@@ -15,19 +15,43 @@ internal static partial class LiveHardwareGateway
     private static byte[] ReadReportBytes(string path, int maximum)
     {
         using var file = File.OpenRead(path);
-        if (file.Length is < 1 || file.Length > maximum) throw new InvalidDataException("Report size is out of bounds.");
-        var bytes = new byte[file.Length];
-        file.ReadExactly(bytes);
-        if (file.ReadByte() != -1) throw new InvalidDataException("Report changed during reading.");
+        return ReadReportBytes(file, file.Length, maximum);
+    }
+
+    private static byte[] ReadReportBytes(Stream stream, long length, int maximum)
+    {
+        if (length is < 1 || length > maximum) throw new InvalidDataException("Report size is out of bounds.");
+        var bytes = new byte[length];
+        stream.ReadExactly(bytes);
+        if (stream.ReadByte() != -1) throw new InvalidDataException("Report changed during reading.");
         return bytes;
     }
 
     private static string ReportHash(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 
+    private const string HandoffManifest = "bindings/venue-bindings.json";
+    private const string HandoffReport = "reports/venue-report.json";
+
+    private static byte[] ReadVenueRunFile(string manifestPath, string directory, string name, int limit)
+    {
+        var path = name == HandoffManifest ? manifestPath : Path.Combine(
+            name.StartsWith("bindings/", StringComparison.Ordinal) ? Path.GetDirectoryName(manifestPath)! : directory,
+            Path.GetFileName(name));
+        return ReadReportBytes(path, limit);
+    }
+
     internal static int ReviewVenueRun(string manifestPath, string directory)
     {
-        var manifest = ReadVenueManifest(manifestPath, out var manifestHash);
-        var report = JsonSerializer.Deserialize<VenueRunReport>(ReadReportBytes(Path.Combine(directory, "venue-report.json"), 8192), HeartbeatWire);
+        Console.WriteLine(JsonSerializer.Serialize(ReviewVenueRun((name, limit) => ReadVenueRunFile(manifestPath, directory, name, limit)), Wire));
+        return 0;
+    }
+
+    private static object ReviewVenueRun(Func<string, int, byte[]> read)
+    {
+        var manifestBytes = read(HandoffManifest, 8192);
+        var manifest = ParseVenueManifest(manifestBytes);
+        var manifestHash = ReportHash(manifestBytes);
+        var report = JsonSerializer.Deserialize<VenueRunReport>(read(HandoffReport, 8192), HeartbeatWire);
         if (report is not { Version: 2 or 3, SimulatedHardwareOnly: true, PhysicalDeliveryConfirmed: false, Rooms.Length: SessionManager.RoomCount }
             || report.Mode != manifest.Mode || report.BindingManifestSha256 != manifestHash
             || report.Complete != report.Rooms.All(room => room?.ExitCode == 0))
@@ -35,10 +59,9 @@ internal static partial class LiveHardwareGateway
 
         var configurationsVerified = report.Version == 3;
         var rooms = report.Rooms.Zip(manifest.Rooms, ReviewRoom).ToArray();
-        Console.WriteLine(JsonSerializer.Serialize(new { version = 1, verified = true, rehearsalComplete = report.Complete,
+        return new { version = 1, verified = true, rehearsalComplete = report.Complete,
             report.Mode, report.BindingManifestSha256, configurationsVerified, simulatedHardwareOnly = true,
-            physicalDeliveryConfirmed = false, rooms }, Wire));
-        return 0;
+            physicalDeliveryConfirmed = false, rooms };
 
         RoomRunReview ReviewRoom(VenueRunResult row, VenueBindingRoom binding)
         {
@@ -47,12 +70,12 @@ internal static partial class LiveHardwareGateway
             Configuration? config = null;
             if (configurationsVerified)
             {
-                config = ReadVenueConfiguration(Path.Combine(Path.GetDirectoryName(manifestPath)!, binding.Configuration), binding, out var sha256);
-                if (row.ConfigurationSha256 != sha256) throw new InvalidDataException("Room configuration bytes do not match.");
+                var configBytes = read("bindings/" + binding.Configuration, 8192);
+                if (row.ConfigurationSha256 != ReportHash(configBytes)) throw new InvalidDataException("Room configuration bytes do not match.");
+                config = RequireVenueConfiguration(ParseConfiguration(configBytes), binding);
             }
             else if (row.ConfigurationSha256 is not null) throw new InvalidDataException("Unexpected configuration hash in version 2.");
             var fileName = FormattableString.Invariant($"room-{row.RoomId:00}-report.json");
-            var path = Path.Combine(directory, fileName);
             if (row.Report is null)
             {
                 if (row.ExitCode != 1 || row.Error is not { Length: > 0 and <= 64 } || !row.Error.All(char.IsAsciiLetterOrDigit)
@@ -61,7 +84,7 @@ internal static partial class LiveHardwareGateway
                 return new(row.RoomId, row.SessionId, row.ExitCode, null, row.Error, null, null, null, null);
             }
             if (row.Report != fileName || row.Error is not null) throw new InvalidDataException("Unexpected room report file name.");
-            var bytes = ReadReportBytes(path, MaxRoomReportBytes);
+            var bytes = read("reports/" + fileName, MaxRoomReportBytes);
             if (row.Bytes != bytes.Length || row.Sha256 != ReportHash(bytes)) throw new InvalidDataException("Room report bytes do not match.");
             var room = JsonSerializer.Deserialize<RoomRunReport>(bytes, HeartbeatWire);
             if (room is not { Version: 1, SimulatedHardwareOnly: true, PhysicalDeliveryConfirmed: false, Attempts.Length: <= MaxAttempts }

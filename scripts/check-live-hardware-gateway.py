@@ -21,6 +21,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1036,6 +1037,22 @@ def run(args):
                         assert seat['mockFailed']==0
                 save(f'{label}-fleet-offline-review.json',summary)
                 check(True,f'{mode} offline review verifies all room reports and distinguishes completion from report consistency')
+                def handoff(*options):
+                    return subprocess.run(['dotnet',str(binary),*map(str,options)],env={key:value for key,value in os.environ.items()
+                        if not key.upper().startswith('VR_COMMAND_')},capture_output=True,timeout=10,creationflags=HIDDEN)
+                package = out/f'{label}-handoff.zip'
+                pack_args = ('--pack-venue-report',manifest_path,'--report-directory',fleet_directory,'--output')
+                packed = handoff(*pack_args,package)
+                assert packed.returncode==0 and packed.stdout==reviewed.stdout and not packed.stderr
+                with zipfile.ZipFile(package) as zipped:
+                    files = {name:zipped.read(name) for name in zipped.namelist()}
+                expected = {f'bindings/{name}':(folder/name).read_bytes()
+                    for name in ['venue-bindings.json',*[f'room-{room:02}.json' for room in rooms]]}
+                expected.update({f'reports/{name}':(fleet_directory/name).read_bytes()
+                    for name in ['venue-report.json',*[f'room-{room:02}-report.json' for room in rooms]]})
+                assert files==expected
+                assert handoff('--verify-venue-zip',package).stdout==reviewed.stdout
+                check(True,f'{mode} handoff ZIP preserves exactly the original evidence and verifies without extraction')
                 if mode=='Independent':
                     copied = runtime/'copied-venue-review'
                     shutil.copytree(fleet_directory,copied)
@@ -1091,6 +1108,35 @@ def run(args):
                     assert old_summary['configurationsVerified'] is False
                     assert all(row['seats'] is None for row in old_summary['rooms'])
                     check(True,'Legacy version 2 remains readable without a claim about room configuration or seat counts')
+                    legacy_package = out/'legacy-handoff.zip'
+                    legacy_packed = handoff('--pack-venue-report',manifest_path,'--report-directory',copied,'--output',legacy_package)
+                    assert legacy_packed.returncode==0 and legacy_packed.stdout==old_review.stdout
+                    assert handoff('--verify-venue-zip',legacy_package).stdout==old_review.stdout
+                    with zipfile.ZipFile(legacy_package) as zipped:
+                        assert len(zipped.namelist())==7 and not any(name.startswith('bindings/room-') for name in zipped.namelist())
+                    check(True,'A legacy version 2 handoff retains only its verified original files')
+                    original_zip = package.read_bytes()
+                    assert handoff(*pack_args,package).returncode==1 and package.read_bytes()==original_zip
+                    rejected_pack = runtime/'invalid-handoff.zip'
+                    altered_config = copied_bindings/'room-01.json'
+                    altered_config.write_bytes(exact_config+b'\n')
+                    # Restore the version 3 aggregate to check the altered configuration.
+                    copied_aggregate.write_bytes(original_aggregate)
+                    refused = handoff('--pack-venue-report',copied_manifest,'--report-directory',copied,'--output',rejected_pack)
+                    assert refused.returncode==1 and not refused.stdout and not rejected_pack.exists()
+                    assert not list(runtime.glob('.vr-hardware-handoff-*.tmp'))
+                    for label_suffix, entries in (
+                        ('outside-path', [(name if name!='reports/room-01-report.json' else '../extra.json',data)
+                                          for name,data in files.items()]),
+                        ('changed', [(name,data+b'\n' if name=='bindings/room-01.json' else data) for name,data in files.items()]),
+                        ('missing', [(name,data) for name,data in files.items() if name!='reports/room-01-report.json']),
+                    ):
+                        invalid_zip = runtime/f'{label_suffix}-handoff.zip'
+                        with zipfile.ZipFile(invalid_zip,'x') as zipped:
+                            for name,data in entries: zipped.writestr(name,data)
+                        refused = handoff('--verify-venue-zip',invalid_zip)
+                        assert refused.returncode==1 and not refused.stdout and b'Venue hardware ZIP rejected:' in refused.stderr
+                    check(True,'Handoff rejects extra paths, changed or missing entries and preserves existing output on failure')
                 if mode=='Linked':
                     fault_directory = out/'linked-fleet-authority-faults'
                     fault_stop = runtime/'linked-fleet-authority-faults.stop'

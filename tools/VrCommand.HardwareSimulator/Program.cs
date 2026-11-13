@@ -26,6 +26,17 @@ try
             throw new ArgumentException("Use --verify-venue-report <venue-bindings.json> --report-directory <existing-directory>.");
         return LiveHardwareGateway.ReviewVenueRun(Path.GetFullPath(args[1]), Path.GetFullPath(args[3]));
     }
+    if (args.FirstOrDefault() == "--pack-venue-report")
+    {
+        if (args.Length != 6 || args[2] != "--report-directory" || args[4] != "--output")
+            throw new ArgumentException("Use --pack-venue-report <venue-bindings.json> --report-directory <existing-directory> --output <new.zip>.");
+        return LiveHardwareGateway.PackVenueHandoff(Path.GetFullPath(args[1]), Path.GetFullPath(args[3]), Path.GetFullPath(args[5]));
+    }
+    if (args.FirstOrDefault() == "--verify-venue-zip")
+    {
+        if (args.Length != 2) throw new ArgumentException("Use --verify-venue-zip <venue.zip>.");
+        return LiveHardwareGateway.ReviewVenueHandoff(Path.GetFullPath(args[1]));
+    }
     if (args.Length < 4 || (!live && args.Length != 4) || args[0] is not ("--input" or "--live" or "--bind-room" or "--bind-venue") || args[2] != "--output")
         throw new ArgumentException("Use --input, --live, --bind-room or --bind-venue <input.json> --output <new-path>.");
     var input = Path.GetFullPath(args[1]); var output = Path.GetFullPath(args[3]);
@@ -80,6 +91,7 @@ catch (Exception error) when (LiveHardwareGateway.IsExpectedFailure(error))
         "--bind-venue" => "Venue hardware binding rejected: ",
         "--venue-status" => "Venue hardware status rejected: ",
         "--verify-venue-report" => "Venue hardware report rejected: ",
+        "--pack-venue-report" or "--verify-venue-zip" => "Venue hardware ZIP rejected: ",
         _ => "Offline hardware simulation rejected: "
     };
     Console.Error.WriteLine(message + error.GetType().Name);

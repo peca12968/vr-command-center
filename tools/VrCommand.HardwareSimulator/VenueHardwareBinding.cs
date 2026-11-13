@@ -15,6 +15,11 @@ internal static partial class LiveHardwareGateway
     {
         var bytes = ReadReportBytes(path, 8192);
         sha256 = ReportHash(bytes);
+        return ParseVenueManifest(bytes);
+    }
+
+    private static VenueBindingManifest ParseVenueManifest(byte[] bytes)
+    {
         var manifest = JsonSerializer.Deserialize<VenueBindingManifest>(bytes, Wire)
             ?? throw new InvalidDataException("Missing venue binding manifest.");
         if (manifest.Version != 1 || !Enum.IsDefined(manifest.Mode) || manifest.Rooms is not { Length: SessionManager.RoomCount }
@@ -29,6 +34,11 @@ internal static partial class LiveHardwareGateway
     private static Configuration ReadVenueConfiguration(string path, VenueBindingRoom room, out string sha256)
     {
         var config = ReadConfiguration(path, out sha256);
+        return RequireVenueConfiguration(config, room);
+    }
+
+    private static Configuration RequireVenueConfiguration(Configuration config, VenueBindingRoom room)
+    {
         if (config.Version != 2 || config.RoomId != room.RoomId || config.SessionId != room.SessionId
             || config.Bindings.Length != room.BoundSeats)
             throw new InvalidDataException("A room configuration does not match the venue binding manifest.");

@@ -188,6 +188,11 @@ internal static partial class LiveHardwareGateway
     {
         var bytes = ReadReportBytes(input, 8192);
         sha256 = ReportHash(bytes);
+        return ParseConfiguration(bytes);
+    }
+
+    private static Configuration ParseConfiguration(byte[] bytes)
+    {
         var config = JsonSerializer.Deserialize<Configuration>(bytes, Wire)
             ?? throw new InvalidDataException("Missing room configuration.");
         ValidateRoom(config.SessionId, config.RoomId, config.MockPort, config.Seconds);
