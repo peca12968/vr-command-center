@@ -28,7 +28,7 @@ public sealed class ReleaseFormChecks : MarshalByRefObject
         {
             var runner = (ReleaseFormChecks)domain.CreateInstanceFromAndUnwrap(typeof(ReleaseFormChecks).Assembly.Location,
                 typeof(ReleaseFormChecks).FullName);
-            var report = measured ? runner.RunMeasured(output, args[3], args[4]) : runner.Run(output, args[2], args[3], args[4]);
+            var report = measured ? runner.RunMeasured(output, args[3], args[4]) : runner.Run(output, args[2], args[3], args[4], args[5]);
             using (var stream = new FileStream(Path.Combine(output, "release-form-checks.json"), FileMode.CreateNew))
             using (var writer = new StreamWriter(stream)) writer.WriteLine(report);
             return 0;
@@ -61,7 +61,14 @@ public sealed class ReleaseFormChecks : MarshalByRefObject
             return BitConverter.ToString(sha.ComputeHash(source)).Replace("-", "").ToLowerInvariant();
     }
 
-    public string Run(string output, string config, string originalRelease, string otherRelease)
+    private static void WaitForOpenXrCheck(Button button)
+    {
+        var wait = Stopwatch.StartNew();
+        while (!button.Enabled && wait.Elapsed < TimeSpan.FromSeconds(8))
+        { Application.DoEvents(); Thread.Sleep(20); }
+    }
+
+    public string Run(string output, string config, string originalRelease, string otherRelease, string runtimeManifest)
     {
         var root = AppDomain.CurrentDomain.BaseDirectory;
         if (!root.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal))
@@ -80,7 +87,7 @@ public sealed class ReleaseFormChecks : MarshalByRefObject
         Process owned = null;
         try
         {
-            using (var form = (Form)Activator.CreateInstance(formType, new object[] { config, null, null }))
+            using (var form = (Form)Activator.CreateInstance(formType, new object[] { null, null, null }))
             {
                 form.ShowInTaskbar = false; form.Opacity = 0; form.Show();
                 var path = Field<TextBox>(form, "path");
@@ -88,6 +95,26 @@ public sealed class ReleaseFormChecks : MarshalByRefObject
                 var play = Field<Button>(form, "play");
                 var records = Field<LinkLabel>(form, "records");
                 var measureLink = Field<CheckBox>(form, "measureLink");
+                var checkOpenXR = Field<Button>(form, "checkOpenXR");
+                var openXRStatus = Field<Label>(form, "openXRStatus");
+                Check(checkOpenXR.Enabled && !openXRStatus.Visible && !play.Enabled && path.Text == "",
+                    "OpenXR file check is available before loading a ticket");
+                checkOpenXR.PerformClick();
+                Check(openXRStatus.Visible, "OpenXR check reveals its status region");
+                WaitForOpenXrCheck(checkOpenXR);
+                Check(checkOpenXR.Enabled && openXRStatus.Text.StartsWith("找不到 OpenXR 清單。", StringComparison.Ordinal),
+                    "OpenXR check gives a readable missing manifest status and permits retry");
+                path.Text = config;
+                Enter(form, path);
+                Environment.SetEnvironmentVariable("XR_RUNTIME_JSON", runtimeManifest);
+                checkOpenXR.PerformClick();
+                WaitForOpenXrCheck(checkOpenXR);
+                Check(checkOpenXR.Enabled && openXRStatus.Text.StartsWith("已找到 OpenXR 清單與 x64 DLL。", StringComparison.Ordinal),
+                    "A second OpenXR check uses the current manifest and refreshes the result");
+                Check(Field<Process>(form, "child") == null && !Field<RadioButton>(form, "openXR").Checked
+                    && play.Enabled && Hash(config) == configHash && !openXRStatus.Text.Contains(runtimeManifest),
+                    "Preflight preserves the reviewed ticket and desktop selection without launching or printing a path");
+                Environment.SetEnvironmentVariable("XR_RUNTIME_JSON", Path.Combine(output, "missing-openxr-runtime.json"));
                 Check(play.Enabled && !records.Visible, "Ordinary graphical mode remains available without a report");
                 Check(!Field<Label>(form, "linkStatus").Visible, "Ordinary launches have no measurement status");
                 Check(!measureLink.Enabled && !measureLink.Checked, "Measurement requires a reviewed release and starts unchecked");

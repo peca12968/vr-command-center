@@ -10,6 +10,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -238,7 +239,7 @@ internal static class PlayerLauncher
                 var bytes = reader.ReadBytes((int)size);
                 if (bytes.Length != size || reader.BaseStream.ReadByte() != -1) return "manifest-invalid";
                 var json = new UTF8Encoding(false, true).GetString(bytes).TrimStart('\uFEFF');
-                doc = Map(Json.DeserializeObject(json));
+                doc = Map(new JavaScriptSerializer { MaxJsonLength = 65536 }.DeserializeObject(json));
             }
         }
         catch (FileNotFoundException) { return "manifest-missing"; }
@@ -657,6 +658,8 @@ internal static class PlayerLauncher
         private readonly Label linkStatus = new Label { Dock = DockStyle.Top, Height = 35, UseMnemonic = false, Visible = false };
         private readonly Button play = new Button { Text = "開始遊戲(&S)", AccessibleName = "開始遊戲", AutoSize = true, Enabled = false };
         private readonly RadioButton openXR = new RadioButton { Text = "Windows OpenXR(&O)", AutoSize = true };
+        private readonly Button checkOpenXR = new Button { Text = "檢查 OpenXR(&X)", AccessibleName = "檢查 OpenXR", AutoSize = true };
+        private readonly Label openXRStatus = new Label { Dock = DockStyle.Top, Height = 46, UseMnemonic = false, Visible = false };
         private readonly CheckBox measureLink = new CheckBox { Text = "記錄本次連線量測(&M)", AccessibleName = "記錄本次連線量測", AutoSize = true, Enabled = false };
         private readonly TextBox path = new TextBox { Dock = DockStyle.Top, AccessibleName = "玩家連線檔完整路徑" };
         private readonly TextBox releasePath = new TextBox { Dock = DockStyle.Top, AccessibleName = "場館發行報告完整路徑" };
@@ -669,7 +672,7 @@ internal static class PlayerLauncher
         private bool HasReleasePath { get { return !String.IsNullOrWhiteSpace(releasePath.Text); } }
         public PlayerForm(string initial, string diagnosticLog, string diagnosticReport)
         {
-            Text = "VR Command 玩家"; ClientSize = new Size(660, 643); MinimumSize = new Size(676, 682);
+            Text = "VR Command 玩家"; ClientSize = new Size(660, 643); MinimumSize = new Size(676, 682); AutoScroll = true;
             Font = new Font("Microsoft JhengHei UI", 11); Padding = new Padding(20); StartPosition = FormStartPosition.CenterScreen;
             var title = new Label { Text = "選擇控制台下載的玩家連線檔", Dock = DockStyle.Top, Height = 40 };
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 45 };
@@ -680,15 +683,36 @@ internal static class PlayerLauncher
             modes.Controls.Add(new RadioButton { Text = "桌面模式(&D)", AutoSize = true, Checked = true });
             modes.Controls.Add(openXR);
             modes.Controls.Add(measureLink);
+            modes.Controls.Add(checkOpenXR);
             var pathHint = new Label { Text = "可選檔或貼上完整路徑，再按 Enter 載入。", Dock = DockStyle.Top, Height = 35 };
             var hint = new Label { Text = "票券過期或入場被拒絕時，請向控制人員重新取得連線檔。", Dock = DockStyle.Top, Height = 50 };
             var releaseButtons = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40 };
             var chooseRelease = new Button { Text = "選擇發行報告…", AutoSize = true };
             var loadRelease = new Button { Text = "核對發行報告(&R)", AccessibleName = "核對發行報告", AutoSize = true };
             releaseButtons.Controls.Add(chooseRelease); releaseButtons.Controls.Add(loadRelease);
-            Controls.Add(hint); Controls.Add(records); Controls.Add(linkStatus); Controls.Add(status); Controls.Add(buttons); Controls.Add(modes);
+            Controls.Add(hint); Controls.Add(records); Controls.Add(linkStatus); Controls.Add(status); Controls.Add(buttons);
+            Controls.Add(openXRStatus); Controls.Add(modes);
             Controls.Add(releaseInfo); Controls.Add(releaseButtons); Controls.Add(releasePath);
             Controls.Add(ticketInfo); Controls.Add(selected); Controls.Add(pathHint); Controls.Add(path); Controls.Add(title);
+            checkOpenXR.Click += async delegate
+            {
+                checkOpenXR.Enabled = false;
+                openXRStatus.Text = "正在檢查 Windows OpenXR 檔案…";
+                openXRStatus.Visible = true;
+                string result;
+                try
+                {
+                    result = await Task.Run(() =>
+                    {
+                        string source;
+                        return InspectOpenXrRuntime(out source);
+                    });
+                }
+                catch (Exception) { result = null; }
+                if (IsDisposed) return;
+                openXRStatus.Text = DescribeOpenXrFiles(result);
+                checkOpenXR.Enabled = true;
+            };
             path.TextChanged += delegate
             {
                 if (settingPath) return;
@@ -879,6 +903,24 @@ internal static class PlayerLauncher
             }
             else releaseInfo.Text = "場館發行報告（選用，連線量測時須核對）";
             UpdatePlay();
+        }
+        private static string DescribeOpenXrFiles(string status)
+        {
+            switch (status)
+            {
+                case "x64-runtime-files-found": return "已找到 OpenXR 清單與 x64 DLL。請連接頭盔後用 Windows OpenXR 模式確認追蹤。";
+                case "runtime-not-configured": return "Windows 尚未設定使用中的 OpenXR 執行環境。請在頭盔軟體中設定。";
+                case "registry-unreadable": return "無法讀取 Windows OpenXR 登錄設定。";
+                case "manifest-path-invalid": return "OpenXR 清單路徑無效。請確認頭盔軟體的執行環境設定。";
+                case "manifest-missing": return "找不到 OpenXR 清單。請確認頭盔軟體的執行環境設定。";
+                case "manifest-invalid": return "無法讀取 OpenXR 清單，或清單格式不正確。";
+                case "library-search-required": return "OpenXR 清單只提供 DLL 檔名。請用 Windows OpenXR 模式確認載入。";
+                case "library-path-invalid": return "OpenXR DLL 路徑無效。請確認頭盔軟體的執行環境設定。";
+                case "library-missing": return "找不到 OpenXR 清單指定的 DLL。請確認頭盔軟體安裝。";
+                case "library-unreadable": return "無法讀取 OpenXR 清單指定的 DLL。";
+                case "library-not-x64-dll": return "OpenXR 清單指定的 DLL 標頭與 x64 Windows 不相符。";
+                default: return "無法完成 OpenXR 檔案檢查。";
+            }
         }
         private void SelectConfig(string file)
         {

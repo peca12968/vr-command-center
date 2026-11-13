@@ -59,6 +59,7 @@ Windows 開發版自 0.46.0 起可用 VrCommand.exe --vr-config 玩家連線檔 
 來源、場景與伺服器須同版。平常使用桌面合成頭手，實際Simulation／GameServer來源以場次為準。
 接到支援的 Windows OpenXR 執行環境時，可使用 Launch-Player.exe --config "玩家連線檔" --launch --openxr --wait 進入 VR。頭盔及控制器相容性需現場驗收。
 啟動器 1.15 可在入場前用 Launch-Player.exe --check-openxr --report "包外新報告.json" 檢查 Windows OpenXR 清單與 x64 DLL 標頭。報告上層目錄須已存在。退出碼 0 表示找到檔案，1 表示請查看報告的狀態，2 表示命令或報告路徑有誤。
+啟動器 1.16 可直接在視窗按「檢查 OpenXR」（Alt+X），查看本機檔案檢查結果。連線檔可在檢查後再載入。
 127.*只供同機連線，其他玩家必須能連到伺服器公告的IPv4與UDP埠。
 本包不修改防火牆、不安裝驅動、不提供NAT或中繼，也沒有驗證你的網路。
 
@@ -159,7 +160,7 @@ def package(player, output, compiler):
                         '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/reference:System.Web.Extensions.dll',
                         '/reference:System.IO.Compression.dll',
                         '/out:' + str(folder / 'Launch-Player.exe'), str(source)], check=True)
-        manifest = {'version': 1, 'platform': 'Windows-x64', 'launcherVersion': '1.15.0', 'createdAtUtc': datetime.now(timezone.utc).isoformat(),
+        manifest = {'version': 1, 'platform': 'Windows-x64', 'launcherVersion': '1.16.0', 'createdAtUtc': datetime.now(timezone.utc).isoformat(),
                     'build': receipt, 'launcherSourceSha256': digest(source), 'scope': 'Offline portable PC player; no tickets; not a signature or network/device verification',
                     'files': [{'path': file.relative_to(folder).as_posix(), 'bytes': file.stat().st_size, 'sha256': digest(file)}
                               for file in sorted(folder.rglob('*')) if file.is_file()]}

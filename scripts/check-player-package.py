@@ -85,6 +85,7 @@ def check_openxr_preflight(folder, directory, mock_manifest):
     assert run(conflicting, manifest, ['--launch']) == 2 and not conflicting.exists()
     if mock_manifest is not None:
         inspect('unity-mock', mock_manifest.resolve(strict=True), 'x64-runtime-files-found')
+    return mock_manifest.resolve(strict=True) if mock_manifest is not None else manifest
 
 
 def check_openxr_unavailable(folder, directory, base, release=None, manifest_hash=None):
@@ -254,7 +255,7 @@ def main():
     check('Preserves an existing player evidence ZIP', [*with_release, '--evidence-zip', str(evidence)])
     assert evidence.read_bytes() == b'original evidence fixture'
     assert not future_log.exists() and release.read_bytes() == original_release and other_release.read_bytes() == other_bytes
-    check_openxr_preflight(folder, directory, args.openxr_mock_manifest)
+    preflight_manifest = check_openxr_preflight(folder, directory, args.openxr_mock_manifest)
     findings.append('Packaged OpenXR preflight reports registry, explicit manifests, PE architecture and output rejections')
     print('PASS:', findings[-1], flush=True)
     if args.check_local_profiler:
@@ -272,12 +273,12 @@ def main():
                         '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/reference:System.Web.Extensions.dll',
                         '/out:' + str(runner), str(ROOT / 'tools/WindowsPlayerLauncher/ReleaseFormChecks.cs')],
                        check=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
-        result = subprocess.run([str(runner), str(folder), str(directory), str(valid), str(release), str(other_release)],
+        result = subprocess.run([str(runner), str(folder), str(directory), str(valid), str(release), str(other_release), str(preflight_manifest)],
                                 capture_output=True, timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
         (directory / 'release-form-run.log').write_bytes(result.stdout + result.stderr)
         result.check_returncode()
         reviewed = json.loads((directory / 'release-form-checks.json').read_bytes())
-        assert reviewed['complete'] and reviewed['checks'] == 21
+        assert reviewed['complete'] and reviewed['checks'] == 26
         findings.append('Shipped WinForms release selection rejects stale reports and publishes the owned child log digest')
         print('PASS:', findings[-1], flush=True)
     # A fresh minimal copy is intentionally incomplete. Never alter the delivered package.
