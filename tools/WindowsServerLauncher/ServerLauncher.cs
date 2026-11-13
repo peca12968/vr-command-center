@@ -1019,21 +1019,26 @@ internal static class ServerLauncher
         });
     }
 
-    sealed class VenueWindow : Form
+    internal sealed class VenueWindow : Form
     {
         readonly TextBox path = new TextBox(), status = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
         readonly Button browse = new Button { Text = "選擇計畫" }, check = new Button { Text = "核對計畫" },
             start = new Button { Text = "啟動全館 (&S)", Enabled = false }, abort = new Button { Text = "中止全館", Enabled = false };
+        readonly Button copyReady = new Button { Text = "複製就緒路徑", Enabled = false },
+            copyFinal = new Button { Text = "複製結果路徑", Enabled = false };
         readonly CheckBox peers = new CheckBox { Text = "記錄本次玩家連線來源（場館驗收）", AutoSize = true };
         readonly Label summary = new Label { AutoEllipsis = true };
+        readonly Label copyFeedback = new Label { AutoEllipsis = true };
         readonly ListView rooms = new ListView { View = View.Details, FullRowSelect = true, ShowItemToolTips = true, AccessibleName = "五房計畫明細" };
+        readonly Action<string> copyPath;
         VenuePlan preview;
         bool busy, readyShown;
         volatile bool cancel;
-        string readyPath;
+        string readyPath, readyReport, finalReport;
 
-        internal VenueWindow(string initialPath = "")
+        internal VenueWindow(string initialPath = "", Action<string> copyPath = null)
         {
+            this.copyPath = copyPath ?? Clipboard.SetText;
             Text = "VR Command 五房批次啟動";
             ClientSize = new Size(1000, 494); Font = new Font("Microsoft JhengHei UI", 11);
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false;
@@ -1044,6 +1049,8 @@ internal static class ServerLauncher
             rooms.Columns.Add("場次 ID", 325); rooms.Columns.Add("公告位址與 UDP", 184);
             Add(rooms, 22, 126, 956, 195);
             Add(peers, 22, 329, 600, 29); Add(start, 22, 368, 165, 36); Add(abort, 200, 368, 165, 36);
+            Add(copyReady, 378, 368, 150, 36); Add(copyFinal, 540, 368, 150, 36);
+            Add(copyFeedback, 702, 374, 276, 30);
             Add(status, 22, 416, 956, 56);
             path.AccessibleName = "場館計畫 JSON 完整路徑";
             status.AccessibleName = "批次啟動狀態";
@@ -1056,6 +1063,8 @@ internal static class ServerLauncher
             check.Click += delegate { CheckPlan(); };
             start.Click += delegate { StartVenue(); };
             abort.Click += delegate { cancel = true; abort.Enabled = false; status.Text = "中止中；此輪不算正常封存完成。"; };
+            copyReady.Click += delegate { CopyReport(readyReport, copyReady); };
+            copyFinal.Click += delegate { CopyReport(finalReport, copyFinal); };
             FormClosing += delegate(object sender, FormClosingEventArgs e)
             {
                 if (!busy) return;
@@ -1067,6 +1076,7 @@ internal static class ServerLauncher
             {
                 if (readyPath == null || readyShown || cancel || !File.Exists(readyPath)) return;
                 readyShown = true;
+                SetReports(readyPath, null);
                 status.Text = "全館就緒。請由控制台配票、開始及結束任務。\r\n就緒紀錄：" + readyPath;
             };
             FormClosed += delegate { timer.Dispose(); };
@@ -1084,8 +1094,30 @@ internal static class ServerLauncher
         void ClearPreview()
         {
             preview = null; rooms.Items.Clear(); start.Enabled = false;
+            SetReports(null, null);
             summary.Text = "請載入並核對控制台下載的五房場館計畫。";
             status.Text = "在路徑欄按 Enter 或按「核對計畫」，查看房間、任務及連線端點。";
+        }
+
+        internal void SetReports(string ready, string final)
+        {
+            readyReport = File.Exists(ready) ? ready : null;
+            finalReport = File.Exists(final) ? final : null;
+            copyReady.Enabled = readyReport != null;
+            copyFinal.Enabled = finalReport != null;
+            copyFeedback.Text = "";
+        }
+
+        void CopyReport(string report, Button button)
+        {
+            if (!File.Exists(report))
+            {
+                button.Enabled = false;
+                copyFeedback.Text = "找不到這份報告。";
+                return;
+            }
+            try { copyPath(report); copyFeedback.Text = "已複製報告路徑。"; }
+            catch (ExternalException) { copyFeedback.Text = "無法使用剪貼簿，請重試。"; }
         }
 
         protected override bool ProcessCmdKey(ref Message message, Keys keyData)
@@ -1133,6 +1165,7 @@ internal static class ServerLauncher
             if (reviewed == null || busy) return;
             var selectedPath = path.Text.Trim();
             var capturePeers = peers.Checked;
+            SetReports(null, null);
             cancel = false; readyShown = false; abort.Enabled = true;
             status.Text = "正在重新核對計畫，然後啟動全館。";
             var local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrCommand");
@@ -1160,7 +1193,9 @@ internal static class ServerLauncher
                 preview = null; rooms.Items.Clear(); peers.Checked = false;
                 status.Text = result == 0 ? "全館任務已封存並停止。"
                     : "未完成：" + (failure != null ? Safe(failure) : "請核對各房結果。");
-                if (File.Exists(report)) status.AppendText("\r\n結果：" + report);
+                SetReports(ready, report);
+                if (readyReport != null) status.AppendText("\r\n就緒紀錄：" + readyReport);
+                if (finalReport != null) status.AppendText("\r\n結果：" + finalReport);
                 summary.Text = "再次啟動前請重新核對場館計畫。";
             });
         }

@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -91,6 +92,57 @@ internal static class ServerCatalogProof
         const int keyDown = 0x0100;
         var message = Message.Create(control.Handle, keyDown, (IntPtr)Keys.Enter, repeated ? (IntPtr)(1 << 30) : IntPtr.Zero);
         return control.PreProcessMessage(ref message);
+    }
+
+    static void CheckVenueReportCopy(string fixtureDirectory)
+    {
+        var readyPath = Path.Combine(fixtureDirectory, "本輪 venue-ready.json");
+        var finalPath = Path.Combine(fixtureDirectory, "本輪 venue-final.json");
+        var original = new List<string>();
+        bool clipboardBusy = false;
+        Exception failure = null;
+        using (var window = new ServerLauncher.VenueWindow(copyPath: path =>
+        {
+            if (clipboardBusy) throw new ExternalException();
+            original.Add(path);
+        }) { ShowInTaskbar = false, Opacity = 0 })
+        {
+            var ready = window.Controls.OfType<Button>().Single(button => button.Text == "複製就緒路徑");
+            var final = window.Controls.OfType<Button>().Single(button => button.Text == "複製結果路徑");
+            var path = window.Controls.OfType<TextBox>().First();
+            window.Shown += delegate
+            {
+                try
+                {
+                    window.SetReports(readyPath, finalPath);
+                    Check(!ready.Enabled && !final.Enabled, "unpublished paths cannot be copied");
+                    File.WriteAllText(readyPath, "{}");
+                    window.SetReports(readyPath, finalPath);
+                    Check(ready.Enabled && !final.Enabled, "publishing readiness enables only its current report path");
+                    clipboardBusy = true;
+                    ready.PerformClick();
+                    Check(ready.Enabled && original.Count == 0 && window.Controls.OfType<Label>().Any(label => label.Text.Contains("請重試")),
+                        "a busy clipboard reports the failure and allows retry");
+                    clipboardBusy = false;
+                    ready.PerformClick();
+                    File.WriteAllText(finalPath, "{}");
+                    window.SetReports(readyPath, finalPath);
+                    final.PerformClick();
+                    Check(ready.Enabled && final.Enabled && original.SequenceEqual(new[] { readyPath, finalPath }),
+                        "the two actual buttons copy the original full paths including spaces and Unicode");
+                    File.Delete(readyPath);
+                    ready.PerformClick();
+                    Check(!ready.Enabled && final.Enabled && original.Count == 2,
+                        "a deleted ready file is not copied and does not disable the final report");
+                    path.Text = Path.Combine(fixtureDirectory, "next-plan.json");
+                    Check(!ready.Enabled && !final.Enabled, "editing the plan path clears both report actions");
+                }
+                catch (Exception error) { failure = error; }
+                finally { window.Close(); }
+            };
+            Application.Run(window);
+        }
+        if (failure != null) throw failure;
     }
 
     static void CheckResponsiveCatalog(string delayedInstance)
@@ -227,6 +279,7 @@ internal static class ServerCatalogProof
             Check(!Char.IsHighSurrogate(ServerLauncher.Choice.Label(new String('甲', 31) + "\ud83d\ude80尾")[31]), "truncation preserves a surrogate boundary");
             var descriptor = ServerLauncher.Read(args[0], 8192); var instance = ServerLauncher.Text(descriptor, "instance");
             CheckResponsiveCatalog(ServerLauncher.Text(descriptor, "delayedInstance"));
+            CheckVenueReportCopy(Path.GetDirectoryName(args[0]));
             var profilePath = Path.Combine(Path.GetDirectoryName(args[0]), "profile-proof", "control-instance.json");
             Directory.CreateDirectory(Path.GetDirectoryName(profilePath));
             var profile = new Dictionary<string, object> { { "schemaVersion", 1 }, { "kind", "VrCommand-RemoteGameServer" },
