@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-13 `VRCommand-ControlServer-0.31.190.zip` 為 53,344,452 bytes，SHA-256 `8561bb8e1c8df45f7e898df9167e99a866b767e848f3cd9ffc21809df3956aca`。解壓核對 568 筆清單。控制台可下載單檔離線播放器。 [管理包](../artifacts/VRCommand-ControlServer-0.31.190.zip) · [回放交付](WORLD_RECORDING.md#讓玩家開啟回放)
+
 2026-11-13 `VRCommand-ControlServer-0.31.189.zip` 為 53,157,781 bytes，SHA-256 `aff0f1b38ddb6c423adaf2ba4ba640a35fbd55447d4a1e481df4898bb1ae747b`。解壓核對 567 筆清單。玩家回放頁可依場館提供的原畫格序號定位。 [管理包](../artifacts/VRCommand-ControlServer-0.31.189.zip) · [回放操作](WORLD_RECORDING.md)
 
 2026-11-13 `VRCommand-ControlServer-0.31.188.zip` 為 53,157,142 bytes，SHA-256 `a75f61c029a9056e2b1964eee7fd5b9f4c3c4d3badf9e9928bfe65fe7d60dc36`。解壓核對 567 筆清單。暫停回放時可輸入序號直接跳到保存畫格。 [管理包](../artifacts/VRCommand-ControlServer-0.31.188.zip) · [回放操作](WORLD_RECORDING.md#暫停逐格檢視)

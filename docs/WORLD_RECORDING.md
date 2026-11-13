@@ -196,6 +196,8 @@ v0.16 新增 `environmentVersion:1`，依保存的 tick／環境重現雨、日�
 
 需要離開場館後觀看時，將單檔播放器 HTML 和原匯出的 JSON 一起交給玩家。用支援 WebGL 2 的桌面瀏覽器開啟 HTML，再選取 JSON 即可離線回看。播放器內含程式、樣式和 3D 素材，檔案不含任何場次資料。 [下載離線播放器](../artifacts/VRCommand-Player-Replay-0.31.189.html)
 
+Windows 管理包 0.31.190 可直接在「已保存的共用片段」按「下載離線播放器」，取得 `VRCommand-Player-Replay.html`。接著用原有的「下載玩家回放檔」取得要交付的 JSON。
+
 從專案根目錄可用以下指令重建播放器。輸出須使用新檔名。
 
 ```powershell

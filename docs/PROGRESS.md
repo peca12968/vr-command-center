@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-13 控制台可下載離線播放器
+
+- Windows 管理包 0.31.190 的「已保存的共用片段」提供「下載離線播放器」。管理包由同一份玩家頁產生單檔 HTML，經附件下載後可與原回放 JSON 一起交付。解壓版瀏覽器測試核對下載檔名、位元內容及離線播放至原末格，全程沒有外部請求。 [下載管理包](../artifacts/VRCommand-ControlServer-0.31.190.zip) · [交付方式](WORLD_RECORDING.md#讓玩家開啟回放)
+- 發行版與解壓版各通過 153 項瀏覽器檢查，另通過 107 項管理包、7 項封裝及 8 項發行核對。核對 568 筆管理包清單及同源 Windows 遊戲包、Quest APK 的離線發行。功能提交 `3ab5ec6` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體仍待驗收。 [驗證摘要](../artifacts/control-offline-player-190-validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43410139758)
+
 ## 2026-11-13 玩家回放可帶離場館
 
 - 單檔 HTML 播放器由管理包 0.31.189 的玩家頁產生。場館可把 HTML 與匯出的原 JSON 一起交付。兩次建置雜湊相同，並已驗證重跑不會覆寫既有檔案。 [下載播放器](../artifacts/VRCommand-Player-Replay-0.31.189.html) · [交付方式](WORLD_RECORDING.md#讓玩家開啟回放)
