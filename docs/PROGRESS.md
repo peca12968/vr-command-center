@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 五房逐席直連的開場前檢查
+
+- 場館可在產生網路清單、UDP 預檢及驗證啟動時選用 `--require-distinct-remote-roster`。工具會指出共用 IPv4 或與伺服器位址衝突的房號、席號。封存驗收也會核對原清單與完整伺服器位址表。 [操作說明](EXTERNAL_CLIENTS.md#從原啟動預覽產生網路清單)
+- 獨立與合併各 5、10、25 席的原同機資料在逐席直連模式下均於啟動前遭拒，沒有產生新啟動報告。用原模式重驗六批封存，80 份戰績確認與既有輸出逐位元相符。 [本機驗證摘要](../artifacts/distinct-remote-roster-preflight-validation.json)
+- 功能來源 `5a4bb8f` 已推送。首次本機測試遇到診斷字串更新與 Java 編譯逾時，重新執行通過 LAN 與 Quest UDP 各 12 項。120 項封存回歸也通過。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 與廠商硬體仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43369923133)
+
 ## 2026-11-13 玩家回放顯示任務活動時間與來源暫停
 
 - 管理包 0.31.173 的玩家回放可分別查看片段播放時間與任務活動時間，並可跳到保存的遊戲來源暫停或恢復畫格。全場版及單房版均支援，舊檔缺少計時或暫停資訊時仍可開啟。 [操作說明](WORLD_RECORDING.md) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.173.zip)
