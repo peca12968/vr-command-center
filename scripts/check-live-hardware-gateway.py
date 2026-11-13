@@ -983,15 +983,19 @@ def run(args):
                 fleet_stdout, _ = fleet.communicate(timeout=8)
                 fleet_report = json.loads((fleet_directory/'venue-report.json').read_bytes())
                 assert json.loads(fleet_stdout)==fleet_report and fleet_report['mode']==mode and not fleet_report['physicalDeliveryConfirmed']
+                manifest_path = folder/'venue-bindings.json'
+                assert fleet_report['version']==2 and fleet_report['bindingManifestSha256']==sha(manifest_path)
                 assert fleet.returncode==int(mode=='Independent') and fleet_report['complete'] is (mode=='Linked') and fleet_stop.is_file()
                 assert len(set(venue_connections.values()))==5
                 assert [(row['roomId'],row['sessionId']) for row in fleet_report['rooms']]==list(owners.items())
                 assert local_report_path.read_bytes()==local_report_bytes
                 for room, row in zip(rooms,fleet_report['rooms'],strict=True):
                     mismatch_room = mode=='Independent' and room==3
+                    original_report = fleet_directory/f'room-{room:02}-report.json'
                     assert row=={'roomId':room,'sessionId':owners[room],'exitCode':int(mismatch_room),
-                                 'report':f'room-{room:02}-report.json','error':None}
-                    report = json.loads((fleet_directory/row['report']).read_bytes())
+                                 'report':original_report.name,'error':None,'sha256':sha(original_report),
+                                 'bytes':original_report.stat().st_size}
+                    report = json.loads(original_report.read_bytes())
                     delivered = {delivery['signal']['reportId'] for attempt in report['attempts']
                                  if attempt['status']=='simulated-acknowledged' for delivery in attempt['deliveries']}
                     assert delivered==fleet_delivered[room] and not report['physicalDeliveryConfirmed']
@@ -1008,6 +1012,45 @@ def run(args):
                 save(f'{label}-fleet-close.json', closed_batch)
                 check(True, f'{mode} room marker cancels only its original held batch and releases leases while other rooms continue')
                 check(True, f'{mode} single-process fleet delivers all 25 exact bindings, cancels the held batch and publishes all terminal results')
+                def review(directory, manifest=manifest_path):
+                    return subprocess.run(['dotnet',str(binary),'--verify-venue-report',str(manifest),
+                        '--report-directory',str(directory)],env={key:value for key,value in os.environ.items()
+                        if not key.upper().startswith('VR_COMMAND_')},capture_output=True,timeout=10,creationflags=HIDDEN)
+                reviewed = review(fleet_directory)
+                assert reviewed.returncode==0 and not reviewed.stderr
+                summary = json.loads(reviewed.stdout)
+                assert summary['verified'] and summary['rehearsalComplete'] is fleet_report['complete']
+                assert summary['bindingManifestSha256']==sha(manifest_path) and summary['physicalDeliveryConfirmed'] is False
+                for row in summary['rooms']:
+                    original = json.loads((fleet_directory/f"room-{row['roomId']:02}-report.json").read_bytes())
+                    assert row['termination']==original['termination'] and row['acknowledged']==original['acknowledged']
+                    assert row['cancelled']==sum(len(attempt['deliveries']) for attempt in original['attempts'] if attempt['status']=='cancelled')
+                    assert row['mockFailed']==0
+                save(f'{label}-fleet-offline-review.json',summary)
+                check(True,f'{mode} offline review verifies all room reports and distinguishes completion from report consistency')
+                if mode=='Independent':
+                    copied = runtime/'copied-venue-review'
+                    shutil.copytree(fleet_directory,copied)
+                    assert review(copied).stdout==reviewed.stdout
+                    destination = copied/'room-01-report.json'
+                    exact = destination.read_bytes()
+                    original_manifest = manifest_path.read_bytes()
+                    edited_manifest = runtime/'modified-venue-manifest.json'
+                    edited_manifest.write_bytes(original_manifest+b'\n')
+                    rejected = [review(copied,edited_manifest)]
+                    destination.write_bytes(exact+b'\n')
+                    rejected.append(review(copied))
+                    destination.unlink()
+                    rejected.append(review(copied))
+                    destination.write_bytes(exact)
+                    copied_aggregate = copied/'venue-report.json'
+                    invalid = json.loads(copied_aggregate.read_bytes())
+                    invalid['rooms'][0]['report'] = '../room-01-report.json'
+                    copied_aggregate.write_text(json.dumps(invalid),encoding='utf-8')
+                    rejected.append(review(copied))
+                    assert all(result.returncode==1 and not result.stdout and b'Venue hardware report rejected:' in result.stderr
+                               for result in rejected)
+                    check(True,'Offline review survives relocation and rejects a changed manifest, changed or missing report, and a path outside the run')
                 if mode=='Linked':
                     fault_directory = out/'linked-fleet-authority-faults'
                     fault_stop = runtime/'linked-fleet-authority-faults.stop'

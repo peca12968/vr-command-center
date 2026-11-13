@@ -9,9 +9,14 @@ internal static partial class LiveHardwareGateway
     private sealed record VenueBindingManifest(int Version, [property: JsonRequired] SessionMode Mode, VenueBindingRoom[] Rooms);
     private sealed record VenueBindingRoom(int RoomId, Guid SessionId, long SessionSequence, string Configuration, int BoundSeats);
 
-    private static VenueBindingManifest ReadVenueManifest(string path)
+    private static VenueBindingManifest ReadVenueManifest(string path) => ReadVenueManifest(path, out _);
+
+    private static VenueBindingManifest ReadVenueManifest(string path, out string sha256)
     {
-        var manifest = ReadInput<VenueBindingManifest>(path);
+        var bytes = ReadReportBytes(path, 8192);
+        sha256 = ReportHash(bytes);
+        var manifest = JsonSerializer.Deserialize<VenueBindingManifest>(bytes, Wire)
+            ?? throw new InvalidDataException("Missing venue binding manifest.");
         if (manifest.Version != 1 || !Enum.IsDefined(manifest.Mode) || manifest.Rooms is not { Length: SessionManager.RoomCount }
             || manifest.Rooms.Any(room => room is null || room.SessionId == Guid.Empty || room.SessionSequence < 1 || room.BoundSeats is < 1 or > 5
                 || room.Configuration != FormattableString.Invariant($"room-{room.RoomId:00}.json"))

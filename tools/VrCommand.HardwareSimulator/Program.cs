@@ -20,6 +20,12 @@ try
             throw new ArgumentException("Use --venue-status <venue-bindings.json> --status-directory <existing-directory>.");
         return LiveHardwareGateway.ReadVenueStatus(Path.GetFullPath(args[1]), Path.GetFullPath(args[3]));
     }
+    if (args.FirstOrDefault() == "--verify-venue-report")
+    {
+        if (args.Length != 4 || args[2] != "--report-directory")
+            throw new ArgumentException("Use --verify-venue-report <venue-bindings.json> --report-directory <existing-directory>.");
+        return LiveHardwareGateway.ReviewVenueRun(Path.GetFullPath(args[1]), Path.GetFullPath(args[3]));
+    }
     if (args.Length < 4 || (!live && args.Length != 4) || args[0] is not ("--input" or "--live" or "--bind-room" or "--bind-venue") || args[2] != "--output")
         throw new ArgumentException("Use --input, --live, --bind-room or --bind-venue <input.json> --output <new-path>.");
     var input = Path.GetFullPath(args[1]); var output = Path.GetFullPath(args[3]);
@@ -73,6 +79,7 @@ catch (Exception error) when (LiveHardwareGateway.IsExpectedFailure(error))
         "--bind-room" => "Room hardware binding rejected: ",
         "--bind-venue" => "Venue hardware binding rejected: ",
         "--venue-status" => "Venue hardware status rejected: ",
+        "--verify-venue-report" => "Venue hardware report rejected: ",
         _ => "Offline hardware simulation rejected: "
     };
     Console.Error.WriteLine(message + error.GetType().Name);

@@ -3,7 +3,9 @@ using VrCommand.Core;
 
 internal static partial class LiveHardwareGateway
 {
-    private sealed record VenueRunResult(int RoomId, Guid SessionId, int ExitCode, string? Report, string? Error);
+    private sealed record VenueRunResult(int RoomId, Guid SessionId, int ExitCode, string? Report, string? Error, string? Sha256, int? Bytes);
+    private sealed record VenueRunReport(int Version, bool Complete, SessionMode Mode, bool SimulatedHardwareOnly,
+        bool PhysicalDeliveryConfirmed, string BindingManifestSha256, VenueRunResult[] Rooms);
 
     internal static async Task<int> RunVenue(string manifestPath, string output, string stopFile)
     {
@@ -12,7 +14,7 @@ internal static partial class LiveHardwareGateway
             || !Directory.Exists(Path.GetDirectoryName(stopFile)) || string.Equals(output, stopFile, StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("Use a new output directory and a separate absent stop marker with existing parents.");
 
-        var manifest = ReadVenueManifest(manifestPath);
+        var manifest = ReadVenueManifest(manifestPath, out var bindingManifestSha256);
         var configs = manifest.Rooms.Select(room =>
         {
             var path = Path.Combine(Path.GetDirectoryName(manifestPath)!, room.Configuration);
@@ -60,7 +62,7 @@ internal static partial class LiveHardwareGateway
             var rooms = await Task.WhenAll(configs.Select((entry, index) =>
                 RunVenueRoom(entry.Config, clients[index], entry.Path, output, stopFile, leases[index])));
             var complete = rooms.All(room => room.ExitCode == 0);
-            var report = new { version = 1, complete, manifest.Mode, simulatedHardwareOnly = true, physicalDeliveryConfirmed = false, rooms };
+            var report = new VenueRunReport(2, complete, manifest.Mode, true, false, bindingManifestSha256, rooms);
             var stagedReport = Path.Combine(output, "venue-report.tmp");
             using (var file = new FileStream(stagedReport, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
@@ -88,11 +90,12 @@ internal static partial class LiveHardwareGateway
         {
             var exit = await RunRoom(config, client, input, output, stopFile, statusEnabled: false, statusDirectory: directory,
                 writeSummary: false, roomStopFile: roomStop, roomLeases: leases);
-            return new(config.RoomId, config.SessionId, exit, fileName, null);
+            var bytes = ReadReportBytes(output, MaxRoomReportBytes);
+            return new(config.RoomId, config.SessionId, exit, fileName, null, ReportHash(bytes), bytes.Length);
         }
         catch (Exception error) when (IsExpectedFailure(error))
         {
-            return new(config.RoomId, config.SessionId, 1, null, error.GetType().Name);
+            return new(config.RoomId, config.SessionId, 1, null, error.GetType().Name, null, null);
         }
         finally { leases.Dispose(); }
     }

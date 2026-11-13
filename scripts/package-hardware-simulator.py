@@ -3,7 +3,7 @@ import argparse,hashlib,json,shutil,uuid,zipfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 FILES=['VrCommand.HardwareSimulator.dll','VrCommand.HardwareSimulator.deps.json','VrCommand.HardwareSimulator.runtimeconfig.json','VrCommand.Core.dll','VrCommand.Simulation.dll']
-VERSION='0.2.15'
+VERSION='0.2.16'
 README=f'''VR Command 硬體回饋模擬器 {VERSION}
 
 需要 .NET 10 runtime，本機使用10.0.14驗證。這不是Unity玩家程式或廠商SDK。
@@ -32,6 +32,9 @@ dotnet VrCommand.HardwareSimulator.dll --live-venue <包外venue-bindings.json> 
 先核對五房憑證、入場與本機互斥資源。建立標記檔會停止本次所有仍運作的閘道，已取消的批次不計入模擬確認。
 在本次輸出資料夾建立 room-01.stop 到 room-05.stop，可單獨停止指定房間。該房報告終止原因為 operator-room-stop，其他房繼續排演。
 五房結果見輸出目錄的 venue-report.json 與各房報告。某房入場失效時，其他房可繼續排演，總結果會列出各房退出碼。
+原綁定清單與整個輸出目錄可搬到另一台電腦後離線核對：
+dotnet VrCommand.HardwareSimulator.dll --verify-venue-report <原venue-bindings.json> --report-directory <原五房輸出目錄>
+核對版本 2 總報告、原綁定清單與各房報告雜湊，列出模擬確認、取消與模擬設備失敗的訊號數。verified 代表檔案一致性，排演結果見 rehearsalComplete。
 排演中若管理服務拒絕本房讀取或回覆無效，本房關閉模擬連線並寫出終止報告。原因分別為 management-refused 及 management-invalid-response。待確認批次取消，先前已確認的模擬回饋保留。
 每次附掛都核對戰鬥串流與來源。已附掛的串流若回報不同來源，該房以 management-invalid-response 結束。短暫的管理連線故障則關閉原連線，恢復後用新連線及當前游標。
 同一輪房間排演會保留最近已核對的管理序號與檢查時間。任一值倒退時取消待確認批次，以 management-invalid-response 結束該房。
