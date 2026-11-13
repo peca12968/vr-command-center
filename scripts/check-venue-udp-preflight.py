@@ -153,7 +153,7 @@ def retained_sources(path, report, mode, expected, launch_check, binding, checke
     rows = report.get('retrySources')
     field.require(type(rows) is list and 0 <= len(rows) <= len(expected), 'Retry report lacks its original verified sources')
     by_seats = {tuple(seats): address for address, seats in expected.items()}
-    valid, seen = {}, set()
+    valid, seen, previous_pairs = {}, set(), set()
     for row in rows:
         field.require(type(row) is dict and set(row) == {'seats', 'pair', 'exchangeSha256', 'pairSha256'},
                       'Invalid verified source in retry report')
@@ -166,6 +166,7 @@ def retained_sources(path, report, mode, expected, launch_check, binding, checke
         seen.add(address)
         try:
             paths = read_pair(row['pair'], path.parent)
+            previous_pairs.add(paths)
             field.require(probe_identity(paths[1]) == address, 'Retry reports name a different UDP source')
             hashes = pair_hashes(paths)
             field.require(hashes == row['pairSha256'], 'Retry pair differs from its original files')
@@ -174,7 +175,7 @@ def retained_sources(path, report, mode, expected, launch_check, binding, checke
         except (OSError, ValueError, KeyError, TypeError, RecursionError):
             continue
         valid[address] = paths, summary, hashes
-    return valid, seen - valid.keys()
+    return valid, seen - valid.keys(), previous_pairs
 
 
 def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, launch_plan=None, retry_report=None, inbox=None,
@@ -219,9 +220,9 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
         field.require_distinct_remote_sources(sources, endpoints.values())
         require_distinct_remote_roster = True
     if prior is not None:
-        retained, expired = retained_sources(retry_report, prior, mode, expected, launch_check, binding, checked_at)
+        retained, expired, previous_pairs = retained_sources(retry_report, prior, mode, expected, launch_check, binding, checked_at)
     else:
-        retained, expired, prior_hash = {}, set(), None
+        retained, expired, previous_pairs, prior_hash = {}, set(), set(), None
     observed = defaultdict(list)
     path_counts = Counter()
     for address, (paths, _, _) in retained.items():
@@ -231,11 +232,15 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
     inbox_summary = None
     if inbox is not None:
         inbox_pairs, inbox_summary = load_inbox(inbox)
-        pairs.extend(inbox_pairs)
-        field.require(len(pairs) <= 50, 'Too many UDP preflight reports')
-    for pair, base, declared_group in pairs:
+    else:
+        inbox_pairs = []
+    field.require(len(pairs) + len(inbox_pairs) <= 50, 'Too many UDP preflight reports')
+    for index, (pair, base, declared_group) in enumerate(pairs + inbox_pairs):
         try:
             paths = read_pair(pair, base)
+            # The retry already checked these original paths and their stored hashes.
+            if index >= len(pairs) and paths in previous_pairs:
+                continue
             address = probe_identity(paths[1])
         except (OSError, ValueError, KeyError, TypeError, RecursionError):
             unreadable += 1

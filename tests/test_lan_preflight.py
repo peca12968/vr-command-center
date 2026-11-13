@@ -592,6 +592,27 @@ class LanPreflightTests(unittest.TestCase):
                           for folder, pair in ((inbox, first_pair), (retry_inbox, second_pair))],
                          [{role: (self.root / name).resolve() for role, name in pair.items()} for pair in refs])
         self.assertEqual(reports, {path: path.read_bytes() for path in reports})
+        shutil.copyfile(self.root / second['listener'], inbox / second_pair['listener'])
+        original_inbox = {path: path.read_bytes() for path in inbox.iterdir() if path.is_file()}
+        same_inbox = self.venue_check(plan, 'same-inbox-complete.json', '--inbox', inbox,
+                                      '--retry-report', self.root / 'inbox-partial.json')
+        self.assertEqual((2, 1), (same_inbox['verifiedSources'], same_inbox['retainedSources']))
+        self.assertEqual({'files': 4, 'pairedExchanges': 2, 'issues': []}, same_inbox['inbox'])
+        self.assertEqual(original_inbox, {path: path.read_bytes() for path in original_inbox})
+
+        original_probe = inbox / first_pair['probe']
+        original_probe.write_bytes(original_inbox[original_probe] + b'\n')
+        changed = self.venue_check(plan, 'same-inbox-changed.json', '--inbox', inbox,
+                                   '--retry-report', self.root / 'inbox-partial.json', status=1)
+        self.assertEqual(['invalid-or-expired', 'verified'], [row['status'] for row in changed['groups'][0]['sources']])
+        self.assertEqual(0, changed['retainedSources'])
+        original_probe.write_bytes(original_inbox[original_probe])
+
+        shutil.copyfile(original_probe, inbox / 'duplicate-probe.json')
+        duplicate = self.venue_check(plan, 'same-inbox-duplicate.json', '--inbox', inbox,
+                                     '--retry-report', self.root / 'inbox-partial.json', status=1)
+        self.assertFalse(duplicate['complete'])
+        self.assertEqual('duplicate-role', duplicate['inbox']['issues'][0]['status'])
 
     def test_venue_independent_requires_a_pair_per_port_for_the_same_source(self):
         ports = []
