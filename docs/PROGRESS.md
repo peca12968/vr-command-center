@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 Windows 批次啟動器顯示逐房席位
+
+- Windows 啟動器 1.22 在啟動前列出五房各自登記的席號，保留空出的席位。合併場的五列共用同一場次與端點。第一版計畫顯示「計畫未提供」，已核對的空名冊顯示「尚未登記」。啟動時仍會重新核對原場次與名冊。 [操作說明](WINDOWS_SERVER_PACKAGE.md#從-windows-視窗核對並啟動) · [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.7-1.22-win-x64.zip)
+- 解壓包通過 51 項啟動器、64 項 Framework、10 項封裝及 587 項 Windows 三包整合檢查。獨立與合併各 25 個同機模擬玩家，核對六份 CSV、50 份伺服器戰績回條、1,272 格完整回放及雙封存。隔離程序正常清理，C／F 的 259 個非資料庫檔案雜湊相符。首次三包命令漏帶本機 IPv4，參數檢查退出後以完整參數重跑。 [驗證摘要](../artifacts/server-launcher-1.22-seat-preview-validation.json)
+- 解壓後核對 331 筆清單，其中 324 個遊戲執行檔與 1.21 相同。管理包、玩家包與原 Quest APK 通過離線相容性及簽章核對。`dec5b0c` 已推送，GitHub Actions 因帳務或支出上限未啟動。桌面工具仍在初始化回報 Windows 錯誤 3，完整可見視窗操作、跨機 25 人、實體頭盔、MR 場地與廠商硬體待驗。 [離線核對](../artifacts/server-launcher-1.22-venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43383024954)
+
 ## 2026-11-13 六批收件總表辨識啟動回條雜湊不符
 
 - 六批收件檢查會列出與 Windows 啟動回條雜湊不符的原報告類別和檔名。以六批同機資料的副本驗證，結束報告、UDP 預檢及就緒報告的三種雜湊不一致各自被辨識，缺少就緒報告也會列出檔名。其餘兩批通過，正式驗收拒絕缺件的總清單。 [操作說明](EXTERNAL_CLIENTS.md#六批使用各自的-windows-啟動回條) · [缺件範例](../artifacts/staged-venue-start-evidence-inspection.json)
