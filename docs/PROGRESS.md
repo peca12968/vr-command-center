@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 五房合併模式管理延遲驗收
+
+- Windows 0.50.7 同機以五房各 5 位模擬玩家進入同一場。暫留共用管理 GET 後，五房時鐘停在 tick 125，沿用管理序號 29 恢復。第 125 與第 129 tick 的房間畫格讀回通過，五房各只讀到自己的 5 位玩家與戰績，10 次跨房查詢均收到 403。 [重跑方式](CLOCK_RECOVERY.md)
+- 合併場在 tick 1200 自動結束一次，保留原本的 25 條 UDP 連線至收到結果，核對 25 份原入場戰績確認與 613 格完整回放。使用同一版測試工具複驗獨立模式，五場通過，共 25 份戰績確認與 2,978 格回放。兩輪 C／F 的 36 個關閉後快照檔逐檔雜湊相符。另通過 72 項本機測試。 [本機驗證摘要](../artifacts/native-linked-management-delay-validation.json)
+- 功能來源 `77cf710` 已推送。GitHub Actions 因帳務或支出上限未啟動。舊 25 席偶發暫停原因、跨機、頭盔、MR 與廠商硬體仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43366562411)
+
 ## 2026-11-13 五房獨立模式管理延遲驗收
 
 - Windows 0.50.7 同機開啟五個獨立房間及 25 個模擬玩家端。第 1 房的管理 GET 暫留後，遊戲時鐘停在 tick 133，隨後沿用原管理序號 9 恢復。其他四房同期各前進 11、11、10、7 tick，且原席位的姿態持續更新。五場各在 tick 1200 自動結束，核對 25 份原入場戰績確認及 2,980 格封存回放。 [重跑方式](CLOCK_RECOVERY.md) · [本機驗證摘要](../artifacts/native-five-room-management-isolation-validation.json)
