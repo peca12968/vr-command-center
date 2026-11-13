@@ -186,6 +186,7 @@ module.exports = async function venueTimeReplayBrowser({ context, api, tokens, b
       && await page.locator('#world-room').inputValue() === '1'
       && (await page.locator('#world-frame-message').innerText()).includes('第 2 格'),
     'Direct frame jump loads the exact original frame and stays paused in the same room');
+    await page.locator('#world-frame-jump').screenshot({ path: path.join(screenshots, 'world-frame-jump.png') });
     await frameNumber.fill('3');
     await frameGo.click();
     await canvasAt(3);
