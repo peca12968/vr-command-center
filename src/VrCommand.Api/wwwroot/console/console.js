@@ -140,7 +140,12 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
         else if (code === 'ticket-source-unavailable') message = '原遊戲來源暫未更新，配票已暫停。請查看房卡的連線狀態。';
         else if (code === 'ticket-endpoint-mismatch') message = '整房配票須使用原公告端點。請按「套用場次連線設定」後再下載。';
         else if (code === 'independent-rooms-occupied' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 使用中，五場都未建立。請確認房間狀態後再試。`;
-        else if (code === 'venue-phase-changed') message = '全館場次狀態已變更，本批命令未套用。請重新整理後確認房間。';
+        else if (code === 'venue-phase-changed') {
+          const scope = Array.isArray(roomIds) && roomIds.length > 0 && roomIds.length <= 5
+            && roomIds.every((id, index) => Number.isInteger(id) && id >= 1 && id <= 5 && (!index || id > roomIds[index - 1]))
+            ? `房間 ${roomIds.join('、')} 的場次狀態已變更` : '全館場次狀態已變更';
+          message = `${scope}，本批命令未套用。請重新整理後確認房間。`;
+        }
         else if (code === 'room-enemy-policy-changed') message = '本房敵軍策略已變更。草稿仍保留，請載入目前策略再編輯。';
         else if (code === 'setting-revision-changed') message = '場次設定已變更。草稿仍保留，請載入目前設定再編輯。';
         else if (code === 'venue-pause-not-observed' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 尚未回傳有效的暫停快照，本批場次維持暫停。`;

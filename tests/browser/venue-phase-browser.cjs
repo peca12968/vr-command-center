@@ -286,9 +286,31 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await panel.screenshot({ path: path.join(screenshots, 'venue-phase-begin-blockers.png') });
     const second = await prepare(preparing[1], 2, true, true, 1);
     const staleBegin = await api('/venue/phase', 'POST', { action: 'Begin', targets: preview }, 'Master', 409, undefined, randomUUID());
-    check(staleBegin.code === 'venue-phase-changed' && (await api('/sessions')).every(session => session.state === 'Preparing'),
+    check(staleBegin.code === 'venue-phase-changed' && staleBegin.roomIds.join() === '2'
+      && (await api('/sessions')).every(session => session.state === 'Preparing'),
       'Preparing roster and source changes invalidate the previous Begin preview without starting either room');
-    const secondReady = await api(`/sessions/${preparing[1]}`);
+    let secondReady = await api(`/sessions/${preparing[1]}`);
+    await page.locator('#refresh').click();
+    await publishUntil(first, firstReady, () => { second(secondReady); return beginButton.isEnabled(); });
+    const beginPath = '**/api/venue/phase';
+    const conflicts = [];
+    const rejectStale = async route => {
+      if (route.request().method() !== 'POST') return route.continue();
+      secondReady = await api(`/sessions/${preparing[1]}/players`, 'POST', {
+        playerId: randomUUID(), roomId: 2, name: 'New seat while confirming', headset: 'Quest3'
+      });
+      const response = await route.fetch();
+      conflicts.push([response.status(), (await response.json()).roomIds]);
+      await route.fulfill({ response });
+    };
+    await page.route(beginPath, rejectStale);
+    try {
+      await click('begin', '房間 1、2 的 2 個場次');
+      await notice.filter({ hasText: '房間 2 的場次狀態已變更，本批命令未套用' }).waitFor();
+      check(JSON.stringify(conflicts) === '[[409,[2]]]'
+        && (await api('/sessions')).every(session => session.state === 'Preparing'),
+        'The rejected confirmation names only the changed room and keeps the whole original batch preparing');
+    } finally { await page.unroute(beginPath, rejectStale); }
     await page.locator('#refresh').click();
     await publishUntil(first, firstReady, () => { second(secondReady); return beginButton.isEnabled(); });
     await panel.screenshot({ path: path.join(screenshots, 'venue-phase-begin.png') });

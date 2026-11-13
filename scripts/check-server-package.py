@@ -188,6 +188,7 @@ def main():
     p.add_argument('--check-venue-receipt-retry', action='store_true', help='Lose both original batch replies after commit through a loopback fixture')
     p.add_argument('--check-venue-launch-review', action='store_true', help='Import original unresolved launcher reports into the shipped Chromium console')
     p.add_argument('--check-venue-ready-review', action='store_true', help='Review the original Windows ready file in Chromium before Begin')
+    p.add_argument('--check-venue-begin-conflict', action='store_true', help='Verify an outdated Begin reports the changed native rooms')
     p.add_argument('--check-venue-relay-readback', action='store_true', help='Use both source relay CLIs on copies of the closed original Linked journals')
     p.add_argument('--check-venue-preview', action='store_true', help='Run the shared Windows venue preview before both topology launches')
     p.add_argument('--check-venue-udp-readiness', action='store_true',
@@ -341,6 +342,8 @@ def main():
         p.error('--check-venue-launch-review requires --check-venue-receipt-retry')
     if args.check_venue_ready_review and (not args.check_venue_launcher or not shutil.which('node')):
         p.error('--check-venue-ready-review requires --check-venue-launcher and Node.js with Playwright Chromium')
+    if args.check_venue_begin_conflict and not args.check_venue_begin:
+        p.error('--check-venue-begin-conflict requires --check-venue-begin')
     if args.check_venue_relay_readback and (not args.check_venue_plan_ui or not shutil.which('dotnet')):
         p.error('--check-venue-relay-readback requires --check-venue-plan-ui and the built .NET relay tools')
     if args.check_venue_preview and not args.check_venue_launcher:
@@ -4747,6 +4750,21 @@ def main():
             if args.check_venue_begin:
                 route='/api/venue/phase'
                 preview=request(route)['begin']
+                if args.check_venue_begin_conflict:
+                    original_fences=[{key:row[key] for key in ('sessionId','phaseSinceSequence','sessionSequence')} for row in preview]
+                    changed_entry=entries[-1]
+                    state_path='/api/sessions/'+changed_entry['sessionId']
+                    before=request(state_path)
+                    changed=request(state_path+'/commands',{'commandId':str(uuid.uuid4()),'action':'SetEnvironment',
+                        'expectedSequence':before['sequence'],'environment':before['environment']})['session']
+                    refused=request(route,{'action':'Begin','targets':original_fences},request_id=str(uuid.uuid4()),expected=409)
+                    preview=request(route)['begin']
+                    previous={row['sessionId']:row['sessionSequence'] for row in original_fences}
+                    check(refused['code']=='venue-phase-changed' and refused['roomIds']==changed['roomIds']
+                          and len(preview)==len(original_fences)
+                          and all(row['sessionSequence']==previous[row['sessionId']]+(row['sessionId']==changed['id']) for row in preview),
+                          'Stale Begin names the changed native rooms and leaves the whole batch preparing')
+                    save(('linked' if linked else 'independent')+'-begin-conflict.json',refused)
                 targets=[{key:row[key] for key in ('sessionId','phaseSinceSequence','sessionSequence')} for row in preview]
                 check({row['sessionId'] for row in targets}==set(owner_ids)
                       and sorted(room for row in preview for room in row['roomIds'])==list(range(1,6)),

@@ -36,7 +36,10 @@ public record VenueTrackingBegin(Guid RequestId, long AppliedAtSequence, VenueTr
 public record VenueParticipationBegin(Guid RequestId, long AppliedAtSequence, VenueTrackingFrame Frame);
 public record VenuePhaseWitness(long PhaseSinceSequence, long SessionSequence, bool Ready, int[]? FullRooms = null,
     VenueTrackingFrame? BeginFrame = null);
-public sealed class VenuePhaseChangedException() : InvalidOperationException("The venue phase targets changed; review the current rooms.");
+public sealed class VenuePhaseChangedException(int[] roomIds) : InvalidOperationException("The venue phase targets changed; review the current rooms.")
+{
+    public int[] RoomIds { get; } = roomIds;
+}
 public sealed class VenuePauseNotObservedException(int[] roomIds) : InvalidOperationException("A game source has not confirmed its current pause.")
 {
     public int[] RoomIds { get; } = roomIds;
@@ -210,10 +213,16 @@ public sealed partial class SessionManager
                 return Receipt(requestId, action, existing, true);
             }
             var targets = Targets(action);
-            if (!targets.Select(history => new VenuePhaseFence(history.View.Id, history.PhaseSinceSequence,
+            var current = targets.Select(history => new VenuePhaseFence(history.View.Id, history.PhaseSinceSequence,
                 begin ? history.View.Sequence : null, environment ? history.EnvironmentSinceSequence : null,
-                enemies ? history.EnemiesSinceSequence : null, enemies ? history.RoomEnemiesSinceSequence : null)).SequenceEqual(expected))
-                throw new VenuePhaseChangedException();
+                enemies ? history.EnemiesSinceSequence : null, enemies ? history.RoomEnemiesSinceSequence : null)).ToArray();
+            if (!current.SequenceEqual(expected))
+            {
+                var changedRooms = expected.Except(current).Concat(current.Except(expected)).OfType<VenuePhaseFence>()
+                    .SelectMany(fence => sessions.TryGetValue(fence.SessionId, out var history) ? history.View.RoomIds : [])
+                    .Distinct().Order().ToArray();
+                throw new VenuePhaseChangedException(changedRooms);
+            }
             if (begin) VerifyVenueBegin(targets, witnesses, requireFullRoster);
             if (action == ControlAction.Resume) VerifyVenueResume(targets, witnesses);
             if (targets.Any(history => history.Commands.ContainsKey(requestId)))
