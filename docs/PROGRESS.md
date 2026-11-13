@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 玩家視窗檢查 Windows OpenXR
+
+- 玩家包 1.16 可在載入票券前按「檢查 OpenXR」或 Alt+X。背景檢查沿用命令列規則，在視窗顯示本機清單及 x64 DLL 的檢查結果。重按會重新讀取設定。檢查保留已載入的連線檔及遊戲模式。 [玩家包與操作方式](WINDOWS_PLAYER_PACKAGE.md#windows-openxr-啟動)
+- 實際解壓後通過 45 項玩家包檢查，其中 WinForms 處理程式涵蓋 26 項。Windows 三包離線發行核對通過，與同源 1.15 比對有 329 個檔案雜湊相同。Unity Mock Runtime 與桌面玩家的同機驗證通過 87 項，包含中斷後同一程序重入、424 格封存回放與兩席戰績確認。桌面操作工具因初始化路徑錯誤未能檢視實際畫面排版。 [驗證摘要](../artifacts/windows-player-1.16-validation.json)
+- 功能提交 `47f0cfd` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3 與 VIVE 實機、跨機 25 人、MR 場地與廠商硬體仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43404774645)
+
 ## 2026-11-13 Windows 玩家包 1.15 內建 OpenXR 預檢
 
 - 場館可從解壓後的玩家包執行 `Launch-Player.exe --check-openxr --report`，檢查 64 位元登錄或目前程序所選的 OpenXR 清單及 x64 DLL 標頭。報告只包含來源及檔案檢查狀態。發行核對通過，與同源 1.14.1 包比對有 329 個清單檔案雜湊一致。 [操作方式與下載](WINDOWS_PLAYER_PACKAGE.md#windows-openxr-啟動)

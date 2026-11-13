@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-13 `VRCommand-Player-0.50.7-1.16-win-x64.zip` 為 84,951,589 bytes，SHA-256 `941dd5f8a5e30ebd03603f1e41218eb83da49f666245fec8e815b65b4913ab31`。解壓核對 331 筆清單，玩家視窗可直接檢查本機 OpenXR 檔案。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.7-1.16-win-x64.zip) · [本包發行報告](../artifacts/venue-release-0.50.7-player-1.16.json)
+
 2026-11-13 `VRCommand-Player-0.50.7-1.15-win-x64.zip` 為 84,949,983 bytes，SHA-256 `08e2c56d0499673ff2090a9027b23b50ffeea751a1d235e39f790af82b5a373c`。解壓核對 331 筆清單。啟動器新增 Windows OpenXR 檔案預檢。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.7-1.15-win-x64.zip) · [本包發行報告](../artifacts/venue-release-0.50.7-player-1.15.json)
 
 2026-11-13 `VRCommand-Player-0.50.7-1.14.1-win-x64.zip` 為 84,947,109 bytes，SHA-256 `b9b1e5cd1f739764e2a87958b5cd1500b848cfae4719adae8bb76ff6b41d6321`。解壓核對 331 筆清單。玩家可在關閉遊戲前查看本次量測結果，關窗後可短暫等候原紀錄檔解除占用。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.7-1.14.1-win-x64.zip) · [本包發行報告](../artifacts/venue-release-0.50.7-player-1.14.1.json)
@@ -103,7 +105,9 @@ runtime只收VrCommand.exe／UnityPlayer／CrashHandler／WinPix及D3D12、MonoB
 
 ### Windows OpenXR 啟動
 
-在頭盔到場前，可從解壓後的玩家包目錄執行啟動器 1.15，檢查這台 Windows 電腦的 OpenXR 設定。
+在頭盔到場前，可開啟解壓後的啟動器 1.16，按「檢查 OpenXR」或 Alt+X。視窗會顯示本機檔案的檢查結果。可在載入連線檔前檢查，調整頭盔軟體後再按一次即可更新結果。
+
+需要留存 JSON 報告時，可從解壓後的玩家包目錄使用啟動器 1.15 起支援的命令。
 
 ```powershell
 $report = 'C:\Venue\openxr-preflight.json'
