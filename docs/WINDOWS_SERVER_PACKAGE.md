@@ -1,5 +1,7 @@
 # Windows 遊戲伺服器包
 
+2026-11-13 `VRCommand-GameServer-0.50.7-1.23-win-x64.zip` 為 84,984,410 bytes，SHA-256 `1b5a6789d6ba8d5ea6f63495866359fc75bc33bf854b3703f391e9a936f6b2ae`。解壓核對 331 筆清單。五房批次視窗可複製本輪就緒與結果報告的完整路徑。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.7-1.23-win-x64.zip)
+
 2026-11-13 `VRCommand-GameServer-0.50.7-1.22-win-x64.zip` 為 84,983,846 bytes，SHA-256 `7043c427022e40f4f4048e6801992504671e75d9a779b260964d0aeb9d19a293`。解壓核對 331 筆清單。五房批次啟動視窗可逐房查看已登記的席號。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.7-1.22-win-x64.zip)
 
 2026-11-11 `VRCommand-GameServer-0.50.7-1.20-win-x64.zip` 為 84,981,993 bytes，SHA-256 `ce417b05968a31d3ecf13cb07acc8f8c132ea481e8a746de8ddf52e04154ab03`。解壓核對 331 筆清單。執行中的合併場實測指定網卡上的遊戲 UDP 及本機上的 Unity 編輯器連線。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.7-1.20-win-x64.zip) · [監聽紀錄](../artifacts/windows-local-profiler-0507/linked-server-sockets.json)
@@ -92,7 +94,7 @@ Unity 0.47.0 伺服器可搭配控制台 0.31.14。啟動器 1.5 可選擇待開
 
 視窗顯示「全館就緒」後，回控制台配票、開始和結束任務。結束後等視窗顯示全館結果。中止會停止這次視窗建立的遊戲程序，並把這批標為未完成。工作及結果分別寫入本機的 `%LOCALAPPDATA%\VrCommand\GameServers` 與 `GameServerReports`。
 
-啟動器 1.23 可按「複製就緒路徑」或「複製結果路徑」，再將完整路徑貼到主控台的報告選檔視窗。按鈕會在原報告寫出後啟用，批次結束後仍可複製這輪的兩份報告。修改計畫路徑或重新核對計畫會清除前一輪的按鈕。批次未完成時，已寫出的結果仍可供查閱，封存狀態以報告內的結果為準。 [主控核對](#核對未確認的啟動報告)
+啟動器 1.23 可按「複製就緒路徑」或「複製結果路徑」。若主控台瀏覽器在同一台電腦，可將完整路徑貼到報告選檔視窗。若主控台在另一台電腦，先將原報告交給主控，再從該電腦選檔。按鈕會在原報告寫出後啟用，批次結束後仍可複製這輪的兩份報告。修改計畫路徑或重新核對計畫會清除前一輪的按鈕。批次未完成時，已寫出的結果仍可供查閱，封存狀態以報告內的結果為準。 [主控核對](#核對未確認的啟動報告)
 
 也可用 `Launch-Server.exe --venue-window <計畫完整路徑>` 開啟五房視窗並填入路徑。命令列的 `--venue-check <計畫完整路徑> --report <新結果檔>` 會核對相同的房間、任務、校正及 UDP 條件。核對結果沒有憑證，啟動時仍會取得原場次的本機鎖。
 

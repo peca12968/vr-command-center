@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 Windows 啟動器複製本輪五房報告路徑
+
+- 1.23 批次視窗在報告寫出後啟用「複製就緒路徑」與「複製結果路徑」。結束後可取本輪兩份報告，修改或重新核對計畫會清除按鈕。實際 WinForms 按鈕處理通過六項專項，含 Unicode 路徑、剪貼簿忙碌、檔案移除與清除舊路徑。測試以替身接收複製內容。桌面工具初始化仍回報 Windows 錯誤 3，本輪未驗證實際桌面剪貼簿。 [操作方式](WINDOWS_SERVER_PACKAGE.md#從-windows-視窗核對並啟動) · [驗證摘要](../artifacts/server-launcher-1.23-report-copy-validation.json)
+- 新 ZIP 解壓後核對 331 筆清單，324 個遊戲執行檔案與 1.22 相同。初次打包指定 1.22 包內的複本，建置收據的原始路徑檢查拒絕；改從收據指定的原 Windows 建置打包後成功。管理包 0.31.184、玩家包與原 Quest 0.50.7 APK 通過相容性及 APK 簽章核對。 [下載 ZIP](../artifacts/server-packages/VRCommand-GameServer-0.50.7-1.23-win-x64.zip) · [發行核對](../artifacts/server-launcher-1.23-venue-release.json)
+- 通過 51 項啟動器、70 項 Framework、10 項封裝及 393 項 Windows 三包檢查。獨立及合併各 25 位同機模擬玩家，核對 50 份伺服器戰績回條、6 份 CSV、1,187 格回放及雙封存。程序清理後 C／F 的 213 個非資料庫檔案雜湊相符。`c379996` 已推送，GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體待驗。 [本機檢查](../artifacts/server-package-checks/run-a14f94f74c51461db8f8a3f5bace0d45/checks.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43395977465)
+
 ## 2026-11-13 硬體排演顯示管理連線故障原因
 
 - 模擬器 0.2.15 在本機單房終端與五房狀態提供三種管理故障碼。以隔離的管理服務和模擬接收端實測第 4 房收到 HTTP 503、逾時及傳輸中斷。恢復後以新連線附掛，取消舊待確認批次，保留舊確認並只新增一筆新確認。新版可讀取舊版未附原因的狀態。 [操作說明](HARDWARE.md#查看五房排演狀態) · [故障快照](../artifacts/live-hardware-gateway/run-d7d4d4cfcb93481da411ace169286d1b/linked-fleet-management-statuses.json)
