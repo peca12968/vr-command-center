@@ -13,7 +13,7 @@ import { mountOperatorNetwork } from './operator-network-ui.js';
 import { mountReport, mountVenueReport, venueScoreFields } from './report-ui.js';
 import { mountVenueHistory } from './venue-history-ui.js';
 import { mountVenueDebriefSeats } from './venue-debrief-ui.js';
-import { mountReadiness, mountRoomReadiness } from './readiness-ui.js';
+import { beginSeatLabels, mountReadiness, mountRoomReadiness } from './readiness-ui.js';
 import { mountConnections, validDestination } from './connection-ui.js';
 import { mountClosure } from './closure-ui.js';
 import { placementHistory } from './placement-history.js';
@@ -49,7 +49,7 @@ const seatDeployments = ['VR', 'MR'].map(mode => mountSeatDeployment(() => state
 const mrVenue = mountMrVenueBundle(() => state, api, download, roomReadiness.ticketDestination);
 const vrVenue = mountVrVenueTickets(() => state, api, download, roomReadiness.ticketSourceLive);
 const venueServerPlan = mountVenueServerPlan(() => state, api, download);
-const venueLaunchReview = mountVenueLaunchReview(() => state, api, selectSession, focusRoster);
+const venueLaunchReview = mountVenueLaunchReview(() => state, api, selectSession, focusRoster, roomReadiness.reviewedBegin);
 const operatorNetwork = mountOperatorNetwork(() => state, api, download, uuid);
 const alignmentPins = mountAlignmentPins({ state: () => state,
   checkFile: file => api('/room-alignment/check-file', 'POST', file),
@@ -888,10 +888,6 @@ function venueBeginPolicy() {
   if ($('venue-full-tracking').checked) return 'tracking';
   return $('venue-full-participation').checked ? 'participation' : 'normal';
 }
-const beginSeatLabels = { Vacant: '未編列', AwaitingAdmission: '等待入場同步', WaitingRevision: '等待場次同步',
-  AwaitingPose: '等待姿態', PoseUnavailable: '姿態未就緒', Eliminated: '已淘汰', Tracked: '追蹤就緒',
-  Simulated: '合成姿態就緒', NeedsTracking: '合成姿態 · 需追蹤', Unknown: '待確認', NotPreparing: '尚無準備場次' };
-
 function renderVenueBegin(targets, waiting, policy) {
   const summary = $('venue-begin-evidence'), list = $('venue-begin-rooms');
   const rows = targets.flatMap(target => target.roomIds.map(roomId => ({

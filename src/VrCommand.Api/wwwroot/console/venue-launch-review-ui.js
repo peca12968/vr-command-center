@@ -1,4 +1,5 @@
 import { validDestination } from './connection-ui.js';
+import { beginSeatLabels } from './readiness-ui.js';
 
 const guid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const isId = value => typeof value === 'string' && guid.test(value) && value !== '00000000-0000-0000-0000-000000000000';
@@ -84,10 +85,10 @@ function verifyReply(value, request) {
   return value;
 }
 
-export function mountVenueLaunchReview(getState, api, selectSession, focusRoster) {
+export function mountVenueLaunchReview(getState, api, selectSession, focusRoster, reviewedBegin) {
   const $ = suffix => document.getElementById('venue-launch-review-' + suffix);
   const panel = document.getElementById('venue-launch-review'), file = $('file'), button = $('check');
-  let active = false, pending = false, opening = false, generation = 0;
+  let active = false, pending = false, opening = false, generation = 0, seatViews = [];
   const isCurrent = (attempt, epoch) => attempt === generation && epoch === getState().epoch && active
     && getState().actor?.role === 'Master';
   function update() {
@@ -96,8 +97,20 @@ export function mountVenueLaunchReview(getState, api, selectSession, focusRoster
     file.disabled = panel.hidden || state.busy || !!state.pending || pending || opening;
     button.disabled = file.disabled || file.files.length !== 1;
     for (const shortcut of $('rooms').querySelectorAll('button')) shortcut.disabled = file.disabled;
+    if (panel.hidden) return;
+    for (const { row, roomId, status } of seatViews) {
+      const view = reviewedBegin(row, roomId);
+      const groups = new Map();
+      for (const [index, seat] of (view.seats ?? []).entries()) {
+        if (!groups.has(seat)) groups.set(seat, []);
+        groups.get(seat).push(index + 1);
+      }
+      const text = groups.size ? [...groups].map(([seat, numbers]) => `${beginSeatLabels[seat]} ${numbers.join('、')}`).join(' · ') : view.text;
+      if (status.textContent !== text) status.textContent = text;
+    }
   }
   function clear() {
+    seatViews = [];
     $('summary').textContent = '';
     $('roster-status').textContent = '';
     $('rooms').replaceChildren();
@@ -158,7 +171,16 @@ export function mountVenueLaunchReview(getState, api, selectSession, focusRoster
           shortcut.dataset.launchReviewRoster = roomId;
           shortcut.textContent = `查看房間 ${roomId} 名冊`;
           shortcut.addEventListener('click', () => { if (!shortcut.disabled) void openRoster(row, roomId); });
-          actions.append(shortcut);
+          if (row.phase === 'Preparing') {
+            const item = document.createElement('div');
+            item.className = 'venue-launch-room-readiness';
+            const status = document.createElement('p');
+            status.className = 'hint';
+            status.dataset.launchReviewSeats = roomId;
+            item.append(shortcut, status);
+            seatViews.push({ row, roomId, status });
+            actions.append(item);
+          } else actions.append(shortcut);
         }
         li.append(actions);
       }

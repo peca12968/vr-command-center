@@ -7,6 +7,9 @@ const labels = { NoRecording: '等待遊戲來源', WaitingFrame: '等待第一�
   Participating: '姿態有效', Updating: '正在更新入場狀態', Unavailable: '參戰狀態未確認' };
 
 const beginSeatStates = new Set(['AwaitingAdmission', 'AwaitingPose', 'PoseUnavailable', 'Eliminated', 'Tracked', 'Simulated']);
+export const beginSeatLabels = { Vacant: '未編列', AwaitingAdmission: '等待入場同步', WaitingRevision: '等待場次同步',
+  AwaitingPose: '等待姿態', PoseUnavailable: '姿態未就緒', Eliminated: '已淘汰', Tracked: '追蹤就緒',
+  Simulated: '合成姿態就緒', NeedsTracking: '合成姿態 · 需追蹤', Unknown: '待確認', NotPreparing: '尚無準備場次' };
 
 function venueBeginSeats(details, registered, capacity, trackedRequired) {
   const seats = details?.seats;
@@ -440,6 +443,19 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
       : venueBegin(target, target.roomIds[0]).ready;
     return venueResume(target, target.roomIds[0]).ready;
   }
+  function reviewedBegin(original, roomId) {
+    const { rooms, sessions } = getState();
+    const room = rooms.find(row => row.id === roomId && row.sessionId === original.sessionId);
+    const session = sessions.find(row => row.id === original.sessionId);
+    if (!room || session?.state !== 'Preparing' || session.combatStream?.streamId !== original.streamId)
+      return { text: '原準備場次已變更，請重新核對就緒檔。' };
+    const current = roomReadinessRow(report, room, session);
+    if (!active || failed || document.visibilityState !== 'visible' || !current
+        || current.sessionSequence !== session.sequence || current.endpoint?.streamId !== original.streamId
+        || current.endpoint.address !== original.endpointAddress || current.endpoint.port !== original.endpointPort)
+      return { text: '等待核對原場次的名冊與端點。' };
+    return venueBegin({ sessionId: session.id, sessionSequence: session.sequence }, roomId);
+  }
   function venueResume(target, roomId) {
     const waiting = { ready: false, state: 'Updating', text: '等待目前場次的暫停確認' };
     if (!active || failed) return waiting;
@@ -595,7 +611,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') update(); else reset(); });
   setInterval(update, 250);
-  return { update, venueReady, venueBegin, venueResume, settingFrame, settingStatus, trackingPause, vrResume, poseFrame, ticketSourceLive, ticketDestination,
+  return { update, venueReady, venueBegin, reviewedBegin, venueResume, settingFrame, settingStatus, trackingPause, vrResume, poseFrame, ticketSourceLive, ticketDestination,
     active(value) { active = value; if (value) update(); else reset(); } };
 }
 

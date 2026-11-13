@@ -8,6 +8,7 @@ const route = '/venue/server-launch-review';
 const panel = '#venue-launch-review', input = panel + '-file', button = panel + '-check', summary = panel + '-summary';
 const rows = panel + '-rooms li';
 const rosterShortcut = roomId => `[data-launch-review-roster="${roomId}"]`;
+const seatStatus = roomId => `[data-launch-review-seats="${roomId}"]`;
 const rosterStatus = panel + '-roster-status';
 
 async function openRoomRoster(page, sessionId, roomId) {
@@ -49,7 +50,7 @@ async function checkVenueLaunchReview({ context, api, tokens, base, screenshots,
   const launchId = randomUUID(), streamId = randomUUID();
   const mission = await api('/missions', 'POST', { name: 'Launch review fixture', briefing: '', durationSeconds: 600,
     environment: { mode: 'VR', weather: 'Clear', timeOfDay: 'Day', lightning: false },
-    enemies: { count: 1, behavior: 'Hold', autoAttack: false }, props: [] }, 'Master', 201);
+    enemies: { count: 0, behavior: 'Hold', autoAttack: false }, props: [] }, 'Master', 201);
   const roomIds = [1, 2, 3, 4, 5];
   const session = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Linked', roomIds }, 'Master', 201);
   const sessionPath = '/sessions/' + session.id;
@@ -110,14 +111,20 @@ async function checkVenueLaunchReview({ context, api, tokens, base, screenshots,
     projected(requests.at(-1));
     assert.deepEqual(requests.at(-1), readyTarget);
     check(missingEndpoint.servers[0].endpointState === 'not-published', 'A ready file is checked against the API before it can show a matching endpoint');
+    const started = Date.now();
     const header = { sessionId: session.id, streamId, origin: 'Simulation', roomIds, missionClockVersion: 1,
+      captureStartedAtUtc: new Date(started).toISOString().replace('Z', '0000+00:00'),
       missionDurationSeconds: session.mission.definition.durationSeconds };
-    const registered = spawnSync('python', [path.resolve(__dirname, '../../scripts/world_test_socket.py')], {
-      encoding: 'utf8', timeout: 6000, windowsHide: true,
-      input: JSON.stringify({ port: Number(new URL(base).port), route: `/api${sessionPath}/world/publish`, token: tokens.GameServer,
-        messages: [{ type: 'header', payload: header }] })
-    });
-    assert.equal(registered.status, 0, registered.stderr || registered.error?.message);
+    function send(...messages) {
+      const result = spawnSync('python', [path.resolve(__dirname, '../../scripts/world_test_socket.py')], {
+        encoding: 'utf8', timeout: 6000, windowsHide: true,
+        input: JSON.stringify({ port: Number(new URL(base).port), route: `/api${sessionPath}/world/publish`, token: tokens.GameServer,
+          messages: [{ type: 'header', payload: header }, ...messages] })
+      });
+      assert.equal(result.status, 0, result.stderr || result.error?.message);
+      return JSON.parse(result.stdout);
+    }
+    send();
     await api('/venue/connection-endpoints', 'PUT', { version: 1, topology: 'Linked', servers: [{ sessionId: session.id,
       endpoint: { version: 1, streamId, address: '192.168.1.21', port: 17777 } }] }, 'GameServer');
     const wrongAddress = await (await checkSelected(page)).json();
@@ -136,6 +143,28 @@ async function checkVenueLaunchReview({ context, api, tokens, base, screenshots,
     });
     const originalRoster = await api(sessionPath);
     assert.equal(await page.locator('[data-launch-review-roster]').count(), 5);
+    const players = originalRoster.players.map(({ id, roomId }) => {
+      const head = { x: (roomId - 3) * 14, y: 1.65, z: -3 };
+      const connected = roomId === 1;
+      return { id, roomId, connected, head, muzzle: head, forward: { x: 0, y: 0, z: 1 }, health: 100,
+        magazine: 30, reserve: 90, rig: connected ? { kind: 'Simulated', left: head, right: head } : { kind: 'None' } };
+    });
+    await page.bringToFront();
+    let sequence = 0;
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline && !(await page.locator(seatStatus(1)).innerText()).includes('合成姿態就緒 1')) {
+      const packet = { sequence: ++sequence, observedSequence: originalRoster.sequence, elapsedMilliseconds: sequence === 1 ? 0 : Date.now() - started,
+        weather: 'Clear', throughCombatSequence: 0, events: [],
+        frame: { phase: 'Preparing', tick: 0, night: false, throughSequence: 0, players } };
+      assert.equal(send({ type: 'frame', payload: packet }).acceptedSequence, sequence);
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+    check((await page.locator(seatStatus(1)).innerText()).includes('合成姿態就緒 1')
+      && (await page.locator(seatStatus(5)).innerText()).includes('姿態未就緒 1')
+      && (await page.locator(seatStatus(2)).innerText()).includes('未編列 1、2、3、4、5'),
+      'Live seat rows distinguish connected simulation, missing pose and vacant rooms in the original linked venue');
+    await page.locator(seatStatus(1)).filter({ hasText: '快照已過期' }).waitFor({ timeout: 5000 });
+    check(!(await page.locator(seatStatus(1)).innerText()).includes('合成姿態就緒'), 'Expired game evidence withdraws previously confirmed seats');
     await openRoomRoster(page, session.id, 5);
     check(await page.locator('#roster [data-roster-room="5"]').isVisible()
       && await page.locator('#roster [data-roster-room="1"]').isHidden(),
@@ -225,6 +254,7 @@ if (require.main === module) {
         assert.match(await page.locator(summary).textContent(), /五房原端點皆相符，並收到近期來源快照/);
         const checkedRosters = [];
         for (const { roomIds, sessionId } of expected) for (const roomId of roomIds) {
+          await page.locator(seatStatus(roomId)).filter({ hasText: '合成姿態就緒 1、2、3、4、5' }).waitFor();
           await openRoomRoster(page, sessionId, roomId);
           assert.equal(await page.locator(`#roster [data-roster-room="${roomId}"]:visible`).count(), 5);
           assert.equal(await page.locator(`#roster [data-roster-room]:visible:not([data-roster-room="${roomId}"])`).count(), 0);

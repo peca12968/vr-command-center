@@ -103,3 +103,6 @@
 #prop-layer [data-layout-trial]{opacity:.28}
 #player-replay-title,#player-replay-source{overflow-wrap:anywhere}
 .event-list .venue-launch-review-row{flex-direction:column;align-items:flex-start;gap:8px;overflow-wrap:anywhere}
+.venue-launch-review-row .button-row{width:100%;align-items:stretch}
+.venue-launch-room-readiness{flex:1 1 190px;min-width:0;padding:8px;border:1px solid var(--line);border-radius:4px}
+.venue-launch-room-readiness .hint{margin:8px 0 0}
