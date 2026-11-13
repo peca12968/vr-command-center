@@ -7,6 +7,16 @@ const { spawnSync } = require('node:child_process');
 const route = '/venue/server-launch-review';
 const panel = '#venue-launch-review', input = panel + '-file', button = panel + '-check', summary = panel + '-summary';
 const rows = panel + '-rooms li';
+const rosterShortcut = roomId => `[data-launch-review-roster="${roomId}"]`;
+const rosterStatus = panel + '-roster-status';
+
+async function openRoomRoster(page, sessionId, roomId) {
+  await page.locator(rosterShortcut(roomId)).click();
+  await page.locator(rosterStatus).filter({ hasText: `已開啟房間 ${roomId} 的原場次名冊` }).waitFor();
+  assert.equal(await page.locator('#session-select').inputValue(), sessionId);
+  assert.equal(await page.locator('#roster-room').inputValue(), String(roomId));
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'roster-title');
+}
 
 async function login(page, base, token) {
   await page.goto(base + '/console/');
@@ -43,6 +53,7 @@ async function checkVenueLaunchReview({ context, api, tokens, base, screenshots,
   const roomIds = [1, 2, 3, 4, 5];
   const session = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Linked', roomIds }, 'Master', 201);
   const sessionPath = '/sessions/' + session.id;
+  let replacement;
   const raw = { schemaVersion: 1, status: 'venue-incomplete', complete: false, readyPublished: false, instanceId,
     venueLaunchId: launchId, topology: 'Linked', sourceAttachment: 'unconfirmed', endpointPublication: 'not-attempted',
     publicationError: 'PRIVATE_FIXTURE_MESSAGE',
@@ -112,6 +123,7 @@ async function checkVenueLaunchReview({ context, api, tokens, base, screenshots,
     const wrongAddress = await (await checkSelected(page)).json();
     await page.locator(rows).filter({ hasText: '公告端點與報告不符' }).waitFor();
     check(wrongAddress.servers[0].addressMatched === false, 'The ready file compares the advertised IPv4 even when Unity binds to all interfaces');
+    assert.equal(await page.locator(rosterShortcut(5)).count(), 0);
     ready.servers[0].ready.address = '192.168.1.21';
     await choose(page, ready);
     const saved = await (await checkSelected(page)).json();
@@ -119,6 +131,28 @@ async function checkVenueLaunchReview({ context, api, tokens, base, screenshots,
     check(saved.servers[0].endpointState === 'published' && saved.servers[0].recentSource !== true
       && !(await page.locator(summary).innerText()).includes('皆相符，並收到'),
       'A matching endpoint alone does not show a fresh game source');
+    for (const roomId of [1, 5]) await api(sessionPath + '/players', 'POST', {
+      playerId: randomUUID(), roomId, name: `Original room ${roomId}`, headset: 'Quest3'
+    });
+    const originalRoster = await api(sessionPath);
+    assert.equal(await page.locator('[data-launch-review-roster]').count(), 5);
+    await openRoomRoster(page, session.id, 5);
+    check(await page.locator('#roster [data-roster-room="5"]').isVisible()
+      && await page.locator('#roster [data-roster-room="1"]').isHidden(),
+      'A shared endpoint opens exactly the requested linked room and focuses its roster');
+    await openRoomRoster(page, session.id, 1);
+    check(JSON.stringify(await api(sessionPath)) === JSON.stringify(originalRoster), 'Both roster shortcuts leave the original session unchanged');
+    await page.setViewportSize({ width: 390, height: 850 });
+    await page.locator(panel).screenshot({ path: path.join(screenshots, 'venue-ready-roster-mobile.png') });
+    check(await page.locator(panel).evaluate(element => element.scrollWidth <= element.clientWidth),
+      'Five linked room shortcuts and the source details fit a narrow console');
+    await page.setViewportSize({ width: 1440, height: 1080 });
+    await api(sessionPath, 'DELETE', undefined, 'Master', 204);
+    replacement = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [5] }, 'Master', 201);
+    await page.locator(rosterShortcut(5)).click();
+    await page.locator(rosterStatus).filter({ hasText: '無法開啟原場次名冊' }).waitFor();
+    check(await page.locator('#session-select').inputValue() !== replacement.id,
+      'A stale shortcut rejects an ended original session before selecting a replacement');
     await choose(page, { ...ready, servers: [{ roomIds, ready: { ...ready.servers[0].ready, streamId: randomUUID() } }] });
     const otherStream = await (await checkSelected(page)).json();
     await page.locator(rows).filter({ hasText: '已登記其他來源' }).waitFor();
@@ -129,7 +163,10 @@ async function checkVenueLaunchReview({ context, api, tokens, base, screenshots,
     await page.locator(rows).filter({ hasText: '已登記其他來源' }).waitFor();
     check(foreign.servers[0].streamId === null && !(await page.locator(rows).textContent()).includes(streamId),
       'A mismatched launch does not identify another source as the original');
-    await api(sessionPath, 'DELETE', undefined, 'Master', 204);
+    await choose(page, ready);
+    await checkSelected(page);
+    await page.locator(rows).filter({ hasText: '已結束' }).waitFor();
+    check(await page.locator(rosterShortcut(5)).count() === 0, 'A ready file for an ended session never links to the replacement room roster');
     await choose(page, raw);
     const ended = await (await checkSelected(page)).json();
     await page.locator(rows).filter({ hasText: '已結束' }).waitFor();
@@ -154,6 +191,7 @@ async function checkVenueLaunchReview({ context, api, tokens, base, screenshots,
     await page.close();
     const current = await api(sessionPath);
     if (current.state !== 'Ended') await api(sessionPath, 'DELETE', undefined, 'Master', 204);
+    if (replacement) await api('/sessions/' + replacement.id, 'DELETE', undefined, 'Master', 204);
   }
 }
 
@@ -185,6 +223,14 @@ if (require.main === module) {
       if (liveReady) {
         assert.equal(response.request().postDataJSON().version, 2);
         assert.match(await page.locator(summary).textContent(), /五房原端點皆相符，並收到近期來源快照/);
+        const checkedRosters = [];
+        for (const { roomIds, sessionId } of expected) for (const roomId of roomIds) {
+          await openRoomRoster(page, sessionId, roomId);
+          assert.equal(await page.locator(`#roster [data-roster-room="${roomId}"]:visible`).count(), 5);
+          assert.equal(await page.locator(`#roster [data-roster-room]:visible:not([data-roster-room="${roomId}"])`).count(), 0);
+          checkedRosters.push({ roomId, sessionId });
+        }
+        review.checkedRosters = checkedRosters;
       }
       await fs.writeFile(output, JSON.stringify(review, null, 2) + '\n', { flag: 'wx' });
     } finally { await browser.close(); }

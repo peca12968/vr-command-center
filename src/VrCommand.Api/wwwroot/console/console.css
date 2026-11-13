@@ -102,3 +102,4 @@
 #layout-trial-routes polyline{fill:none;stroke:#ffd477;stroke-width:.11;stroke-dasharray:.18 .09;stroke-linecap:round;pointer-events:none}
 #prop-layer [data-layout-trial]{opacity:.28}
 #player-replay-title,#player-replay-source{overflow-wrap:anywhere}
+.event-list .venue-launch-review-row{flex-direction:column;align-items:flex-start;gap:8px;overflow-wrap:anywhere}

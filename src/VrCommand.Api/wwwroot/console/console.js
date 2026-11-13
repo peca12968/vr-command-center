@@ -49,7 +49,7 @@ const seatDeployments = ['VR', 'MR'].map(mode => mountSeatDeployment(() => state
 const mrVenue = mountMrVenueBundle(() => state, api, download, roomReadiness.ticketDestination);
 const vrVenue = mountVrVenueTickets(() => state, api, download, roomReadiness.ticketSourceLive);
 const venueServerPlan = mountVenueServerPlan(() => state, api, download);
-const venueLaunchReview = mountVenueLaunchReview(() => state, api);
+const venueLaunchReview = mountVenueLaunchReview(() => state, api, selectSession, focusRoster);
 const operatorNetwork = mountOperatorNetwork(() => state, api, download, uuid);
 const alignmentPins = mountAlignmentPins({ state: () => state,
   checkFile: file => api('/room-alignment/check-file', 'POST', file),
@@ -425,6 +425,12 @@ async function selectSession(id, rosterRoom = '') {
   if (state.refreshPromise) { try { await state.refreshPromise; } catch { /* Refresh below reports errors. */ } }
   if (selection !== selectionEpoch || epoch !== state.epoch) return;
   try { await refresh(); } catch (error) { showRefreshError(error); }
+}
+function focusRoster(sessionId, roomId) {
+  if ($('operations-view').hidden || state.session?.id !== sessionId || $('roster-room').value !== String(roomId)) return false;
+  $('roster-title').scrollIntoView({ block: 'start' });
+  $('roster-title').focus({ preventScroll: true });
+  return true;
 }
 function commonLaunchRevision() {
   const missionId = $('launch-mission').value;
@@ -916,10 +922,7 @@ function renderVenueBegin(targets, waiting, policy) {
         if (!master() || state.busy || state.pending
             || !venueTargets('Begin').some(target => target.sessionId === sessionId && target.roomIds.includes(roomId))) return;
         await selectSession(sessionId, String(roomId));
-        if (state.session?.id === sessionId && $('roster-room').value === String(roomId)) {
-          $('roster-title').scrollIntoView({ block: 'start' });
-          $('roster-title').focus({ preventScroll: true });
-        }
+        focusRoster(sessionId, roomId);
       });
       item.append(' ', button);
     }

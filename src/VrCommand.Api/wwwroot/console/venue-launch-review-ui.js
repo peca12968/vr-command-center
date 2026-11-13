@@ -84,19 +84,50 @@ function verifyReply(value, request) {
   return value;
 }
 
-export function mountVenueLaunchReview(getState, api) {
+export function mountVenueLaunchReview(getState, api, selectSession, focusRoster) {
   const $ = suffix => document.getElementById('venue-launch-review-' + suffix);
   const panel = document.getElementById('venue-launch-review'), file = $('file'), button = $('check');
-  let active = false, pending = false, generation = 0;
+  let active = false, pending = false, opening = false, generation = 0;
+  const isCurrent = (attempt, epoch) => attempt === generation && epoch === getState().epoch && active
+    && getState().actor?.role === 'Master';
   function update() {
     const state = getState();
     panel.hidden = !active || state.actor?.role !== 'Master';
-    file.disabled = panel.hidden || state.busy || !!state.pending || pending;
+    file.disabled = panel.hidden || state.busy || !!state.pending || pending || opening;
     button.disabled = file.disabled || file.files.length !== 1;
+    for (const shortcut of $('rooms').querySelectorAll('button')) shortcut.disabled = file.disabled;
   }
   function clear() {
     $('summary').textContent = '';
+    $('roster-status').textContent = '';
     $('rooms').replaceChildren();
+  }
+  async function openRoster(row, roomId) {
+    const attempt = generation, epoch = getState().epoch;
+    const current = () => isCurrent(attempt, epoch);
+    const matches = session => session?.id === row.sessionId && session.roomIds?.includes(roomId)
+      && session.state !== 'Ended' && session.combatStream?.streamId === row.streamId;
+    opening = true;
+    update();
+    $('roster-status').textContent = '正在核對原場次名冊…';
+    try {
+      const session = await api(`/sessions/${row.sessionId}`);
+      if (!current()) return;
+      if (!matches(session)) throw new Error('Original source is no longer active');
+      const { busy, pending } = getState();
+      if (busy || pending) {
+        $('roster-status').textContent = '請先確認目前命令的結果，再開啟名冊。';
+        return;
+      }
+      await selectSession(row.sessionId, String(roomId));
+      if (!current()) return;
+      if (!matches(getState().session) || !focusRoster(row.sessionId, roomId)) throw new Error('Original roster selection changed');
+      $('roster-status').textContent = `已開啟房間 ${roomId} 的原場次名冊。`;
+    } catch {
+      if (current()) $('roster-status').textContent = '無法開啟原場次名冊。請重新核對就緒檔。';
+    } finally {
+      if (current()) { opening = false; update(); }
+    }
   }
   function show(review) {
     const allUnbound = review.servers.every(row => row.phase === 'Preparing' && row.sourceState === 'unbound');
@@ -108,11 +139,29 @@ export function mountVenueLaunchReview(getState, api) {
     $('summary').textContent = `${instance}${summary} 取樣時間 ${new Date(review.observedAtUtc).toLocaleString('zh-TW')}。`;
     $('rooms').replaceChildren(...review.servers.map(row => {
       const li = document.createElement('li');
+      li.className = 'venue-launch-review-row';
       const endpoint = row.endpointAddress === null ? '' : ` · ${row.endpointAddress}:${row.endpointPort}`;
       const stream = row.streamId === null ? '' : ` · 來源 ${row.streamId}`;
       const address = endpoint && row.addressMatched === null ? ' · 報告無可比對的公告位址' : '';
       const recent = row.recentSource === null ? '' : row.recentSource ? ' · 有近期來源快照' : ' · 尚無近期來源快照';
-      li.textContent = `房間 ${row.roomIds.join('、')} · ${row.sessionId}${row.phase === null ? '' : ' · ' + phases[row.phase]} · ${sourceStates[row.sourceState]}${stream} · ${endpointStates[row.endpointState]}${endpoint}${address}${recent}`;
+      const detail = document.createElement('span');
+      detail.textContent = `房間 ${row.roomIds.join('、')} · ${row.sessionId}${row.phase === null ? '' : ' · ' + phases[row.phase]} · ${sourceStates[row.sourceState]}${stream} · ${endpointStates[row.endpointState]}${endpoint}${address}${recent}`;
+      li.append(detail);
+      if (review.version === 2 && review.instanceVerified && row.sourceState === 'original-source'
+          && row.endpointState === 'published' && ['Preparing', 'Running', 'Paused'].includes(row.phase)) {
+        const actions = document.createElement('div');
+        actions.className = 'button-row';
+        for (const roomId of row.roomIds) {
+          const shortcut = document.createElement('button');
+          shortcut.type = 'button';
+          shortcut.className = 'quiet small';
+          shortcut.dataset.launchReviewRoster = roomId;
+          shortcut.textContent = `查看房間 ${roomId} 名冊`;
+          shortcut.addEventListener('click', () => { if (!shortcut.disabled) void openRoster(row, roomId); });
+          actions.append(shortcut);
+        }
+        li.append(actions);
+      }
       return li;
     }));
   }
@@ -122,7 +171,7 @@ export function mountVenueLaunchReview(getState, api) {
   button.addEventListener('click', async () => {
     if (button.disabled) return;
     const selected = file.files[0], attempt = ++generation, epoch = getState().epoch;
-    const current = () => attempt === generation && epoch === getState().epoch && active && getState().actor?.role === 'Master';
+    const current = () => isCurrent(attempt, epoch);
     pending = true; clear(); update();
     $('summary').textContent = '正在讀取啟動報告…';
     try {
@@ -146,7 +195,7 @@ export function mountVenueLaunchReview(getState, api) {
   });
   return { update, active(on) {
     active = on;
-    if (!on) { generation++; pending = false; file.value = ''; clear(); panel.open = false; }
+    if (!on) { generation++; pending = opening = false; file.value = ''; clear(); panel.open = false; }
     update();
   } };
 }
