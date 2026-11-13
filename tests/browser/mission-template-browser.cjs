@@ -131,11 +131,34 @@ module.exports = async function missionTemplateBrowser({ context, api, tokens, d
     check((await target.locator('#draft-name').inputValue()) === definition.name && await target.locator('#prop-layer > g').count() === 2
       && await target.locator('#save-revision').isDisabled() && (await read('/mission-library')).length === 0,
       'Applying a checked file loads the exact fields and objects as a separate unsaved draft');
+    await target.locator('#draft-duration').fill('180');
+    await target.locator('#prop-x').fill('4.25'); await target.locator('#prop-x').blur();
+    const draftExpected = structuredClone(original.definition);
+    draftExpected.durationSeconds = 180;
+    draftExpected.props[0].position.x = 4.25;
+    const draftStarted = target.waitForEvent('download');
+    await target.locator('#export-draft-template').click();
+    const draftDownload = await draftStarted;
+    const draftPath = path.join(screenshots, 'mission-template-draft.json');
+    await draftDownload.saveAs(draftPath);
+    const draftBytes = await fs.readFile(draftPath);
+    const draftFile = JSON.parse(draftBytes);
+    check(draftDownload.suggestedFilename() === 'vr-mission-draft.json' && draftFile.format === format && draftFile.version === 1
+      && JSON.stringify(draftFile.definition) === JSON.stringify(draftExpected)
+      && Object.keys(draftFile).length === 3 && (await read('/mission-library')).length === 0,
+      'The local backup preserves draft geometry, changed duration and original text without saving a version');
+    await target.locator('#draft-name').fill('準備取回備份');
+    await input.setInputFiles({ name: draftDownload.suggestedFilename(), mimeType: 'application/json', buffer: draftBytes });
+    await inspect.click(); await preview.filter({ hasText: '180 秒' }).waitFor(); await ready(target);
+    target.once('dialog', dialog => dialog.accept()); await apply.click();
+    check(await target.locator('#prop-x').inputValue() === '4.25' && await target.locator('#draft-duration').inputValue() === '180'
+      && await target.locator('#draft-name').inputValue() === draftExpected.name && (await read('/mission-library')).length === 0,
+      'The existing import route restores the downloaded draft and leaves the library untouched');
     await target.locator('#mission-form button[type=submit]').click();
     await target.waitForFunction(() => document.querySelector('#draft-status').textContent.startsWith('已儲存'), null, { polling: 50 });
     const [saved] = await read('/mission-library');
     check(saved.mission.id !== original.id && saved.number === 1 && saved.seriesId === saved.mission.id
-      && JSON.stringify(saved.mission.definition) === JSON.stringify(original.definition),
+      && JSON.stringify(saved.mission.definition) === JSON.stringify(draftExpected),
       'Explicit save creates a new series in the other service and preserves the original text and full definition');
     await target.locator('#tab-operations').click();
     await target.locator('#launch-mode').selectOption('IndependentSet');
@@ -144,7 +167,7 @@ module.exports = async function missionTemplateBrowser({ context, api, tokens, d
     const sessions = (await read('/sessions')).sort((a, b) => a.roomIds[0] - b.roomIds[0]);
     check(sessions.length === 5 && sessions.every((session, index) =>
       session.roomIds[0] === index + 1 && session.roomIds.length === 1 && session.mission.id === saved.mission.id
-      && JSON.stringify(session.mission.definition) === JSON.stringify(original.definition)),
+      && JSON.stringify(session.mission.definition) === JSON.stringify(draftExpected)),
       'All five destination rooms prepare the imported saved definition through the ordinary operator UI');
     for (const session of sessions) {
       const result = await fetch(`${destination}/api/sessions/${session.id}/commands`, {

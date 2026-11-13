@@ -26,6 +26,8 @@ const behaviorNames = { Hold: '守備', Patrol: '巡邏', Advance: '推進' };
 const archiveNames = { NoSource: '沒有遊戲來源', Missing: '尚無錄製紀錄', Waiting: '等待封存', SourceMismatch: '來源尚未對上', Sealed: '已封存' };
 const venueMissionRooms = [1, 2, 3, 4, 5];
 const venueMissionFileLimit = 4096;
+const missionTemplateFormat = 'vr-command-mission-template';
+const missionTemplateFileLimit = 512 * 1024;
 let venueMissionFileReview = null;
 let venueMissionFileMaps = null;
 const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: null, rooms: [], venue: null, venuePhaseBlob: null, missions: [], catalog: [], launchPinned: null, history: null, draftBase: null, draftChanged: false, draftSavedAt: '', sessions: [], session: null, selected: null, pending: null, props: [], prop: -1, settingRevisions: null };
@@ -728,6 +730,7 @@ function applyPermissions() {
   $('export-mission-template').disabled = locked || !master() || !$('mission-version').value;
   $('mission-template-panel').hidden = !master();
   $('mission-template-file').disabled = locked || !master();
+  $('export-draft-template').disabled = !canExportDraftTemplate();
   $('check-mission-template').disabled = locked || !master() || !$('mission-template-file').files.length;
   $('use-mission-template').disabled = locked || !master() || !checkedTemplate;
   $('compare-version').disabled = locked || !state.history || !$('mission-version').value;
@@ -1762,7 +1765,7 @@ async function checkMissionTemplate(file, epoch) {
   const result = await api('/mission-templates/check-file', 'POST', file);
   if (epoch !== templateEpoch || $('missions-view').hidden) return;
   const draft = result?.definition;
-  if (result?.format !== 'vr-command-mission-template' || result.version !== 1 || typeof draft?.name !== 'string'
+  if (result?.format !== missionTemplateFormat || result.version !== 1 || typeof draft?.name !== 'string'
       || typeof draft.briefing !== 'string' || !Number.isInteger(draft.durationSeconds)
       || !draft.environment || !draft.enemies || !Array.isArray(draft.props) || draft.props.some(prop => !prop?.position))
     throw new Error('Unexpected mission template response.');
@@ -1783,6 +1786,22 @@ function draftDefinition() {
     briefing: loadedText?.briefing?.shown === briefing ? loadedText.briefing.value : briefing,
     durationSeconds: Number($('draft-duration').value),
     environment: environment('draft'), enemies: enemies('draft'), props: structuredClone(state.props) };
+}
+function canExportDraftTemplate() {
+  return master() && !state.busy && (!state.pending
+    || (['mission-create', 'mission-revise'].includes(state.pending.kind) && state.pending.restoredFrom === undefined));
+}
+function exportDraftTemplate() {
+  if (!canExportDraftTemplate() || (!state.pending && !$('mission-form').reportValidity())) return;
+  const definition = state.pending?.body ?? draftDefinition();
+  if (!definition.name.trim()) { notify('請先輸入任務名稱。', true); return; }
+  const invalid = definition.props.findIndex(prop => !prop.assetId.trim() || prop.assetId.length > 100
+    || ![prop.position.x, prop.position.y, prop.position.z, prop.yawDegrees].every(value => Number.isFinite(Math.fround(value))));
+  if (invalid !== -1) { notify(`請先修正物件 ${invalid + 1} 的素材代碼或座標。`, true); return; }
+  const blob = new Blob([JSON.stringify({ format: missionTemplateFormat, version: 1, definition }, null, 2)], { type: 'application/json' });
+  if (blob.size > missionTemplateFileLimit) { notify('草稿範本超過 512 KiB，請減少文字或物件。', true); return; }
+  download('vr-mission-draft.json', blob);
+  notify('已下載草稿範本。');
 }
 function clearMissionComparison() {
   if (!comparedVersion) return;
@@ -2092,11 +2111,12 @@ $('export-mission-template').addEventListener('click', () => {
   }, true);
 });
 $('mission-template-file').addEventListener('change', () => { clearMissionTemplate(true); applyPermissions(); });
+$('export-draft-template').addEventListener('click', exportDraftTemplate);
 $('check-mission-template').addEventListener('click', () => {
   const file = $('mission-template-file').files[0];
   if (!editable() || !file) return;
   clearMissionTemplate(true);
-  if (!file.size || file.size > 512 * 1024) { notify('請選擇 512 KiB 以內的任務範本 JSON。', true); applyPermissions(); return; }
+  if (!file.size || file.size > missionTemplateFileLimit) { notify('請選擇 512 KiB 以內的任務範本 JSON。', true); applyPermissions(); return; }
   const epoch = templateEpoch;
   run(() => checkMissionTemplate(file, epoch));
 });

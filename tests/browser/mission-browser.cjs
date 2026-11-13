@@ -43,6 +43,14 @@ module.exports = async function missionBrowser({ page, context, api, tokens, bas
     await editor.locator('#save-revision').click(); await editor.locator('#pending-command').waitFor({ state: 'visible' });
     await waitForDom(() => !document.querySelector('#retry-command').disabled);
     check(await editor.locator('#draft-name').isDisabled() && await editor.locator('#load-mission').isDisabled(), 'Lost revision response freezes the original mission request and draft');
+    const backupStarted = editor.waitForEvent('download');
+    await editor.locator('#export-draft-template').click();
+    const backup = await backupStarted;
+    const draft = JSON.parse(await fs.readFile(await backup.path(), 'utf8'));
+    check(draft.format === 'vr-command-mission-template' && draft.version === 1
+      && JSON.stringify(draft.definition) === JSON.stringify(JSON.parse(attempts[0].body))
+      && Object.keys(draft).length === 3 && attempts.length === 1 && await editor.locator('#pending-command').isVisible(),
+      'A local draft backup preserves the unconfirmed revision body without retrying or clearing the pending write');
     const secondId = (await api(`/missions/${mission.id}/history`)).headId, second = await api('/missions/' + secondId);
     const third = await revise(second.id, { ...second.definition, name: '另一主控的第三版' });
     await editor.locator('#retry-command').click(); await waitForDom(() => document.querySelector('#pending-command').hidden && document.querySelector('#draft-status').textContent.startsWith('已儲存')); await ready();
