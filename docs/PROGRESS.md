@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 Windows OpenXR 執行環境預檢
+
+- `check-windows-openxr.ps1` 唯讀檢查 64 位元登錄中的 `ActiveRuntime` 或目前程序的 `XR_RUNTIME_JSON`，辨識缺少的清單、無法定位的 DLL 及錯誤架構。本機登錄設定與 Unity Mock Runtime 都通過檔案預檢，缺失的環境變數指定清單回報 `manifest-missing`。登錄值及模擬執行環境檔案經前後比對一致。三項 Windows 測試通過。本機 Windows PowerShell 的執行原則拒絕載入腳本，驗證以 PowerShell 7 完成。 [操作方式](WINDOWS_PLAYER_PACKAGE.md#windows-openxr-啟動)
+- 解壓玩家包通過 43 項檢查，缺少 OpenXR 執行環境時在入場前退出。Windows 三包另通過 80 項模擬 OpenXR 整合，核對頭手追蹤、中斷與同一連線恢復，兩位同機玩家的戰績與 107 格雙封存回放。清理後 C／F 的 39 個非資料庫檔案雜湊相符。 [驗證摘要](../artifacts/windows-openxr-preflight-validation.json)
+- `cdb601f` 已推送，GitHub Actions 因帳務或支出上限未啟動。VIVE 型號、實機控制器與追蹤、Quest 實機、跨機 25 人、MR 場地及廠商硬體待驗。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43402537901)
+
 ## 2026-11-13 Quest 單席安裝核對原發行 APK
 
 - `deploy-quest.ps1` 的單席流程可搭配 `-ReleaseReport` 與 `-ApkPath`。`-CheckOnly` 可在無頭盔時核對本機 APK 與原連線檔。正式安裝以核對過的暫存副本執行，讀回裝置 APK 雜湊後才傳送及啟用玩家設定。 [操作方式](QUEST3.md#powershell-部署)
