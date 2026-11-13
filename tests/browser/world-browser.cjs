@@ -1,6 +1,7 @@
 const fs = require('node:fs/promises');
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { spawn } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const { isDeepStrictEqual } = require('node:util');
@@ -889,6 +890,38 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
         'A truncated local file clears the old display without making a request');
     } finally {
       await playerContext.close();
+      await page.bringToFront();
+    }
+    const offlineFile = path.join(directory, 'player-replay-offline.html');
+    const { packagePlayerReplay } = await import('../../scripts/package-player-replay.mjs');
+    await packagePlayerReplay(offlineFile);
+    const offlineContext = await context.browser().newContext({ offline: true, viewport: { width: 390, height: 844 } });
+    try {
+      const offline = await offlineContext.newPage(), requests = [], errors = [];
+      const fileUrl = pathToFileURL(offlineFile).href;
+      offline.on('request', request => { if (request.url() !== fileUrl) requests.push(request.url()); });
+      offline.on('pageerror', error => errors.push(error.message));
+      offline.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+      await offline.goto(fileUrl);
+      const input = offline.locator('#player-replay-file');
+      const position = offline.locator('#player-replay-frame');
+      await input.setInputFiles({ name: 'exported-clip.json', mimeType: 'application/json', buffer: bytes });
+      await position.filter({ hasText: `第 ${eventSequence} 格` }).waitFor();
+      check(await offline.locator('#player-replay-title').innerText() === clipName
+        && await offline.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)
+        && Number(await offline.locator('#replay-canvas').getAttribute('data-triangles')) > 0,
+      'Single-file player renders the actual exported clip from file URL with the browser offline');
+      const frameNumber = offline.locator('#player-replay-number');
+      await frameNumber.fill(String(clipTail - 1));
+      await frameNumber.press('Enter');
+      check((await position.innerText()).startsWith(`第 ${clipTail - 1} 格`), 'Offline player jumps to the original frame number');
+      await offline.locator('#player-replay-play').click();
+      await position.filter({ hasText: `第 ${clipTail} 格` }).waitFor();
+      check(await offline.locator('#player-replay-next').isDisabled() && requests.length === 0 && errors.length === 0,
+        'Offline player reaches the original end without external resources or browser errors');
+      await offline.screenshot({ path: path.join(screenshots, 'player-replay-offline.png'), fullPage: true });
+    } finally {
+      await offlineContext.close();
       await page.bringToFront();
     }
     const roomClip = await context.newPage();
