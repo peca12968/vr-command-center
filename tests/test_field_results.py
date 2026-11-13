@@ -785,7 +785,9 @@ class FieldResultsTests(unittest.TestCase):
                             for room in range(1, 6)]
             venue = {'version': 1, 'scope': 'venue-udp-preflight-only', 'mode': 'Independent', 'complete': False,
                      'groups': venue_groups, 'expectedSources': 5, 'verifiedSources': 4, 'unmatchedPairs': 1,
-                     'unreadablePairs': 0, 'inbox': {'issues': [{'files': ['private-file.json']}]},
+                     'unreadablePairs': 0, 'inbox': {'issues': [{'files': ['private-file.json']},
+                        {'status': 'missing-counterpart', 'files': ['private-file.json'],
+                         'seats': [{'roomId': 5, 'seat': 1}], 'missingRole': 'probe'}]},
                      'launcherPreview': {'complete': True}, 'launchBinding': {'complete': True}}
             quest = {'version': 1, 'scope': 'quest-udp-preflight-only', 'mode': 'Linked', 'complete': False,
                      'groups': [{'roomIds': [1, 2, 3, 4, 5], 'complete': False, 'seats': [
@@ -806,7 +808,9 @@ class FieldResultsTests(unittest.TestCase):
             self.assertEqual([[1], [2]], [issue['entries'] for issue in report['issues']])
             self.assertEqual([{'roomId': 5, 'seat': 1, 'status': 'invalid-or-expired'}],
                              report['issues'][0]['udpPreflight'][0]['pendingSeats'])
-            self.assertEqual(1, report['issues'][0]['udpPreflight'][0]['inboxIssues'])
+            self.assertEqual(2, report['issues'][0]['udpPreflight'][0]['inboxIssues'])
+            self.assertEqual([{'status': 'missing-counterpart', 'seats': [{'roomId': 5, 'seat': 1}], 'missingRole': 'probe'}],
+                             report['issues'][0]['udpPreflight'][0]['inboxSeatIssues'])
             self.assertEqual([{'roomId': 3, 'seat': 1, 'status': 'device'}], report['issues'][1]['udpPreflight'][0]['pendingSeats'])
             self.assertEqual({'report': 2, 'name': 'missing-quest-udp.json', 'status': 'missing-report'},
                              report['issues'][1]['udpPreflight'][1])
@@ -816,6 +820,11 @@ class FieldResultsTests(unittest.TestCase):
             rejected = subprocess.run(command, capture_output=True)
             self.assertEqual(1, rejected.returncode)
             self.assertIn(b'Provide a complete UDP preflight batch', rejected.stderr)
+
+            venue['inbox']['issues'][1]['seats'].append({'roomId': 4, 'seat': 1})
+            (first.parent / 'udp.json').write_text(json.dumps(venue), encoding='utf-8')
+            bad_inbox = field.verify_venue_stages(plan_path, inspect=True)['issues'][0]
+            self.assertIn('does not match an original source', bad_inbox['reason'])
 
             venue['groups'][-1]['complete'] = True
             venue['groups'][-1]['sources'][0]['status'] = 'verified'

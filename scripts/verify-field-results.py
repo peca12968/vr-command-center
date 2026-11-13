@@ -1695,7 +1695,7 @@ def inspect_incomplete_udp_preflight(path, mode, expected_rooms, players_per_roo
     require(type(groups) is list and 1 <= len(groups) <= len(expected_rooms), 'Invalid UDP endpoint groups')
     venue_statuses = {'missing', 'invalid-or-expired', 'duplicate-pair', 'duplicate-exchange', 'verified'}
     quest_failures = {'device', 'key', 'listener', 'probe', 'pair', 'budget', 'not-attempted', 'interrupted', 'duplicate', 'expired'}
-    seen_groups, seen_seats, issues = set(), set(), []
+    seen_groups, seen_seats, source_seats, issues = set(), set(), set(), []
     expected_sources = verified_sources = 0
     for group in groups:
         require(type(group) is dict and type(group.get('complete')) is bool, 'Invalid UDP endpoint group')
@@ -1719,13 +1719,16 @@ def inspect_incomplete_udp_preflight(path, mode, expected_rooms, players_per_roo
                 verified = row['complete']
                 require(status in ({'verified', 'reused'} if verified else quest_failures), 'Invalid Quest UDP seat outcome')
             outcomes.append(verified)
+            source = []
             for seat in seats:
                 require(type(seat) is dict, 'Invalid UDP seat')
                 key = (integer(seat.get('roomId'), 1, 5), integer(seat.get('seat'), 1, 5))
                 require(key[0] in rooms and key not in seen_seats, 'UDP preflight repeats a seat or uses the wrong room')
                 seen_seats.add(key)
+                source.append(key)
                 if not verified:
                     issues.append({'roomId': key[0], 'seat': key[1], 'status': status})
+            source_seats.add(tuple(sorted(source)))
         require(group['complete'] == all(outcomes), 'UDP endpoint completeness differs from its source outcomes')
         expected_sources += len(outcomes)
         verified_sources += sum(outcomes)
@@ -1751,6 +1754,24 @@ def inspect_incomplete_udp_preflight(path, mode, expected_rooms, players_per_roo
             inbox = report['inbox']
             require(type(inbox) is dict and type(inbox.get('issues')) is list and len(inbox['issues']) <= 100, 'Invalid UDP inbox issues')
             summary['inboxIssues'] = len(inbox['issues'])
+            seat_issues = []
+            for item in inbox['issues']:
+                if type(item) is not dict or 'seats' not in item:
+                    continue
+                status, seats = item.get('status'), item['seats']
+                require(status in ('missing-counterpart', 'duplicate-role') and type(seats) is list
+                        and 1 <= len(seats) <= 25, 'Invalid UDP inbox seat issue')
+                keys = tuple(sorted((integer(seat.get('roomId'), 1, 5), integer(seat.get('seat'), 1, 5))
+                                    for seat in seats if type(seat) is dict))
+                require(len(keys) == len(seats) and keys in source_seats, 'UDP inbox issue does not match an original source')
+                issue = {'status': status, 'seats': [{'roomId': room, 'seat': seat} for room, seat in keys]}
+                if status == 'missing-counterpart':
+                    role = item.get('missingRole')
+                    require(role in ('listener', 'probe'), 'Invalid missing UDP inbox role')
+                    issue['missingRole'] = role
+                seat_issues.append(issue)
+            if seat_issues:
+                summary['inboxSeatIssues'] = seat_issues
         require(bool(issues) or summary['unmatchedPairs'] or summary['unreadablePairs'] or summary.get('inboxIssues')
                 or any(summary.get(key + 'Complete') is False for key in ('launcherPreview', 'launchBinding')),
                 'Incomplete venue UDP report has no pending sources or reported issues')

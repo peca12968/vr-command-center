@@ -295,7 +295,7 @@ python .\scripts\check-venue-udp-preflight.py `
   --output .\venue-readiness.json
 ```
 
-`inbox.issues` 列出無法讀取的原始報告、缺少對端的檔案及同一交換中重複提交的檔案。已配成對的報告仍會核對完整樣本與時限。可另用 `--batch` 加入 Quest 批次，並以同樣的方式提供所用的啟動原檔。
+`inbox.issues` 列出無法讀取的原始報告、缺少對端的檔案及同一交換中重複提交的檔案。若報告的伺服器端點及探測來源都能對上原網路清單，問題會附對應的房號與席號。缺少對端時，`missingRole` 為 `listener`（監聽端）或 `probe`（探測端）。已配成對的報告仍會核對完整樣本與時限。可另用 `--batch` 加入 Quest 批次，並以同樣的方式提供所用的啟動原檔。
 
 #### 補測未完成的全館 UDP 預檢
 
@@ -630,6 +630,8 @@ python scripts/verify-field-results.py --venue-stages .\stages.json --inspect-ve
 若 Quest 擷取報告尚未涵蓋原計畫席位，`issues[].questCaptures` 會列出預期席數、報告中標示完成的席數、失敗嘗試次數及待補的房號與席號。找不到原擷取或部署報告時，`issues[].missingFile` 會附檔案類型與檔名。 [重試擷取](QUEST3.md#重試未完成的-quest-擷取席位)
 
 若原 UDP 預檢報告尚未完成，`issues[].udpPreflight` 會列出該批引用的報告項次、檔名、已核對數量及 `pendingSeats`。全館報告會指出缺少、過期或重複的來源對應到哪些席位，並列出無法配對的報告數。Quest 報告會指出待補席位及失敗階段，例如裝置未就緒或探測失敗。找不到報告檔時，同一明細會列出缺少的報告。席位狀態取自預檢報告，補測後須保留原雙端紀錄並重跑正式驗收。 [補測全館 UDP](#補測未完成的全館-udp-預檢)
+
+全館 UDP 報告若包含收件問題的席位，總表會在 `inboxSeatIssues` 列出原來源對應的房號、席號及缺少的端別。請回該批原預檢報告查看檔名。無法對上原網路清單的問題仍會計入 `inboxIssues`。
 
 擷取報告已標示完成的席位，若原日誌缺少、長度或 SHA-256 不符、編碼無效或無法讀取，會一併出現在 `issues[].questCaptures.logIssues`。每筆包含房號、席號、原檔名及原因。請按批次與席號補回同一次擷取的原檔，再重跑收件與正式驗收，由原流程核對部署、日誌內容及伺服器回條。
 

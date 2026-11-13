@@ -40,7 +40,7 @@ def probe_identity(path):
     return report_address(row, 'probe')
 
 
-def load_inbox(directory):
+def load_inbox(directory, expected_sources):
     files = []
     for path in directory.iterdir():
         if path.suffix.lower() in ('.json', '.ndjson') and path.is_file():
@@ -63,13 +63,19 @@ def load_inbox(directory):
             issues.append({'status': 'invalid-report', 'files': [path.name]})
 
     pairs = []
-    for entries in exchanges.values():
+    for (server, port, peer, _), entries in exchanges.items():
         roles = dict(entries)
         if len(roles) == len(entries) == 2:
             pairs.append(({'listener': roles['listen'], 'probe': roles['probe']}, directory, None))
         else:
             status = 'duplicate-role' if len(roles) < len(entries) else 'missing-counterpart'
-            issues.append({'status': status, 'files': [name for _, name in entries]})
+            issue = {'status': status, 'files': [name for _, name in entries]}
+            seats = expected_sources.get((server, port, peer))
+            if seats:
+                issue['seats'] = [{'roomId': room, 'seat': seat} for room, seat in seats]
+                if status == 'missing-counterpart':
+                    issue['missingRole'] = 'probe' if 'listen' in roles else 'listener'
+            issues.append(issue)
     return pairs, {'files': len(files), 'pairedExchanges': len(pairs), 'issues': issues}
 
 
@@ -231,7 +237,7 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
     unmatched = unreadable = 0
     inbox_summary = None
     if inbox is not None:
-        inbox_pairs, inbox_summary = load_inbox(inbox)
+        inbox_pairs, inbox_summary = load_inbox(inbox, expected)
     else:
         inbox_pairs = []
     field.require(len(pairs) + len(inbox_pairs) <= 50, 'Too many UDP preflight reports')

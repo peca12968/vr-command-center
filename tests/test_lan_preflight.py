@@ -566,16 +566,19 @@ class LanPreflightTests(unittest.TestCase):
         (inbox / 'subfolder.json').mkdir()
 
         invalid = self.venue_check(plan, 'inbox-invalid.json', '--inbox', inbox, status=1)
+        first_seats = [{'roomId': room, 'seat': 1} for room in rooms]
+        second_seats = [{'roomId': room, 'seat': 2} for room in rooms]
+        missing_listener = {'status': 'missing-counterpart', 'files': ['101.json'], 'seats': second_seats, 'missingRole': 'listener'}
         self.assertEqual({'files': 5, 'pairedExchanges': 0, 'issues': [
             {'status': 'invalid-report', 'files': ['broken.json']},
-            {'status': 'missing-counterpart', 'files': ['101.json']},
-            {'status': 'duplicate-role', 'files': ['104.JSON', '200.NDJSON', 'copy.json']},
+            missing_listener,
+            {'status': 'duplicate-role', 'files': ['104.JSON', '200.NDJSON', 'copy.json'], 'seats': first_seats},
         ]}, invalid['inbox'])
         (inbox / 'copy.json').unlink()
         (inbox / 'broken.json').unlink()
         partial = self.venue_check(plan, 'inbox-partial.json', '--inbox', inbox, status=1)
         self.assertEqual((1, 1), (partial['verifiedSources'], partial['inbox']['pairedExchanges']))
-        self.assertEqual([{'status': 'missing-counterpart', 'files': ['101.json']}], partial['inbox']['issues'])
+        self.assertEqual([missing_listener], partial['inbox']['issues'])
 
         retry_inbox = self.root / '補件箱'
         retry_inbox.mkdir()
@@ -613,6 +616,7 @@ class LanPreflightTests(unittest.TestCase):
                                      '--retry-report', self.root / 'inbox-partial.json', status=1)
         self.assertFalse(duplicate['complete'])
         self.assertEqual('duplicate-role', duplicate['inbox']['issues'][0]['status'])
+        self.assertEqual(first_seats, duplicate['inbox']['issues'][0]['seats'])
 
     def test_venue_independent_requires_a_pair_per_port_for_the_same_source(self):
         ports = []
