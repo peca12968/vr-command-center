@@ -50,7 +50,8 @@ class VenueHttpGate:
         self.upstream = ('127.0.0.1', target.port); self.max_block_seconds = max_block_seconds
         self.maximum_seconds = maximum_seconds; self.lock = threading.RLock(); self.slots = threading.BoundedSemaphore(8)
         self.mode = None; self.block_started = None; self.block_history = []; self.tunnels = set(); self.stop = threading.Event()
-        self.counts = dict.fromkeys(['managementBlocked', 'publicationBlocked', 'combatBatchBlocked', 'combatSealBlocked', 'statisticsBlocked', 'tunnelsClosed', 'httpForwarded', 'webSockets', 'capacityRejected', 'handlerErrors', 'routeRejected'], 0)
+        self.management_release = None
+        self.counts = dict.fromkeys(['managementBlocked', 'managementDelayed', 'publicationBlocked', 'combatBatchBlocked', 'combatSealBlocked', 'statisticsBlocked', 'tunnelsClosed', 'httpForwarded', 'webSockets', 'capacityRejected', 'handlerErrors', 'routeRejected'], 0)
         self.limits_triggered = []; self.server = _Server(('127.0.0.1', 0), _Handler); self.server.owner = self
         self.base = 'http://127.0.0.1:' + str(self.server.server_port)
         self.thread = threading.Thread(target=self.server.serve_forever, kwargs={'poll_interval': .05}, daemon=True)
@@ -63,10 +64,12 @@ class VenueHttpGate:
         self.started = time.monotonic(); self.thread.start(); self.watchdog.start(); return self
 
     def block(self, mode):
-        if mode not in (*PUBLICATION_BLOCKS, 'management', 'combat-seal', 'statistics'): raise ValueError('Unknown fault mode')
+        if mode not in (*PUBLICATION_BLOCKS, 'management', 'management-delay', 'combat-seal', 'statistics'): raise ValueError('Unknown fault mode')
         with self.lock:
             if self.mode is not None: raise ValueError('Release the current fault first')
             self.mode = mode; self.block_started = time.monotonic()
+            if mode == 'management-delay':
+                self.management_release = threading.Event()
             tunnels = list(self.tunnels) if mode in PUBLICATION_BLOCKS else []
         for pair in tunnels:
             self.bump('tunnelsClosed')
@@ -79,6 +82,19 @@ class VenueHttpGate:
             if self.mode is None: return
             self.block_history.append({'mode': self.mode, 'seconds': time.monotonic() - self.block_started, 'releaseReason': reason})
             self.mode = None; self.block_started = None
+            if self.management_release is not None:
+                self.management_release.set()
+                self.management_release = None
+
+    def wait_for_management_release(self, method, path):
+        if method != 'GET' or path != self.prefix:
+            return
+        with self.lock:
+            release = self.management_release
+            if release is None:
+                return
+            self.counts['managementDelayed'] += 1
+        release.wait(self.max_block_seconds)
 
     def blocked(self, mode):
         with self.lock: return self.mode == mode
@@ -190,6 +206,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         blocked = gate.blocked_http(self.command, self.path)
         if blocked:
             gate.bump(blocked); return self.reject(503)
+        gate.wait_for_management_release(self.command, self.path)
         if self.headers.get('Transfer-Encoding'): return self.reject(400)
         try: size = int(self.headers.get('Content-Length', '0'))
         except ValueError: return self.reject(400)

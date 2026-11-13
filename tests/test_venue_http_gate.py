@@ -65,6 +65,26 @@ class VenueHttpGateTests(unittest.TestCase):
                          self.request(gate, '/debrief-receipts', 'POST', b'original receipt',
                                       {'Authorization': 'Bearer unit-test-only'}))
         gate.release(); self.assertEqual(200, self.request(gate)[0]); self.assertEqual(1, gate.snapshot()['counts']['managementBlocked'])
+    def test_management_delay_holds_only_the_original_read_until_release(self):
+        gate = self.gate()
+        gate.block('management-delay')
+        replies = []
+        thread = threading.Thread(target=lambda: replies.append(self.request(gate)))
+        thread.start()
+        try:
+            deadline = time.monotonic() + 1
+            while not gate.snapshot()['counts']['managementDelayed'] and time.monotonic() < deadline:
+                time.sleep(.005)
+            self.assertEqual(1, gate.snapshot()['counts']['managementDelayed'])
+            self.assertTrue(thread.is_alive())
+            self.assertEqual((200, b'ordinary response'), self.request(gate, '/statistics'))
+            self.assertEqual(0, gate.snapshot()['counts']['managementBlocked'])
+        finally:
+            gate.release()
+            thread.join(2)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual([(200, b'ordinary response')], replies)
+
     def test_publication_fault_closes_opaque_tunnel_and_reconnects_after_release(self):
         gate = self.gate()
         with self.tunnel(gate) as client:

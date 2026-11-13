@@ -16,23 +16,29 @@ debrief = importlib.util.module_from_spec(spec); spec.loader.exec_module(debrief
 vm = debrief.venue_module
 
 
-def management_suspension(log, observed_sequence, resumed_sequence):
+def management_suspension(log, observed_sequence, resumed_sequence, *, delayed=False):
     # Read message lines only. Unity emits separate stack traces after warnings.
     events = [line for line in log.splitlines() if line.startswith(
         ('VR_MANAGEMENT_REFRESH_FAILED ', 'VR_AUTHORITY_SUSPENDED ', 'VR_AUTHORITY_RESUMED '))]
-    expected = (
-        r'VR_MANAGEMENT_REFRESH_FAILED reason=ProtocolError httpStatus=503 elapsedSeconds=[\d.]+ monotonicSeconds=([\d.]+)',
-        rf'VR_AUTHORITY_SUSPENDED reason=ManagementRefresh observedSequence={observed_sequence} '
-        r'managementAgeSeconds=[\d.]+ monotonicSeconds=([\d.]+)',
+    cause = 'ManagementWatchdog' if delayed else 'ManagementRefresh'
+    expected = [
+        rf'VR_AUTHORITY_SUSPENDED reason={cause} observedSequence={observed_sequence} '
+        r'managementAgeSeconds=([\d.]+) monotonicSeconds=([\d.]+)',
         rf'VR_AUTHORITY_RESUMED observedSequence={resumed_sequence} phase=Running monotonicSeconds=([\d.]+)',
-    )
+    ]
+    if not delayed:
+        expected.insert(0, r'VR_MANAGEMENT_REFRESH_FAILED reason=ProtocolError httpStatus=503 elapsedSeconds=[\d.]+ monotonicSeconds=([\d.]+)')
     matches = [re.fullmatch(pattern, event) for pattern, event in zip(expected, events)]
     if len(events) != len(expected) or not all(matches):
-        raise RuntimeError('Native suspension diagnostics did not distinguish the original management refresh outage')
-    times = [float(match.group(1)) for match in matches]
-    if not times[0] <= times[1] < times[2]:
+        raise RuntimeError('Native suspension diagnostics did not distinguish the original management fault')
+    times = [float(match.groups()[-1]) for match in matches]
+    management_age = float(matches[-2].group(1))
+    if times != sorted(times) or times[-2] == times[-1] or (delayed and management_age < 1.5):
         raise RuntimeError('Native suspension diagnostics are out of order')
-    return {'events': events, 'observedSequence': observed_sequence, 'resumedSequence': resumed_sequence}
+    if resumed_sequence != observed_sequence:
+        raise RuntimeError('Management recovery changed the original observed sequence')
+    return {'events': events, 'cause': cause, 'managementAgeSeconds': management_age,
+            'observedSequence': observed_sequence, 'resumedSequence': resumed_sequence}
 
 
 def fingerprint():
@@ -79,6 +85,8 @@ def main():
     parser.add_argument('--player-exe', type=Path, default=ROOT / 'artifacts/desktop/VrCommand.exe')
     parser.add_argument('--api-dll', type=Path, default=Path(os.environ.get('VR_COMMAND_API_DLL', ROOT / 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
     parser.add_argument('--seconds', type=int, choices=[60, 180], default=180, help='Bounded active duration, below the existing probe 240-second lifetime')
+    parser.add_argument('--delay-management', action='store_true',
+                        help='Hold the original management GET until the native watchdog suspends the server')
     args = parser.parse_args(); args.duration = 230; args.job_workers = 2; args.visible_room = 0; args.check = True
     vm.verify_player(args); original_fingerprint = fingerprint(); venue = FaultVenue(args, artifact_family='desktop-clock-faults')
     report = None; proxy_closed = False
@@ -96,18 +104,22 @@ def main():
         def frame(): return venue.frame(entry)['packet']
         venue.command(entry, 'SetMissionClock', missionClock={'autoEnd': True}); venue.command(entry, 'Begin')
         venue.wait(lambda: frame()['frame']['tick'] >= 100, 20, 'active native timer')
-        venue.proxy.block('management'); venue.stage('management-blocked')
+        venue.proxy.block('management-delay' if args.delay_management else 'management')
+        venue.stage('management-blocked', delayed=args.delay_management)
+        if args.delay_management:
+            venue.wait(lambda: venue.proxy.snapshot()['counts']['managementDelayed'] == 1, 5, 'one original pending management GET')
         paused = venue.wait(lambda: (f if (f := frame())['suspended'] and f['frame']['phase'] == 'Paused' else None), 8, 'management suspension')
         frozen_tick = paused['frame']['tick']; management_samples = [capture()]; hold_started = time.monotonic()
         for _ in range(3):
-            time.sleep(1.75); sample = capture(); management_samples.append(sample)
+            time.sleep(.35 if args.delay_management else 1.75); sample = capture(); management_samples.append(sample)
             accepted = frame()
             if sample['presentation']['tick'] != frozen_tick or sample['ready'] or sample['phase'] != 'Paused' or accepted['frame']['tick'] != frozen_tick or not accepted['suspended']:
                 raise RuntimeError('Management outage consumed mission ticks or hid suspension')
             if venue.state(entry)['state'] != 'Running': raise RuntimeError('Source suspension incorrectly changed management lifecycle')
         hold_seconds = time.monotonic() - hold_started
         venue.proxy.release(); resumed = venue.wait(lambda: (f if not (f := frame())['suspended'] and f['frame']['phase'] == 'Running' and f['frame']['tick'] > frozen_tick else None), 10, 'same-policy recovery')
-        diagnostics = management_suspension(debrief.log_text(venue, names[0]), paused['observedSequence'], resumed['observedSequence'])
+        diagnostics = management_suspension(debrief.log_text(venue, names[0]), paused['observedSequence'],
+                                            resumed['observedSequence'], delayed=args.delay_management)
         limit = args.seconds * 20
         venue.stage('running-before-publication-fault', durationSeconds=args.seconds, resumedTick=resumed['frame']['tick'])
         venue.wait(lambda: frame()['frame']['tick'] >= limit - 100, args.seconds + 10, 'near deadline')
@@ -149,6 +161,8 @@ def main():
         if len(expiry) != 1 or expiry[0]['payload']['clockExpiration']['tick'] != limit or expiry[0]['actor']['id'] != 'mission-clock': raise RuntimeError('Deadline was not committed exactly once')
         venue.proxy.close(); proxy_closed = True; gate = venue.proxy.snapshot()
         venue.save('proxy-final.json', gate)
+        if args.delay_management and (gate['counts']['managementDelayed'] != 1 or gate['counts']['managementBlocked']):
+            raise RuntimeError('Expected one delayed original management request without a forced HTTP error')
         if gate['limitsTriggered'] or gate['activeTunnels'] or gate['counts']['handlerErrors'] or gate['counts']['routeRejected'] or gate['counts']['capacityRejected'] or gate['counts']['webSockets'] < 2:
             raise RuntimeError('Fault proxy scope / bounds / reconnection invalid')
         report = {'complete': False, 'source': 'Actual Windows Unity UDP / native local replicas; Simulation rigs', 'headsets': 0, 'durationSeconds': args.seconds,
@@ -162,7 +176,7 @@ def main():
                        'publication loss does not pause an otherwise managed timer', 'native server and client freeze at exact due tick before API acceptance',
                        'unaccepted local due time cannot authorize End', 'restored publication commits exactly one internal End',
                        'both seals, targeted result and management acknowledgement match the original admission', 'entire sealed replay is contiguous and never exceeds the deadline',
-                       'native logs identify the 503 refresh failure, authority suspension and recovery in order']}
+                       'native logs identify the management fault, authority suspension and recovery in order']}
     except BaseException as error:
         venue.stage('failed', errorType=type(error).__name__); raise
     finally:
