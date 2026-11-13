@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 Windows 五房開場前重驗 UDP
+
+- 新增 `start-verified-venue.py`，重驗同一份原計畫、網路清單及雙端 UDP 報告後才啟動現有 Windows 套件。缺件、逾時、未完成或計畫有變時，在建立遊戲工作目錄前退出。 [啟動方式](WINDOWS_SERVER_PACKAGE.md#以-udp-預檢報告啟動五房)
+- 首輪在限制 `PATH` 的環境找不到 Windows PowerShell，已修正並保留原失敗及清理紀錄。重跑通過 369 項套件檢查，獨立與合併各 5 個同機 Windows 模擬玩家，合計 6 組原 UDP 綁定、10 份戰績回條及 583 格完整回放。另通過 146 項本機測試。用逾時原報告確認拒絕，另以 Windows 測試程序確認強制結束命令後，其啟動器與子程序會退出。 [本機驗證摘要](../artifacts/venue-verified-start-validation.json)
+- 功能來源 `f30139f` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43336832354)
+
 ## 2026-11-13 五房 UDP 報告收件配對
 
 - `--inbox` 可依遊戲端點、來源與交換雜湊配對原始監聽和探測報告，列出缺少對端、重複及無法讀取的檔名。完整報告可納入封存驗收，未完成報告可接續補件。 [收件方式](EXTERNAL_CLIENTS.md#從資料夾配對-udp-報告)
