@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 五房重連來源 IPv4 核對
+
+- 封存與 Windows 收件可使用原開場網路清單和 `reconnectSourcePlan`，逐條核對同一程序重連前後的 IPv4、舊連線釋放、原入場與戰績確認。開場 UDP 預檢沿用第一個來源。混合場的 Quest 擷取沿用原 PID。 [操作方式](EXTERNAL_CLIENTS.md#核對重連時變更的-ipv4)
+- 通過 113 項封存、10 項 LAN 預檢與 12 項 Quest UDP 測試。重驗既有 Windows 同機兩種模式的 50 份玩家 ZIP、52 條連線及 3,361 格封存回放。另在兩份伺服器日誌副本各改一筆最終來源，未列入清單時均在收件遭拒，提供相符清單後通過。原封存資料保持一致。 [本機驗證摘要](../artifacts/venue-reconnect-source-validation.json)
+- 功能來源 `d019474` 已推送。GitHub Actions 因帳務或支出上限未啟動。實際換網卡重連、Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43333234951)
+
 ## 2026-11-13 Windows 收件核對原程序重連
 
 - 開啟 `verifyReconnectHistory` 後，Windows 收件就會檢查各 ZIP 的原程序啟動、歷次 UDP 來源及舊連線釋放順序。重複認領同一歷史連線時，兩份檔案都會列為待補件。產生場館清單可加 `--verify-reconnect-history`。 [操作方式](EXTERNAL_CLIENTS.md#核對原程序的重連歷程)
