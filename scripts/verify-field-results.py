@@ -58,6 +58,12 @@ class WindowsLinkCriteriaFailed(EvidenceError):
         self.metrics = metrics
 
 
+class QuestCapturesIncomplete(EvidenceError):
+    def __init__(self, captures):
+        super().__init__('Quest capture reports must cover the planned Quest seats exactly')
+        self.captures = captures
+
+
 class MissingEvidence(FileNotFoundError):
     def __init__(self, kind, reference):
         self.kind = kind
@@ -1650,14 +1656,14 @@ def read_quest_capture_batches(spec, mode, expected, evidence_path, shared_netwo
     require(type(spec) is dict and 'reports' in spec and {'networkPlan', 'deviceMap'} & spec.keys()
             and spec.keys() <= {'networkPlan', 'deviceMap', 'reports'},
             'Provide capture reports and a Quest network plan, the original device map, or both')
-    device_map = read_quest_device_map(evidence_path(spec['deviceMap'])) if 'deviceMap' in spec else None
+    device_map = read_quest_device_map(evidence_path(spec['deviceMap'], kind='questDeviceMap')) if 'deviceMap' in spec else None
     observed = 'networkPlan' not in spec
     if observed:
         sources = dict.fromkeys(device_map)
         endpoints = {}
     else:
         if shared_network is None:
-            plan_mode, endpoints, plan_sources = read_quest_network_plan(evidence_path(spec['networkPlan']))
+            plan_mode, endpoints, plan_sources = read_quest_network_plan(evidence_path(spec['networkPlan'], kind='questNetworkPlan'))
             require(plan_mode == mode, 'Quest network plan differs from the venue mode')
             sources = {seat: ipv4(address) for seat, address in plan_sources.items()}
         else:
@@ -1669,7 +1675,7 @@ def read_quest_capture_batches(spec, mode, expected, evidence_path, shared_netwo
     captures, used_seats, deployments = {}, set(), []
     incomplete_reports = failed_attempts = 0
     for name in reports:
-        path = evidence_path(name)
+        path = evidence_path(name, kind='questCaptureReport')
         report = read_quest_capture_report(path, mode)
         if 'deploymentSha256' in report:
             deployments.append((report['deploymentSha256'], report['seats']))
@@ -1694,7 +1700,12 @@ def read_quest_capture_batches(spec, mode, expected, evidence_path, shared_netwo
             require(log.parent == path.parent and log.name == row['log'], 'Quest capture log must be next to its report')
             captures.setdefault(session_id, []).append((sources[seat], log, row['logcatPid'], seat, row['bytes'], row['sha256']))
             used_seats.add(seat)
-    require(used_seats == sources.keys(), 'Quest capture reports must cover the planned Quest seats exactly')
+    if used_seats != sources.keys():
+        raise QuestCapturesIncomplete({
+            'expectedSeats': len(sources), 'reportedCompleteSeats': len(used_seats),
+            'reportsRead': len(reports), 'failedAttempts': failed_attempts,
+            'missingSeats': [{'roomId': room, 'seat': seat} for room, seat in sorted(sources.keys() - used_seats)],
+        })
     summary = {'questCaptureBatchesVerified': len(reports)}
     if observed:
         summary['questCaptureAddressSource'] = 'server-observed'
@@ -1824,7 +1835,7 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
     require(type(spec) is dict and set(spec) == expected,
             'Provide the original Quest deployment reports and exactly one release report for the selected mode')
     if release is None:
-        release = read_quest_json(evidence_path(spec['releaseReport']))
+        release = read_quest_json(evidence_path(spec['releaseReport'], kind='questReleaseReport'))
     quest = release.get('quest')
     require(release.get('verified') is True and release.get('scope') == 'offline-package-consistency'
             and type(quest) is dict and quest.get('applicationId') == 'com.vrcommand.quest'
@@ -1837,7 +1848,7 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
     require(type(reports) is list and 1 <= len(reports) <= 25, 'Provide 1 to 25 Quest deployment reports')
     attempts = {}
     for name in reports:
-        report, raw = read_quest_document(evidence_path(name))
+        report, raw = read_quest_document(evidence_path(name, kind='questDeploymentReport'))
         report_hash = hashlib.sha256(raw).hexdigest()
         require(report_hash not in attempts, 'Quest deployment repeats a successful seat or the same original report')
         require(report.get('phase') == 'deployment' and report.get('managementVerified') is True
@@ -2702,13 +2713,10 @@ def verify_venue_stages(plan_path, *, inspect=False):
     stage_keys = [(mode, players) for players in sizes for mode in modes]
     stages, entries, issues = {}, {}, []
 
-    def reject(message, *indices, missing=None, windows_inbox=None, windows_link_metrics=None):
+    def reject(message, *indices, **details):
         if not inspect:
             raise EvidenceError(message)
-        issues.append({'entries': sorted(set(indices)), 'reason': message,
-                       **({'missingFile': missing} if missing else {}),
-                       **({'windowsInbox': windows_inbox} if windows_inbox is not None else {}),
-                       **({'windowsLinkMetrics': windows_link_metrics} if windows_link_metrics is not None else {})})
+        issues.append({'entries': sorted(set(indices)), 'reason': message, **details})
 
     paths, used, releases = {}, {}, {}
     for index, name in enumerate(names, 1):
@@ -2716,7 +2724,7 @@ def verify_venue_stages(plan_path, *, inspect=False):
             path = (plan_path.parent / name).resolve(strict=True)
         except (FileNotFoundError, NotADirectoryError):
             reject(f'Venue manifest entry {index}: missing manifest file', index,
-                   missing={'kind': 'venueManifest', 'name': Path(name).name})
+                   missingFile={'kind': 'venueManifest', 'name': Path(name).name})
             continue
         except (OSError, ValueError, RuntimeError):
             reject(f'Venue manifest entry {index}: unreadable manifest path', index)
@@ -2740,17 +2748,20 @@ def verify_venue_stages(plan_path, *, inspect=False):
             verified_start = report.get('verifiedVenueStart')
             require(not require_start or verified_start is not None, 'missing verified Windows start receipt')
         except WindowsInboxIncomplete as error:
-            reject(f'Venue manifest entry {index}: {error}', index, windows_inbox=error.inbox)
+            reject(f'Venue manifest entry {index}: {error}', index, windowsInbox=error.inbox)
             continue
         except WindowsLinkCriteriaFailed as error:
-            reject(f'Venue manifest entry {index}: {error}', index, windows_link_metrics=error.metrics)
+            reject(f'Venue manifest entry {index}: {error}', index, windowsLinkMetrics=error.metrics)
+            continue
+        except QuestCapturesIncomplete as error:
+            reject(f'Venue manifest entry {index}: {error}', index, questCaptures=error.captures)
             continue
         except EvidenceError as error:
             reject(f'Venue manifest entry {index}: {error}', index)
             continue
         except MissingEvidence as error:
             reject(f'Venue manifest entry {index}: missing original evidence file', index,
-                   missing={'kind': error.kind, 'name': error.file_name})
+                   missingFile={'kind': error.kind, 'name': error.file_name})
             continue
         except (OSError, ValueError, ArithmeticError, AttributeError, KeyError, TypeError, RecursionError,
                 zipfile.BadZipFile, zlib.error, RuntimeError):

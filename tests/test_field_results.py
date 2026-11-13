@@ -264,8 +264,10 @@ def venue_fixture(root, mode, *, remote=False, quest_per_room=0, with_journals=F
     return path, manifest, batch
 
 
-def quest_capture_venue_fixture(root, mode, *, quest_per_room=2, batches=2, use_capture_tool=False, interrupt_first=False, with_journals=False):
-    path, manifest, _ = venue_fixture(root, mode, remote=True, quest_per_room=quest_per_room, with_journals=with_journals)
+def quest_capture_venue_fixture(root, mode, *, quest_per_room=2, batches=2, use_capture_tool=False, interrupt_first=False,
+                                with_journals=False, room_sizes=(5,) * 5, id_offset=0, minutes_after=0):
+    path, manifest, _ = venue_fixture(root, mode, remote=True, quest_per_room=quest_per_room, with_journals=with_journals,
+                                     room_sizes=room_sizes, id_offset=id_offset, minutes_after=minutes_after)
     network = {'version': 1, 'mode': mode, 'endpoints': [], 'sources': []}
     mapped, inputs = [], {}
     for entry in manifest['sessions']:
@@ -806,6 +808,86 @@ class FieldResultsTests(unittest.TestCase):
                 path.write_text(json.dumps(dict(plan, windowsLinkCriteria=invalid)), encoding='utf-8')
                 with self.assertRaises(field.EvidenceError):
                     field.verify_venue_stages(path)
+
+    def test_staged_inspection_lists_missing_quest_captures_and_recovers_original_batches(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = self.staged_plan(root, remote=True)
+            names = plan['venueManifests']
+            replacements = {}
+            for index, mode, count, minutes in ((2, 'Independent', 2, 2), (5, 'Linked', 5, 3)):
+                folder = root / f'quest-{mode}'
+                folder.mkdir()
+                path, manifest = quest_capture_venue_fixture(folder, mode, quest_per_room=1, with_journals=True,
+                    room_sizes=(count,) * 5, id_offset=100000 + index * 10000, minutes_after=minutes)
+                offsets = [0] if mode == 'Linked' else [0, 100, 200, 300, 400]
+                start = datetime.fromisoformat('2026-11-09T08:00:00+08:00') + timedelta(minutes=minutes)
+                self.concurrent_journals(folder, manifest, offsets, capture_start=start)
+                manifest.update(expectedPlayersPerRoom=count, minimumConcurrentMilliseconds=2000)
+                release = self.add_shared_release(folder, manifest, 1).read_bytes()
+                if index == 5:
+                    manifest['questCaptures'] = observed_quest_capture_spec(folder, manifest['questCaptures'])
+                manifest['questCaptures']['reports'].pop()
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                replacements[index] = (path, manifest)
+                names[index] = str(path.relative_to(root))
+            for name in names:
+                (root / name).with_name('release.json').write_bytes(release)
+            plan_path = root / 'stages.json'
+            plan_path.write_text(json.dumps(plan), encoding='utf-8')
+            command = [sys.executable, str(SCRIPT), '--venue-stages', str(plan_path)]
+            result = subprocess.run([*command, '--inspect-venue-stages'], capture_output=True)
+            self.assertEqual(1, result.returncode, result.stderr)
+            self.assertFalse(result.stderr)
+            inspection = json.loads(result.stdout)
+            self.assertEqual([[3], [6]], [issue['entries'] for issue in inspection['issues']])
+            self.assertEqual(['verified', 'verified', 'needs-evidence', 'verified', 'verified', 'needs-evidence'],
+                             [row['status'] for row in inspection['entries']])
+            for issue, seat in zip(inspection['issues'], (2, 5), strict=True):
+                captures = issue['questCaptures']
+                self.assertEqual((5, 3, 1, 0), (captures['expectedSeats'], captures['reportedCompleteSeats'],
+                                               captures['reportsRead'], captures['failedAttempts']))
+                self.assertEqual([{'roomId': room, 'seat': seat} for room in (2, 4)], captures['missingSeats'])
+            for secret in (str(root), '192.168.', 'fixture-1-5'):
+                self.assertNotIn(secret, result.stdout.decode())
+            rejected = subprocess.run(command, capture_output=True)
+            self.assertEqual(1, rejected.returncode)
+            self.assertIn(b'Venue manifest entry 3: Quest capture reports must cover', rejected.stderr)
+            batch_path, manifest = replacements[2]
+            report_path = batch_path.parent / manifest['questCaptures']['reports'][0]
+            raw_report = report_path.read_bytes()
+            report_path.unlink()
+            missing_file = subprocess.run([*command, '--inspect-venue-stages'], capture_output=True)
+            self.assertEqual(1, missing_file.returncode)
+            self.assertEqual({'kind': 'questCaptureReport', 'name': 'capture-report.json'},
+                             json.loads(missing_file.stdout)['issues'][0]['missingFile'])
+            report_path.write_bytes(raw_report)
+            report = json.loads(raw_report)
+            failed = report['seats'][-1]
+            report['seats'][-1] = {key: failed[key] for key in ('roomId', 'seat', 'sessionId', 'port')} | {
+                'complete': False, 'reason': 'fixture interruption'}
+            report.update(complete=False, capturedSeats=2)
+            report_path.write_text(json.dumps(report), encoding='utf-8')
+            interrupted = subprocess.run([*command, '--inspect-venue-stages'], capture_output=True)
+            self.assertEqual(1, interrupted.returncode)
+            captures = json.loads(interrupted.stdout)['issues'][0]['questCaptures']
+            self.assertEqual(1, captures['failedAttempts'])
+            self.assertEqual(2, captures['reportedCompleteSeats'])
+            self.assertEqual([{'roomId': room, 'seat': 2} for room in (2, 4, 5)], captures['missingSeats'])
+            report_path.write_bytes(raw_report)
+            for path, manifest in replacements.values():
+                manifest['questCaptures']['reports'].append('capture batch 2/capture-report.json')
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+            accepted = json.loads(subprocess.check_output(command))
+            self.assertEqual(80, accepted['serverAcknowledgements'])
+            self.assertFalse(accepted['physicalHostsVerified'])
+
+            deployment = batch_path.with_name('deployment.json')
+            deployment.unlink()
+            missing_file = subprocess.run([*command, '--inspect-venue-stages'], capture_output=True)
+            self.assertEqual(1, missing_file.returncode)
+            self.assertEqual({'kind': 'questDeploymentReport', 'name': 'deployment.json'},
+                             json.loads(missing_file.stdout)['issues'][0]['missingFile'])
 
     def test_staged_venue_rejects_incomplete_repeated_misordered_or_mismatched_batches(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1805,7 +1887,8 @@ class FieldResultsTests(unittest.TestCase):
             rows.extend({'roomId': player['roomId'], 'seat': player['seat'] + 1, 'status': 'launch-requested',
                          'apkVerified': True, 'filesVerified': True, 'versionCode': 64, 'port': endpoint['port'],
                          'sessionId': session['id'], 'playerId': player['id'], 'admissionId': player['admissionId']}
-                        for player in session['players'] if player['seat'] >= 5 - quest_per_room)
+                        for player in session['players']
+                        if player['seat'] >= sum(other['roomId'] == player['roomId'] for other in session['players']) - quest_per_room)
         report = {'phase': 'deployment', 'managementVerified': True, 'apkVerificationVersion': 1, 'topology': manifest['mode'],
                   'complete': True, 'expectedApkSha256': digest, 'expectedVersionCode': 64, 'devices': rows}
         manifest['questDeployments'] = {'releaseReport': 'release.json', 'reports': ['deployment.json']}

@@ -592,6 +592,8 @@ python scripts/verify-field-results.py --venue-stages .\stages.json --inspect-ve
 
 若批次已設定 `windowsLinkCriteria`，Windows 收件核對完成但量測缺漏或未達門檻，總表會在 `issues[].windowsLinkMetrics` 顯示該批門檻、已核對席數、缺量測的房號與席號，以及已收到的逐席回覆數與 p95 往返時間。`criteriaFailures` 會指出該席未通過的門檻。原始資料可使用散檔、逐席 ZIP 或 Windows 收件資料夾。 [連線量測門檻](#逐席核對-windows-連線量測門檻)
 
+若 Quest 擷取報告尚未涵蓋原計畫席位，`issues[].questCaptures` 會列出預期席數、報告中標示完成的席數、失敗嘗試次數及待補的房號與席號。找不到原擷取或部署報告時，`issues[].missingFile` 會附檔案類型與檔名。報告中標示完成的席位在收齊後仍須核對原日誌、部署及伺服器回條。 [重試擷取](QUEST3.md#重試未完成的-quest-擷取席位)
+
 ##### 六批共用 Windows 連線量測門檻
 
 可在 `stages.json` 加入 `"windowsLinkCriteria": {"minimumReplies": 28, "maximumP95RoundTripMs": 40}`，讓六批都核對原 Windows 逐席量測。個別批次可要求更高的最低回覆數或更低的 p95 上限，每項採兩份清單中較嚴的值。總表會顯示共用門檻，並逐批列出實際門檻及核對席數。每批至少須有一席 Windows 量測才能通過這項選用檢查。
