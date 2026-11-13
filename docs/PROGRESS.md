@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 主控台逐台列出工作站回條問題
+
+- 管理台 0.31.184 可在本機檢查部分回條，列出缺少或重複的主控與房控角色。收齊後由管理服務核對簽章、來源及 15 分鐘期限，回應只列未通過的角色和原因。 [操作說明](WINDOWS_CONTROL_PACKAGE.md#核對主控與五房控的直連來源) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.184.zip)
+- 解壓包通過 30 項 HTTPS 與 18 項 Chromium 工作站檢查。實際從同一台 Windows 電腦下載六個角色的簽署回條，管理服務逐房拒絕不符的來源。選四份回條時瀏覽器列出缺少的兩房，且未送出回條。六個來源相符時的畫面以模擬回應驗證。 [驗證摘要](../artifacts/console-workstation-diagnostics-validation.json)
+- 通過 1,109 項核心、825 項 HTTP、11 項命令列、107 項管理包及 1,166 項完整瀏覽器檢查。解壓核對 567 筆清單與提交 `924e531` 的 193 個建置來源，其中 29 檔按換行正規化比對。GitHub Actions 因帳務或支出上限未啟動。六台工作站直連、跨機 25 人、頭盔、MR 場地與廠商硬體仍待驗收。 [離線核對](../artifacts/console-workstation-diagnostics-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43392605582)
+
 ## 2026-11-13 UDP 離線重驗指出待補原因
 
 - `--verify-only` 的待補席位可附原因，包含原檔無法讀取、量測逾期、時間戳未早於核對時間、雙端屬不同交換、端點不符及報告無效。沿用原配對及 30 分鐘規則。 [操作說明](WINDOWS_SERVER_PACKAGE.md#以-udp-預檢報告啟動五房)
