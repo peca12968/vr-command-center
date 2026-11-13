@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 管理台核對 Windows 全館結束報告
+
+- 管理台 0.31.180 的「核對全館啟動與封存」接受第四版計畫正常結束的 `venue-sealed-stopped` JSON。逐組核對原場次、批次、來源及戰鬥與回放封存尾端。測試確認尚未雙封存、任一序號不同或來源類型不同時，畫面不會顯示相符。 [操作說明](WINDOWS_SERVER_PACKAGE.md#核對未確認的啟動報告) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.180.zip)
+- 三包整合通過 591 項。五房獨立及合併模式各 25 位同機模擬玩家，原生結束報告匯入解壓管理台後，六場雙封存序號都相符。核對 50 份伺服器戰績回條、6 份 CSV、1,125 格回放，清理後 C／F 的 259 個非資料庫檔案雜湊相符。 [本機驗證](../artifacts/console-venue-terminal-review-validation.json)
+- 另通過 1,105 項核心、825 項 HTTP、107 項管理包、來源與解壓包各 27 項瀏覽器專項，以及 1,162 項完整瀏覽器檢查。先前兩次專項停在 Chromium 檔案不存在或缺少 V8 資料，改用本機完整 Chromium 後通過。解壓核對 567 筆清單與提交 `58111b0` 的 193 個建置來源，其中 29 檔以換行正規化比對。GitHub Actions 因帳務或支出上限未啟動。桌面完整操作、跨機 25 人、頭盔、MR 場地與廠商硬體仍待驗。 [離線版本核對](../artifacts/console-venue-terminal-review-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43384245983)
+
 ## 2026-11-13 Windows 批次啟動器顯示逐房席位
 
 - Windows 啟動器 1.22 在啟動前列出五房各自登記的席號，保留空出的席位。合併場的五列共用同一場次與端點。第一版計畫顯示「計畫未提供」，已核對的空名冊顯示「尚未登記」。啟動時仍會重新核對原場次與名冊。 [操作說明](WINDOWS_SERVER_PACKAGE.md#從-windows-視窗核對並啟動) · [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.7-1.22-win-x64.zip)
