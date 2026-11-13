@@ -60,6 +60,7 @@ def prepare(args, output):
 
     field.require(len(release_digests) == 1, 'Every staged venue batch must use the same original verified release report')
     plan['venueManifests'] = [manifest_tool.path_reference(batches[key], output.parent) for key in field.VENUE_STAGE_KEYS]
+    plan['expectedStages'] = [{'mode': mode, 'players': players} for mode, players in field.VENUE_STAGE_KEYS]
     return plan
 
 

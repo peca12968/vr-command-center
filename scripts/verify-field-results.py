@@ -65,6 +65,14 @@ class QuestCapturesIncomplete(EvidenceError):
         self.captures = captures
 
 
+class VenueStageMismatch(EvidenceError):
+    def __init__(self, expected, observed):
+        super().__init__(f"expected {expected['mode']} with {expected['players']} seats, "
+                         f"found {observed['mode']} with {observed['players']} seats")
+        self.expected = expected
+        self.observed = observed
+
+
 class MissingEvidence(FileNotFoundError):
     def __init__(self, kind, reference):
         self.kind = kind
@@ -2174,7 +2182,7 @@ def read_windows_link_criteria(document):
 
 
 def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_logs=False,
-                       staged_roster=None, staged_link_criteria=None):
+                       staged_roster=None, staged_link_criteria=None, expected_stage=None):
     manifest_path = manifest_path.resolve(strict=True)
     with manifest_path.open('rb') as stream:
         raw_manifest = limited_read(stream)
@@ -2188,6 +2196,10 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     players_per_room = integer(manifest.get('expectedPlayersPerRoom', 5), 1, 5)
     topology, mode = manifest['topology'], manifest['mode']
     require(topology in ('same-host', 'direct-lan') and mode in ('Independent', 'Linked'), 'Invalid venue topology or mode')
+    if expected_stage is not None:
+        observed = {'mode': mode, 'players': players_per_room * len(QUEST_ROOMS)}
+        if observed != expected_stage:
+            raise VenueStageMismatch(expected_stage, observed)
     addresses = manifest['serverIps']
     require(type(addresses) is list and 1 <= len(addresses) <= 128, 'Provide the server IPv4 inventory as a list')
     server_ips = {ipv4(value) for value in addresses}
@@ -2727,6 +2739,18 @@ def staged_batch_report(report, batch):
 VENUE_STAGE_KEYS = tuple((mode, players) for players in (5, 10, 25) for mode in ('Independent', 'Linked'))
 
 
+def read_expected_stages(plan):
+    if 'expectedStages' not in plan:
+        return [None] * len(VENUE_STAGE_KEYS)
+    expected = plan['expectedStages']
+    message = 'Expected staged venue entries must name each mode and seat count exactly once'
+    require(type(expected) is list and len(expected) == len(VENUE_STAGE_KEYS)
+            and all(type(row) is dict and set(row) == {'mode', 'players'} and type(row['mode']) is str
+                    and type(row['players']) is int for row in expected), message)
+    require({(row['mode'], row['players']) for row in expected} == set(VENUE_STAGE_KEYS), message)
+    return expected
+
+
 def verify_venue_stages(plan_path, *, inspect=False):
     plan_path = plan_path.resolve(strict=True)
     with plan_path.open('rb') as stream:
@@ -2734,7 +2758,7 @@ def verify_venue_stages(plan_path, *, inspect=False):
     plan = read_json(raw_plan.decode('utf-8-sig'))
     required = {'version', 'topology', 'minimumConcurrentMilliseconds', 'venueManifests'}
     roster_options = ('requireTrackedRoster', 'requireConcurrentFire')
-    optional = {'requireDistinctRemoteRoster', 'requireVerifiedVenueStart', 'windowsLinkCriteria', *roster_options}
+    optional = {'expectedStages', 'requireDistinctRemoteRoster', 'requireVerifiedVenueStart', 'windowsLinkCriteria', *roster_options}
     require(type(plan) is dict and required <= plan.keys() <= required | optional,
             'Invalid staged venue plan fields')
     integer(plan['version'], 1, 1)
@@ -2756,6 +2780,7 @@ def verify_venue_stages(plan_path, *, inspect=False):
     require(type(names) is list and len(names) == len(VENUE_STAGE_KEYS)
             and all(type(name) is str and bool(name.strip()) for name in names),
             'Provide six venue manifests for the two 5, 10 and 25 seat series')
+    expected_stages = read_expected_stages(plan)
     stage_keys = VENUE_STAGE_KEYS
     stages, entries, issues = {}, {}, []
 
@@ -2765,7 +2790,7 @@ def verify_venue_stages(plan_path, *, inspect=False):
         issues.append({'entries': sorted(set(indices)), 'reason': message, **details})
 
     paths, used, releases = {}, {}, {}
-    for index, name in enumerate(names, 1):
+    for index, (name, expected_stage) in enumerate(zip(names, expected_stages, strict=True), 1):
         try:
             path = (plan_path.parent / name).resolve(strict=True)
         except (FileNotFoundError, NotADirectoryError):
@@ -2781,7 +2806,8 @@ def verify_venue_stages(plan_path, *, inspect=False):
         paths[path] = index
         try:
             report, batch = verify_venue_batch(path, inspect_quest_logs=inspect,
-                                               staged_roster=staged_roster, staged_link_criteria=link_criteria)
+                                               staged_roster=staged_roster, staged_link_criteria=link_criteria,
+                                               expected_stage=expected_stage)
             key = (report['mode'], report['players'])
             require(key in stage_keys, 'Staged venue evidence must cover each mode and seat count exactly once')
             require(report['declaredTopology'] == topology, 'Venue batch topology differs from the staged plan')
@@ -2794,6 +2820,10 @@ def verify_venue_stages(plan_path, *, inspect=False):
                     'Venue batch lacks distinct original remote sources for every seat')
             verified_start = report.get('verifiedVenueStart')
             require(not require_start or verified_start is not None, 'missing verified Windows start receipt')
+        except VenueStageMismatch as error:
+            reject(f'Venue manifest entry {index}: {error}', index,
+                   expectedStage=error.expected, observedStage=error.observed)
+            continue
         except WindowsInboxIncomplete as error:
             reject(f'Venue manifest entry {index}: {error}', index, windowsInbox=error.inbox)
             continue
@@ -2845,12 +2875,15 @@ def verify_venue_stages(plan_path, *, inspect=False):
     if inspect:
         affected = {index for issue in issues for index in issue['entries']}
         results = []
-        for index in range(1, len(names) + 1):
+        for index, expected_stage in enumerate(expected_stages, 1):
+            entry = {'entry': index}
+            if expected_stage is not None:
+                entry['expectedStage'] = expected_stage
             if index not in entries:
-                results.append({'entry': index, 'status': 'needs-evidence'})
+                results.append({**entry, 'status': 'needs-evidence'})
                 continue
             status = 'conflict' if index in affected else 'verified'
-            results.append({'entry': index, 'status': status, **entries[index]})
+            results.append({**entry, 'status': status, **entries[index]})
         return {'version': 1, 'scope': 'staged-venue-inspection', 'complete': not issues,
                 'planSha256': hashlib.sha256(raw_plan).hexdigest(), **link_policy, 'entries': results, 'issues': issues,
                 'missingStages': [{'mode': mode, 'players': players} for mode, players in stage_keys if (mode, players) not in stages]}

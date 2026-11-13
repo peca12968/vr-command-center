@@ -651,13 +651,39 @@ class FieldResultsTests(unittest.TestCase):
             generated = json.loads(original)
             self.assertEqual(names, [(output.parent / name).resolve() for name in generated['venueManifests']])
             self.assertTrue(all(not Path(name).is_absolute() for name in generated['venueManifests']))
+            self.assertEqual([{'mode': mode, 'players': size} for size in (5, 10, 25)
+                              for mode in ('Independent', 'Linked')], generated['expectedStages'])
             self.assertEqual({'minimumReplies': 28, 'maximumP95RoundTripMs': 14}, generated['windowsLinkCriteria'])
             inspection = field.verify_venue_stages(output, inspect=True)
             self.assertFalse(inspection['complete'])
             self.assertEqual([[1]], [row['entries'] for row in inspection['issues']])
             self.assertEqual(4, inspection['issues'][0]['windowsInbox']['receivedWindowsSeats'])
+            self.assertEqual(generated['expectedStages'][0], inspection['entries'][0]['expectedStage'])
             archive.write_bytes(original_zip)
-            self.assertEqual(80, field.verify_venue_stages(output)['serverAcknowledgements'])
+            accepted = field.verify_venue_stages(output)
+            self.assertEqual(80, accepted['serverAcknowledgements'])
+            self.assertNotIn('expectedStages', accepted)
+
+            swapped = plan_folder / 'swapped.json'
+            references = generated['venueManifests'].copy()
+            references[0], references[1] = references[1], references[0]
+            references[-1] = 'missing folder/venue.json'
+            swapped.write_text(json.dumps(dict(generated, venueManifests=references)), encoding='utf-8')
+            inspection = field.verify_venue_stages(swapped, inspect=True)
+            self.assertEqual([[1], [2], [6]], [row['entries'] for row in inspection['issues']])
+            self.assertEqual(generated['expectedStages'][0], inspection['issues'][0]['expectedStage'])
+            self.assertEqual(generated['expectedStages'][1], inspection['issues'][0]['observedStage'])
+            self.assertEqual(generated['expectedStages'][-1], inspection['entries'][-1]['expectedStage'])
+            self.assertEqual({'kind': 'venueManifest', 'name': 'venue.json'}, inspection['issues'][-1]['missingFile'])
+            self.assertNotIn('missing folder', json.dumps(inspection))
+            with self.assertRaisesRegex(field.EvidenceError, 'Venue manifest entry 1: expected Independent with 5'):
+                field.verify_venue_stages(swapped)
+
+            for invalid in (None, generated['expectedStages'][:-1],
+                            [generated['expectedStages'][0]] * 6):
+                swapped.write_text(json.dumps(dict(generated, expectedStages=invalid)), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'Expected staged venue entries'):
+                    field.verify_venue_stages(swapped, inspect=True)
 
             self.assertNotEqual(0, prepare().returncode)
             self.assertEqual(original, output.read_bytes())
