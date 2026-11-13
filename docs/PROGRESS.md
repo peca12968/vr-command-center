@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 離線發行核對指出混版與 APK 簽署差異
+
+- `verify-venue-release.py` 可指出 Windows 與 Quest 建置來源或網路識別的差異欄位。Windows 共用檔不一致時，列出差異數量及最多三個套件內相對路徑。APK 發行回條有記載簽署憑證指紋時，會與 Android 工具驗出的憑證核對，並逐欄核對有記載的套件 ID、SDK 及 v2 簽章。 [操作說明](EXTERNAL_CLIENTS.md#發送前離線核對交付套件)
+- 以實際套件執行五種案例。原 Windows 0.50.7、管理 0.31.187、Quest 0.50.7 通過，報告與既有版本相同。混入 Windows 0.50.6 玩家包或 Quest 0.50.6 APK 時指出 `sourceFingerprint`。原簽署 APK 搭配改動憑證指紋的回條被拒絕，省略選用欄位的回條通過。8 個原始 APK、回條與套件清單的雜湊相符。 [驗證摘要](../artifacts/venue-release-mismatch-validation.json)
+- 通過 8 項發行核對、10 項伺服器封裝、7 項玩家封裝及 7 項管理封裝檢查。玩家封裝的符號連結測試因本機 Windows 權限跳過。`61f6bbd` 已推送，GitHub Actions 因帳務或支出上限未啟動。跨機、頭盔、MR 場地及廠商硬體仍待實機驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43401091452)
+
 ## 2026-11-13 全館戰績 ZIP 包含分房與全館合計
 
 - 管理包 0.31.187 的「下載本批戰績 ZIP」新增 `scores.csv`，與獨立下載的分房合計逐位元相同。清單以 `scoresFile` 標示檔名。API 加 `includeScores=true` 可取得新版內容，省略參數沿用既有格式。開發版與解壓版各通過 20 項戰績瀏覽器檢查，另通過 133 項全館流程。首輪瀏覽器驗證取到空的回應正文，改以獨立 API 讀取比對下載檔後通過。 [操作方式](REPORTS.md#下載全館結束批次) · [驗證摘要](../artifacts/venue-score-zip-187-validation.json)
