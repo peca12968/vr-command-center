@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 命令列列出工作站回條問題
+
+- `check-venue-operator.py --verify-workstations` 可混用瀏覽器原回條與命令列 JSON。可先提供一至六份檔案，本機列出缺少或重複的角色。收齊後，會從管理服務的拒絕回應擷取已知角色及原因。 [命令列操作](WINDOWS_CONTROL_PACKAGE.md#命令列操作)
+- 通過 12 項命令列、31 項實際 HTTPS 與 18 項工作站瀏覽器檢查。只提供四份時，命令列指出缺第 4、5 房，無需主控金鑰。混合格式的六份同機簽署回條經管理服務逐房拒絕。沿用管理包 0.31.184，ZIP 雜湊相符。六個來源相符時的瀏覽器畫面沿用模擬回應。 [驗證摘要](../artifacts/venue-workstation-cli-validation.json)
+- `22deaeb` 已推送。GitHub Actions 因帳務或支出上限未啟動。六台工作站直連、跨機 25 人、頭盔、MR 場地及廠商硬體仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43394019423)
+
 ## 2026-11-13 主控台逐台列出工作站回條問題
 
 - 管理台 0.31.184 可在本機檢查部分回條，列出缺少或重複的主控與房控角色。收齊後由管理服務核對簽章、來源及 15 分鐘期限，回應只列未通過的角色和原因。 [操作說明](WINDOWS_CONTROL_PACKAGE.md#核對主控與五房控的直連來源) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.184.zip)
