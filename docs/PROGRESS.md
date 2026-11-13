@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 Windows 正式啟動重新核對五房席位
+
+- Windows 伺服器啟動器 1.21 的場館預覽帶入原場次房號與已登記席號。命令列產生清單及 UDP 預檢會核對完整席位，正式啟動再以原計畫向管理服務讀取一次。若預檢後名冊變更，需重新下載啟動計畫並核對預檢。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.7-1.21-win-x64.zip) · [操作說明](WINDOWS_SERVER_PACKAGE.md#從主控台下載場館計畫)
+- Windows 三包整合通過 587 項。五房獨立與合併均實測移除一席後舊預檢被拒，且未建立原生工作目錄。重新登記後各以 25 個同機模擬玩家入場，核對 50 筆伺服器戰績回條、6 份 CSV、1,080 格完整回放及雙封存。清理後 C／F 共 259 個非資料庫檔案雜湊相符。 [本機驗收](../artifacts/server-launcher-1.21-roster-validation.json)
+- 另通過 51 項啟動器、59 項 Framework、16 項 LAN、12 項 Quest UDP、120 項封存與 10 項封裝測試。解壓核對 331 筆清單，Windows 套件和原 Quest 0.50.7 APK 通過離線來源及簽章核對。功能來源 `190787f` 已推送，GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、實體頭盔、MR 場地及廠商硬體仍待驗收。 [離線交付核對](../artifacts/server-launcher-1.21-venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43374098622)
+
 ## 2026-11-13 UDP 預檢清單核對五房名冊
 
 - 控制台 0.31.175 逐席比對上傳的 IPv4 表與準備中場次。若名冊與檔案有差異，會列出缺漏及未登記的房號與席號。按下載時再讀取原場次，可擋下預覽後換席的舊清單。Windows 啟動計畫仍可在空名冊時下載。 [操作說明](EXTERNAL_CLIENTS.md#從原啟動預覽產生網路清單) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.175.zip)
