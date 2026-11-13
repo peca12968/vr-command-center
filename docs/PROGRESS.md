@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 逐房配票端點
+
+- 控制台 0.31.166 在名冊的房間 ZIP 下載按鈕旁顯示目前使用的 IPv4 與 UDP 埠。套用場次公告或編輯手動欄位時會更新顯示，端點無效時停用按鈕。 [操作方式](EXTERNAL_CLIENTS.md#按房間下載連線檔)
+- 通過 22 項參戰規則、76 項 Chromium、107 項 Windows 管理包及 495 項三包整合檢查。獨立與合併模式各 25 個 Windows 同機模擬玩家，核對畫面與請求端點、10 份原 ZIP、50 份原連線檔、50 份伺服器戰績回條及 1,060 格封存回放，收尾無遺留程序。 [Windows 管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.166-roster-endpoint-win-x64.zip) · [本機驗證摘要](../artifacts/venue-roster-ticket-endpoint-validation.json)
+- 功能來源 `c718d74` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43346170418)
+
 ## 2026-11-13 名冊整房連線檔的 Windows 入場與結算
 
 - `--check-roster-room-tickets` 讓 Chromium 逐房使用控制台 0.31.165 的名冊捷徑，將下載的原 ZIP 交給 Windows 玩家包。逐席核對原入場與遊戲端點。 [重跑方式](EXTERNAL_CLIENTS.md#按房間下載連線檔)
