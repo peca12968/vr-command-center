@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-13 暫停回放可按序號跳到保存畫格
+
+- 管理包 0.31.188 在「逐格檢視」加入畫格序號。按 Enter 或「跳到畫格」讀取原保存格並維持暫停，沿用房間、鏡頭及玩家檢討範圍。未封存錄製沿用本次確認的保存尾端。初版畫格標籤在畫面上換行，調整後重新打包並檢視截圖。 [操作方式](WORLD_RECORDING.md#暫停逐格檢視) · [管理包](../artifacts/VRCommand-ControlServer-0.31.188.zip)
+- 最終解壓包通過 31 項五房回放、144 項觀戰與回放 Chromium 檢查，以及 107 項管理包檢查。核對 567 筆清單及同源 Windows 遊戲包、Quest APK 的離線發行。產品與畫面調整提交已推送。兩次 GitHub Actions 因帳務或支出上限未啟動。這輪驗證使用瀏覽器與管理包，跨機 25 人、頭盔、MR 場地及廠商硬體仍待現場驗收。 [驗證摘要](../artifacts/world-frame-jump-188-validation.json) · [最終 GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43408329140)
+
 ## 2026-11-13 六批收件總表列出 UDP 補件原因
 
 - 六批收件總表可在逐席 `pendingSeats` 顯示雙端原檔已變更、已逾時或缺少哪一端。使用兩份原生排演產生的補件報告，總表列出獨立場 5 席、合併場 25 席的原檔變更原因，其餘四批通過。正式驗收拒絕這兩份未完成報告。 [操作方式](EXTERNAL_CLIENTS.md#一次查看六批待補件) · [本機證據](../artifacts/staged-udp-recheck-details/validation.json)
