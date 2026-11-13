@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 六批驗收定位缺少的原始檔案
+
+- `--inspect-venue-stages` 的 `missingFile` 會顯示原檔類型及檔名。操作員可按批次項次找出缺少的就緒報告、UDP 原檔、回放或玩家日誌。 [操作方式](EXTERNAL_CLIENTS.md#一次查看六批待補件)
+- 本機通過 114 項封存及 11 項 LAN 測試。重驗既有六批 Windows 同機的 80 份戰績回條，正式摘要逐位元一致。另用副本一次定位四個缺件，輸出只包含檔名。首次驗證腳本的換行比對已修正為比較收件 JSON 內容，原始清單保持一致。 [本機驗證摘要](../artifacts/staged-venue-missing-files-validation.json)
+- 功能來源 `2d824ec` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43340428520)
+
 ## 2026-11-13 六批場館驗收收件檢查
 
 - `--inspect-venue-stages` 一次檢查 5、10、25 人的獨立與合併六批資料，列出待補的模式與人數，並指出原清單項次、缺件原因及跨批衝突。 [操作方式](EXTERNAL_CLIENTS.md#一次查看六批待補件)
