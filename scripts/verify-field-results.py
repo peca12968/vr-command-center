@@ -1570,9 +1570,33 @@ def read_udp_launcher_document(path, *, preview):
                            'sessionSequence': integer(row['sessionSequence'], 1) if 'sessionSequence' in row else None,
                            'port': integer(row['port'], 1024, 65535), 'address': quest_network_address(endpoint['address']),
                            'listenAddress': '0.0.0.0' if listen == '0.0.0.0' else quest_network_address(listen)}
+        if preview and 'registeredSeats' in row:
+            registered = row['registeredSeats']
+            require(type(registered) is list and len(registered) <= len(group) * 5, 'Invalid launcher seat roster')
+            keys = []
+            for seat in registered:
+                require(type(seat) is dict and set(seat) == {'roomId', 'seat'}, 'Invalid launcher seat roster')
+                room = integer(seat['roomId'], 1, 5)
+                require(room in group, 'Launcher seat belongs to a different room group')
+                keys.append((room, integer(seat['seat'], 1, 5)))
+            require(keys == sorted(set(keys)), 'Launcher seat roster is repeated or out of order')
+            bindings[group]['registeredSeats'] = keys
         sessions.add(session)
     require(len({row['port'] for row in bindings.values()}) == len(bindings), 'Repeated launcher port')
+    require(len({'registeredSeats' in row for row in bindings.values()}) == 1, 'Launcher seat roster must cover every room group')
     return hashlib.sha256(raw).hexdigest(), mode, bindings
+
+
+def check_udp_launcher_seats(preview, sources):
+    bindings = preview[2].values()
+    if not any('registeredSeats' in row for row in bindings):
+        return
+    registered = {seat for row in bindings for seat in row['registeredSeats']}
+    supplied = set(sources)
+    issues = [f'{label}: ' + ', '.join(f'room {room} seat {seat}' for room, seat in sorted(seats))
+              for label, seats in (('missing registered seats', registered - supplied),
+                                   ('unregistered seats', supplied - registered)) if seats]
+    require(not issues, 'Seat inventory differs from the original Windows launcher preview (' + '; '.join(issues) + ')')
 
 
 def compare_udp_launch_documents(plan, preview):

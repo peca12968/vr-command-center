@@ -81,7 +81,12 @@ def launch(args):
     with tempfile.TemporaryDirectory(prefix='vr-verified-venue-') as directory:
         snapshot = Path(directory) / 'venue-plan.json'
         snapshot.write_bytes(raw_plan)
-        checked = preflight.check_venue(args.network_plan, None, [readiness], readiness, preview, snapshot,
+        with args.network_plan.open('rb') as stream:
+            network_raw = stream.read(field.MAX_QUEST_PLAN_BYTES + 1)
+        field.require(len(network_raw) <= field.MAX_QUEST_PLAN_BYTES, 'The network plan is too large')
+        network = Path(directory) / 'venue-network.json'
+        network.write_bytes(network_raw)
+        checked = preflight.check_venue(network, None, [readiness], readiness, preview, snapshot,
                                         require_distinct_remote_roster=distinct)
         with readiness.open('rb') as stream:
             field.require(checked['networkPlanSha256'] == report.get('networkPlanSha256')
@@ -90,6 +95,15 @@ def launch(args):
                           'The original network plan, readiness report or preview changed')
         field.require(checked['complete'], 'UDP readiness is no longer complete or within its original time window')
         distinct = field.udp_preflight_distinct_roster(checked)
+        original_preview = field.read_udp_launcher_document(preview, preview=True)
+        field.require(original_preview[0] == binding['previewSha256'], 'The original Windows launcher preview changed')
+        own_launcher_processes()
+        if any('registeredSeats' in row for row in original_preview[2].values()):
+            fresh_path = Path(directory) / 'current-preview.json'
+            current = subprocess.run([str(launcher), '--venue-check', str(snapshot), '--report', str(fresh_path)], timeout=45)
+            field.require(current.returncode == 0, 'Windows launcher no longer accepts the original session revisions')
+            fresh = field.read_udp_launcher_document(fresh_path, preview=True)
+            field.require(fresh == original_preview, 'Current Windows launcher preview differs from the original sessions, seats or bindings')
         print(json.dumps({'status': 'udp-preflight-verified', 'mode': checked['mode'],
                           'verifiedSources': checked['verifiedSources'], 'launchPlanSha256': binding['planSha256'],
                           'networkPlanSha256': checked['networkPlanSha256'],
@@ -98,7 +112,6 @@ def launch(args):
                    '--seconds', str(args.seconds), '--ready-report', str(ready_path), '--report', str(result_path)]
         if args.peer_diagnostics:
             command.extend(('--peer-diagnostics', 'on'))
-        own_launcher_processes()
         with subprocess.Popen(command) as process:
             try:
                 code = process.wait()
@@ -154,7 +167,7 @@ def main():
         return launch(args)
     except field.EvidenceError as error:
         parser.exit(1, f'Verified venue start rejected. {error}.\n')
-    except (OSError, ValueError, KeyError, TypeError, RecursionError):
+    except (OSError, ValueError, KeyError, TypeError, RecursionError, subprocess.TimeoutExpired):
         parser.exit(1, 'Verified venue start could not read its original inputs or start the Windows launcher.\n')
 
 

@@ -187,6 +187,8 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
     field.require({room for room, _ in sources} == set(field.QUEST_ROOMS), 'Plan a source for every room')
     field.require(launch_plan is None or launcher_preview is not None, 'A launch plan requires its original launcher preview')
     preview = field.read_udp_launcher_document(launcher_preview, preview=True) if launcher_preview else None
+    if preview:
+        field.check_udp_launcher_seats(preview, sources)
     launch_check = field.check_udp_launcher_endpoints(preview, mode, endpoints) if preview else None
     binding = None
     if launch_plan:

@@ -353,6 +353,8 @@ python .\scripts\prepare-venue-network-plan.py `
 
 管理台 0.31.175 會核對席位表的每個房號與席號。匯入前先登記準備中場次的席位。若名冊和席位表有差異，面板會列出表內缺少或場次尚未登記的席位。下載時若場次或名冊已變更，請重新讀取五房場次並確認席位表。預檢清單沿用版本 1，只記錄房號、席號和網路位址。
 
+Windows 啟動器 1.21 的 `--venue-check` 預覽也會記錄各場已登記的房號與席號。產生全館網路清單或驗證 UDP 報告時，若提供這份預覽，工具會逐席比對。準備 Quest 專用清單時會先核對完整席位表，再選出指定的 Quest 席位。正式啟動會以同一份啟動計畫重新向管理服務預覽，確認原場次版本、席位及端點。名冊改動後請重新下載計畫、產生預覽並核對 UDP 報告。舊版預覽仍可用於歷史報告的查核。
+
 #### 用原網路清單核對封存席位
 
 在 `venue.json` 加入 `"venueNetworkPlan": "venue-network.json"`，或在 `prepare-venue-field-manifest.py` 加 `--venue-network-plan .\venue-network.json`。使用開場前的全館清單，涵蓋本階段所有 Windows 與 Quest 席位。工具會比對每房原封存端點及原名冊，再將伺服器已確認戰績的 UDP 來源逐席核對。收件模式會列出來源不符的 Windows ZIP，並將對應席位列為待補件。

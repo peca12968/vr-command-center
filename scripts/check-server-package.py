@@ -753,7 +753,7 @@ def main():
                   'unlocked Linked MR venue cannot start or publish a game source')
             return []
         prepared_rosters={}
-        if args.check_venue_plan_ui and args.check_venue_udp_readiness:
+        if args.check_venue_udp_readiness:
             for state in states:
                 for room in state['roomIds']:
                     people=sorted((p for p in state['players'] if p['roomId']==room),key=lambda p:p['seat'])
@@ -1015,6 +1015,10 @@ def main():
             expected=[{**plan_row,'missionId':state['mission']['id'],'missionName':state['mission']['definition']['name'],
                        'experienceMode':state['environment']['mode'],'address':address,'listenAddress':address}
                       for plan_row,state in zip(plan['servers'],states,strict=True)]
+            if plan['version'] >= 2:
+                for row,state in zip(expected,states,strict=True):
+                    row['registeredSeats']=[{'roomId':person['roomId'],'seat':person['seat']+1}
+                                            for person in sorted(state['players'],key=lambda p:(p['roomId'],p['seat']))]
             check(actual=={'schemaVersion':1,'status':'venue-checked','complete':True,'topology':topology,
                            'instanceId':read(data/'control-instance.json')['instanceId'],'servers':expected}
                   and not work.exists() and not ready.exists()
@@ -1027,6 +1031,19 @@ def main():
                 readiness_path = out / (label + '-udp-readiness.json')
                 start_receipt = out / (label + '-verified-start.json')
                 guarded_start.extend(('--start-receipt', str(start_receipt)))
+                original_network = read(out / (label + '-udp-network.json'))
+                last_seat = original_network['sources'][-1]
+                mismatched_network = out / (label + '-udp-wrong-seat.json')
+                wrong_seats = original_network['sources'][:-1]
+                if players_per_room == 1:
+                    wrong_seats.append({**last_seat, 'seat': 2})
+                save(mismatched_network.name, {**original_network, 'sources': wrong_seats})
+                bad_roster = out / (label + '-udp-wrong-seat-readiness.json')
+                blocked = subprocess.run([sys.executable, str(ROOT / 'scripts/check-venue-udp-preflight.py'),
+                    '--network-plan', str(mismatched_network), '--launch-plan', str(plan_file), '--launcher-preview', str(preview),
+                    '--output', str(bad_roster)], capture_output=True, encoding='utf-8', timeout=45)
+                check(blocked.returncode == 1 and f"missing registered seats: room 5 seat {last_seat['seat']}" in blocked.stderr
+                      and not bad_roster.exists(), label + ' launcher preview prevents UDP preflight for an incorrect occupied seat')
                 incomplete = out / (label + '-udp-incomplete-launch.json')
                 save(incomplete.name, dict(read(readiness_path), complete=False))
                 wrong_plan = out / (label + '-udp-changed-launch.json')
@@ -1048,6 +1065,31 @@ def main():
                           and not any(path.exists() for path in (work, ready, report, start_receipt))
                           and all(request('/api/sessions/' + row['id']) == row for row in states),
                           label + ' guarded launch rejects ' + reason + ' before native work')
+                if args.check_venue_plan_ui:
+                    changed = states[-1]
+                    route = '/api/sessions/'+changed['id']
+                    person = prepared_rosters[5][-1]
+                    request(route+'/players/'+person['id'], role='Room5', method='DELETE', admission=person['admissionId'], expected=204)
+                    stale = subprocess.run([*guarded_start, '--launch-plan', str(plan_file), '--readiness', str(readiness_path),
+                        '--work', str(work), '--seconds', '600', '--ready-report', str(ready), '--report', str(report)],
+                        capture_output=True, encoding='utf-8', timeout=65)
+                    check(stale.returncode == 1 and 'no longer accepts the original session revisions' in stale.stderr
+                          and not stale.stdout and not any(path.exists() for path in (work, ready, report, start_receipt))
+                          and request(route)['combatStream'] is None,
+                          label + ' verified start checks the current roster revision before creating Windows work')
+                    return_from_probe = request(route+'/players', {'playerId':person['id'],'roomId':5,'name':person['name'],
+                        'headset':person['headset']}, role='Room5')
+                    prepared_rosters[5]=sorted((player for player in return_from_probe['players'] if player['roomId']==5),key=lambda p:p['seat'])
+                    states[-1]=return_from_probe
+                    refresh_plan()
+                    plan_file=download_plan('-browser-roster-restored')
+                    preview=call(label+'-restored-preview',['--venue-check',plan_file],good=True)
+                    readiness_path.rename(out/(label+'-before-roster-change-udp-readiness.json'))
+                    restored = subprocess.run([sys.executable, str(ROOT / 'scripts/check-venue-udp-preflight.py'),
+                        '--network-plan', str(out/(label+'-udp-network.json')), '--launch-plan', str(plan_file), '--launcher-preview', str(preview),
+                        '--pairs', str(out/(label+'-udp-pairs.json')), '--output', str(readiness_path)],
+                        capture_output=True, encoding='utf-8', timeout=75)
+                    check(restored.returncode == 0 and read(readiness_path)['complete'], label + ' restores the original seat with a newly reviewed revision')
                 guarded_start.extend(('--launch-plan', str(plan_file), '--readiness', str(readiness_path)))
         if venue_pin:
             listed = read(call(label + '-https-catalog', ['--catalog', venue_target], good=True))

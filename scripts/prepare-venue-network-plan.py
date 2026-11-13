@@ -30,6 +30,7 @@ def prepare(launch_path, preview_path, seat_path, players_per_room, device_path=
     inventory = field.read_quest_plan_file(seat_path)
     field.require(set(inventory) == {'version', 'seats'}, 'Expected a version 1 seat address inventory')
     seats = {seat: field.quest_network_address(address) for seat, address in field.quest_seats(inventory['seats'], 'address').items()}
+    field.check_udp_launcher_seats(preview, seats)
     incomplete = [room for room in field.QUEST_ROOMS if sum(seat[0] == room for seat in seats) != players_per_room]
     field.require(not incomplete, 'Seat count differs from the requested stage in room(s) ' + ', '.join(map(str, incomplete)))
     addresses = {row['address'] for row in endpoints} | set(seats.values())

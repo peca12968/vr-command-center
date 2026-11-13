@@ -303,6 +303,7 @@ internal static class ServerLauncher
     internal sealed class Choice
     {
         internal string Id, MissionId, MissionName, Mode, Experience; internal int[] Rooms, MissingAlignmentRooms;
+        internal Dictionary<string, object>[] RegisteredSeats;
         internal long Sequence;
         internal bool CanStart { get { return MissingAlignmentRooms.Length == 0; } }
         internal static string GuidValue(string value) { Guid id; Need(Guid.TryParseExact(value, "D", out id) && id != Guid.Empty && id.ToString("D") == value, "場次或任務識別格式錯誤。"); return value; }
@@ -335,6 +336,23 @@ internal static class ServerLauncher
                 Sequence = Num(value, "sequence"), Mode = mode, Experience = experience, Rooms = rooms,
                 MissingAlignmentRooms = experience == "MR" ? MissingAlignment(value, rooms) : new int[0] };
         }
+        internal static Dictionary<string, object>[] ReadRegisteredSeats(Dictionary<string, object> session, int[] rooms)
+        {
+            object raw;
+            Need(session.TryGetValue("players", out raw) && raw is object[] && ((object[])raw).Length <= rooms.Length * 5,
+                "場次名冊格式錯誤。");
+            var seats = new SortedDictionary<int, Dictionary<string, object>>();
+            foreach (var item in (object[])raw)
+            {
+                var player = Map(item); var room = Num(player, "roomId"); var seat = Num(player, "seat");
+                Need(room >= 1 && room <= 5 && Array.IndexOf(rooms, (int)room) >= 0 && seat >= 0 && seat < 5,
+                    "場次名冊有無效的房號或席位。");
+                var key = (int)(room * 5 + seat);
+                Need(!seats.ContainsKey(key), "場次名冊有重複席位。");
+                seats.Add(key, new Dictionary<string, object> { { "roomId", room }, { "seat", seat + 1 } });
+            }
+            var result = new Dictionary<string, object>[seats.Count]; seats.Values.CopyTo(result, 0); return result;
+        }
         internal static string Label(string value)
         {
             var text = new StringBuilder(); foreach (var c in value) { if (Char.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.Format) continue; text.Append(Char.IsControl(c) || Char.IsWhiteSpace(c) ? ' ' : c); }
@@ -351,7 +369,7 @@ internal static class ServerLauncher
         {
             var catalog = ReadTarget(path);
             catalog.Target.Identity(planVersion);
-            catalog.Choices = Parse(catalog.Target.Sessions());
+            catalog.Choices = Parse(catalog.Target.Sessions(), planVersion >= 2);
             return catalog;
         }
         internal static Catalog ReadTarget(string path)
@@ -378,7 +396,7 @@ internal static class ServerLauncher
             target.ValidateTarget();
             return new Catalog { Target = target, PathName = path, InstanceId = id };
         }
-        internal static List<Choice> Parse(object[] rows)
+        internal static List<Choice> Parse(object[] rows, bool includeSeats = false)
         {
             Need(rows != null && rows.Length <= 5, "場次列表超界。"); var choices = new List<Choice>(); var ids = new HashSet<string>(); var occupied = new HashSet<int>();
             foreach (var item in rows)
@@ -388,6 +406,7 @@ internal static class ServerLauncher
                 var phase = Text(value, "state"); var experience = Text(Child(value, "environment"), "mode"); Need(phase == "Preparing" || phase == "Running" || phase == "Paused" || phase == "Ended", "場次階段格式錯誤。"); Need(experience == "VR" || experience == "MR", "場次環境格式錯誤。");
                 if (phase != "Preparing" || bound != null) continue;
                 var choice = Choice.Parse(value); Need(ids.Add(choice.Id), "場次識別重複。"); foreach (var room in choice.Rooms) Need(occupied.Add(room), "待開場次房間重疊。"); choices.Add(choice);
+                if (includeSeats) choice.RegisteredSeats = Choice.ReadRegisteredSeats(value, choice.Rooms);
             }
             choices.Sort((a, b) => a.Rooms[0] != b.Rooms[0] ? a.Rooms[0].CompareTo(b.Rooms[0]) : String.CompareOrdinal(a.Id, b.Id)); return choices;
         }
@@ -692,7 +711,11 @@ internal static class ServerLauncher
                     var row = new Dictionary<string, object> { { "roomIds", choice.Rooms }, { "sessionId", choice.Id },
                         { "missionId", choice.MissionId }, { "missionName", choice.MissionName }, { "experienceMode", choice.Experience },
                         { "address", server.Config.Address }, { "listenAddress", server.Config.Bind }, { "port", server.Config.Port } };
-                    if (Version >= 2) row.Add("sessionSequence", choice.Sequence);
+                    if (Version >= 2)
+                    {
+                        row.Add("sessionSequence", choice.Sequence);
+                        row.Add("registeredSeats", choice.RegisteredSeats);
+                    }
                     return row;
                 }) };
         }
@@ -879,11 +902,14 @@ internal static class ServerLauncher
                 reserved.Wait();
                 if (plan.Version >= 2 && !gate.Abort && !cancel())
                 {
-                    var current = Catalog.Parse(plan.Catalog.Target.Sessions());
+                    var current = Catalog.Parse(plan.Catalog.Target.Sessions(), true);
                     foreach (var server in servers)
                     {
                         var expected = server.Choice;
-                        CheckVenueRevision(current.Find(choice => choice.Id == expected.Id), expected.Sequence, expected.MissionId, expected.Rooms);
+                        var choice = current.Find(candidate => candidate.Id == expected.Id);
+                        CheckVenueRevision(choice, expected.Sequence, expected.MissionId, expected.Rooms);
+                        Need(Json.Serialize(choice.RegisteredSeats) == Json.Serialize(expected.RegisteredSeats),
+                            "場次名冊已變更。請重新讀取場次並核對席位。");
                     }
                 }
                 launch.Set();

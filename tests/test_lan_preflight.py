@@ -171,6 +171,40 @@ class NetworkPlanPreparationTests(unittest.TestCase):
                 self.assertIn('shared source: room 1 seat 1, room 5 seat 1', checked.stderr)
                 self.assertFalse(readiness.exists())
 
+    def test_roster_preview_rejects_same_size_wrong_seat_before_network_output(self):
+        for mode, ports in (('Independent', range(7777, 7782)), ('Linked', [7777])):
+            with self.subTest(mode=mode):
+                launch, preview = guarded_documents(mode, ports, '192.168.5.10')
+                expected = [{'roomId': room, 'seat': 2 if room == 5 else 1} for room in range(1, 6)]
+                for group in preview['servers']:
+                    group['registeredSeats'] = [seat for seat in expected if seat['roomId'] in group['roomIds']]
+                launch_path, preview_path = self.store('launch.json', launch), self.store('preview.json', preview)
+                seats = [{**seat, 'address': f"192.168.5.{20 + seat['roomId']}"} for seat in expected]
+                wrong = [*seats[:-1], {**seats[-1], 'seat': 1}]
+                inventory = self.store('seats.json', {'version': 1, 'seats': wrong})
+                output = self.root / f'{mode}-network.json'
+                result = prepare_network(launch_path, preview_path, inventory, output, '--players-per-room', 1)
+                self.assertEqual(1, result.returncode, result.stderr)
+                self.assertIn('missing registered seats: room 5 seat 2', result.stderr)
+                self.assertIn('unregistered seats: room 5 seat 1', result.stderr)
+                self.assertFalse(output.exists())
+                self.store(inventory.name, {'version': 1, 'seats': seats})
+                result = prepare_network(launch_path, preview_path, inventory, output, '--players-per-room', 1)
+                self.assertEqual(0, result.returncode, result.stderr)
+                plan = json.loads(output.read_bytes())
+                self.assertEqual(seats, plan['sources'])
+                output.write_text(json.dumps({**plan, 'sources': wrong}), encoding='utf-8')
+                readiness = self.root / f'{mode}-readiness.json'
+                args = [sys.executable, str(ROOT / 'scripts/check-venue-udp-preflight.py'), '--network-plan', str(output),
+                        '--launch-plan', str(launch_path), '--launcher-preview', str(preview_path), '--output', str(readiness)]
+                result = subprocess.run(args, capture_output=True, text=True, timeout=15)
+                self.assertIn('unregistered seats: room 5 seat 1', result.stderr)
+                self.assertFalse(readiness.exists())
+                output.write_text(json.dumps(plan), encoding='utf-8')
+                result = subprocess.run(args, capture_output=True, text=True, timeout=15)
+                self.assertEqual(1, result.returncode, result.stderr)
+                self.assertEqual(5, json.loads(readiness.read_bytes())['expectedSources'])
+
     def test_distinct_requirement_survives_retry_and_batch_recheck(self):
         launch_value, preview_value = guarded_documents('Linked', [7777], '192.168.5.10')
         launch = self.store('launch.json', launch_value)
