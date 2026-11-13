@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 Windows 五房啟動回條與封存核對
+
+- `start-verified-venue.py --start-receipt` 在正常封存並停止後保存當次預檢、就緒檔與結束檔的雜湊。驗收工具核對相同房間、錄製來源、遊戲程序與 UDP 綁定。可用 `--verified-start-receipt` 將原回條帶入驗收清單。 [操作方式](EXTERNAL_CLIENTS.md#核對-windows-五房啟動回條)
+- Windows 同機獨立與合併模式通過 373 項套件檢查及 124 項本機測試。兩種模式各有 5 個模擬玩家，合計 6 組 UDP、10 份戰績回條及 580 格封存回放。新產生的兩份清單重驗結果一致。另確認不同預檢雜湊及被改寫的就緒程序編號會遭拒，原檔保持一致。 [本機驗證摘要](../artifacts/venue-start-receipt-validation.json)
+- 功能來源 `736d29b` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43337709588)
+
 ## 2026-11-13 Windows 五房開場前重驗 UDP
 
 - 新增 `start-verified-venue.py`，重驗同一份原計畫、網路清單及雙端 UDP 報告後才啟動現有 Windows 套件。缺件、逾時、未完成或計畫有變時，在建立遊戲工作目錄前退出。 [啟動方式](WINDOWS_SERVER_PACKAGE.md#以-udp-預檢報告啟動五房)
