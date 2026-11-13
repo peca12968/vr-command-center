@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
+const { spawnSync } = require('node:child_process');
 
 const route = '/venue/server-launch-review';
 const panel = '#venue-launch-review', input = panel + '-file', button = panel + '-check', summary = panel + '-summary';
@@ -24,7 +25,7 @@ function projected(body) {
   assert.deepEqual(Object.keys(body).sort(), ['instanceId', 'launchId', 'servers', 'topology', 'version']);
   for (const server of body.servers) {
     assert.deepEqual(Object.keys(server).sort(), ['roomIds', 'sessionId', 'streamId', 'udp']);
-    if (server.udp) assert.deepEqual(Object.keys(server.udp).sort(), ['bindAddress', 'port']);
+    if (server.udp) assert.deepEqual(Object.keys(server.udp).sort(), body.version === 2 ? ['address', 'bindAddress', 'port'] : ['bindAddress', 'port']);
   }
 }
 
@@ -84,6 +85,45 @@ async function checkVenueLaunchReview({ context, api, tokens, base, screenshots,
       && JSON.stringify(await api(sessionPath)) === JSON.stringify(before), 'An original source can be present without an endpoint and without a new event');
     await page.locator(panel).screenshot({ path: path.join(screenshots, 'venue-launch-review-source.png') });
 
+    const ready = { schemaVersion: 1, status: 'venue-ready', topology: 'Linked', instanceId,
+      servers: [{ roomIds, ready: { schemaVersion: 1, status: 'ready', sessionId: session.id, streamId, childPid: 123,
+        address: '192.168.1.20', port: 17777, udpBinding: { address: '0.0.0.0', port: 17777, processId: 123 },
+        workDirectory: 'C:/PRIVATE_FIXTURE_DIRECTORY' } }] };
+    const readyTarget = { version: 2, instanceId, launchId: null, topology: 'Linked',
+      servers: [{ roomIds, sessionId: session.id, streamId, udp: { address: '192.168.1.20', bindAddress: '0.0.0.0', port: 17777 } }] };
+    await api(route, 'POST', readyTarget, 'Room1', 403);
+    await api(route, 'POST', { ...readyTarget, servers: [{ ...readyTarget.servers[0], streamId: null }] }, 'Master', 400);
+    await choose(page, ready);
+    const missingEndpoint = await (await checkSelected(page)).json();
+    await page.locator(rows).filter({ hasText: '尚未公告端點' }).waitFor();
+    projected(requests.at(-1));
+    assert.deepEqual(requests.at(-1), readyTarget);
+    check(missingEndpoint.servers[0].endpointState === 'not-published', 'A ready file is checked against the API before it can show a matching endpoint');
+    const header = { sessionId: session.id, streamId, origin: 'Simulation', roomIds, missionClockVersion: 1,
+      missionDurationSeconds: session.mission.definition.durationSeconds };
+    const registered = spawnSync('python', [path.resolve(__dirname, '../../scripts/world_test_socket.py')], {
+      encoding: 'utf8', timeout: 6000, windowsHide: true,
+      input: JSON.stringify({ port: Number(new URL(base).port), route: `/api${sessionPath}/world/publish`, token: tokens.GameServer,
+        messages: [{ type: 'header', payload: header }] })
+    });
+    assert.equal(registered.status, 0, registered.stderr || registered.error?.message);
+    await api('/venue/connection-endpoints', 'PUT', { version: 1, topology: 'Linked', servers: [{ sessionId: session.id,
+      endpoint: { version: 1, streamId, address: '192.168.1.21', port: 17777 } }] }, 'GameServer');
+    const wrongAddress = await (await checkSelected(page)).json();
+    await page.locator(rows).filter({ hasText: '公告端點與報告不符' }).waitFor();
+    check(wrongAddress.servers[0].addressMatched === false, 'The ready file compares the advertised IPv4 even when Unity binds to all interfaces');
+    ready.servers[0].ready.address = '192.168.1.21';
+    await choose(page, ready);
+    const saved = await (await checkSelected(page)).json();
+    await page.locator(rows).filter({ hasText: '管理端已保存端點' }).waitFor();
+    check(saved.servers[0].endpointState === 'published' && saved.servers[0].recentSource !== true
+      && !(await page.locator(summary).innerText()).includes('皆相符，並收到'),
+      'A matching endpoint alone does not show a fresh game source');
+    await choose(page, { ...ready, servers: [{ roomIds, ready: { ...ready.servers[0].ready, streamId: randomUUID() } }] });
+    const otherStream = await (await checkSelected(page)).json();
+    await page.locator(rows).filter({ hasText: '已登記其他來源' }).waitFor();
+    check(otherStream.servers[0].endpointAddress === null, 'An unrelated stream cannot borrow the published endpoint of the current session');
+
     await choose(page, { ...raw, venueLaunchId: randomUUID() });
     const foreign = await (await checkSelected(page)).json();
     await page.locator(rows).filter({ hasText: '已登記其他來源' }).waitFor();
@@ -124,7 +164,7 @@ if (require.main === module) {
     const { chromium } = require('playwright');
     const inputChunks = [];
     for await (const chunk of process.stdin) inputChunks.push(chunk);
-    const { base, token, reportPath, expected, output } = JSON.parse(Buffer.concat(inputChunks).toString('utf8'));
+    const { base, token, reportPath, expected, output, liveReady } = JSON.parse(Buffer.concat(inputChunks).toString('utf8'));
     assert.match(base, /^http:[/][/]127[.]0[.]0[.]1:[0-9]+$/);
     const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_SERVER_PLAN_CHROMIUM });
     try {
@@ -142,6 +182,10 @@ if (require.main === module) {
         for (const [key, value] of Object.entries(fields)) assert.deepEqual(review.servers[index][key], value);
       await page.locator(rows).nth(expected.length - 1).waitFor();
       assert.match(await page.locator(summary).textContent(), /管理實例相符/);
+      if (liveReady) {
+        assert.equal(response.request().postDataJSON().version, 2);
+        assert.match(await page.locator(summary).textContent(), /五房原端點皆相符，並收到近期來源快照/);
+      }
       await fs.writeFile(output, JSON.stringify(review, null, 2) + '\n', { flag: 'wx' });
     } finally { await browser.close(); }
   })().catch(error => { console.error(error); process.exitCode = 1; });

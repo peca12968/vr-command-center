@@ -81,10 +81,10 @@
           </form>
         </details>
         <details id="venue-launch-review" class="panel" hidden>
-          <summary>核對未確認的全館啟動報告</summary>
-          <p class="hint">選擇第四版計畫的啟動結果 JSON。檔案只在瀏覽器解析，管理服務只接收核對所需的識別與 UDP 設定。結果為管理端取樣，無法證明玩家可連線。</p>
+          <summary>核對全館伺服器就緒</summary>
+          <p class="hint">選取 Windows 啟動器的全館就緒檔或未確認的第四版啟動報告。管理台會查核原遊戲來源與公告的 UDP 端點。玩家連線及姿態請在房間名冊確認。</p>
           <div class="form-row">
-            <label>全館啟動結果 JSON<input id="venue-launch-review-file" type="file" accept=".json,application/json" disabled></label>
+            <label>全館就緒或啟動結果 JSON<input id="venue-launch-review-file" type="file" accept=".json,application/json" disabled></label>
             <button id="venue-launch-review-check" type="button" class="quiet" disabled>核對原場次</button>
           </div>
           <p id="venue-launch-review-summary" class="hint" role="status"></p>
@@ -558,7 +558,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.175 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.176 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

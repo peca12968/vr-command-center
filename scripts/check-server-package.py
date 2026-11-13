@@ -187,6 +187,7 @@ def main():
     p.add_argument('--check-venue-plan-ui', action='store_true', help='Launch each topology with the exact plan downloaded from Chromium')
     p.add_argument('--check-venue-receipt-retry', action='store_true', help='Lose both original batch replies after commit through a loopback fixture')
     p.add_argument('--check-venue-launch-review', action='store_true', help='Import original unresolved launcher reports into the shipped Chromium console')
+    p.add_argument('--check-venue-ready-review', action='store_true', help='Review the original Windows ready file in Chromium before Begin')
     p.add_argument('--check-venue-relay-readback', action='store_true', help='Use both source relay CLIs on copies of the closed original Linked journals')
     p.add_argument('--check-venue-preview', action='store_true', help='Run the shared Windows venue preview before both topology launches')
     p.add_argument('--check-venue-udp-readiness', action='store_true',
@@ -338,6 +339,8 @@ def main():
         p.error('--check-venue-receipt-retry requires --check-venue-plan-ui and its own plain loopback management target')
     if args.check_venue_launch_review and not args.check_venue_receipt_retry:
         p.error('--check-venue-launch-review requires --check-venue-receipt-retry')
+    if args.check_venue_ready_review and (not args.check_venue_launcher or not shutil.which('node')):
+        p.error('--check-venue-ready-review requires --check-venue-launcher and Node.js with Playwright Chromium')
     if args.check_venue_relay_readback and (not args.check_venue_plan_ui or not shutil.which('dotnet')):
         p.error('--check-venue-relay-readback requires --check-venue-plan-ui and the built .NET relay tools')
     if args.check_venue_preview and not args.check_venue_launcher:
@@ -712,11 +715,11 @@ def main():
                   label+' original Unity child owns the exact endpoint released by the UDP preflight')
             save(label+'-lan-preflight.json', dict(preflight, gameBinding=binding, scope='same-host'))
         return entry
-    def browser_launch_review(report, expected, label):
+    def browser_launch_review(report, expected, label, *, live_ready=False):
         driver=ROOT/'tests/browser/venue-launch-review-browser.cjs'
         output=out/(label+'-browser-review.json')
         completed=subprocess.run([shutil.which('node'),str(driver)],cwd=driver.parent,
-            input=json.dumps({'base':uri,'token':keys['Master'],'reportPath':str(report),'expected':expected,'output':str(output)}),
+            input=json.dumps({'base':uri,'token':keys['Master'],'reportPath':str(report),'expected':expected,'output':str(output),'liveReady':live_ready}),
             text=True,encoding='utf-8',capture_output=True,timeout=45,creationflags=subprocess.CREATE_NO_WINDOW)
         diagnostic=completed.stderr
         for key in keys.values():diagnostic=diagnostic.replace(key,'[redacted]')
@@ -4754,6 +4757,14 @@ def main():
                     if len(rows)==5 and all(row['venueBeginReady'] and row['sessionSequence']==expected.get(row['sessionId']) for row in rows):
                         return rows
                 preparing=wait(begin_when_ready,60,'five fresh original Preparing room aggregates')
+                if args.check_venue_ready_review:
+                    original=read(entries[0]['readyPath'])
+                    expected_review=[{'roomIds':row['roomIds'],'sessionId':row['ready']['sessionId'],'phase':'Preparing',
+                        'sourceState':'original-source','streamId':row['ready']['streamId'],'endpointState':'published',
+                        'endpointAddress':row['ready']['address'],'endpointPort':row['ready']['port'],'addressMatched':True,
+                        'recentSource':True} for row in original['servers']]
+                    browser_launch_review(entries[0]['readyPath'],expected_review,'linked-ready' if linked else 'independent-ready',live_ready=True)
+                    check(request(route)['begin']==preview, 'Reading the original Windows ready file does not advance any Begin revision')
                 if args.check_venue_roster_ui:
                     mode = 'linked' if linked else 'independent'
                     roster = []

@@ -21,19 +21,22 @@ const endpointStates = {
 function projectReport(value) {
   const { schemaVersion, status, complete, readyPublished, instanceId, venueLaunchId, topology,
     sourceAttachment, endpointPublication, servers } = value ?? {};
-  if (schemaVersion !== 1 || status !== 'venue-incomplete' || complete !== false || readyPublished !== false
-      || !isId(instanceId) || !isId(venueLaunchId) || !['Independent', 'Linked'].includes(topology)
+  const ready = status === 'venue-ready';
+  if (schemaVersion !== 1 || !isId(instanceId) || !['Independent', 'Linked'].includes(topology)
+      || !Array.isArray(servers) || servers.length !== (topology === 'Linked' ? 1 : 5))
+    throw new Error('Invalid venue report');
+  if (!ready && (status !== 'venue-incomplete' || complete !== false || readyPublished !== false || !isId(venueLaunchId)
       || !['not-attempted', 'rejected', 'confirmed', 'unconfirmed'].includes(sourceAttachment)
       || !['not-attempted', 'confirmed', 'unconfirmed'].includes(endpointPublication)
       || ![sourceAttachment, endpointPublication].includes('unconfirmed')
       || (sourceAttachment === 'unconfirmed' && endpointPublication !== 'not-attempted')
-      || (endpointPublication === 'unconfirmed' && sourceAttachment !== 'confirmed')
-      || !Array.isArray(servers) || servers.length !== (topology === 'Linked' ? 1 : 5))
+      || (endpointPublication === 'unconfirmed' && sourceAttachment !== 'confirmed')))
     throw new Error('Invalid launch report');
   const roomCount = topology === 'Linked' ? 5 : 1;
   const targets = servers.map(row => {
-    const { roomIds, result } = row ?? {};
-    const { sessionId, streamId, udpBinding, childPid } = result ?? {};
+    const { roomIds } = row ?? {};
+    const result = ready ? row?.ready : row?.result;
+    const { sessionId, streamId, udpBinding, childPid, address, port } = result ?? {};
     if (!Array.isArray(roomIds) || roomIds.length !== roomCount || !roomIds.every(id => rooms.includes(id))
         || !isId(sessionId) || (streamId !== null && !isId(streamId)))
       throw new Error('Invalid venue server');
@@ -45,16 +48,21 @@ function projectReport(value) {
       udp = { bindAddress: udpBinding.address, port: udpBinding.port };
     }
     if (endpointPublication === 'unconfirmed' && !udp) throw new Error('Missing UDP evidence');
+    if (ready) {
+      if (result.schemaVersion !== 1 || result.status !== 'ready' || !udp || !validDestination(address, port)
+          || port !== udp.port || !['0.0.0.0', address].includes(udp.bindAddress)) throw new Error('Invalid ready endpoint');
+      udp.address = address;
+    }
     return { sessionId, roomIds: [...roomIds].sort(), streamId, udp };
   }).sort((a, b) => a.roomIds[0] - b.roomIds[0]);
   if (new Set(targets.map(row => row.sessionId)).size !== targets.length
       || targets.flatMap(row => row.roomIds).join(',') !== rooms.join(','))
     throw new Error('Invalid room coverage');
-  return { version: 1, instanceId, launchId: venueLaunchId, topology, servers: targets };
+  return { version: ready ? 2 : 1, instanceId, launchId: ready ? null : venueLaunchId, topology, servers: targets };
 }
 
 function verifyReply(value, request) {
-  if (value?.version !== 1 || value.launchId !== request.launchId || value.topology !== request.topology
+  if (value?.version !== request.version || value.launchId !== request.launchId || value.topology !== request.topology
       || typeof value.instanceVerified !== 'boolean' || typeof value.observedAtUtc !== 'string'
       || !Number.isFinite(Date.parse(value.observedAtUtc)) || !Array.isArray(value.servers)
       || value.servers.length !== request.servers.length)
@@ -66,6 +74,9 @@ function verifyReply(value, request) {
         || (row.phase !== null && !Object.hasOwn(phases, row.phase)) || ![true, false, null].includes(row.recentSource)
         || ![true, false, null].includes(row.addressMatched)
         || (row.sourceState === 'original-source' ? !isId(row.streamId) : row.streamId !== null)
+        || (row.sourceState === 'original-source' && target.streamId !== null && row.streamId !== target.streamId)
+        || (request.version === 2 && row.endpointState === 'published'
+          && (row.endpointAddress !== target.udp.address || row.endpointPort !== target.udp.port || row.addressMatched !== true))
         || (['published', 'endpoint-mismatch'].includes(row.endpointState)
           && !validDestination(row.endpointAddress, row.endpointPort)))
       throw new Error('Invalid room review');
@@ -89,8 +100,10 @@ export function mountVenueLaunchReview(getState, api) {
   }
   function show(review) {
     const allUnbound = review.servers.every(row => row.phase === 'Preparing' && row.sourceState === 'unbound');
-    const summary = allUnbound ? '原場次取樣時均在準備中且尚未登記來源。'
-      : '已核對原場次。請依各房來源與端點狀態處理。';
+    const allLive = review.servers.every(row => row.phase === 'Preparing' && row.sourceState === 'original-source'
+      && row.endpointState === 'published' && row.recentSource === true);
+    const summary = review.version === 2 && allLive && review.instanceVerified ? '取樣時五房原端點皆相符，並收到近期來源快照。'
+      : allUnbound ? '原場次取樣時均在準備中且尚未登記來源。' : '已核對原場次。請查看各房來源與端點狀態。';
     const instance = review.instanceVerified ? '管理實例相符。' : '此管理服務未提供實例識別，已按原場次識別比對。';
     $('summary').textContent = `${instance}${summary} 取樣時間 ${new Date(review.observedAtUtc).toLocaleString('zh-TW')}。`;
     $('rooms').replaceChildren(...review.servers.map(row => {
@@ -118,7 +131,7 @@ export function mountVenueLaunchReview(getState, api) {
         if (!selected.size || selected.size > 65536) throw new Error('Invalid report size');
         request = projectReport(JSON.parse(await selected.text()));
       } catch {
-        if (current()) $('summary').textContent = '請選擇 64 KiB 內、含未確認狀態的第四版全館啟動報告。';
+        if (current()) $('summary').textContent = '請選擇 64 KiB 內的全館就緒檔，或含未確認狀態的第四版啟動報告。';
         return;
       }
       if (!current()) return;
