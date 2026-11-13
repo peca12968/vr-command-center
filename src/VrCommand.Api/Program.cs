@@ -128,6 +128,8 @@ app.Use(async (context, next) =>
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = vrVenue.Code, roomId = vrVenue.RoomId });
         else if (ex is TicketSourceUnavailableException)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "ticket-source-unavailable" });
+        else if (ex is TicketEndpointMismatchException)
+            await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "ticket-endpoint-mismatch" });
         else if (ex is VenuePhaseChangedException)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "venue-phase-changed" });
         else if (ex is VenuePauseNotObservedException waiting)

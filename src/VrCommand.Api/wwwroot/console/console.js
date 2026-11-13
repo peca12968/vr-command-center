@@ -42,7 +42,7 @@ const readiness = mountReadiness(() => state, logout, () => Number($('roster-roo
 const roomReadiness = mountRoomReadiness(() => state, logout, applyVenuePermissions, venueClimateText, venueEnemyText, target => {
   if (!state.busy && !state.pending) tab('world', target);
 });
-const connections = mountConnections(() => state, logout, updateRosterTicketButton);
+const connections = mountConnections(() => state, logout, updateRoomTicketButtons);
 const closure = mountClosure(() => state, logout, target => tab('world', target), report);
 const alignment = mountAlignment(api, download);
 const seatDeployments = ['VR', 'MR'].map(mode => mountSeatDeployment(() => state, api, mode));
@@ -138,6 +138,7 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
         else if (code === 'vr-participation-resume-not-ready') message = '暫停中的席位尚未確認恢復。請查看房卡等待的席位。';
         else if (code === 'mr-alignment-required') message = '請由主控鎖定 MR 校正檔後再配票。';
         else if (code === 'ticket-source-unavailable') message = '原遊戲來源暫未更新，配票已暫停。請查看房卡的連線狀態。';
+        else if (code === 'ticket-endpoint-mismatch') message = '整房配票須使用原公告端點。請按「套用場次連線設定」後再下載。';
         else if (code === 'independent-rooms-occupied' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 使用中，五場都未建立。請確認房間狀態後再試。`;
         else if (code === 'venue-phase-changed') message = '全館場次狀態已變更，本批命令未套用。請重新整理後確認房間。';
         else if (code === 'room-enemy-policy-changed') message = '本房敵軍策略已變更。草稿仍保留，請載入目前策略再編輯。';
@@ -732,8 +733,7 @@ function applyPermissions() {
   $('player-headset').querySelector('option[value="ViveXr"]').disabled = mixedReality;
   if (mixedReality) $('player-headset').value = 'Quest3';
   $('ticket-fields').disabled = locked || ended || !session;
-  $('download-room-tickets').disabled = locked || !$('ticket-room').value || !canIssueTicket(session, Number($('ticket-room').value));
-  updateRosterTicketButton();
+  updateRoomTicketButtons();
   const pinHint = $('mr-ticket-pin-hint');
   pinHint.hidden = !mixedReality || ended;
   const pinMessage = session?.roomAlignment
@@ -946,6 +946,7 @@ function renderVenueBegin(targets, waiting, policy) {
   })));
 }
 function applyVenuePermissions() {
+  updateRoomTicketButtons();
   $('venue-phase').hidden = !master();
   const begin = master() ? venueTargets('Begin') : [], pause = venueTargets('Pause'), resume = venueTargets('Resume'), end = venueTargets('End');
   const locked = state.busy || !!state.pending || !master();
@@ -1300,25 +1301,37 @@ function filterRoster() {
   $('roster-filter-empty').hidden = !room || shown !== 0 || !state.session?.players.length;
   const capacity = room ? 5 : (state.session?.roomIds.length ?? 0) * 5;
   $('player-count').textContent = (room ? `房間 ${room} · ` : '') + `${shown} / ${capacity} 人（名冊）`;
-  updateRosterTicketButton();
+  updateRoomTicketButtons();
   readiness.update();
 }
-function updateRosterTicketButton() {
-  const session = state.session, roomId = Number($('roster-room').value);
+function roomTicketProblem(session, roomId, destination) {
+  const source = roomReadiness.ticketDestination(state.rooms.find(room => room.id === roomId), session);
+  if (source?.live == null) return '';
+  const { address, port } = source.endpoint;
+  if (!source.live) return `公告端點 ${address}:${port} · 遊戲來源暫未確認，暫停配票。`;
+  return destination && (address !== destination.address || port !== destination.port)
+    ? `公告端點為 ${address}:${port}。請套用場次連線設定。` : '';
+}
+function updateRoomTicketButtons() {
+  const session = state.session, roomId = Number($('roster-room').value), selectedRoom = Number($('ticket-room').value);
   const button = $('download-roster-room-tickets');
   const status = $('roster-ticket-destination');
   const destination = configuredTicketDestination();
+  const locked = state.busy || !!state.pending;
+  $('download-room-tickets').disabled = locked || !selectedRoom || !canIssueTicket(session, selectedRoom)
+    || !!roomTicketProblem(session, selectedRoom, destination);
   button.hidden = !session?.roomIds.includes(roomId) || !ownsRoom(roomId);
-  button.disabled = button.hidden || state.busy || !!state.pending || !canIssueTicket(session, roomId)
-    || !destination || !session.players.some(player => player.roomId === roomId);
+  const problem = button.hidden ? '' : roomTicketProblem(session, roomId, destination);
+  button.disabled = button.hidden || locked || !canIssueTicket(session, roomId)
+    || !destination || !!problem || !session.players.some(player => player.roomId === roomId);
   if (!button.hidden) button.textContent = `下載房間 ${roomId} 連線檔 ZIP`;
   status.hidden = button.hidden;
-  const text = button.hidden ? '' : destination ? `配票端點 ${destination.address}:${destination.port}`
-    : '請先設定下方的遊戲伺服器 IPv4 與連線埠。';
+  const text = button.hidden ? '' : problem || (destination ? `配票端點 ${destination.address}:${destination.port}`
+    : '請先設定下方的遊戲伺服器 IPv4 與連線埠。');
   if (status.textContent !== text) status.textContent = text;
 }
 $('roster-room').addEventListener('change', filterRoster);
-for (const id of ['game-address', 'game-port']) $(id).addEventListener('input', updateRosterTicketButton);
+for (const id of ['game-address', 'game-port']) $(id).addEventListener('input', updateRoomTicketButtons);
 function environment(prefix) { return { mode: prefix === 'live' ? state.session.environment.mode : $('draft-mode').value, weather: $(prefix + '-weather').value, timeOfDay: $(prefix + '-time').value, lightning: $(prefix + '-lightning').checked }; }
 function enemies(prefix) { return { count: Number($(prefix + '-count').value), behavior: $(prefix + '-behavior').value, autoAttack: $(prefix + '-auto-attack').checked }; }
 function setEnvironment(prefix, value) { $(prefix + '-mode').value = value.mode; $(prefix + '-weather').value = value.weather; $(prefix + '-time').value = value.timeOfDay; $(prefix + '-lightning').checked = value.lightning; }
@@ -1578,6 +1591,8 @@ function downloadRoomTickets(roomId) {
   if (!canIssueTicket(session, roomId) || !ownsRoom(roomId) || !session.roomIds.includes(roomId)) return;
   const destination = ticketDestination();
   if (!destination) return;
+  const problem = roomTicketProblem(session, roomId, destination);
+  if (problem) { notify(problem, true); return; }
   const players = session.players.filter(player => player.roomId === roomId);
   if (!players.length) return;
   const admissions = players.map(player => ({ playerId: player.id, admissionId: player.admissionId }));

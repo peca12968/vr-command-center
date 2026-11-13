@@ -18,7 +18,7 @@ internal static class RoomTicketBundles
         if (!ConnectionDestination.IsValid(request.Address, request.Port))
             throw new ArgumentException("Use a canonical unicast IPv4 address and port 1024–65535.");
         var players = ValidateAdmissions(session, roomId, request.Players);
-        worlds.RequireTicketSource(session);
+        worlds.RequireTicketSource(session, (request.Address!, request.Port));
         return Encode(session, roomId, players, request.Address!, request.Port, signer);
     }
 

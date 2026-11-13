@@ -14,6 +14,8 @@ public record VenueEndpointBatch(int Version, SessionMode Topology, VenueEndpoin
 public record VenueEndpointReceipt(int Version, SessionMode Topology, ConnectionEndpoint[] Servers);
 internal sealed class TicketSourceUnavailableException()
     : InvalidOperationException("The published game source has no current frame; wait for it before issuing connection files.");
+internal sealed class TicketEndpointMismatchException()
+    : InvalidOperationException("Use the published game endpoint for this room's connection files.");
 
 internal static class ConnectionDestination
 {
@@ -59,10 +61,16 @@ public sealed partial class WorldRecordings
                 });
     }
 
-    internal void RequireTicketSource(SessionView session)
+    internal void RequireTicketSource(SessionView session, (string Address, int Port)? destination = null)
     {
         lock (gate)
-            if (TicketSourceLive(session) == false) throw new TicketSourceUnavailableException();
+        {
+            var live = TicketSourceLive(session);
+            if (live == false) throw new TicketSourceUnavailableException();
+            if (live == true && destination is { } requested
+                && (EndpointRow(session) is not { } endpoint || (endpoint.Address, endpoint.Port) != requested))
+                throw new TicketEndpointMismatchException();
+        }
     }
 
     internal (SessionView Session, ConnectionEndpoint? Endpoint, bool SourceLive) ReadSeatDeploymentSource(Guid id, int roomId, OperatorIdentity actor)
