@@ -12,6 +12,8 @@
 
 五房獨立模式可再加 `--five-room-isolation`。五房各開五個 Windows 模擬玩家端，僅暫留第 1 房的原管理請求。依已接受畫格的擷取時間，確認其他四房在第 1 房時鐘暫停期間仍持續更新原席位的姿態與推進時鐘。遊戲暫停時原姿態可能因 0.5 秒時限失效，工具另用原生客戶端日誌確認每位玩家從入場到收到結果均沿用同一條 UDP 連線。五場到期後逐房核對原入場戰績回條及封存回放。這個選項固定使用 `--seconds 60`，適用於同機排演。
 
+五房合併模式使用 `--five-room-linked`。25 個模擬玩家共用場次、遊戲時鐘與管理請求。工具核對五房共同暫停及恢復後的原入場、房間與姿態。各房操作員讀取暫停與恢復畫格時，只看見自己房間的玩家及統計，跨房查詢會收到 403。到期後核對一次自動結束、25 份戰績確認及完整回放。這個選項同樣固定使用 `--seconds 60`。
+
 接近期限時，代理關閉自己既有 world tunnel，拒絕新的 publish upgrade，其他管理與 combat HTTP 正常。Unity計時繼續，恰好期限 tick 停止並 Ready=false；用既有 Windows Development `--vr-replication-probe` 分別觀察真正 server／client，**不讀取或破壞仍有 exclusive lease 的 journal**。後端的已接受序號保持不變且仍 Running，證明未發布的本地到期不能授權 End。
 
 維持本地到期至少6秒後恢復 publication，原 world publisher 重連、原來源精確補送。API收到保存的到期幀後只能出現一次 mission-clock End；原 combat／world雙seal、結果ack與原入場／ledger核對均須通過。完整封存回放須逐幀連續、tick不倒退／不超過期限，保留管理失聯與到期等待兩個階段，末packet及統計與已保存世界相同。這不是世界進程崩潰恢復，也不保證指定某一個ACK曾經丟失。
@@ -31,6 +33,7 @@ $env:VR_COMMAND_API_DLL = "$PWD/artifacts/build-clock-v1/bin/VrCommand.Api/relea
 python scripts/check-desktop-clock-faults.py --runtime-root "$env:LOCALAPPDATA/VrCommand/SimulationRuns" --seconds 60
 python scripts/check-desktop-clock-faults.py --runtime-root "$env:LOCALAPPDATA/VrCommand/SimulationRuns" --seconds 60 --delay-management
 python scripts/check-desktop-clock-faults.py --runtime-root "$env:LOCALAPPDATA/VrCommand/SimulationRuns" --seconds 60 --delay-management --five-room-isolation
+python scripts/check-desktop-clock-faults.py --runtime-root "$env:LOCALAPPDATA/VrCommand/SimulationRuns" --seconds 60 --delay-management --five-room-linked
 python scripts/check-desktop-clock-faults.py --runtime-root "$env:LOCALAPPDATA/VrCommand/SimulationRuns" --seconds 180
 python -m unittest discover -s tests -p test_venue_http_gate.py
 ```
