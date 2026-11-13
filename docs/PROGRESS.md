@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 五房 UDP 預檢補測
+
+- 全館預檢可用 `--retry-report` 重新核對原本通過的雙端資料，並只提交缺漏來源。重試沿用同一份網路清單和原啟動資料，並檢查原檔雜湊、重複來源與既有時限。 [補測方式](EXTERNAL_CLIENTS.md#補測未完成的全館-udp-預檢)
+- 本機通過 113 項封存、10 項 LAN 預檢與 12 項 Quest UDP 測試。用原檢查時間重驗 Windows 同機資料，獨立模式保留四組來源後補齊第五組，合併模式補齊唯一一組。兩種模式的收件與封存摘要和原驗收一致，涵蓋 50 份原玩家 ZIP、6 組 UDP 及 2,502 格封存回放。 [本機驗證摘要](../artifacts/venue-udp-resume-validation.json)
+- 功能來源 `b89ff79` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43334562104)
+
 ## 2026-11-13 五房重連來源 IPv4 核對
 
 - 封存與 Windows 收件可使用原開場網路清單和 `reconnectSourcePlan`，逐條核對同一程序重連前後的 IPv4、舊連線釋放、原入場與戰績確認。開場 UDP 預檢沿用第一個來源。混合場的 Quest 擷取沿用原 PID。 [操作方式](EXTERNAL_CLIENTS.md#核對重連時變更的-ipv4)
