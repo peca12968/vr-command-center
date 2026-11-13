@@ -61,6 +61,9 @@ class VenueHttpGateTests(unittest.TestCase):
         gate = self.gate(); self.assertEqual((200, b'ordinary response'), self.request(gate))
         gate.block('management'); self.assertEqual(503, self.request(gate)[0])
         self.assertEqual((200, b'own fixture body|Bearer unit-test-only'), self.request(gate, '/combat-stream/batch', 'POST', b'own fixture body', {'Authorization': 'Bearer unit-test-only'}))
+        self.assertEqual((200, b'original receipt|Bearer unit-test-only'),
+                         self.request(gate, '/debrief-receipts', 'POST', b'original receipt',
+                                      {'Authorization': 'Bearer unit-test-only'}))
         gate.release(); self.assertEqual(200, self.request(gate)[0]); self.assertEqual(1, gate.snapshot()['counts']['managementBlocked'])
     def test_publication_fault_closes_opaque_tunnel_and_reconnects_after_release(self):
         gate = self.gate()
@@ -78,6 +81,7 @@ class VenueHttpGateTests(unittest.TestCase):
     def test_other_session_and_unbounded_http_bodies_are_rejected(self):
         gate = self.gate()
         self.assertEqual(403, self.request(gate, '/../' + str(uuid.uuid4()))[0])
+        self.assertEqual(403, self.request(gate, '/debrief-receipts')[0])
         self.assertEqual(413, self.request(gate, '/combat-stream', 'POST', headers={'Content-Length': str(1024 * 1024 + 1)})[0])
         self.assertEqual(400, self.request(gate, '/combat-stream', 'POST', headers={'Transfer-Encoding': 'chunked'})[0])
     def test_automatic_release_is_reported_and_cannot_be_a_successful_fault(self):

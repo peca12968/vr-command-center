@@ -16,7 +16,7 @@
 
 `venue_http_gate.py` 只綁127.0.0.1，拒絕非plain loopback、正式5080、帶使用者資訊／路徑／query的upstream；由fixture從自己的新API建立，不是部署用代理或認證邊界。HTTP仍由API檢查GameServer認證，代理不製造Internal身分。
 
-只允許自己session的管理／statistics GET、combat-stream POST／batch／seal、player ticket validate及同一session world publish；其餘拒絕。HTTP在記憶體轉送原body／認證，不輸出或保存headers、payload、票券、GameServer key。WebSocket只轉送不解析的原始bytes，不注入姿態／武器／RPC，也不改管理或combat JSON。
+只允許自己場次的管理與戰績查詢、戰鬥資料與封存、原戰績確認回條、世界發布及入場票券驗證。HTTP 在記憶體轉送原內容及認證，不保存憑證或內容。WebSocket 轉送原始位元組。
 
 最多8個處理連線，HTTP body1MiB、response2MiB，tunnel每塊最多64KiB、沒有無界排隊；每次故障最長20秒、代理最長240秒。自動上限觸發會記為失效證據，不能passed。HTTP處理執行緒為non-daemon，server_close等待其全部完成；listener／watchdog與自己的tunnel亦必須停止，所有writer全停後才一次複製runtime回F，原件不移動。兩類故障獨立，不以關掉整個API冒充分通道驗證。
 

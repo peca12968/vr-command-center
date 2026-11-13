@@ -139,10 +139,16 @@ def main():
         sealed = venue.seal(entry); results = venue.wait_for_player_results(entry)
         if not results['allAcknowledged']: raise RuntimeError('Final result was not acknowledged after recovery')
         result = debrief.final_result(venue, names[1]); debrief.validate_result(result, entry, entry['players'][0], sealed)
+        def recorded_receipt():
+            info = venue.request(f'/api/sessions/{entry["id"]}/world?includeDebriefReceipts=true')
+            rows = (info.get('debriefReceipts') or {}).get('players', [])
+            return next((row for row in rows if row['admissionId'] == result['admissionId'] and row['acknowledged']), None)
+        receipt = venue.wait(recorded_receipt, 5, 'original management debrief acknowledgement')
         events = venue.request(f'/api/sessions/{entry["id"]}/events?after=0&limit=500')
         expiry = [event for event in events if event['kind'] == 'ControlApplied' and event['payload'].get('clockExpiration')]
         if len(expiry) != 1 or expiry[0]['payload']['clockExpiration']['tick'] != limit or expiry[0]['actor']['id'] != 'mission-clock': raise RuntimeError('Deadline was not committed exactly once')
         venue.proxy.close(); proxy_closed = True; gate = venue.proxy.snapshot()
+        venue.save('proxy-final.json', gate)
         if gate['limitsTriggered'] or gate['activeTunnels'] or gate['counts']['handlerErrors'] or gate['counts']['routeRejected'] or gate['counts']['capacityRejected'] or gate['counts']['webSockets'] < 2:
             raise RuntimeError('Fault proxy scope / bounds / reconnection invalid')
         report = {'complete': False, 'source': 'Actual Windows Unity UDP / native local replicas; Simulation rigs', 'headsets': 0, 'durationSeconds': args.seconds,
@@ -150,11 +156,12 @@ def main():
             'managementSamples': management_samples, 'managementDiagnostics': diagnostics,
             'resumedPacket': resumed, 'acceptedBeforeDue': accepted_before_due,
             'localDueSamples': held_samples, 'clientDue': due_client, 'unacceptedDueHoldSeconds': due_hold_seconds, 'proxy': gate,
-            'automaticEnd': expiry[0], 'sealed': sealed, 'clientResult': result, 'replay': replay(venue, entry, sealed, limit),
+            'automaticEnd': expiry[0], 'sealed': sealed, 'clientResult': result,
+            'managementDebriefReceipt': receipt, 'replay': replay(venue, entry, sealed, limit),
             'checks': ['management loss visibly freezes the authority and published clock', 'same policy resumes without resetting elapsed ticks',
                        'publication loss does not pause an otherwise managed timer', 'native server and client freeze at exact due tick before API acceptance',
                        'unaccepted local due time cannot authorize End', 'restored publication commits exactly one internal End',
-                       'both seals and targeted client result match the final ledger', 'entire sealed replay is contiguous and never exceeds the deadline',
+                       'both seals, targeted result and management acknowledgement match the original admission', 'entire sealed replay is contiguous and never exceeds the deadline',
                        'native logs identify the 503 refresh failure, authority suspension and recovery in order']}
     except BaseException as error:
         venue.stage('failed', errorType=type(error).__name__); raise

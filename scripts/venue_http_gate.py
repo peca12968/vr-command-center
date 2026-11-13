@@ -94,7 +94,8 @@ class VenueHttpGate:
 
     def allowed(self, method, path):
         return (method == 'GET' and path in self.reads) or (method == 'POST' and path in (
-            '/api/player-tickets/validate', self.prefix + '/combat-stream', self.prefix + '/combat-stream/batch', self.prefix + '/combat-stream/seal'))
+            '/api/player-tickets/validate', self.prefix + '/combat-stream', self.prefix + '/combat-stream/batch',
+            self.prefix + '/combat-stream/seal', self.prefix + '/debrief-receipts'))
 
     def blocked_http(self, method, path):
         if method == 'GET' and path == self.prefix and self.blocked('management'): return 'managementBlocked'
