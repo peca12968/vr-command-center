@@ -1088,15 +1088,18 @@ def main():
                 changed_pair = out / f'{label}-udp-changed-original.json'
                 changed = read(readiness_path)
                 reference = changed['groups'][-1]['udpSourcePreflights'][0]
+                original_pair = dict(reference)
                 listener = out / reference['listener']
                 replacement = out / f'{label}-udp-reformatted-listener.ndjson'
                 replacement.write_bytes(listener.read_bytes() + b'\n')
                 reference['listener'] = replacement.name
                 save(changed_pair.name, changed)
-                changed_evidence = subprocess.run([*verify_only, '--readiness', str(changed_pair)],
+                retry_path = out / f'{label}-udp-retry-after-recheck.json'
+                changed_evidence = subprocess.run([*verify_only, '--readiness', str(changed_pair), '--retry-output', str(retry_path)],
                                                   capture_output=True, encoding='utf-8', timeout=45)
                 changed_summary = json.loads(changed_evidence.stdout)
-                check(changed_evidence.returncode == 1 and changed_summary['verifiedSources'] == len(states) - 1
+                check(changed_evidence.returncode == 1 and changed_summary['retryReportSaved'] is True
+                      and changed_summary['verifiedSources'] == len(states) - 1
                       and changed_summary['pendingSeats'] == [
                           {'roomId': seat['roomId'], 'seat': seat['seat'], 'status': 'invalid-or-expired', 'reason': 'changed-original'}
                           for seat in original_network['sources'] if seat['roomId'] in changed['groups'][-1]['roomIds']]
@@ -1104,6 +1107,20 @@ def main():
                       and all(request('/api/sessions/' + row['id']) == row for row in states),
                       label + ' offline verification rejects different bytes in an otherwise valid original exchange')
                 offline['changedOriginal'] = changed_summary
+                restored_pairs = out / f'{label}-udp-restored-pair.json'
+                save(restored_pairs.name, {'version': 1, 'pairs': [original_pair]})
+                restored_readiness = out / f'{label}-udp-restored-readiness.json'
+                retried = subprocess.run([sys.executable, str(ROOT / 'scripts/check-venue-udp-preflight.py'),
+                    '--network-plan', str(out / (label + '-udp-network.json')), '--launch-plan', str(plan_file),
+                    '--launcher-preview', str(preview), '--retry-report', str(retry_path), '--pairs', str(restored_pairs),
+                    '--output', str(restored_readiness)], capture_output=True, encoding='utf-8', timeout=45)
+                recovered = read(restored_readiness) if restored_readiness.is_file() else None
+                check(retried.returncode == 0 and recovered['complete'] and recovered['retainedSources'] == len(states) - 1
+                      and recovered['groups'] == read(readiness_path)['groups']
+                      and not any(path.exists() for path in (work, ready, report, start_receipt))
+                      and all(request('/api/sessions/' + row['id']) == row for row in states),
+                      label + ' saved offline retry restores the missing source and reuses only verified originals')
+                offline['retry'] = json.loads(retried.stdout)
                 save(label + '-offline-udp-check.json', offline)
                 for reason, input_plan, input_report in (
                     ('complete venue UDP readiness report', plan_file, incomplete),

@@ -501,13 +501,41 @@ class LanPreflightTests(unittest.TestCase):
         for role in ('listener', 'probe'):
             (self.root / first[role]).write_bytes((self.root / replacement[role]).read_bytes())
         try:
-            rejected = subprocess.run([*verify, '--readiness', str(bound_path)], capture_output=True, timeout=15)
+            retry_dir = self.root / 'recheck'
+            retry_dir.mkdir()
+            retry = retry_dir / 'retry.json'
+            command = [*verify, '--readiness', str(bound_path), '--retry-output', str(retry)]
+            rejected = subprocess.run(command, capture_output=True, timeout=15)
             self.assertEqual(1, rejected.returncode, rejected.stderr)
             diagnostic = json.loads(rejected.stdout)
             self.assertEqual(1, diagnostic['verifiedSources'])
+            self.assertTrue(diagnostic['retryReportSaved'])
             self.assertEqual([{'roomId': room, 'seat': seat, 'status': 'invalid-or-expired', 'reason': 'changed-original'}
                               for room in rooms for seat in (1, 2, 3)], diagnostic['pendingSeats'])
             self.assertNotIn(str(self.root).encode(), rejected.stdout)
+            retry_bytes = retry.read_bytes()
+            retry_doc = json.loads(retry_bytes)
+            self.assertFalse(retry_doc['complete'])
+            self.assertEqual(original, (retry_dir / retry_doc['launchBinding']['plan']).resolve())
+            retained, = retry_doc['retrySources']
+            self.assertEqual({role: self.root / name for role, name in second.items()},
+                             {role: (retry_dir / name).resolve() for role, name in retained['pair'].items()})
+            collision = subprocess.run(command, capture_output=True, timeout=15)
+            self.assertEqual(1, collision.returncode)
+            self.assertEqual(retry_bytes, retry.read_bytes())
+            additions = self.venue_json('replacement-pairs.json', {'version': 1, 'pairs': [replacement]})
+            repaired = self.venue_check(generated, 'repaired-after-recheck.json', '--retry-report', retry, '--pairs', additions,
+                                        '--launch-plan', original, '--launcher-preview', guarded_preview)
+            self.assertTrue(repaired['complete'])
+            self.assertEqual(1, repaired['retainedSources'])
+            self.assertEqual([replacement, second], repaired['groups'][0]['udpSourcePreflights'])
+            self.assertEqual(retry_bytes, retry.read_bytes())
+            fixed_output = retry_dir / 'fixed-retry.json'
+            fixed = subprocess.run([*verify, '--readiness', str(self.root / 'repaired-after-recheck.json'),
+                                    '--retry-output', str(fixed_output)], capture_output=True, timeout=15)
+            self.assertEqual(0, fixed.returncode, fixed.stderr)
+            self.assertNotIn('retryReportSaved', json.loads(fixed.stdout))
+            self.assertFalse(fixed_output.exists())
             spec = importlib.util.spec_from_file_location('field_results', ROOT / 'scripts/verify-field-results.py')
             field = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(field)

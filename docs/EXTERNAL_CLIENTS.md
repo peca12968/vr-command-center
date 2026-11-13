@@ -303,6 +303,8 @@ python .\scripts\check-venue-udp-preflight.py `
 
 #### 補測未完成的全館 UDP 預檢
 
+已完成的全館報告若在開場前重驗失敗，可用 `start-verified-venue.py --verify-only` 加上 `--retry-output .\venue-retry.json`。輸出目錄須已存在，檔名須未使用。工具會在離線重驗未完成時保存這一輪仍有效的來源，並在終端機回傳 `retryReportSaved`。接著以新檔作為下方指令的 `--retry-report`，只加入找回或補測的雙端報告。 [開場前重驗](WINDOWS_SERVER_PACKAGE.md#以-udp-預檢報告啟動五房)
+
 全館檢查未完成且已提供的啟動資料核對通過時，報告會在 `retrySources` 保留已驗證的來源、雙端報告路徑與雜湊。補測缺漏或失敗來源後，用 `--retry-report` 指定前一份未完成的全館報告，並用 `--pairs`、`--inbox` 或 `--batch` 帶入補測的雙端資料。若只缺對端原檔，可補進同一收件夾後重跑。工具會重新核對先前通過的原檔，同一路徑的同一對檔案只計一次。若某來源重新探測，請把新一對放入補件收件夾，並保留先前的原始檔案供核對。每輪使用新的輸出路徑。重試須沿用同一份網路清單，以及前一輪提供的啟動計畫或預覽原檔。
 
 ```powershell

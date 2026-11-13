@@ -60,7 +60,11 @@ def launch(args):
     proof = field.read_udp_launch_binding(report, readiness.parent, report.get('mode'))
     field.require(proof is not None, 'Provide a readiness report bound to the original Windows plan and preview')
     binding, _ = proof
+    original_plan = (readiness.parent / report['launchBinding']['plan']).resolve(strict=True)
     preview = (readiness.parent / report['launchBinding']['preview']).resolve(strict=True)
+    retry_output = args.retry_output.resolve() if args.retry_output is not None else None
+    if retry_output is not None:
+        field.require(not retry_output.exists() and retry_output.parent.is_dir(), 'Use a new retry report in an existing directory')
     with args.launch_plan.open('rb') as stream:
         raw_plan = stream.read(field.MAX_QUEST_PLAN_BYTES + 1)
     field.require(len(raw_plan) <= field.MAX_QUEST_PLAN_BYTES
@@ -87,7 +91,7 @@ def launch(args):
         field.require(len(network_raw) <= field.MAX_QUEST_PLAN_BYTES, 'The network plan is too large')
         network = Path(directory) / 'venue-network.json'
         network.write_bytes(network_raw)
-        checked = preflight.check_venue(network, None, [readiness], readiness, preview, snapshot,
+        checked = preflight.check_venue(network, None, [readiness], retry_output or readiness, preview, snapshot,
                                         require_distinct_remote_roster=distinct, explain_failures=args.verify_only)
         with readiness.open('rb') as stream:
             field.require(checked['networkPlanSha256'] == report.get('networkPlanSha256')
@@ -95,6 +99,15 @@ def launch(args):
                           and checked['launchBinding']['previewSha256'] == binding['previewSha256'],
                           'The original network plan, readiness report or preview changed')
         if args.verify_only:
+            if retry_output is not None and not checked['complete']:
+                # The checker read a private snapshot. Subsequent retries must use the original plan.
+                field.require(checked['launchBinding']['complete'] and
+                              field.read_udp_launcher_document(original_plan, preview=False)[0] == binding['planSha256'],
+                              'The original Windows launch plan changed before saving the retry report')
+                checked['launchBinding']['plan'] = preflight.path_reference(original_plan, retry_output.parent)
+                with retry_output.open('x', encoding='utf-8', newline='\n') as stream:
+                    json.dump(checked, stream, indent=2)
+                    stream.write('\n')
             pending = [{**seat, 'status': row['status'], **{key: row[key] for key in ('reason', 'missingRole') if key in row}}
                        for group in checked['groups'] for row in group['sources'] if row['status'] != 'verified'
                        for seat in row['seats']]
@@ -102,7 +115,8 @@ def launch(args):
                               'mode': checked['mode'], 'verifiedSources': checked['verifiedSources'],
                               'expectedSources': checked['expectedSources'], 'unreadablePairs': checked['unreadablePairs'],
                               'unmatchedPairs': checked['unmatchedPairs'],
-                              'pendingSeats': sorted(pending, key=lambda seat: (seat['roomId'], seat['seat']))}), flush=True)
+                              'pendingSeats': sorted(pending, key=lambda seat: (seat['roomId'], seat['seat'])),
+                              **({'retryReportSaved': True} if retry_output is not None and not checked['complete'] else {})}), flush=True)
             return 0 if checked['complete'] else 1
         field.require(checked['complete'], 'UDP readiness is no longer complete or within its original time window')
         distinct = field.udp_preflight_distinct_roster(checked)
@@ -160,6 +174,7 @@ def write_start_receipt(path, ready_path, result_path, readiness, original, chec
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--verify-only', action='store_true', help='Recheck archived UDP evidence without contacting management or starting Windows')
+    parser.add_argument('--retry-output', type=Path, help='With --verify-only, save an incomplete report for check-venue-udp-preflight.py --retry-report')
     parser.add_argument('--launcher', type=Path)
     parser.add_argument('--launch-plan', type=Path, required=True)
     parser.add_argument('--network-plan', type=Path, required=True)
@@ -177,8 +192,11 @@ def main():
     if args.verify_only:
         if any(getattr(args, name) is not None for name in launch_options) or args.start_receipt or args.peer_diagnostics:
             parser.error('--verify-only does not accept Windows launch or output options')
-    elif any(getattr(args, name) is None for name in launch_options):
-        parser.error('Starting Windows requires --launcher --work --seconds --ready-report --report')
+    else:
+        if args.retry_output is not None:
+            parser.error('--retry-output requires --verify-only')
+        if any(getattr(args, name) is None for name in launch_options):
+            parser.error('Starting Windows requires --launcher --work --seconds --ready-report --report')
     try:
         if not args.verify_only:
             field.require(os.name == 'nt', 'This launcher runs on Windows')
