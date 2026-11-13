@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 從本房名冊下載整房連線檔
+
+- 控制台 0.31.165 可從指定房間名冊直接下載該房 ZIP，沿用原 IPv4、UDP 埠及名冊再次核對。 [操作方式](EXTERNAL_CLIENTS.md#按房間下載連線檔)
+- 通過 75 項 Chromium 及 107 項 Windows 管理包檢查。三種入口均拒絕已簽發但入場被更換的連線檔，重新整理後可從名冊取得新 ZIP。首輪瀏覽器腳本先填位址再切換場次，已修正測試順序並保留原失敗紀錄。 [Windows 管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.165-roster-tickets-win-x64.zip) · [本機驗證摘要](../artifacts/venue-roster-room-tickets-validation.json)
+- 功能來源 `5fb016d` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43344967784)
+
 ## 2026-11-13 名冊人數與參戰摘要依房間篩選
 
 - 控制台 0.31.164 選定房間後，名冊與有效姿態摘要都使用該房人數。切回全部房間可查看全場，快照效期仍為 1.5 秒。 [操作方式](PLAYER_READINESS.md#五房追蹤驗收開場)
