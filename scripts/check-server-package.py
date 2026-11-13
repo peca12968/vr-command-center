@@ -188,6 +188,7 @@ def main():
     p.add_argument('--check-venue-receipt-retry', action='store_true', help='Lose both original batch replies after commit through a loopback fixture')
     p.add_argument('--check-venue-launch-review', action='store_true', help='Import original unresolved launcher reports into the shipped Chromium console')
     p.add_argument('--check-venue-ready-review', action='store_true', help='Review the original Windows ready file in Chromium before Begin')
+    p.add_argument('--check-venue-terminal-review', action='store_true', help='Compare both original Windows terminal seals in Chromium')
     p.add_argument('--check-venue-begin-conflict', action='store_true', help='Verify an outdated Begin reports the changed native rooms')
     p.add_argument('--check-venue-relay-readback', action='store_true', help='Use both source relay CLIs on copies of the closed original Linked journals')
     p.add_argument('--check-venue-preview', action='store_true', help='Run the shared Windows venue preview before both topology launches')
@@ -342,6 +343,8 @@ def main():
         p.error('--check-venue-launch-review requires --check-venue-receipt-retry')
     if args.check_venue_ready_review and (not args.check_venue_launcher or not shutil.which('node')):
         p.error('--check-venue-ready-review requires --check-venue-launcher and Node.js with Playwright Chromium')
+    if args.check_venue_terminal_review and (not args.check_venue_launcher or not args.venue_field_evidence or not shutil.which('node')):
+        p.error('--check-venue-terminal-review requires --check-venue-launcher --venue-field-evidence and Node.js with Playwright Chromium')
     if args.check_venue_begin_conflict and not args.check_venue_begin:
         p.error('--check-venue-begin-conflict requires --check-venue-begin')
     if args.check_venue_relay_readback and (not args.check_venue_plan_ui or not shutil.which('dotnet')):
@@ -2146,6 +2149,15 @@ def main():
             check(summary['venueLauncherReport'] == {'launchId': read(original_launch)['venueLaunchId'],
                   'sha256': control.sha(original_launch), 'sessions': len(entries)},
                   label + ' sealed field report reads the untouched shared Windows terminal report')
+            if args.check_venue_terminal_review:
+                terminal = read(original_launch)
+                expected = [{'sessionId': row['result']['sessionId'], 'roomIds': row['roomIds'], 'phase': 'Ended',
+                             'sourceState': 'original-source', 'streamId': row['result']['streamId'], 'sealState': 'matched'}
+                            for row in sorted(terminal['servers'], key=lambda row: row['roomIds'][0])]
+                observed = browser_launch_review(original_launch, expected, label+'-terminal')
+                check(observed['version'] == 3 and observed['launchId'] == terminal['venueLaunchId']
+                      and control.sha(original_launch) == summary['venueLauncherReport']['sha256'],
+                      label+' original terminal report matches both management seals without changing the file')
         if args.check_venue_udp_readiness:
             if args.check_venue_plan_ui:
                 check(summary['venueNetworkPlan'] == {'sha256': control.sha(Path(common['venueNetworkPlan'])),

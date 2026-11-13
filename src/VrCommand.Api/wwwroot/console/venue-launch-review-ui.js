@@ -18,15 +18,33 @@ const endpointStates = {
   'endpoint-mismatch': '公告端點與報告不符',
   published: '管理端已保存端點'
 };
+const sealStates = { matched: '雙封存序號相符', pending: '管理端尚未完成雙封存', mismatch: '原錄製來源或封存序號不符' };
+
+function projectSeal(result, roomIds, launchId) {
+  const { schemaVersion, status, complete, childExited, cleanupCompleted, sessionId, streamId, finalWorld, finalCombatStream } = result;
+  const header = finalWorld?.header;
+  const worldSequence = finalWorld?.acceptedSequence, combatSequence = finalCombatStream?.acceptedSequence;
+  if (schemaVersion !== 1 || status !== 'sealed-stopped' || complete !== true || childExited !== true || cleanupCompleted !== true
+      || finalWorld?.complete !== true || finalCombatStream?.sealed !== true || header?.schemaVersion !== 1
+      || header.sessionId !== sessionId || header.streamId !== streamId || finalCombatStream.streamId !== streamId
+      || finalCombatStream.venueLaunchId !== launchId || !['Simulation', 'GameServer'].includes(header.origin)
+      || header.origin !== finalCombatStream.origin || !Array.isArray(header.roomIds) || header.roomIds.join(',') !== roomIds.join(',')
+      || !Number.isSafeInteger(worldSequence) || worldSequence < 1 || !Number.isSafeInteger(combatSequence) || combatSequence < 0)
+    throw new Error('Invalid sealed report');
+  return { origin: header.origin, combatSequence, worldSequence };
+}
 
 function projectReport(value) {
   const { schemaVersion, status, complete, readyPublished, instanceId, venueLaunchId, topology,
     sourceAttachment, endpointPublication, servers } = value ?? {};
   const ready = status === 'venue-ready';
+  const terminal = status === 'venue-sealed-stopped';
   if (schemaVersion !== 1 || !isId(instanceId) || !['Independent', 'Linked'].includes(topology)
       || !Array.isArray(servers) || servers.length !== (topology === 'Linked' ? 1 : 5))
     throw new Error('Invalid venue report');
-  if (!ready && (status !== 'venue-incomplete' || complete !== false || readyPublished !== false || !isId(venueLaunchId)
+  if (terminal && (complete !== true || readyPublished !== true || !isId(venueLaunchId)
+      || sourceAttachment !== 'confirmed' || endpointPublication !== 'confirmed')) throw new Error('Invalid sealed venue');
+  if (!ready && !terminal && (status !== 'venue-incomplete' || complete !== false || readyPublished !== false || !isId(venueLaunchId)
       || !['not-attempted', 'rejected', 'confirmed', 'unconfirmed'].includes(sourceAttachment)
       || !['not-attempted', 'confirmed', 'unconfirmed'].includes(endpointPublication)
       || ![sourceAttachment, endpointPublication].includes('unconfirmed')
@@ -41,6 +59,10 @@ function projectReport(value) {
     if (!Array.isArray(roomIds) || roomIds.length !== roomCount || !roomIds.every(id => rooms.includes(id))
         || !isId(sessionId) || (streamId !== null && !isId(streamId)))
       throw new Error('Invalid venue server');
+    if (terminal) {
+      if (!isId(streamId)) throw new Error('Missing original source');
+      return { sessionId, roomIds: [...roomIds].sort(), streamId, udp: null, seal: projectSeal(result, roomIds, venueLaunchId) };
+    }
     let udp = null;
     if (udpBinding !== null) {
       if (!udpBinding || !isId(streamId) || !Number.isInteger(childPid) || childPid < 1 || udpBinding.processId !== childPid
@@ -59,7 +81,7 @@ function projectReport(value) {
   if (new Set(targets.map(row => row.sessionId)).size !== targets.length
       || targets.flatMap(row => row.roomIds).join(',') !== rooms.join(','))
     throw new Error('Invalid room coverage');
-  return { version: ready ? 2 : 1, instanceId, launchId: ready ? null : venueLaunchId, topology, servers: targets };
+  return { version: ready ? 2 : terminal ? 3 : 1, instanceId, launchId: ready ? null : venueLaunchId, topology, servers: targets };
 }
 
 function verifyReply(value, request) {
@@ -76,6 +98,9 @@ function verifyReply(value, request) {
         || ![true, false, null].includes(row.addressMatched)
         || (row.sourceState === 'original-source' ? !isId(row.streamId) : row.streamId !== null)
         || (row.sourceState === 'original-source' && target.streamId !== null && row.streamId !== target.streamId)
+        || (request.version === 3 && (row.endpointState !== 'not-checked'
+          || (row.sourceState === 'original-source' ? !Object.hasOwn(sealStates, row.sealState) : row.sealState !== undefined)
+          || (row.sealState === 'matched' && row.phase !== 'Ended')))
         || (request.version === 2 && row.endpointState === 'published'
           && (row.endpointAddress !== target.udp.address || row.endpointPort !== target.udp.port || row.addressMatched !== true))
         || (['published', 'endpoint-mismatch'].includes(row.endpointState)
@@ -146,7 +171,9 @@ export function mountVenueLaunchReview(getState, api, selectSession, focusRoster
     const allUnbound = review.servers.every(row => row.phase === 'Preparing' && row.sourceState === 'unbound');
     const allLive = review.servers.every(row => row.phase === 'Preparing' && row.sourceState === 'original-source'
       && row.endpointState === 'published' && row.recentSource === true);
-    const summary = review.version === 2 && allLive && review.instanceVerified ? '取樣時五房原端點皆相符，並收到近期來源快照。'
+    const allSealed = review.servers.every(row => row.sealState === 'matched');
+    const summary = review.version === 3 ? (allSealed ? '五房原戰鬥與回放封存序號均相符。' : '請查看各房的原來源與封存結果。')
+      : review.version === 2 && allLive && review.instanceVerified ? '取樣時五房原端點皆相符，並收到近期來源快照。'
       : allUnbound ? '原場次取樣時均在準備中且尚未登記來源。' : '已核對原場次。請查看各房來源與端點狀態。';
     const instance = review.instanceVerified ? '管理實例相符。' : '此管理服務未提供實例識別，已按原場次識別比對。';
     $('summary').textContent = `${instance}${summary} 取樣時間 ${new Date(review.observedAtUtc).toLocaleString('zh-TW')}。`;
@@ -158,7 +185,9 @@ export function mountVenueLaunchReview(getState, api, selectSession, focusRoster
       const address = endpoint && row.addressMatched === null ? ' · 報告無可比對的公告位址' : '';
       const recent = row.recentSource === null ? '' : row.recentSource ? ' · 有近期來源快照' : ' · 尚無近期來源快照';
       const detail = document.createElement('span');
-      detail.textContent = `房間 ${row.roomIds.join('、')} · ${row.sessionId}${row.phase === null ? '' : ' · ' + phases[row.phase]} · ${sourceStates[row.sourceState]}${stream} · ${endpointStates[row.endpointState]}${endpoint}${address}${recent}`;
+      const evidence = review.version === 3 ? (sealStates[row.sealState] ?? '無法核對原封存')
+        : `${endpointStates[row.endpointState]}${endpoint}${address}${recent}`;
+      detail.textContent = `房間 ${row.roomIds.join('、')} · ${row.sessionId}${row.phase === null ? '' : ' · ' + phases[row.phase]} · ${sourceStates[row.sourceState]}${stream} · ${evidence}`;
       li.append(detail);
       if (review.version === 2 && review.instanceVerified && row.sourceState === 'original-source'
           && row.endpointState === 'published' && ['Preparing', 'Running', 'Paused'].includes(row.phase)) {
@@ -202,7 +231,7 @@ export function mountVenueLaunchReview(getState, api, selectSession, focusRoster
         if (!selected.size || selected.size > 65536) throw new Error('Invalid report size');
         request = projectReport(JSON.parse(await selected.text()));
       } catch {
-        if (current()) $('summary').textContent = '請選擇 64 KiB 內的全館就緒檔，或含未確認狀態的第四版啟動報告。';
+        if (current()) $('summary').textContent = '請選擇 64 KiB 內的全館就緒檔、正常結束報告或含未確認狀態的第四版啟動報告。';
         return;
       }
       if (!current()) return;

@@ -35,8 +35,13 @@ async function checkSelected(page) {
 function projected(body) {
   assert.deepEqual(Object.keys(body).sort(), ['instanceId', 'launchId', 'servers', 'topology', 'version']);
   for (const server of body.servers) {
-    assert.deepEqual(Object.keys(server).sort(), ['roomIds', 'sessionId', 'streamId', 'udp']);
+    assert.deepEqual(Object.keys(server).sort(), body.version === 3 ? ['roomIds', 'seal', 'sessionId', 'streamId', 'udp']
+      : ['roomIds', 'sessionId', 'streamId', 'udp']);
     if (server.udp) assert.deepEqual(Object.keys(server.udp).sort(), body.version === 2 ? ['address', 'bindAddress', 'port'] : ['bindAddress', 'port']);
+    if (body.version === 3) {
+      assert.equal(server.udp, null);
+      assert.deepEqual(Object.keys(server.seal).sort(), ['combatSequence', 'origin', 'worldSequence']);
+    }
   }
 }
 
@@ -202,6 +207,53 @@ async function checkVenueLaunchReview({ context, api, tokens, base, screenshots,
     check(ended.servers[0].phase === 'Ended' && ended.servers[0].streamId === streamId,
       'A closed original session remains available for review');
 
+    const terminal = { ...raw, status: 'venue-sealed-stopped', complete: true, readyPublished: true,
+      sourceAttachment: 'confirmed', endpointPublication: 'confirmed', servers: [{ roomIds, result: {
+        ...raw.servers[0].result, schemaVersion: 1, status: 'sealed-stopped', complete: true, childExited: true,
+        cleanupCompleted: true, streamId, finalWorld: { complete: true, acceptedSequence: sequence,
+          header: { ...header, schemaVersion: 1 } },
+        finalCombatStream: { sealed: true, streamId, origin: 'Simulation', venueLaunchId: launchId, acceptedSequence: 0 }
+      } }] };
+    const terminalTarget = { version: 3, instanceId, launchId, topology: 'Linked', servers: [{ roomIds, sessionId: session.id,
+      streamId, udp: null, seal: { origin: 'Simulation', combatSequence: 0, worldSequence: sequence } }] };
+    await api(route, 'POST', terminalTarget, 'Room1', 403);
+    await api(route, 'POST', { ...terminalTarget, servers: [{ ...terminalTarget.servers[0], seal: { origin: 'Simulation', worldSequence: sequence } }] }, 'Master', 400);
+    await choose(page, terminal);
+    assert.equal((await (await checkSelected(page)).json()).servers[0].sealState, 'pending');
+    await page.locator(rows).filter({ hasText: '管理端尚未完成雙封存' }).waitFor();
+    check(!(await page.locator(summary).textContent()).includes('均相符'), 'The report cannot confirm closure before the management seals');
+    const endedState = await api(sessionPath);
+    const finalSequence = ++sequence;
+    assert.equal(send({ type: 'frame', payload: { sequence, observedSequence: endedState.sequence, elapsedMilliseconds: Date.now() - started,
+      weather: 'Clear', throughCombatSequence: 0, events: [], frame: { phase: 'Ended', tick: 0, night: false, throughSequence: 0, players } } }).acceptedSequence, sequence);
+    await api(sessionPath + '/combat-stream/seal', 'POST', { streamId, finalSequence: 0 }, 'GameServer');
+    assert.equal(send({ type: 'seal', finalSequence }).complete, true);
+    terminal.servers[0].result.finalWorld.acceptedSequence = sequence;
+    await choose(page, terminal);
+    const originalClosed = await api(sessionPath);
+    assert.equal((await (await checkSelected(page)).json()).servers[0].sealState, 'matched');
+    projected(requests.at(-1));
+    terminalTarget.servers[0].seal.worldSequence = sequence;
+    assert.deepEqual(requests.at(-1), terminalTarget);
+    await page.locator(summary).filter({ hasText: '五房原戰鬥與回放封存序號均相符' }).waitFor();
+    check(await page.locator(rosterShortcut(5)).count() === 0 && JSON.stringify(await api(sessionPath)) === JSON.stringify(originalClosed),
+      'A sealed report matches both original tails without uploading private fields or changing the session');
+    await page.locator(panel).screenshot({ path: path.join(screenshots, 'venue-terminal-review.png') });
+    for (const evidence of ['finalCombatStream', 'finalWorld']) {
+      terminal.servers[0].result[evidence].acceptedSequence++;
+      await choose(page, terminal);
+      assert.equal((await (await checkSelected(page)).json()).servers[0].sealState, 'mismatch');
+      await page.locator(rows).filter({ hasText: '原錄製來源或封存序號不符' }).waitFor();
+      check(!(await page.locator(summary).textContent()).includes('均相符'), `A different ${evidence} tail cannot confirm closure`);
+      terminal.servers[0].result[evidence].acceptedSequence--;
+    }
+    const terminalResult = terminal.servers[0].result;
+    terminalResult.finalWorld.header.origin = terminalResult.finalCombatStream.origin = 'GameServer';
+    await choose(page, terminal);
+    assert.equal((await (await checkSelected(page)).json()).servers[0].sealState, 'mismatch');
+    await page.locator(rows).filter({ hasText: '原錄製來源或封存序號不符' }).waitFor();
+    check(!(await page.locator(summary).textContent()).includes('均相符'), 'Matching sequence numbers from a different origin cannot confirm closure');
+
     let received;
     const observed = new Promise(resolve => { received = resolve; });
     const held = new Promise(resolve => { release = resolve; });
@@ -249,6 +301,11 @@ if (require.main === module) {
         for (const [key, value] of Object.entries(fields)) assert.deepEqual(review.servers[index][key], value);
       await page.locator(rows).nth(expected.length - 1).waitFor();
       assert.match(await page.locator(summary).textContent(), /管理實例相符/);
+      if (response.request().postDataJSON().version === 3) {
+        assert.match(await page.locator(summary).textContent(), /五房原戰鬥與回放封存序號均相符/);
+        assert.equal(await page.locator(rows).filter({ hasText: '雙封存序號相符' }).count(), expected.length);
+        assert.equal(await page.locator('[data-launch-review-roster]').count(), 0);
+      }
       if (liveReady) {
         assert.equal(response.request().postDataJSON().version, 2);
         assert.match(await page.locator(summary).textContent(), /五房原端點皆相符，並收到近期來源快照/);
