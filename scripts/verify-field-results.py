@@ -2605,7 +2605,19 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
                                    'world stream': stream_ids, 'admission': admission_ids}}
 
 
-def verify_venue_stages(plan_path):
+def staged_batch_report(report, batch):
+    return {'mode': report['mode'], 'players': report['players'], 'closureRequestId': batch['closureRequestId'],
+            'manifestSha256': batch['manifestSha256'],
+            'startedAtUtc': batch['started'].astimezone(timezone.utc).isoformat(),
+            'endedAtUtc': batch['ended'].astimezone(timezone.utc).isoformat(),
+            'serverAcknowledgements': report['serverAcknowledgements'],
+            'worldJournalsVerified': report['worldJournalsVerified'], 'concurrentRoster': report['concurrentRoster'],
+            **{key: report[key] for key in ('combatJournalsVerified', 'distinctRemoteRoster', 'windowsLinkCriteria',
+                                           'windowsStationAddresses', 'venueNetworkPlan', 'reconnectSourcePlan',
+                                           'verifiedVenueStart') if key in report}}
+
+
+def verify_venue_stages(plan_path, *, inspect=False):
     plan_path = plan_path.resolve(strict=True)
     with plan_path.open('rb') as stream:
         raw_plan = limited_read(stream)
@@ -2631,66 +2643,92 @@ def verify_venue_stages(plan_path):
     require(type(names) is list and len(names) == len(modes) * len(sizes)
             and all(type(name) is str and bool(name.strip()) for name in names),
             'Provide six venue manifests for the two 5, 10 and 25 seat series')
-    paths = [(plan_path.parent / name).resolve(strict=True) for name in names]
-    require(plan_path not in paths and len(set(paths)) == len(paths), 'Staged venue manifest paths must be distinct')
+    stage_keys = [(mode, players) for players in sizes for mode in modes]
+    stages, entries, issues = {}, {}, []
 
-    stages, used = {}, {}
-    start_launches = set()
-    release_hash = None
-    for index, path in enumerate(paths, 1):
+    def reject(message, *indices):
+        if not inspect:
+            raise EvidenceError(message)
+        issues.append({'entries': sorted(set(indices)), 'reason': message})
+
+    paths, used, releases = {}, {}, {}
+    for index, name in enumerate(names, 1):
+        try:
+            path = (plan_path.parent / name).resolve(strict=True)
+        except FileNotFoundError:
+            reject(f'Venue manifest entry {index}: missing manifest file', index)
+            continue
+        except (OSError, ValueError, RuntimeError):
+            reject(f'Venue manifest entry {index}: unreadable manifest path', index)
+            continue
+        if path == plan_path or path in paths:
+            reject('Staged venue manifest paths must be distinct', index, paths.get(path, index))
+            continue
+        paths[path] = index
         try:
             report, batch = verify_venue_batch(path, staged_roster=staged_roster)
+            key = (report['mode'], report['players'])
+            require(key in stage_keys, 'Staged venue evidence must cover each mode and seat count exactly once')
+            require(report['declaredTopology'] == topology, 'Venue batch topology differs from the staged plan')
+            release = report.get('venueRelease', {}).get('reportSha256')
+            require(release is not None, 'Every staged venue batch must use the same original verified release report')
+            overlap = report.get('concurrentRoster')
+            require(overlap is not None and overlap['longestMilliseconds'] >= minimum,
+                    'Venue batch lacks the continuous concurrent roster required by the staged plan')
+            require(not distinct or report.get('distinctRemoteRoster', {}).get('seatsVerified') == key[1],
+                    'Venue batch lacks distinct original remote sources for every seat')
+            verified_start = report.get('verifiedVenueStart')
+            require(not require_start or verified_start is not None, 'missing verified Windows start receipt')
         except EvidenceError as error:
-            raise EvidenceError(f'Venue manifest entry {index}: {error}') from None
-        mode, players = report['mode'], report['players']
-        key = mode, players
-        require(mode in modes and players in sizes and key not in stages,
-                'Staged venue evidence must cover each mode and seat count exactly once')
-        require(report['declaredTopology'] == topology, 'Venue batch topology differs from the staged plan')
+            reject(f'Venue manifest entry {index}: {error}', index)
+            continue
+        except (OSError, ValueError, ArithmeticError, AttributeError, KeyError, TypeError, RecursionError,
+                zipfile.BadZipFile, zlib.error, RuntimeError):
+            reject(f'Venue manifest entry {index}: unreadable or malformed original evidence', index)
+            continue
+
+        entries[index] = staged_batch_report(report, batch)
         for label, values in batch['identities'].items():
-            seen = used.setdefault(label, set())
-            require(seen.isdisjoint(values), f'Staged venue evidence reuses an original {label} identity')
-            seen.update(values)
-        current_release = report.get('venueRelease', {}).get('reportSha256')
-        require(current_release is not None and release_hash in (None, current_release),
-                'Every staged venue batch must use the same original verified release report')
-        release_hash = current_release
-        overlap = report.get('concurrentRoster')
-        require(overlap is not None and overlap['longestMilliseconds'] >= minimum,
-                'Venue batch lacks the continuous concurrent roster required by the staged plan')
-        require(not distinct or report.get('distinctRemoteRoster', {}).get('seatsVerified') == players,
-                'Venue batch lacks distinct original remote sources for every seat')
-        verified_start = report.get('verifiedVenueStart')
-        require(not require_start or verified_start is not None,
-                f'Venue manifest entry {index}: missing verified Windows start receipt')
+            seen = used.setdefault(label, {})
+            reused = {seen[value] for value in values if value in seen}
+            if reused:
+                reject(f'Staged venue evidence reuses an original {label} identity', index, *reused)
+            for value in values:
+                seen.setdefault(value, index)
         if verified_start is not None:
-            launch_id = verified_start['launchId']
-            require(launch_id not in start_launches, f'Venue manifest entry {index}: reused verified Windows launch identity')
-            start_launches.add(launch_id)
-        stages[key] = (report, batch)
+            launches = used.setdefault('verified Windows launch', {})
+            prior = launches.setdefault(verified_start['launchId'], index)
+            if prior != index:
+                reject(f'Venue manifest entry {index}: reused verified Windows launch identity', index, prior)
+        if key in stages:
+            reject('Staged venue evidence must cover each mode and seat count exactly once', index, stages[key][0])
+        else:
+            stages[key] = (index, batch)
+        releases.setdefault(release, []).append(index)
 
+    if len(releases) > 1:
+        reject('Every staged venue batch must use the same original verified release report', *chain.from_iterable(releases.values()))
     for mode in modes:
-        batches = [stages[mode, players][1] for players in sizes]
-        require(all(before['ended'] <= after['started'] for before, after in zip(batches, batches[1:])),
-                f'{mode} original sessions do not run in 5, 10 and 25 seat order')
+        batches = [stages[mode, players] for players in sizes if (mode, players) in stages]
+        for (left, before), (right, after) in zip(batches, batches[1:]):
+            if before['ended'] > after['started']:
+                reject(f'{mode} original sessions do not run in 5, 10 and 25 seat order', left, right)
 
-    results = []
-    for players in sizes:
-        for mode in modes:
-            report, batch = stages[mode, players]
-            results.append({'mode': mode, 'players': players, 'closureRequestId': batch['closureRequestId'],
-                            'manifestSha256': batch['manifestSha256'],
-                            'startedAtUtc': batch['started'].astimezone(timezone.utc).isoformat(),
-                            'endedAtUtc': batch['ended'].astimezone(timezone.utc).isoformat(),
-                            'serverAcknowledgements': report['serverAcknowledgements'],
-                            'worldJournalsVerified': report['worldJournalsVerified'],
-                            'concurrentRoster': report['concurrentRoster'],
-                            **{field: report[field] for field in ('combatJournalsVerified', 'distinctRemoteRoster', 'windowsLinkCriteria',
-                                                                'windowsStationAddresses', 'venueNetworkPlan', 'reconnectSourcePlan',
-                                                                'verifiedVenueStart')
-                               if field in report}})
+    if inspect:
+        affected = {index for issue in issues for index in issue['entries']}
+        results = []
+        for index in range(1, len(names) + 1):
+            if index not in entries:
+                results.append({'entry': index, 'status': 'needs-evidence'})
+                continue
+            status = 'conflict' if index in affected else 'verified'
+            results.append({'entry': index, 'status': status, **entries[index]})
+        return {'version': 1, 'scope': 'staged-venue-inspection', 'complete': not issues,
+                'planSha256': hashlib.sha256(raw_plan).hexdigest(), 'entries': results, 'issues': issues,
+                'missingStages': [{'mode': mode, 'players': players} for mode, players in stage_keys if (mode, players) not in stages]}
+    results = [entries[stages[key][0]] for key in stage_keys]
     return {'version': 1, 'consistent': True, 'declaredTopology': topology,
-            'planSha256': hashlib.sha256(raw_plan).hexdigest(), 'venueReleaseSha256': release_hash,
+            'planSha256': hashlib.sha256(raw_plan).hexdigest(), 'venueReleaseSha256': next(iter(releases)),
             'minimumConcurrentMilliseconds': minimum, 'requireDistinctRemoteRoster': distinct,
             **({'requireVerifiedVenueStart': require_start} if 'requireVerifiedVenueStart' in plan else {}),
             **{key: requirements[key] for key in roster_options if key in plan}, 'stages': results,
@@ -2703,6 +2741,7 @@ def main():
     venue = parser.add_mutually_exclusive_group()
     venue.add_argument('--venue-manifest', type=Path, help='Check one five-room End batch from a private manifest')
     venue.add_argument('--venue-stages', type=Path, help='Verify the six original five-room batches for staged 5, 10 and 25 player runs')
+    parser.add_argument('--inspect-venue-stages', action='store_true', help='List issues across all six original venue batches')
     parser.add_argument('--inspect-windows-inbox', action='store_true', help='List missing seats, conflicts and verified Windows measurements in a venue inbox')
     parser.add_argument('--topology', choices=('same-host', 'direct-lan'))
     parser.add_argument('--server-ip', action='append', help='Repeat for each assigned server IPv4')
@@ -2729,13 +2768,15 @@ def main():
         parser.error('Provide --venue-manifest or --venue-stages alone, or all single-session options.')
     if args.inspect_windows_inbox and not args.venue_manifest:
         parser.error('--inspect-windows-inbox requires --venue-manifest.')
+    if args.inspect_venue_stages and not args.venue_stages:
+        parser.error('--inspect-venue-stages requires --venue-stages.')
     if args.udp_preflight and args.udp_source_preflight:
         parser.error('Use either --udp-preflight or --udp-source-preflight.')
     try:
         if args.inspect_windows_inbox:
             report, _ = verify_venue_batch(args.venue_manifest, inspect_windows=True)
         elif args.venue_stages:
-            report = verify_venue_stages(args.venue_stages)
+            report = verify_venue_stages(args.venue_stages, inspect=args.inspect_venue_stages)
         elif args.venue_manifest:
             report = verify_venue(args.venue_manifest)
         else:
@@ -2778,6 +2819,8 @@ def main():
         parser.exit(1, 'Field evidence rejected. Check topology, original admissions, UDP peer markers, final seals and complete logs.\n')
     print(json.dumps(report, indent=2))
     if args.inspect_windows_inbox and (not report['complete'] or not report.get('windowsLinkMetrics', {}).get('meetsCriteria', True)):
+        raise SystemExit(1)
+    if args.inspect_venue_stages and not report['complete']:
         raise SystemExit(1)
 
 

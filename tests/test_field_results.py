@@ -616,6 +616,29 @@ class FieldResultsTests(unittest.TestCase):
             with self.assertRaisesRegex(field.EvidenceError, 'verified Windows start option must be boolean'):
                 field.verify_venue_stages(path)
 
+    def test_staged_inspection_reports_missing_bad_and_reused_evidence_in_one_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = self.staged_plan(root)
+            names = plan['venueManifests']
+            (root / names[1]).unlink()
+            (root / names[2]).write_text('{', encoding='utf-8')
+            names[3] = names[0]
+            path = root / 'stages.json'
+            path.write_text(json.dumps(plan), encoding='utf-8')
+            result = subprocess.run([sys.executable, str(SCRIPT), '--venue-stages', str(path), '--inspect-venue-stages'],
+                                    capture_output=True, check=False)
+            self.assertEqual(1, result.returncode, result.stderr)
+            self.assertFalse(result.stderr)
+            inspection = json.loads(result.stdout)
+            self.assertFalse(inspection['complete'])
+            self.assertEqual(['conflict', 'needs-evidence', 'needs-evidence', 'needs-evidence', 'verified', 'verified'],
+                             [row['status'] for row in inspection['entries']])
+            self.assertEqual([[2], [3], [1, 4]], [issue['entries'] for issue in inspection['issues']])
+            self.assertEqual([{'mode': 'Linked', 'players': 5}, {'mode': 'Independent', 'players': 10},
+                              {'mode': 'Linked', 'players': 10}], inspection['missingStages'])
+            self.assertNotIn(str(root), result.stdout.decode())
+
     def test_staged_venue_rejects_incomplete_repeated_misordered_or_mismatched_batches(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

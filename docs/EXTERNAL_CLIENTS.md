@@ -568,6 +568,14 @@ python scripts/verify-field-results.py --venue-stages .\stages.json
 
 工具會重驗六批原始資料，要求各模式的 5、10、25 人場次按原開始與結束時間依序完成。各批須符合總清單的拓撲與同時在線門檻，且不得共用原結束回條、場次、世界來源或入場識別。結果列出每批原結束回條、清單雜湊、開始與結束時間、同時在線區間及伺服器戰績確認。若要每席都有不同直連 IPv4，可在 `direct-lan` 總清單與六份批次清單都加上 `"requireDistinctRemoteRoster": true`。同機排演使用 `same-host`，現場實體主機數及網路容量仍須驗收。
 
+##### 一次查看六批待補件
+
+```powershell
+python scripts/verify-field-results.py --venue-stages .\stages.json --inspect-venue-stages
+```
+
+收件檢查依總清單順序逐份核對，`entries` 列出各項的狀態，`issues` 指出受影響的項次及原因，`missingStages` 列出缺少合格資料的模式和人數。個別資料通過但與其他批次衝突時，受影響的項次會標為 `conflict`。可先列入預定的清單路徑，收到檔案後再核對。檢查遇到缺件或衝突時以退出碼 1 回傳 JSON，六批皆通過時以 0 結束。正式封存摘要使用原指令 `--venue-stages`。
+
 ##### 統一核對追蹤及遊戲射擊
 
 要讓六批都通過同時追蹤及遊戲射擊驗收，在 `stages.json` 加入 `"requireTrackedRoster": true` 及 `"requireConcurrentFire": true`。兩項可各自啟用。各批保留所有原玩家日誌及 `worldJournal`，啟用射擊驗收時另提供 `combatJournal`。啟用任一項後，總清單會將自己的 `minimumConcurrentMilliseconds` 套用到全部六批；若個別清單另有較長門檻，該批使用較長值。
