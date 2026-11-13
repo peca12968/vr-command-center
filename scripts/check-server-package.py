@@ -1012,7 +1012,7 @@ def main():
                 check([row['sessionSequence'] for row in result['servers']]==[state['sequence'] for state in states],
                       'Existing v2 plans still preview the exact revisions with the guarded packages')
         else:
-            if args.check_venue_udp_readiness or args.check_venue_roster_ui:
+            if args.check_venue_udp_readiness or args.check_venue_roster_ui or args.venue_field_evidence:
                 plan['version']=4
                 plan['servers']=[{**row,'sessionSequence':state['sequence'],'missionId':state['mission']['id']}
                                  for row,state in zip(plan['servers'],states,strict=True)]
