@@ -105,8 +105,8 @@ def prepare(args, output):
 
     seen_paths = {output, bundle, terminal}
 
-    def evidence_path(value, base=output.parent):
-        path = (base / value).resolve(strict=True)
+    def evidence_path(value, base=output.parent, *, kind='evidence'):
+        path = field.resolve_evidence_reference(base, value, kind)
         field.require(path not in seen_paths, 'Evidence paths must be distinct across the venue')
         seen_paths.add(path)
         return path

@@ -576,6 +576,8 @@ python scripts/verify-field-results.py --venue-stages .\stages.json --inspect-ve
 
 收件檢查依總清單順序逐份核對，`entries` 列出各項的狀態，`issues` 指出受影響的項次及原因，`missingStages` 列出缺少合格資料的模式和人數。個別資料通過但與其他批次衝突時，受影響的項次會標為 `conflict`。可先列入預定的清單路徑，收到檔案後再核對。檢查遇到缺件或衝突時以退出碼 1 回傳 JSON，六批皆通過時以 0 結束。正式封存摘要使用原指令 `--venue-stages`。
 
+清單或驗收引用的原檔找不到時，`issues[].missingFile` 會列出檔案類型 `kind` 和檔名 `name`，例如 `worldJournal` 或 `windowsReadyReport`。報告只保留檔名，請依 `entries` 的項次回到該批清單核對存放位置。補齊後再次執行，可接續定位該批後續的缺件。
+
 ##### 統一核對追蹤及遊戲射擊
 
 要讓六批都通過同時追蹤及遊戲射擊驗收，在 `stages.json` 加入 `"requireTrackedRoster": true` 及 `"requireConcurrentFire": true`。兩項可各自啟用。各批保留所有原玩家日誌及 `worldJournal`，啟用射擊驗收時另提供 `combatJournal`。啟用任一項後，總清單會將自己的 `minimumConcurrentMilliseconds` 套用到全部六批；若個別清單另有較長門檻，該批使用較長值。

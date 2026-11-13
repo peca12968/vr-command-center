@@ -46,6 +46,19 @@ class EvidenceError(ValueError):
     pass
 
 
+class MissingEvidence(FileNotFoundError):
+    def __init__(self, kind, reference):
+        self.kind = kind
+        self.file_name = Path(reference).name
+
+
+def resolve_evidence_reference(base, reference, kind):
+    try:
+        return (base / reference).resolve(strict=True)
+    except (FileNotFoundError, NotADirectoryError):
+        raise MissingEvidence(kind, reference) from None
+
+
 def require(condition, message):
     if not condition:
         raise EvidenceError(message)
@@ -1205,10 +1218,10 @@ def windows_log_paths(row, evidence_path):
     bundled = {'address', 'evidenceZip'}
     require(type(row) is dict and set(row) in (base, launcher, launcher | {'linkMetrics'}, bundled, bundled | {'linkMetrics'}),
             'Provide either the original Windows files or the player evidence ZIP for one address')
-    launch = evidence_path(row['launcherReport']) if 'launcherReport' in row else None
-    metrics = evidence_path(row['linkMetrics']) if 'linkMetrics' in row else None
-    log = evidence_path(row['log']) if 'log' in row else None
-    bundle = evidence_path(row['evidenceZip']) if 'evidenceZip' in row else None
+    launch = evidence_path(row['launcherReport'], kind='playerLauncherReport') if 'launcherReport' in row else None
+    metrics = evidence_path(row['linkMetrics'], kind='playerLinkMetrics') if 'linkMetrics' in row else None
+    log = evidence_path(row['log'], kind='playerLog') if 'log' in row else None
+    bundle = evidence_path(row['evidenceZip'], kind='playerEvidenceZip') if 'evidenceZip' in row else None
     return ipv4(row['address']), log, launch, metrics, bundle
 
 
@@ -1543,8 +1556,8 @@ def read_udp_launch_binding(batch, directory, mode, expected_sessions=None):
     require(type(proof) is dict and all(type(proof.get(name)) is str and proof[name] for name in ('plan', 'preview')),
             'Missing original Windows launch plan and preview paths')
     paths = {name: proof[name] for name in ('plan', 'preview')}
-    plan = read_udp_launcher_document(directory / paths['plan'], preview=False)
-    preview = read_udp_launcher_document(directory / paths['preview'], preview=True)
+    plan = read_udp_launcher_document(resolve_evidence_reference(directory, paths['plan'], 'windowsLaunchPlan'), preview=False)
+    preview = read_udp_launcher_document(resolve_evidence_reference(directory, paths['preview'], 'windowsLaunchPreview'), preview=True)
     checked = compare_udp_launch_documents(plan, preview)
     summary = batch.get('launcherPreview')
     require(proof == {**paths, **checked} and checked['complete'] and checked['mode'] == mode
@@ -1665,7 +1678,7 @@ def read_quest_capture_batches(spec, mode, expected, evidence_path, shared_netwo
             if not row['complete']:
                 continue
             require(seat not in used_seats, 'Quest capture repeats a completed seat')
-            log = evidence_path(row['log'], path.parent)
+            log = evidence_path(row['log'], path.parent, kind='questLogcat')
             require(log.parent == path.parent and log.name == row['log'], 'Quest capture log must be next to its report')
             captures.setdefault(session_id, []).append((sources[seat], log, row['logcatPid'], seat, row['bytes'], row['sha256']))
             used_seats.add(seat)
@@ -2043,7 +2056,8 @@ def read_verified_venue_start(path, readiness_path, terminal, results, mode):
             and type(preflight.get('launchBinding')) is dict,
             'Verified start requires a complete UDP readiness report bound to Windows')
     require(type(receipt['readyReport']) is str and receipt['readyReport'], 'Verified start receipt lacks the original ready report')
-    ready, ready_raw = read_quest_document(path.parent / receipt['readyReport'])
+    ready_path = resolve_evidence_reference(path.parent, receipt['readyReport'], 'windowsReadyReport')
+    ready, ready_raw = read_quest_document(ready_path)
     require(receipt['readySha256'] == hashlib.sha256(ready_raw).hexdigest()
             and integer(ready['schemaVersion'], 1, 1) == 1 and ready['status'] == 'venue-ready'
             and ready['topology'] == mode and identity(ready['instanceId']) == terminal['instanceId'],
@@ -2116,15 +2130,15 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
     require(len(server_ips) == len(addresses), 'Duplicate server address')
     seen_paths = {manifest_path}
 
-    def evidence_path(value, base=manifest_path.parent):
+    def evidence_path(value, base=manifest_path.parent, *, kind='evidence'):
         require(type(value) is str and bool(value), 'Evidence path is missing')
-        path = (base / value).resolve(strict=True)
+        path = resolve_evidence_reference(base, value, kind)
         require(path not in seen_paths, 'Evidence paths must be distinct across the venue')
         seen_paths.add(path)
         return path
 
     network_reference = manifest.get('venueNetworkPlan')
-    venue_network = (read_venue_network_plan(evidence_path(network_reference), mode, players_per_room)
+    venue_network = (read_venue_network_plan(evidence_path(network_reference, kind='venueNetworkPlan'), mode, players_per_room)
                      if 'venueNetworkPlan' in manifest else None)
     planned_seat_addresses = venue_network['seats'] if venue_network is not None else None
 
@@ -2134,7 +2148,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
         return {'venueNetworkPlan': {'sha256': venue_network['sha256'], 'expectedSeats': len(planned_seat_addresses),
                                      'verifiedSeats': verified, 'endpointsVerified': len(venue_network['endpoints'])}}
 
-    release, release_hash = (read_venue_release(evidence_path(manifest['venueReleaseReport']))
+    release, release_hash = (read_venue_release(evidence_path(manifest['venueReleaseReport'], kind='venueReleaseReport'))
                              if 'venueReleaseReport' in manifest else (None, None))
     windows_release = release.get('windows') if release is not None else None
     windows_hash = windows_release.get('playerManifestSha256') if type(windows_release) is dict else None
@@ -2143,9 +2157,9 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
     require(packed != ('closure' in manifest), 'Provide either venueBundle or the original closure and per-session ZIPs')
     receipt_bytes = None
     if packed:
-        closure, archives, receipt_bytes = venue_bundle(evidence_path(manifest['venueBundle']), mode)
+        closure, archives, receipt_bytes = venue_bundle(evidence_path(manifest['venueBundle'], kind='venueBundle'), mode)
     else:
-        closure = read_json(content(evidence_path(manifest['closure'])))['batch']
+        closure = read_json(content(evidence_path(manifest['closure'], kind='closure')))['batch']
     closure_id = identity(closure['requestId'])
     recorded_at = datetime.fromisoformat(closure['recordedAtUtc'])
     require(recorded_at.utcoffset() is not None, 'Closure time must specify a time zone')
@@ -2248,11 +2262,12 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
         require(all('launcherReport' not in entry and 'sessionId' in entry for entry in entries),
                 'Use sessionId instead of a per-session launcher report with venueLauncherReport')
         venue_launcher, venue_results = read_terminal_venue_launcher(
-            evidence_path(manifest['venueLauncherReport']), mode, expected, include_instance=wants_verified_start)
+            evidence_path(manifest['venueLauncherReport'], kind='venueLauncherReport'), mode, expected,
+            include_instance=wants_verified_start)
     start_readiness_path = None
     if wants_verified_start:
-        start_readiness_path = evidence_path(manifest['udpPreflightBatch'])
-        verified_start = read_verified_venue_start(evidence_path(manifest['verifiedVenueStart']),
+        start_readiness_path = evidence_path(manifest['udpPreflightBatch'], kind='udpPreflightBatch')
+        verified_start = read_verified_venue_start(evidence_path(manifest['verifiedVenueStart'], kind='verifiedVenueStart'),
                                                   start_readiness_path, venue_launcher, venue_results, mode)
         venue_launcher.pop('instanceId')
     batch_pairs, udp_launch_bindings = {}, {}
@@ -2260,7 +2275,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
         batch_names = [manifest['udpPreflightBatch']] if single_batch else manifest['udpPreflightBatches']
         require(type(batch_names) is list and 1 <= len(batch_names) <= 25, 'Provide 1 to 25 Quest UDP batch reports')
         for name in batch_names:
-            batch, launch = read_udp_preflight_batch(start_readiness_path or evidence_path(name), mode, expected_rooms,
+            batch, launch = read_udp_preflight_batch(start_readiness_path or evidence_path(name, kind='udpPreflightBatch'), mode, expected_rooms,
                                                      expected_sessions={tuple(row['roomIds']): sid for sid, row in expected.items()},
                                                      venue_plan_hash=venue_network['sha256'] if venue_network else None)
             if launch is not None:
@@ -2275,7 +2290,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
 
     def preflight_pair(pair, base=manifest_path.parent):
         require(type(pair) is dict and set(pair) == {'listener', 'probe'}, 'Provide the original UDP listener and probe reports')
-        return evidence_path(pair['listener'], base), evidence_path(pair['probe'], base)
+        return evidence_path(pair['listener'], base, kind='udpListener'), evidence_path(pair['probe'], base, kind='udpProbe')
 
     control_summary, controls = [], {}
     if 'venueControlBatches' in manifest and not inspect_windows:
@@ -2300,7 +2315,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
 
     def load_session(entry):
         if venue_launcher is None:
-            launcher = read_json(content(evidence_path(entry['launcherReport'])))
+            launcher = read_json(content(evidence_path(entry['launcherReport'], kind='serverLauncherReport')))
             launch_id = identity(launcher['sessionId']) if packed else None
         else:
             launch_id = identity(entry['sessionId'])
@@ -2314,12 +2329,12 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
             session, statistics, endpoint = management_zip_records(archives[name])
             require(session['id'] == launch_id, 'Venue ZIP member differs from its original launcher session')
         else:
-            session, statistics, endpoint = management_zip(evidence_path(entry['evidenceZip']))
+            session, statistics, endpoint = management_zip(evidence_path(entry['evidenceZip'], kind='sessionEvidenceZip'))
         if venue_launcher is not None:
             require_venue_launcher_source(session, venue_launcher['launchId'], launch_id, expected[launch_id])
         if venue_network is not None:
             check_venue_network_session(venue_network, session, endpoint, launcher['udpBinding'])
-        return entry, launcher, session, statistics, endpoint, content(evidence_path(entry['serverLog']))
+        return entry, launcher, session, statistics, endpoint, content(evidence_path(entry['serverLog'], kind='serverLog'))
 
     inputs = (load_session(entry) for entry in entries)
     station_summary = {}
@@ -2337,7 +2352,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
                 'Provide the Windows seat map when the batch contains Quest evidence')
         name = manifest['windowsEvidenceDirectory']
         require(type(name) is str and bool(name), 'Windows evidence directory is missing')
-        directory = (manifest_path.parent / name).resolve(strict=True)
+        directory = resolve_evidence_reference(manifest_path.parent, name, 'windowsEvidenceDirectory')
         inputs = list(inputs)
         windows_by_session, inbox = windows_inbox(directory, inputs, expected, players_per_room, windows_hash,
                                                  seat_map, evidence_path, link_criteria, station_addresses=station_addresses,
@@ -2433,7 +2448,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
                 require(not capture_supplied, 'Use the Quest capture batches or manual Quest logs, not both')
                 require(not {'linkMetrics', 'launcherReport', 'evidenceZip'} & player.keys(),
                         'Windows launcher evidence requires a Windows player log')
-                quest_logs.append((ipv4(player['address']), evidence_path(player['log']), integer(player['logcatPid'], 1, 2**31 - 1)))
+                quest_logs.append((ipv4(player['address']), evidence_path(player['log'], kind='questLogcat'),
+                                   integer(player['logcatPid'], 1, 2**31 - 1)))
             else:
                 logs.append(windows_log_paths(player, evidence_path))
         windows_players += len(logs)
@@ -2487,8 +2503,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
                                          server_log, size, windows_logs(),
                                          require_remote=False,
                                          quest_player_logs=((address, content(path), pid) for address, path, pid in quest_logs),
-                                         world_journal=evidence_path(entry['worldJournal']) if journals else None,
-                                         combat_journal=evidence_path(entry['combatJournal']) if combat_journals else None,
+                                         world_journal=evidence_path(entry['worldJournal'], kind='worldJournal') if journals else None,
+                                         combat_journal=evidence_path(entry['combatJournal'], kind='combatJournal') if combat_journals else None,
                                          applied_end=row['appliedAtSequence'], room_alignments=alignments, udp_preflight=preflight_paths,
                                          udp_source_preflights=source_paths, verify_player_sources=verify_player_sources,
                                          quest_capture_logs=(quest_capture_log(*evidence) for evidence in captured),
@@ -2646,17 +2662,18 @@ def verify_venue_stages(plan_path, *, inspect=False):
     stage_keys = [(mode, players) for players in sizes for mode in modes]
     stages, entries, issues = {}, {}, []
 
-    def reject(message, *indices):
+    def reject(message, *indices, missing=None):
         if not inspect:
             raise EvidenceError(message)
-        issues.append({'entries': sorted(set(indices)), 'reason': message})
+        issues.append({'entries': sorted(set(indices)), 'reason': message, **({'missingFile': missing} if missing else {})})
 
     paths, used, releases = {}, {}, {}
     for index, name in enumerate(names, 1):
         try:
             path = (plan_path.parent / name).resolve(strict=True)
-        except FileNotFoundError:
-            reject(f'Venue manifest entry {index}: missing manifest file', index)
+        except (FileNotFoundError, NotADirectoryError):
+            reject(f'Venue manifest entry {index}: missing manifest file', index,
+                   missing={'kind': 'venueManifest', 'name': Path(name).name})
             continue
         except (OSError, ValueError, RuntimeError):
             reject(f'Venue manifest entry {index}: unreadable manifest path', index)
@@ -2681,6 +2698,10 @@ def verify_venue_stages(plan_path, *, inspect=False):
             require(not require_start or verified_start is not None, 'missing verified Windows start receipt')
         except EvidenceError as error:
             reject(f'Venue manifest entry {index}: {error}', index)
+            continue
+        except MissingEvidence as error:
+            reject(f'Venue manifest entry {index}: missing original evidence file', index,
+                   missing={'kind': error.kind, 'name': error.file_name})
             continue
         except (OSError, ValueError, ArithmeticError, AttributeError, KeyError, TypeError, RecursionError,
                 zipfile.BadZipFile, zlib.error, RuntimeError):

@@ -635,9 +635,18 @@ class FieldResultsTests(unittest.TestCase):
             self.assertEqual(['conflict', 'needs-evidence', 'needs-evidence', 'needs-evidence', 'verified', 'verified'],
                              [row['status'] for row in inspection['entries']])
             self.assertEqual([[2], [3], [1, 4]], [issue['entries'] for issue in inspection['issues']])
+            self.assertEqual({'kind': 'venueManifest', 'name': Path(names[1]).name}, inspection['issues'][0]['missingFile'])
             self.assertEqual([{'mode': 'Linked', 'players': 5}, {'mode': 'Independent', 'players': 10},
                               {'mode': 'Linked', 'players': 10}], inspection['missingStages'])
             self.assertNotIn(str(root), result.stdout.decode())
+
+            document = json.loads((root / names[4]).read_bytes())
+            document['sessions'][0]['worldJournal'] = str(root / 'private-directory' / 'room-01.worldlog')
+            (root / names[4]).write_text(json.dumps(document), encoding='utf-8')
+            inspection = field.verify_venue_stages(path, inspect=True)
+            self.assertEqual({'entries': [5], 'reason': 'Venue manifest entry 5: missing original evidence file',
+                              'missingFile': {'kind': 'worldJournal', 'name': 'room-01.worldlog'}}, inspection['issues'][-1])
+            self.assertNotIn('private-directory', json.dumps(inspection))
 
     def test_staged_venue_rejects_incomplete_repeated_misordered_or_mismatched_batches(self):
         with tempfile.TemporaryDirectory() as directory:
