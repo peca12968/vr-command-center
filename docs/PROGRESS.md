@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 名冊人數與參戰摘要依房間篩選
+
+- 控制台 0.31.164 選定房間後，名冊與有效姿態摘要都使用該房人數。切回全部房間可查看全場，快照效期仍為 1.5 秒。 [操作方式](PLAYER_READINESS.md#五房追蹤驗收開場)
+- 通過 22 項參戰規則、44 項 Chromium、107 項 Windows 管理包及 493 項三包整合檢查。Windows 同機獨立與合併模式各有 25 席，十次房間檢查均顯示 5／5 名冊及有效姿態。共核對 50 份戰績回條及 1,007 格封存回放，收尾無遺留程序。 [Windows 管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.164-roster-summary-win-x64.zip) · [本機驗證摘要](../artifacts/venue-roster-summary-validation.json)
+- 功能來源 `2a22195` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43344233701)
+
 ## 2026-11-13 Windows 原生五房名冊驗收
 
 - 三包整合工具新增 `--check-venue-roster-ui`。Chromium 從控制台 0.31.163 的開場表逐房打開原名冊，比對原入場、席位與遊戲端有效合成姿態，重新整理後核對篩選與原開場目標。 [重跑方式](PLAYER_READINESS.md#五房追蹤驗收開場)
