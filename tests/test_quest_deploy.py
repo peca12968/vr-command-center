@@ -1125,6 +1125,23 @@ else:
         self.assert_rejected(self.run_bundle(files, '-Serial', 'fixture'), 'Specify -RoomId and -Seat')
         self.assert_rejected(self.run_bundle(files, '-RoomId', '5', '-Seat', '2'), 'Specify -Serial')
 
+    def test_single_bundle_seat_checks_local_release_without_adb(self):
+        files, _ = self.vr_bundle('Linked')
+        apk = self.root / 'game.apk'
+        apk.write_bytes(b'mock release')
+        release, report, _ = self.release_report()
+        report['quest']['sha256'] = hashlib.sha256(apk.read_bytes()).hexdigest()
+        release.write_text(json.dumps(report), encoding='utf-8')
+        flags = ('-ReleaseReport', str(release), '-ApkPath', str(apk), '-AdbPath', str(self.root/'absent-adb.exe'), '-CheckOnly')
+        result = self.run_bundle(files, '-RoomId', '5', '-Seat', '2', *flags)
+        self.assertEqual(0, result.returncode, result.stderr)
+        info = json.loads(result.stdout)
+        self.assertEqual((5, 2, 'VR', True), (info['roomId'], info['seat'], info['mode'], info['localApkVerified']))
+        self.assertNotIn('v2.', result.stdout)
+        self.assert_rejected(self.run_bundle(files, *flags), 'check an APK for a single bundle seat')
+        mapping, _ = self.device_map()
+        self.assert_rejected(self.run_bundle(files, '-DeviceMap', str(mapping), *flags), 'Use -ApkPath only for a single-seat install')
+
     def test_vr_bundle_previews_both_topologies_and_requires_live_check_to_write(self):
         for topology in ('Linked', 'Independent'):
             with self.subTest(topology=topology):
