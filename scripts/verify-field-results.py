@@ -60,7 +60,8 @@ class WindowsLinkCriteriaFailed(EvidenceError):
 
 class QuestCapturesIncomplete(EvidenceError):
     def __init__(self, captures):
-        super().__init__('Quest capture reports must cover the planned Quest seats exactly')
+        super().__init__('Quest capture reports must cover the planned Quest seats exactly' if captures['missingSeats']
+                         else 'Quest capture logs are missing or do not match their original reports')
         self.captures = captures
 
 
@@ -1652,7 +1653,7 @@ def read_quest_capture_report(path, mode):
     return report
 
 
-def read_quest_capture_batches(spec, mode, expected, evidence_path, shared_network=None):
+def read_quest_capture_batches(spec, mode, expected, evidence_path, shared_network=None, *, inspect_logs=False):
     require(type(spec) is dict and 'reports' in spec and {'networkPlan', 'deviceMap'} & spec.keys()
             and spec.keys() <= {'networkPlan', 'deviceMap', 'reports'},
             'Provide capture reports and a Quest network plan, the original device map, or both')
@@ -1673,6 +1674,7 @@ def read_quest_capture_batches(spec, mode, expected, evidence_path, shared_netwo
     reports = spec['reports']
     require(type(reports) is list and 1 <= len(reports) <= 25, 'Provide 1 to 25 Quest capture reports')
     captures, used_seats, deployments = {}, set(), []
+    log_issues = []
     incomplete_reports = failed_attempts = 0
     for name in reports:
         path = evidence_path(name, kind='questCaptureReport')
@@ -1696,16 +1698,31 @@ def read_quest_capture_batches(spec, mode, expected, evidence_path, shared_netwo
             if not row['complete']:
                 continue
             require(seat not in used_seats, 'Quest capture repeats a completed seat')
-            log = evidence_path(row['log'], path.parent, kind='questLogcat')
-            require(log.parent == path.parent and log.name == row['log'], 'Quest capture log must be next to its report')
-            captures.setdefault(session_id, []).append((sources[seat], log, row['logcatPid'], seat, row['bytes'], row['sha256']))
             used_seats.add(seat)
-    if used_seats != sources.keys():
-        raise QuestCapturesIncomplete({
+            try:
+                log = evidence_path(row['log'], path.parent, kind='questLogcat')
+            except MissingEvidence:
+                if not inspect_logs:
+                    raise
+                log_issues.append({'roomId': seat[0], 'seat': seat[1], 'file': row['log'], 'reason': 'missing'})
+                continue
+            require(log.parent == path.parent and log.name == row['log'], 'Quest capture log must be next to its report')
+            evidence = (sources[seat], log, row['logcatPid'], seat, row['bytes'], row['sha256'])
+            if inspect_logs:
+                reason = quest_capture_log_issue(evidence)
+                if reason is not None:
+                    log_issues.append({'roomId': seat[0], 'seat': seat[1], 'file': row['log'], 'reason': reason})
+                    continue
+            captures.setdefault(session_id, []).append(evidence)
+    if used_seats != sources.keys() or log_issues:
+        details = {
             'expectedSeats': len(sources), 'reportedCompleteSeats': len(used_seats),
             'reportsRead': len(reports), 'failedAttempts': failed_attempts,
             'missingSeats': [{'roomId': room, 'seat': seat} for room, seat in sorted(sources.keys() - used_seats)],
-        })
+        }
+        if log_issues:
+            details['logIssues'] = sorted(log_issues, key=lambda issue: (issue['roomId'], issue['seat']))
+        raise QuestCapturesIncomplete(details)
     summary = {'questCaptureBatchesVerified': len(reports)}
     if observed:
         summary['questCaptureAddressSource'] = 'server-observed'
@@ -1719,6 +1736,20 @@ def quest_capture_log(address, path, pid, seat, size, digest):
         raw = limited_read(source)
     require(len(raw) == size and hashlib.sha256(raw).hexdigest() == digest, 'Original Quest capture log size or digest differs')
     return address, raw.decode('utf-8-sig'), pid, seat
+
+
+def quest_capture_log_issue(evidence):
+    try:
+        quest_capture_log(*evidence)
+    except FileNotFoundError:
+        return 'missing'
+    except OSError:
+        return 'unreadable'
+    except UnicodeError:
+        return 'invalid-encoding'
+    except EvidenceError:
+        return 'size-or-digest-mismatch'
+    return None
 
 
 def quest_deployment_fingerprint(salt, value):
@@ -1912,7 +1943,7 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
     return deployed, summary, readiness
 
 
-def read_venue_quest_evidence(manifest, mode, expected, evidence_path, release, *, venue_network=None):
+def read_venue_quest_evidence(manifest, mode, expected, evidence_path, release, *, venue_network=None, inspect_logs=False):
     captures, endpoints, summary, references = {}, {}, {}, []
     device_map = deployments = deployment_summary = None
     readiness = {}, None
@@ -1922,7 +1953,7 @@ def read_venue_quest_evidence(manifest, mode, expected, evidence_path, release, 
         shared = (venue_network if type(captures_spec) is dict and captures_spec.get('networkPlan') == manifest.get('venueNetworkPlan')
                   else None)
         captures, endpoints, summary, references, device_map = read_quest_capture_batches(
-            captures_spec, mode, expected, evidence_path, shared)
+            captures_spec, mode, expected, evidence_path, shared, inspect_logs=inspect_logs)
     require(not references or 'questDeployments' in manifest, 'Provide the original Quest deployment reports referenced by the capture')
     if 'questReadinessReports' in manifest:
         require('questDeployments' in manifest and type(manifest['questReadinessReports']) is list,
@@ -2142,7 +2173,8 @@ def read_windows_link_criteria(document):
     return criteria
 
 
-def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=None, staged_link_criteria=None):
+def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_logs=False,
+                       staged_roster=None, staged_link_criteria=None):
     manifest_path = manifest_path.resolve(strict=True)
     with manifest_path.open('rb') as stream:
         raw_manifest = limited_read(stream)
@@ -2341,7 +2373,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
     capture_supplied = 'questCaptures' in manifest
     captures, capture_endpoints, capture_summary, quest_deployments, deployment_summary, readiness = (
         ({}, {}, {}, None, None, ({}, None)) if inspect_windows else
-        read_venue_quest_evidence(manifest, mode, expected, evidence_path, release, venue_network=venue_network))
+        read_venue_quest_evidence(manifest, mode, expected, evidence_path, release,
+                                  venue_network=venue_network, inspect_logs=inspect_quest_logs))
     quest_readiness, readiness_summary = readiness
     observed_quest_addresses = set() if capture_summary.get('questCaptureAddressSource') == 'server-observed' else None
 
@@ -2734,7 +2767,8 @@ def verify_venue_stages(plan_path, *, inspect=False):
             continue
         paths[path] = index
         try:
-            report, batch = verify_venue_batch(path, staged_roster=staged_roster, staged_link_criteria=link_criteria)
+            report, batch = verify_venue_batch(path, inspect_quest_logs=inspect,
+                                               staged_roster=staged_roster, staged_link_criteria=link_criteria)
             key = (report['mode'], report['players'])
             require(key in stage_keys, 'Staged venue evidence must cover each mode and seat count exactly once')
             require(report['declaredTopology'] == topology, 'Venue batch topology differs from the staged plan')

@@ -592,7 +592,9 @@ python scripts/verify-field-results.py --venue-stages .\stages.json --inspect-ve
 
 若批次已設定 `windowsLinkCriteria`，Windows 收件核對完成但量測缺漏或未達門檻，總表會在 `issues[].windowsLinkMetrics` 顯示該批門檻、已核對席數、缺量測的房號與席號，以及已收到的逐席回覆數與 p95 往返時間。`criteriaFailures` 會指出該席未通過的門檻。原始資料可使用散檔、逐席 ZIP 或 Windows 收件資料夾。 [連線量測門檻](#逐席核對-windows-連線量測門檻)
 
-若 Quest 擷取報告尚未涵蓋原計畫席位，`issues[].questCaptures` 會列出預期席數、報告中標示完成的席數、失敗嘗試次數及待補的房號與席號。找不到原擷取或部署報告時，`issues[].missingFile` 會附檔案類型與檔名。報告中標示完成的席位在收齊後仍須核對原日誌、部署及伺服器回條。 [重試擷取](QUEST3.md#重試未完成的-quest-擷取席位)
+若 Quest 擷取報告尚未涵蓋原計畫席位，`issues[].questCaptures` 會列出預期席數、報告中標示完成的席數、失敗嘗試次數及待補的房號與席號。找不到原擷取或部署報告時，`issues[].missingFile` 會附檔案類型與檔名。 [重試擷取](QUEST3.md#重試未完成的-quest-擷取席位)
+
+擷取報告已標示完成的席位，若原日誌缺少、長度或 SHA-256 不符、編碼無效或無法讀取，會一併出現在 `issues[].questCaptures.logIssues`。每筆包含房號、席號、原檔名及原因。請按批次與席號補回同一次擷取的原檔，再重跑收件與正式驗收，由原流程核對部署、日誌內容及伺服器回條。
 
 ##### 六批共用 Windows 連線量測門檻
 

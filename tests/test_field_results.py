@@ -878,9 +878,64 @@ class FieldResultsTests(unittest.TestCase):
             for path, manifest in replacements.values():
                 manifest['questCaptures']['reports'].append('capture batch 2/capture-report.json')
                 path.write_text(json.dumps(manifest), encoding='utf-8')
-            accepted = json.loads(subprocess.check_output(command))
+            accepted_raw = subprocess.check_output(command)
+            accepted = json.loads(accepted_raw)
             self.assertEqual(80, accepted['serverAcknowledgements'])
             self.assertFalse(accepted['physicalHostsVerified'])
+
+            other_path, other_manifest = replacements[5]
+            other_report = other_path.parent / other_manifest['questCaptures']['reports'][0]
+            raw_other_report = other_report.read_bytes()
+            other_rows = json.loads(raw_other_report)
+            linked_row, invalid_row = other_rows['seats'][:2]
+            missing_row, changed_row, unreadable_row = json.loads(raw_report)['seats']
+            missing_log = report_path.with_name(missing_row['log'])
+            changed_log = report_path.with_name(changed_row['log'])
+            unreadable_log = report_path.with_name(unreadable_row['log'])
+            linked_log = other_report.with_name(linked_row['log'])
+            invalid_log = other_report.with_name(invalid_row['log'])
+            originals = {path: path.read_bytes() for path in
+                         (missing_log, changed_log, unreadable_log, linked_log, invalid_log)}
+            missing_log.unlink()
+            data = originals[changed_log]
+            changed_log.write_bytes(bytes([data[0] ^ 1]) + data[1:])
+            unreadable_log.unlink()
+            unreadable_log.mkdir()
+            linked_log.write_bytes(originals[linked_log][:-1])
+            invalid_data = b'\xff'
+            invalid_log.write_bytes(invalid_data)
+            invalid_row.update(bytes=len(invalid_data), sha256=hashlib.sha256(invalid_data).hexdigest())
+            other_report.write_text(json.dumps(other_rows), encoding='utf-8')
+
+            damaged = subprocess.run([*command, '--inspect-venue-stages'], capture_output=True)
+            self.assertEqual(1, damaged.returncode)
+            self.assertFalse(damaged.stderr)
+            inspection = json.loads(damaged.stdout)
+            self.assertEqual([[3], [6]], [issue['entries'] for issue in inspection['issues']])
+            self.assertEqual(['verified', 'verified', 'needs-evidence', 'verified', 'verified', 'needs-evidence'],
+                             [row['status'] for row in inspection['entries']])
+            expected_issues = (
+                ((missing_row, 'missing'), (changed_row, 'size-or-digest-mismatch'), (unreadable_row, 'unreadable')),
+                ((linked_row, 'size-or-digest-mismatch'), (invalid_row, 'invalid-encoding')),
+            )
+            for issue, expected in zip(inspection['issues'], expected_issues, strict=True):
+                captures = issue['questCaptures']
+                self.assertEqual(5, captures['reportedCompleteSeats'])
+                self.assertEqual([], captures['missingSeats'])
+                self.assertEqual([
+                    {'roomId': row['roomId'], 'seat': row['seat'], 'file': row['log'], 'reason': reason}
+                    for row, reason in expected
+                ], captures['logIssues'])
+            for secret in (str(root), '192.168.', 'fixture-1-5'):
+                self.assertNotIn(secret, damaged.stdout.decode())
+            rejected = subprocess.run(command, capture_output=True)
+            self.assertEqual(1, rejected.returncode)
+            self.assertIn(b'Venue manifest entry 3: missing original evidence file', rejected.stderr)
+            unreadable_log.rmdir()
+            other_report.write_bytes(raw_other_report)
+            for path, original in originals.items():
+                path.write_bytes(original)
+            self.assertEqual(accepted_raw, subprocess.check_output(command))
 
             deployment = batch_path.with_name('deployment.json')
             deployment.unlink()
