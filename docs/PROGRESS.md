@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 從原封存準備 Windows 量測驗收清單
+
+- 準備指令可在建立批次清單時填入同時在線時間、Windows 最低回覆數及最高 p95。25 席合併場的缺件測試辨識第 1 房第 1 席，補回原 ZIP 後使用同一清單通過正式驗收。 [操作方式](EXTERNAL_CLIENTS.md#核對五房批次啟動器的原終止報告)
+- 從前一輪六批已封存的 Windows 同機資料重建清單，核對 18 場原啟動、80 份連線量測及戰績回條。除新清單及總清單的雜湊外，六批驗收摘要與上一輪相符，237 份原證據雜湊一致。 [本機驗證摘要](../artifacts/staged-venue-prepare-measured-manifest-validation.json)
+- 通過 119 項封存及 12 項 Quest UDP 測試。功能來源 `1665dfc` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地與廠商硬體仍待現地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43358895748)
+
 ## 2026-11-13 六批 Windows 啟動與連線量測合併驗收
 
 - 使用管理包 0.31.170 與遊戲 0.50.7，完成 5、10、25 席獨立及合併六批同機排演。總清單核對 18 場原啟動與封存、80 份原連線量測及戰績回條。1,453 項套件檢查通過，含 7,653 格封存回放。三輪皆清理完畢，C／F 共 705 份封存快照檔雜湊相符。 [本機驗證摘要](../artifacts/staged-venue-native-link-and-start-validation.json)
