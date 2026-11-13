@@ -1,4 +1,5 @@
 const fs = require('node:fs/promises');
+const assert = require('node:assert/strict');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
@@ -786,12 +787,29 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       await note.filter({ hasText: `已載入 ${exported.packets.length} 格。` }).waitFor();
       const position = player.locator('#player-replay-frame');
       const replayCanvas = player.locator('#replay-canvas');
+      const playerFrameNumber = player.locator('#player-replay-number');
+      const playerFrameGo = player.locator('#player-replay-jump button');
       check((await player.locator('#player-replay-title').innerText()) === clipName
         && (await position.innerText()).startsWith(`第 ${eventSequence} 格`) && await player.locator('#player-replay-back').isDisabled()
         && await player.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
         'Player opens the exact first frame on a small viewport without operator login');
       check(Number((await replayCanvas.getAttribute('data-camera')).split(',')[1]) < 40
         && Number(await replayCanvas.getAttribute('data-triangles')) > 0, 'The first room is framed using the visible canvas dimensions');
+      assert.ok(eventSequence > 1 && clipTail > eventSequence + 1);
+      await playerFrameNumber.fill(String(eventSequence - 1));
+      await playerFrameGo.click();
+      check(await playerFrameNumber.getAttribute('min') === String(eventSequence)
+        && await playerFrameNumber.getAttribute('max') === String(clipTail)
+        && await playerFrameNumber.evaluate(input => input.validity.rangeUnderflow)
+        && (await position.innerText()).startsWith(`第 ${eventSequence} 格`),
+      'Player frame jump rejects a number before the original exported frame range');
+      await playerFrameNumber.fill(String(clipTail));
+      await playerFrameNumber.press('Enter');
+      check((await position.innerText()).startsWith(`第 ${clipTail} 格`)
+        && await player.locator('#player-replay-next').isDisabled() && requests.length === 0,
+      'Player frame jump reads the exact original last frame without an API request');
+      await playerFrameNumber.fill(String(eventSequence));
+      await playerFrameGo.click();
       await player.locator('#player-replay-next').click();
       check((await position.innerText()).startsWith(`第 ${eventSequence + 1} 格`), 'Player can step to the next saved frame');
       await player.locator('#player-replay-play').click();
@@ -824,6 +842,13 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       check(!await loop.isChecked() && requests.length === 0,
         'Player loops back to the original first frame and stops at the tail when looping is disabled');
       await loop.check();
+      await playerFrameNumber.fill(String(eventSequence + 1));
+      const timeline = player.locator('#replay-timeline');
+      await play.click();
+      await playerFrameGo.click();
+      check((await position.innerText()).startsWith(`第 ${eventSequence + 1} 格`)
+        && await play.innerText() === '播放' && await timeline.inputValue() === '1' && await loop.isChecked(),
+      'Jumping during playback stops on the selected original frame and retains the loop setting');
       await player.screenshot({ path: path.join(screenshots, 'player-replay-mobile.png'), fullPage: true });
       const pausedReplay = structuredClone(exported);
       pausedReplay.header.missionClockVersion = 1;
@@ -837,7 +862,8 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       recovered.suspended = false;
       await input.setInputFiles({ name: 'source-pause.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(pausedReplay)) });
       await note.filter({ hasText: `已載入 ${pausedReplay.packets.length} 格。` }).waitFor();
-      check(!await loop.isChecked(), 'Loading a different local replay resets the loop option');
+      check(!await loop.isChecked() && await playerFrameNumber.inputValue() === '',
+        'Loading a different local replay resets the loop option and frame input');
       const clock = player.locator('#player-replay-clock'), time = player.locator('#player-replay-time');
       const firstClock = await clock.innerText(), firstTime = await time.innerText();
       const transition = player.locator('#player-replay-transition');

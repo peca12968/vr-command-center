@@ -106,5 +106,5 @@
 .venue-launch-review-row .button-row{width:100%;align-items:stretch}
 .venue-launch-room-readiness{flex:1 1 190px;min-width:0;padding:8px;border:1px solid var(--line);border-radius:4px}
 .venue-launch-room-readiness .hint{margin:8px 0 0}
-#world-frame-jump label span{white-space:nowrap}
-#world-frame-number{width:12ch}
+#world-frame-jump label span,#player-replay-jump label span{white-space:nowrap}
+#world-frame-number,#player-replay-number{width:12ch}

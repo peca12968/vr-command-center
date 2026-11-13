@@ -35,6 +35,10 @@
         <output id="player-replay-clock" hidden></output>
       </div>
       <label>時間軸<input id="replay-timeline" type="range" min="0" value="0" step="1"></label>
+      <form id="player-replay-jump" class="replay-transport">
+        <label><span>畫格序號</span><input id="player-replay-number" type="number" inputmode="numeric" min="1" step="1" required></label>
+        <button type="submit" class="quiet">跳到畫格</button>
+      </form>
       <label id="player-replay-transition-field" hidden>遊戲來源畫格<select id="player-replay-transition"></select></label>
     </section>
   </main>

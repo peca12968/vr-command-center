@@ -5,6 +5,7 @@ const $ = id => document.getElementById('player-replay-' + id);
 const timeline = document.getElementById('replay-timeline');
 const canvas = document.getElementById('replay-canvas');
 const loop = $('loop');
+const frameNumber = $('number');
 const loopPauseMilliseconds = 300;
 const weatherNames = { Clear: '晴朗', Rain: '下雨', Fog: '濃霧', Storm: '暴風雨' };
 const phaseNames = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
@@ -56,6 +57,7 @@ $('file').addEventListener('change', async () => {
   pause();
   replay = null;
   loop.checked = false;
+  frameNumber.value = '';
   $('file').value = '';
   $('view').hidden = true;
   scene?.reset();
@@ -74,6 +76,8 @@ $('file').addEventListener('change', async () => {
     $('room').replaceChildren(...rooms.map(room => new Option('房間 ' + room, room)));
     if (rooms.length > 1) $('room').prepend(new Option('全場俯視', 'all', true, true));
     replay = candidate;
+    frameNumber.min = candidate.startFrame;
+    frameNumber.max = candidate.endFrame;
     $('title').textContent = candidate.clipName;
     const source = candidate.header.origin === 'GameServer' ? '遊戲伺服器' : '模擬';
     const scope = candidate.roomId === undefined ? '' : ` · 僅房間 ${candidate.roomId}`;
@@ -131,6 +135,13 @@ $('play').addEventListener('click', () => {
 });
 $('back').addEventListener('click', () => openFrame(index - 1));
 $('next').addEventListener('click', () => openFrame(index + 1));
+$('jump').addEventListener('submit', event => {
+  event.preventDefault();
+  const sequence = frameNumber.valueAsNumber;
+  if (!replay || !Number.isSafeInteger(sequence) || sequence < replay.startFrame || sequence > replay.endFrame) return;
+  openFrame(sequence - replay.startFrame);
+  frameNumber.focus();
+});
 loop.addEventListener('change', () => { if (!loop.checked && restartAt !== null) pause(); });
 timeline.addEventListener('input', () => openFrame(Number(timeline.value)));
 $('transition').addEventListener('change', event => {
