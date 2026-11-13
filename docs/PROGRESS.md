@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 從控制台下載五房 UDP 預檢清單
+
+- 控制台 0.31.162 可在 Windows 啟動計畫頁選取席位 IPv4 表，依五房獨立或合併模式匯出預檢清單。下載前重新核對場次，席位表留在瀏覽器。 [操作方式](WINDOWS_SERVER_PACKAGE.md#從主控台下載場館計畫)
+- 通過 26 項 Chromium、107 項 Windows 管理包及 11 項 LAN 檢查。兩種模式的瀏覽器下載皆與原 Python 清單產生器相符，現有預檢工具可讀取。新版 Windows ZIP 解壓後通過清單與原程序收尾核對。 [Windows 管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.162-venue-network-win-x64.zip) · [本機驗證摘要](../artifacts/venue-console-network-validation.json)
+- 功能來源 `eae45ac` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43341121938)
+
 ## 2026-11-13 六批驗收定位缺少的原始檔案
 
 - `--inspect-venue-stages` 的 `missingFile` 會顯示原檔類型及檔名。操作員可按批次項次找出缺少的就緒報告、UDP 原檔、回放或玩家日誌。 [操作方式](EXTERNAL_CLIENTS.md#一次查看六批待補件)
