@@ -65,7 +65,14 @@ class VenueReleaseTests(unittest.TestCase):
     def test_individually_valid_player_with_replaced_runtime_is_not_a_pair(self):
         self.write(self.player, 'VrCommand.exe', 'different but manifest-consistent game')
         self.manifest(self.player, 'player-package.json', {'version': 1, 'platform': 'Windows-x64', 'build': self.source})
-        with self.assertRaisesRegex(ValueError, 'runtime files differ'):
+        with self.assertRaisesRegex(ValueError, r'runtime files differ \(1\): VrCommand\.exe'):
+            release.verify_windows(self.control, self.server, self.player)
+
+    def test_windows_build_mismatch_lists_only_changed_identity_fields(self):
+        different = dict(self.source, sourceFingerprint='c' * 64, playerPrefabId='GlobalObjectId_V1-1-other')
+        self.write(self.player, 'build-receipt.json', different)
+        self.manifest(self.player, 'player-package.json', {'version': 1, 'platform': 'Windows-x64', 'build': different})
+        with self.assertRaisesRegex(ValueError, r'differs: sourceFingerprint, playerPrefabId$'):
             release.verify_windows(self.control, self.server, self.player)
 
     def test_player_with_unlisted_files_is_rejected(self):
@@ -95,11 +102,34 @@ class VenueReleaseTests(unittest.TestCase):
                    'source': dict(self.source, target='Android')}
         self.write(self.root, 'game.receipt.json', receipt)
         game = release.identity(self.source, 'StandaloneWindows64')
-        with self.assertRaisesRegex(ValueError, 'build source or network identity differs'):
+        with self.assertRaisesRegex(ValueError, r'build source or network identity differs: sourceFingerprint$'):
             release.verify_quest(apk, self.root, self.root, dict(game, sourceFingerprint='b' * 64))
         apk.write_bytes(b'wrong APK')
         with self.assertRaisesRegex(ValueError, 'original release receipt'):
             release.verify_quest(apk, self.root, self.root, game)
+
+    def test_verified_quest_metadata_must_match_fields_in_original_receipt(self):
+        apk = self.root / 'game.apk'
+        with zipfile.ZipFile(apk, 'w') as archive:
+            for name in ('libil2cpp.so', 'libUnityOpenXR.so', 'libopenxr_loader.so'):
+                archive.writestr('lib/arm64-v8a/' + name, b'fixture')
+        for name in ('build-tools/36.0.0/aapt2', 'build-tools/36.0.0/aapt2.exe', 'build-tools/36.0.0/lib/apksigner.jar', 'bin/java', 'bin/java.exe'):
+            self.write(self.root, name, 'fixture')
+        meta = {'applicationId': release.QUEST_APP, 'version': '0.49.0', 'versionCode': 63, 'architecture': 'arm64-v8a',
+                'minSdk': 32, 'targetSdk': 35, 'signatureV2': True, 'signerSha256': 'e' * 64}
+        receipt = {'artifact': apk.name, 'bytes': apk.stat().st_size, 'sha256': release.digest(apk),
+                   'source': dict(self.source, target='Android'), 'version': meta['version'],
+                   'versionCode': meta['versionCode'], 'architecture': meta['architecture']}
+        game = release.identity(self.source, 'StandaloneWindows64')
+        with patch.object(release.subprocess, 'run'), patch.object(release, 'quest_metadata', return_value=meta):
+            for accepted in (receipt, dict(receipt, **meta)):
+                self.write(self.root, 'game.receipt.json', accepted)
+                self.assertEqual(release.verify_quest(apk, self.root, self.root, game)['signerSha256'], 'e' * 64)
+            for field, value in [('signerSha256', 'f' * 64), ('signatureV2', 1), ('minSdk', 31),
+                                 ('targetSdk', 34), ('applicationId', 'com.example.other')]:
+                with self.subTest(field=field), self.assertRaisesRegex(ValueError, f'Quest APK {field} differs'):
+                    self.write(self.root, 'game.receipt.json', {**receipt, **meta, field: value})
+                    release.verify_quest(apk, self.root, self.root, game)
 
     def test_quest_metadata_accepts_arm64_and_verified_v2_only(self):
         badging = ("package: name='com.vrcommand.quest' versionCode='63' versionName='0.49.0'\n"

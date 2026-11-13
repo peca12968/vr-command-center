@@ -47,6 +47,11 @@ def identity(receipt, target):
     return values
 
 
+def require_matching_identity(expected, actual, message):
+    different = [field for field in IDENTITY if expected[field] != actual[field]]
+    require(not different, f'{message}: {", ".join(different)}')
+
+
 def verify_windows(control, server, player):
     control_manifest = control_package.verify(control)
     server_manifest = server_package.verify(server)
@@ -69,15 +74,21 @@ def verify_windows(control, server, player):
 
     server_build = read(server / 'Runtime/build-receipt.json')
     player_build = read(player / 'build-receipt.json')
-    require(server_build == server_manifest.get('build') == player_manifest.get('build') == player_build,
-            'Windows server and player do not share their original build receipt')
+    require(server_build == server_manifest.get('build'), 'Windows server manifest and original build receipt differ')
+    require(player_build == player_manifest.get('build'), 'Windows player manifest and original build receipt differ')
     game = identity(server_build, 'StandaloneWindows64')
+    require_matching_identity(game, identity(player_build, 'StandaloneWindows64'),
+                              'Windows server and player build source or network identity differs')
+    require(server_build == player_build, 'Windows server and player do not share their original build receipt')
     runtime = {row['path'].removeprefix('Runtime/'): (row['bytes'], row['sha256']) for row in server_manifest['files']
                if row['path'].startswith('Runtime/')}
     names = set(player_package.RUNTIME) | {'build-receipt.json'}
     paired = {row['path']: (row['bytes'], row['sha256']) for row in player_manifest['files']
               if row['path'].split('/', 1)[0] in names}
-    require(runtime == paired, 'Windows server and player runtime files differ')
+    if runtime != paired:
+        different = sorted(name for name in runtime.keys() | paired.keys() if runtime.get(name) != paired.get(name))
+        preview = ', '.join(different[:3])
+        raise ValueError(f'Windows server and player runtime files differ ({len(different)}): {preview}')
     require({f.relative_to(player).as_posix() for f in player.rglob('*') if f.is_file()}
             == {row['path'] for row in player_manifest['files']} | {'player-package.json'},
             'Windows player package contains unlisted files')
@@ -110,7 +121,8 @@ def verify_quest(apk, sdk, jdk, game):
     require(receipt.get('artifact') == apk.name and type(receipt.get('bytes')) is int
             and apk.stat().st_size == receipt['bytes'] and digest(apk) == receipt.get('sha256'),
             'Quest APK differs from its original release receipt')
-    require(identity(receipt['source'], 'Android') == game, 'Quest and Windows build source or network identity differs')
+    require_matching_identity(game, identity(receipt['source'], 'Android'),
+                              'Quest APK differs from the matching Windows pair; build source or network identity differs')
     suffix = '.exe' if os.name == 'nt' else ''
     tools = sdk / 'build-tools' / '36.0.0'
     aapt, java, signer = tools / ('aapt2' + suffix), jdk / 'bin' / ('java' + suffix), tools / 'lib/apksigner.jar'
@@ -123,6 +135,10 @@ def verify_quest(apk, sdk, jdk, game):
     meta = quest_metadata(run(aapt, 'dump', 'badging', apk), run(java, '-jar', signer, 'verify', '--verbose', '--print-certs', apk))
     require(meta['version'] == receipt.get('version') and meta['versionCode'] == receipt.get('versionCode')
             and meta['architecture'] == receipt.get('architecture'), 'Quest APK version or architecture differs from the release receipt')
+    for field in ('applicationId', 'minSdk', 'targetSdk', 'signatureV2', 'signerSha256'):
+        if field in receipt:
+            require(type(receipt[field]) is type(meta[field]) and receipt[field] == meta[field],
+                    f'Quest APK {field} differs from the release receipt')
     with zipfile.ZipFile(apk) as archive:
         natives = {f'lib/{ABI}/{name}' for name in ('libil2cpp.so', 'libUnityOpenXR.so', 'libopenxr_loader.so')}
         require(natives <= set(archive.namelist()), 'Quest APK is missing the required OpenXR or game libraries')
