@@ -8,6 +8,7 @@ const route = '/venue/server-launch-review';
 const panel = '#venue-launch-review', input = panel + '-file', button = panel + '-check', summary = panel + '-summary';
 const rows = panel + '-rooms li';
 const rosterShortcut = roomId => `[data-launch-review-roster="${roomId}"]`;
+const replayShortcut = roomId => `[data-launch-review-replay="${roomId}"]`;
 const seatStatus = roomId => `[data-launch-review-seats="${roomId}"]`;
 const rosterStatus = panel + '-roster-status';
 
@@ -17,6 +18,21 @@ async function openRoomRoster(page, sessionId, roomId) {
   assert.equal(await page.locator('#session-select').inputValue(), sessionId);
   assert.equal(await page.locator('#roster-room').inputValue(), String(roomId));
   assert.equal(await page.evaluate(() => document.activeElement.id), 'roster-title');
+}
+
+async function openRoomReplay(page, sessionId, roomId, worldSequence) {
+  const watch = page.waitForRequest(request => {
+    const url = new URL(request.url());
+    return url.pathname === `/api/sessions/${sessionId}/world/watch` && url.searchParams.get('mode') === 'replay'
+      && url.searchParams.get('fromFrame') === '1';
+  });
+  await page.locator(replayShortcut(roomId)).click();
+  await watch;
+  await page.locator('#world-status').filter({ hasText: '錄製已核對封存' }).waitFor();
+  await page.locator('#world-canvas[data-sequence]').waitFor();
+  assert.equal(await page.locator('#world-recording').inputValue(), sessionId);
+  assert.equal(await page.locator('#world-room').inputValue(), String(roomId));
+  assert.equal(await page.locator('#world-recording option:checked').getAttribute('data-accepted'), String(worldSequence));
 }
 
 async function login(page, base, token) {
@@ -221,7 +237,8 @@ async function checkVenueLaunchReview({ context, api, tokens, base, screenshots,
     await choose(page, terminal);
     assert.equal((await (await checkSelected(page)).json()).servers[0].sealState, 'pending');
     await page.locator(rows).filter({ hasText: '管理端尚未完成雙封存' }).waitFor();
-    check(!(await page.locator(summary).textContent()).includes('均相符'), 'The report cannot confirm closure before the management seals');
+    check(!(await page.locator(summary).textContent()).includes('均相符') && await page.locator(replayShortcut(5)).count() === 0,
+      'The report cannot confirm closure or offer replay before the management seals');
     const endedState = await api(sessionPath);
     const finalSequence = ++sequence;
     assert.equal(send({ type: 'frame', payload: { sequence, observedSequence: endedState.sequence, elapsedMilliseconds: Date.now() - started,
@@ -239,12 +256,38 @@ async function checkVenueLaunchReview({ context, api, tokens, base, screenshots,
     check(await page.locator(rosterShortcut(5)).count() === 0 && JSON.stringify(await api(sessionPath)) === JSON.stringify(originalClosed),
       'A sealed report matches both original tails without uploading private fields or changing the session');
     await page.locator(panel).screenshot({ path: path.join(screenshots, 'venue-terminal-review.png') });
+    await openRoomReplay(page, session.id, 5, sequence);
+    check(await page.locator('#world-view').isVisible() && await page.locator('#world-recording').inputValue() !== replacement.id,
+      'A verified room shortcut opens its original sealed recording even after the room is reused');
+    await page.locator('#tab-operations').click();
+    await page.locator(panel + ' summary').click();
+    await choose(page, terminal);
+    await checkSelected(page);
+    await page.route('**/api/world-recordings/page?**', async handler => {
+      const original = await handler.fetch();
+      const payload = await original.json();
+      const row = [...payload.recordings, ...payload.pinned].find(item => item.header.sessionId === session.id);
+      if (row) row.acceptedSequence++;
+      await handler.fulfill({ response: original, json: payload });
+    });
+    let replayRequested = false;
+    const trackReplay = request => { if (request.url().includes(`/api/sessions/${session.id}/world/watch?`)) replayRequested = true; };
+    page.on('request', trackReplay);
+    await page.locator(replayShortcut(5)).click();
+    await page.locator('#world-message').filter({ hasText: '目前無法讀取原場次的錄製' }).waitFor();
+    check(!replayRequested && await page.locator('#world-recording').inputValue() === '',
+      'A changed recording tail is rejected before a replay stream opens');
+    page.off('request', trackReplay);
+    await page.unroute('**/api/world-recordings/page?**');
+    await page.locator('#tab-operations').click();
+    await page.locator(panel + ' summary').click();
     for (const evidence of ['finalCombatStream', 'finalWorld']) {
       terminal.servers[0].result[evidence].acceptedSequence++;
       await choose(page, terminal);
       assert.equal((await (await checkSelected(page)).json()).servers[0].sealState, 'mismatch');
       await page.locator(rows).filter({ hasText: '原錄製來源或封存序號不符' }).waitFor();
-      check(!(await page.locator(summary).textContent()).includes('均相符'), `A different ${evidence} tail cannot confirm closure`);
+      check(!(await page.locator(summary).textContent()).includes('均相符') && await page.locator(replayShortcut(5)).count() === 0,
+        `A different ${evidence} tail cannot confirm closure or offer replay`);
       terminal.servers[0].result[evidence].acceptedSequence--;
     }
     const terminalResult = terminal.servers[0].result;
@@ -285,7 +328,8 @@ if (require.main === module) {
     for await (const chunk of process.stdin) inputChunks.push(chunk);
     const { base, token, reportPath, expected, output, liveReady } = JSON.parse(Buffer.concat(inputChunks).toString('utf8'));
     assert.match(base, /^http:[/][/]127[.]0[.]0[.]1:[0-9]+$/);
-    const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_SERVER_PLAN_CHROMIUM });
+    const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_SERVER_PLAN_CHROMIUM,
+      args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
     try {
       const page = await browser.newPage();
       await login(page, base, token);
@@ -305,6 +349,19 @@ if (require.main === module) {
         assert.match(await page.locator(summary).textContent(), /五房原戰鬥與回放封存序號均相符/);
         assert.equal(await page.locator(rows).filter({ hasText: '雙封存序號相符' }).count(), expected.length);
         assert.equal(await page.locator('[data-launch-review-roster]').count(), 0);
+        const targets = response.request().postDataJSON().servers;
+        const checkedReplays = [];
+        for (const { sessionId, roomIds, seal } of targets) for (const roomId of roomIds) {
+          if (checkedReplays.length) {
+            await page.locator('#tab-operations').click();
+            await page.locator(panel + ' summary').click();
+            await page.locator(input).setInputFiles(reportPath);
+            assert.equal((await checkSelected(page)).status(), 200);
+          }
+          await openRoomReplay(page, sessionId, roomId, seal.worldSequence);
+          checkedReplays.push({ sessionId, roomId, worldSequence: seal.worldSequence });
+        }
+        review.checkedReplays = checkedReplays;
       }
       if (liveReady) {
         assert.equal(response.request().postDataJSON().version, 2);

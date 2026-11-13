@@ -110,7 +110,7 @@ function verifyReply(value, request) {
   return value;
 }
 
-export function mountVenueLaunchReview(getState, api, selectSession, focusRoster, reviewedBegin) {
+export function mountVenueLaunchReview(getState, api, selectSession, focusRoster, reviewedBegin, openReplay) {
   const $ = suffix => document.getElementById('venue-launch-review-' + suffix);
   const panel = document.getElementById('venue-launch-review'), file = $('file'), button = $('check');
   let active = false, pending = false, opening = false, generation = 0, seatViews = [];
@@ -167,7 +167,7 @@ export function mountVenueLaunchReview(getState, api, selectSession, focusRoster
       if (current()) { opening = false; update(); }
     }
   }
-  function show(review) {
+  function show(review, request) {
     const allUnbound = review.servers.every(row => row.phase === 'Preparing' && row.sourceState === 'unbound');
     const allLive = review.servers.every(row => row.phase === 'Preparing' && row.sourceState === 'original-source'
       && row.endpointState === 'published' && row.recentSource === true);
@@ -177,7 +177,7 @@ export function mountVenueLaunchReview(getState, api, selectSession, focusRoster
       : allUnbound ? '原場次取樣時均在準備中且尚未登記來源。' : '已核對原場次。請查看各房來源與端點狀態。';
     const instance = review.instanceVerified ? '管理實例相符。' : '此管理服務未提供實例識別，已按原場次識別比對。';
     $('summary').textContent = `${instance}${summary} 取樣時間 ${new Date(review.observedAtUtc).toLocaleString('zh-TW')}。`;
-    $('rooms').replaceChildren(...review.servers.map(row => {
+    $('rooms').replaceChildren(...review.servers.map((row, index) => {
       const li = document.createElement('li');
       li.className = 'venue-launch-review-row';
       const endpoint = row.endpointAddress === null ? '' : ` · ${row.endpointAddress}:${row.endpointPort}`;
@@ -189,6 +189,25 @@ export function mountVenueLaunchReview(getState, api, selectSession, focusRoster
         : `${endpointStates[row.endpointState]}${endpoint}${address}${recent}`;
       detail.textContent = `房間 ${row.roomIds.join('、')} · ${row.sessionId}${row.phase === null ? '' : ' · ' + phases[row.phase]} · ${sourceStates[row.sourceState]}${stream} · ${evidence}`;
       li.append(detail);
+      if (review.version === 3 && review.instanceVerified && row.sealState === 'matched') {
+        const { origin, worldSequence } = request.servers[index].seal;
+        const actions = document.createElement('div');
+        actions.className = 'button-row';
+        for (const roomId of row.roomIds) {
+          const shortcut = document.createElement('button');
+          shortcut.type = 'button';
+          shortcut.className = 'quiet small';
+          shortcut.dataset.launchReviewReplay = roomId;
+          shortcut.textContent = `回放房間 ${roomId}`;
+          shortcut.addEventListener('click', () => {
+            if (!shortcut.disabled && shortcut.isConnected)
+              openReplay({ mode: 'replay', complete: true, sessionId: row.sessionId, streamId: row.streamId,
+                origin, throughSequence: worldSequence, roomId });
+          });
+          actions.append(shortcut);
+        }
+        li.append(actions);
+      }
       if (review.version === 2 && review.instanceVerified && row.sourceState === 'original-source'
           && row.endpointState === 'published' && ['Preparing', 'Running', 'Paused'].includes(row.phase)) {
         const actions = document.createElement('div');
@@ -236,7 +255,7 @@ export function mountVenueLaunchReview(getState, api, selectSession, focusRoster
       }
       if (!current()) return;
       const review = verifyReply(await api('/venue/server-launch-review', 'POST', request), request);
-      if (current()) show(review);
+      if (current()) show(review, request);
     } catch (error) {
       if (current()) $('summary').textContent = error.code === 'venue-launch-instance-mismatch'
         ? '報告屬於另一個管理實例。' : '無法核對原場次，請確認管理連線後重試。';

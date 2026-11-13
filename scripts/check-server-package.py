@@ -2155,9 +2155,13 @@ def main():
                              'sourceState': 'original-source', 'streamId': row['result']['streamId'], 'sealState': 'matched'}
                             for row in sorted(terminal['servers'], key=lambda row: row['roomIds'][0])]
                 observed = browser_launch_review(original_launch, expected, label+'-terminal')
+                replays = [{'sessionId': row['result']['sessionId'], 'roomId': room,
+                            'worldSequence': row['result']['finalWorld']['acceptedSequence']}
+                           for row in sorted(terminal['servers'], key=lambda row: row['roomIds'][0]) for room in row['roomIds']]
                 check(observed['version'] == 3 and observed['launchId'] == terminal['venueLaunchId']
+                      and observed['checkedReplays'] == replays
                       and control.sha(original_launch) == summary['venueLauncherReport']['sha256'],
-                      label+' original terminal report matches both management seals without changing the file')
+                      label+' original terminal report matches both seals and opens each original room replay without changing the file')
         if args.check_venue_udp_readiness:
             if args.check_venue_plan_ui:
                 check(summary['venueNetworkPlan'] == {'sha256': control.sha(Path(common['venueNetworkPlan'])),

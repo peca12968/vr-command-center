@@ -49,7 +49,8 @@ const seatDeployments = ['VR', 'MR'].map(mode => mountSeatDeployment(() => state
 const mrVenue = mountMrVenueBundle(() => state, api, download, roomReadiness.ticketDestination);
 const vrVenue = mountVrVenueTickets(() => state, api, download, roomReadiness.ticketSourceLive);
 const venueServerPlan = mountVenueServerPlan(() => state, api, download);
-const venueLaunchReview = mountVenueLaunchReview(() => state, api, selectSession, focusRoster, roomReadiness.reviewedBegin);
+const venueLaunchReview = mountVenueLaunchReview(() => state, api, selectSession, focusRoster, roomReadiness.reviewedBegin,
+  target => tab('world', target));
 const operatorNetwork = mountOperatorNetwork(() => state, api, download, uuid);
 const alignmentPins = mountAlignmentPins({ state: () => state,
   checkFile: file => api('/room-alignment/check-file', 'POST', file),

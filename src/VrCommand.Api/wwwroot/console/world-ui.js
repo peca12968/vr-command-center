@@ -280,6 +280,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   }
   function matchesTarget(recording, target) {
     if (recording.header?.sessionId !== target.sessionId
+      || (target.origin != null && recording.header.origin !== target.origin)
       || (target.roomId != null && !recording.header.roomIds?.includes(target.roomId))) return false;
     if (isBeginWitness(target.witness)) {
       const { roomIds } = target.witness;
