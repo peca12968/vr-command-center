@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 UDP 預檢清單核對五房名冊
+
+- 控制台 0.31.175 逐席比對上傳的 IPv4 表與準備中場次。若名冊與檔案有差異，會列出缺漏及未登記的房號與席號。按下載時再讀取原場次，可擋下預覽後換席的舊清單。Windows 啟動計畫仍可在空名冊時下載。 [操作說明](EXTERNAL_CLIENTS.md#從原啟動預覽產生網路清單) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.175.zip)
+- 五房獨立與合併均從解壓包的控制台下載原清單，沿用至同機 UDP 預檢、原生啟動與封存。575 項三包整合通過，兩種模式各 25 個同機 Windows 模擬玩家，核對 50 筆原戰績回條、6 份 CSV、1,060 格回放及雙封存。隔離程序已停止，C／F 共 257 個非資料庫檔案雜湊相符。 [三包驗收](../artifacts/server-package-checks/run-98b3554ccbfc4814a6a6eb2ee8b81b55/checks.json)
+- 另通過 1,105 項核心、825 項 HTTP、1,144 項完整 Chromium、解壓包 36 項 Chromium、107 項 Windows 管理包及 15 項 UDP 測試。首次套件核對將 ZIP 傳給需要解壓目錄的參數，改用解壓目錄後 567 筆清單全數通過。發行回條在提交前產生，193 個建置來源檔案已與提交 `4ac554b` 逐檔核對。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 與廠商硬體仍待現場驗收。 [驗證摘要](../artifacts/console-venue-network-roster-validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43372683603)
+
 ## 2026-11-13 管理台匯出五房伺服器 IPv4 清單
 
 - 控制台 0.31.174 的五房啟動計畫可逐行填入伺服器其他 IPv4。公告位址會自動加入 UDP 預檢清單。下載前會指出衝突房號及席號，欄位與席位表只在瀏覽器處理。 [操作說明](EXTERNAL_CLIENTS.md#從原啟動預覽產生網路清單) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.174.zip)
