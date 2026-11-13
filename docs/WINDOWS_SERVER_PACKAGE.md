@@ -86,6 +86,21 @@ Unity 0.47.0 伺服器可搭配控制台 0.31.14。啟動器 1.5 可選擇待開
 
 開場前可將這份成功預覽和 Windows／Quest UDP 雙端報告一併核對。若某房的模式、埠或公告／綁定位址與網路清單不符，場館報告會標出該房，供主控修正。 [五房 UDP 核對](EXTERNAL_CLIENTS.md#開場前核對五房-udp-報告)
 
+### 以 UDP 預檢報告啟動五房
+
+需要在開場前重驗預檢時，從專案目錄執行以下指令。使用本次的網路清單、原啟動計畫，以及核對計畫和預覽後產生的完整 `venue-readiness.json`。保留報告所引用的原始雙端檔案及預覽路徑。工作目錄和兩份結果檔使用新路徑。
+
+```powershell
+python .\scripts\start-verified-venue.py `
+  --launcher C:\VRCommand\GameServer\Launch-Server.exe `
+  --launch-plan C:\VRCommand\venue-plan.json --network-plan C:\VRCommand\venue-network.json `
+  --readiness C:\VRCommand\venue-readiness.json --seconds 3600 `
+  --work C:\VRCommand\venue-work --ready-report C:\VRCommand\venue-ready.json `
+  --report C:\VRCommand\venue-result.json --peer-diagnostics
+```
+
+指令核對原計畫與網路清單的雜湊，重驗原始雙端報告及既有 30 分鐘期限，再把已核對的計畫交給 `Launch-Server.exe`。預檢缺件、逾時或計畫有變時，指令會在遊戲程序建立前退出。看到 `udp-preflight-verified` 後，仍須等啟動器寫出 `venue-ready`，再到控制台配票和開始。`--peer-diagnostics` 可選，用於需要保存玩家 UDP 來源的驗收。 [補測方式](EXTERNAL_CLIENTS.md#補測未完成的全館-udp-預檢)
+
 ### 重跑五房視窗驗收
 
 在 Windows 使用解壓後的伺服器包及管理包，指定新的本機測試目錄。`--topology Independent` 驗證五個伺服器，`--topology Linked` 驗證一個涵蓋五房的伺服器。`--players-per-room 5` 會啟動 25 個同機 Windows 模擬端。

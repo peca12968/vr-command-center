@@ -985,6 +985,7 @@ def main():
                                  for row,state in zip(plan['servers'],states,strict=True)]
             plan_file.write_text(json.dumps(dict(plan,servers=list(reversed(plan['servers'])))),encoding='utf-8')
         udp_pairs = []
+        guarded_start = None
         if args.check_venue_preview:
             preview=call(label+'-preview',['--venue-check',plan_file],good=True)
             actual=read(preview)
@@ -998,13 +999,43 @@ def main():
                   label+' shared preview lists exact original rooms, missions and UDP without modifying any session or publishing readiness')
             if args.check_venue_udp_readiness:
                 udp_pairs = venue_udp_readiness(label, topology, states, values, plan_file, preview)
+                guarded_start = [sys.executable, str(ROOT / 'scripts/start-verified-venue.py'), '--launcher', str(exe),
+                                 '--network-plan', str(out / (label + '-udp-network.json'))]
+                readiness_path = out / (label + '-udp-readiness.json')
+                incomplete = out / (label + '-udp-incomplete-launch.json')
+                save(incomplete.name, dict(read(readiness_path), complete=False))
+                wrong_plan = out / (label + '-udp-changed-launch.json')
+                wrong_plan.write_bytes(plan_file.read_bytes() + b'\n')
+                missing_pair = out / (label + '-udp-missing-original.json')
+                missing = read(readiness_path)
+                missing['groups'][-1]['udpSourcePreflights'][0]['probe'] = label + '-absent-probe.json'
+                save(missing_pair.name, missing)
+                for reason, input_plan, input_report in (
+                    ('complete venue UDP readiness report', plan_file, incomplete),
+                    ('launch plan differs', wrong_plan, readiness_path),
+                    ('UDP readiness is no longer complete', plan_file, missing_pair),
+                ):
+                    blocked = subprocess.run([*guarded_start, '--launch-plan', str(input_plan),
+                                              '--readiness', str(input_report), '--work', str(work),
+                                              '--seconds', '600', '--ready-report', str(ready), '--report', str(report)],
+                                             capture_output=True, text=True, encoding='utf-8', cwd=out, env=env, timeout=45)
+                    check(blocked.returncode == 1 and reason in blocked.stderr and not blocked.stdout
+                          and not any(path.exists() for path in (work, ready, report))
+                          and all(request('/api/sessions/' + row['id']) == row for row in states),
+                          label + ' guarded launch rejects ' + reason + ' before native work')
+                guarded_start.extend(('--launch-plan', str(plan_file), '--readiness', str(readiness_path)))
         if venue_pin:
             listed = read(call(label + '-https-catalog', ['--catalog', venue_target], good=True))
             check(listed['instanceId'] == read(venue_target)['instanceId']
                   and [(row['id'], row['roomIds']) for row in listed['sessions']] == [(row['id'], row['roomIds']) for row in states],
                   label + ' pinned HTTPS catalog returns the exact original venue rooms')
         extra=['--peer-diagnostics','on'] if args.peer_diagnostics else []
-        process=subprocess.Popen([str(exe),*map(str,args_for(plan_file,work,ready)),'--report',str(report),*extra],cwd=out,env=env)
+        if guarded_start is None:
+            launch_command = [str(exe), *map(str, args_for(plan_file, work, ready)), '--report', str(report), *extra]
+        else:
+            launch_command = [*guarded_start, '--work', str(work), '--seconds', '600', '--ready-report', str(ready),
+                              '--report', str(report), *(['--peer-diagnostics'] if args.peer_diagnostics else [])]
+        process=subprocess.Popen(launch_command,cwd=out,env=env)
         entries=[]
         for index,(state,value) in enumerate(zip(states,values,strict=True)):
             name='linked' if linked else f"room-{state['roomIds'][0]:02}"

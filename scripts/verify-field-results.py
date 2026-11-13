@@ -844,7 +844,12 @@ def verify_room_alignments(session, header, alignments):
 
 def verify_udp_preflight(paths, binding, addresses):
     require(bool(addresses), 'UDP preflight needs an observed peer for this game binding')
-    powershell = (shutil.which('powershell.exe') if os.name == 'nt' else None) or shutil.which('pwsh')
+    powershell = None
+    if os.name == 'nt':
+        system_root = os.environ.get('SystemRoot', r'C:\Windows')
+        bundled_shell = Path(system_root) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+        powershell = str(bundled_shell) if bundled_shell.is_file() else shutil.which('powershell.exe')
+    powershell = powershell or shutil.which('pwsh')
     require(powershell is not None, 'PowerShell is required to verify the original UDP reports')
     script = Path(__file__).with_name('check-lan-udp.ps1')
     command = [powershell, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned', '-File', str(script),
