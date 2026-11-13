@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 單席補發採用原公告端點
+
+- 控制台 0.31.168 在五房批次公告後，單席連線檔採用管理服務在同次票券回應提供的 IPv4 與 UDP 埠，手動欄位空白或填錯仍可按原端點補發。來源過期時停用；未使用批次公告的場次仍沿用手動欄位。 [操作方式](EXTERNAL_CLIENTS.md#按房間下載連線檔)
+- 0.31.167 對同一測試只回傳票券，缺少端點。新版通過 825 項 HTTP、1,113 項完整 Chromium、107 項 Windows 管理包及 510 項三包整合檢查。原 Unity 程序暫停及恢復時核對端點與名冊，停止後確認阻擋新配票。五房獨立與合併各 25 個同機模擬玩家，核對 10 份原房間 ZIP、50 份戰績回條及 1,143 格封存回放。 [本機驗證摘要](../artifacts/venue-managed-seat-endpoint-validation.json)
+- 功能來源 `85ae5d9` 已推送。新版管理包與原 Windows 遊戲包、Quest 0.50.7 APK 通過離線交付一致性核對。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、Quest 3／VIVE XR、MR 場地及廠商硬體仍待實地驗收。 [Windows 管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.168-managed-seat-endpoint-win-x64.zip) · [離線交付報告](../artifacts/venue-release-control-0.31.168-game-0.50.7.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43349394248)
+
 ## 2026-11-13 整房配票核對原公告端點
 
 - 控制台 0.31.167 與管理 API 在五房批次公告後，整房 ZIP 使用原 IPv4 與 UDP 埠。來源暫未更新時停用下載，回傳新畫格後可續用原端點與名冊。舊版 0.31.166 對錯誤埠回應 200，新版逐一驗證錯誤位址及埠皆回應 409。 [操作方式](EXTERNAL_CLIENTS.md#按房間下載連線檔)
