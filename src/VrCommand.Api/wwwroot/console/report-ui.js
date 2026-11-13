@@ -1,4 +1,35 @@
+import { csvReportAccuracy, csvReportText, matchesReportRows } from './report-csv.js';
+
 export const venueScoreFields = ['players', 'ammoUsed', 'shotsHit', 'kills', 'hitsReceived', 'damageTaken'];
+
+const finalColumns = ['reportVersion', 'rowType', 'sessionId', 'missionId', 'missionName', 'sessionMode', 'roomIds',
+  'createdAtUtc', 'startedAtUtc', 'endedAtUtc', 'plannedDurationSeconds', 'throughSequence', 'origin', 'streamId',
+  'finalStreamSequence', 'playerId', 'playerName', 'playerRoomId', 'ammoUsed', 'shotsHit', 'kills', 'damageTaken',
+  'hitsReceived', 'accuracyPercent', 'health'];
+
+function csvUtc(value) {
+  if (value == null) return null;
+  const parts = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,7}))?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  if (!parts) return () => false;
+  const [, clock, fraction = '', offset] = parts;
+  const utc = new Date(clock + offset);
+  return Number.isFinite(utc.getTime()) ? utc.toISOString().slice(0, 19) + '.' + fraction.padEnd(7, '0') + '+00:00' : () => false;
+}
+
+function matchesFinalCsv(bytes, { session, statistics }, roomId, playerId) {
+  const { mission, combatStream } = session;
+  const scope = [session.id, mission.id, csvReportText(mission.definition.name), session.mode, session.roomIds.join('|'),
+    csvUtc(session.createdAtUtc), csvUtc(session.startedAtUtc), csvUtc(session.endedAtUtc), mission.definition.durationSeconds,
+    statistics.throughSequence, statistics.origin ?? combatStream?.origin ?? 'None', combatStream?.streamId, combatStream?.acceptedSequence];
+  const players = statistics.players.filter(player => (roomId === null || player.roomId === roomId)
+    && (playerId === null || player.playerId === playerId));
+  if (playerId && players.length !== 1) return false;
+  const rows = players.length ? players.map(player => [1, 'Player', ...scope, player.playerId, csvReportText(player.name),
+    player.roomId, player.ammoUsed, player.shotsHit, player.kills, player.damageTaken, player.hitsReceived,
+    csvReportAccuracy(player.accuracyPercent), player.health]) : [[1, 'Session', ...scope, ...Array(10).fill(null)]];
+  return roomId === null ? matchesReportRows(bytes, [finalColumns, ...rows])
+    : matchesReportRows(bytes, [[...finalColumns, 'reportRoomId'], ...rows.map(row => [...row, roomId])]);
+}
 
 function venueScoreCsv(scores) {
   const header = ['reportVersion', 'rowType', 'requestId', 'sessionId', 'roomId', ...venueScoreFields, 'accuracyPercent'];
@@ -98,6 +129,13 @@ export function mountReport(current, unauthorized, scopeChanged) {
       if (response.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase() !== mediaType) throw new Error('報表格式不符，請更新後重試。');
       const blob = await response.blob();
       if (!active()) return;
+      if (!allRooms) {
+        const bytes = await blob.arrayBuffer();
+        if (!active()) return;
+        const latest = current();
+        if (!ready(latest) || !matchesFinalCsv(bytes, latest, playerId ? null : roomId, playerId))
+          throw new Error('CSV 與目前場次的封存戰績不符，可重新下載。');
+      }
       const url = URL.createObjectURL(blob), link = document.createElement('a');
       try {
         link.href = url; link.download = allRooms ? `vr-command-reports-v1-${id}.zip`

@@ -1,3 +1,5 @@
+import { csvReportAccuracy, csvReportText, matchesReportRows } from './report-csv.js';
+
 const $ = id => document.getElementById(`world-clip-stats-${id}`);
 const metrics = ['ammoUsed', 'shotsHit', 'kills', 'hitsReceived', 'damageTaken'];
 const playerIdPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
@@ -6,33 +8,12 @@ const csvColumns = ['reportVersion', 'rowType', 'sessionId', 'streamId', 'fromFr
   'kills', 'hitsReceived', 'damageTaken', 'accuracyPercent'];
 
 export function matchesClipCsv(bytes, report) {
-  let text;
-  try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes); }
-  catch { return false; }
-  if (text[0] !== '\uFEFF') return false;
-  // The server quotes every cell, including empty fields and multiline names.
-  const field = /"((?:[^"]|"")*)"(,|\r\n)/y;
-  field.lastIndex = 1;
-  function matchesRow(expected, hasAccuracy = false) {
-    return expected.every((value, index) => {
-      const cell = field.exec(text);
-      const last = index === expected.length - 1;
-      if (!cell || cell[2] !== (last ? '\r\n' : ',')) return false;
-      const actual = cell[1].replaceAll('""', '"');
-      if (last && hasAccuracy && value !== null)
-        return /^(?:0|[1-9]\d{0,2})(?:\.\d{1,2})?$/.test(actual) && Number(actual) === value;
-      return actual === String(value ?? '');
-    });
-  }
-  if (!matchesRow(csvColumns)) return false;
   const scope = [report.sessionId, report.streamId, report.fromFrame, report.throughFrame, report.roomId, report.playerId];
-  if (report.players.length === 0)
-    return matchesRow([1, 'Clip', ...scope, ...Array(10).fill(null)]) && field.lastIndex === text.length;
-  return report.players.every(player => {
-    const name = /\p{Cc}|^\p{White_Space}*[=+@-]/u.test(player.name) ? "'" + player.name : player.name;
-    return matchesRow([1, 'Player', ...scope, player.playerId, name, player.roomId, player.ammoUsed, player.shotsHit,
-      player.matchedShots, player.kills, player.hitsReceived, player.damageTaken, player.accuracyPercent], true);
-  }) && field.lastIndex === text.length;
+  const rows = report.players.length === 0 ? [[1, 'Clip', ...scope, ...Array(10).fill(null)]]
+    : report.players.map(player => [1, 'Player', ...scope, player.playerId, csvReportText(player.name), player.roomId,
+      player.ammoUsed, player.shotsHit, player.matchedShots, player.kills, player.hitsReceived, player.damageTaken,
+      player.accuracyPercent === null ? null : csvReportAccuracy(player.accuracyPercent)]);
+  return matchesReportRows(bytes, [csvColumns, ...rows]);
 }
 
 export function mountWorldClipStatistics(response, download) {

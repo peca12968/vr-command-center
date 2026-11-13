@@ -84,6 +84,33 @@ async function main() {
       assert(sequence > 0 && sequence <= session.replay.throughSequence);
       return { sessionId: session.sessionId, room, sequence, throughSequence: session.replay.throughSequence };
     }
+    async function verifyFinalCsv(sessionId) {
+      const base = `${config.base}/api/sessions/${sessionId}`;
+      const headers = { Authorization: 'Bearer ' + config.masterKey };
+      const overview = await fetch(base + '/overview', { headers });
+      assert.equal(overview.status, 200);
+      const { session, statistics } = await overview.json();
+      await page.locator('#include-ended').check();
+      await page.locator(`#session-select option[value="${sessionId}"]`).waitFor({ state: 'attached' });
+      await page.locator('#session-select').selectOption(sessionId);
+      const [download, response] = await Promise.all([
+        page.waitForEvent('download'), page.waitForResponse(reply => reply.url() === base + '/report.csv'),
+        page.locator('#export-report').click()
+      ]);
+      assert.equal(response.status(), 200);
+      assert.equal(response.headers()['cache-control'], 'no-store');
+      const name = `vr-command-report-v1-${sessionId}.csv`;
+      assert.equal(download.suggestedFilename(), name);
+      const bytes = await fs.readFile(await download.path());
+      const rows = readCsv(bytes);
+      const fields = ['ammoUsed', 'shotsHit', 'kills', 'damageTaken', 'hitsReceived', 'accuracyPercent', 'health'];
+      assert.deepEqual(rows.map(row => [row.sessionId, row.streamId, +row.finalStreamSequence, +row.throughSequence,
+        row.playerId, +row.playerRoomId, ...fields.map(field => Number(row[field]))]), statistics.players.map(player =>
+        [sessionId, session.combatStream.streamId, session.combatStream.acceptedSequence, statistics.throughSequence,
+          player.playerId, player.roomId, ...fields.map(field => player[field])]));
+      await fs.writeFile(path.join(path.dirname(output), 'browser-' + name), bytes, { flag: 'wx' });
+      return { rows: rows.length, throughSequence: statistics.throughSequence, sha256: createHash('sha256').update(bytes).digest('hex') };
+    }
     async function openParticipation(session) {
       const { worldSequence: sequence, elapsedMilliseconds } = session.participationBegin.frame;
       const stream = page.waitForResponse(response => {
@@ -444,6 +471,7 @@ async function main() {
           contextStart, contextEnd, clipStatistics, clipCsv } };
     }
     for (const session of config.sessions) {
+      const finalCsv = await verifyFinalCsv(session.sessionId);
       if (session.participationBegin) {
         participation.push(await openParticipation(session));
         if (config.alignReplay && !alignment) {
@@ -489,6 +517,7 @@ async function main() {
         await page.locator('#tab-operations').click();
       }
       const replay = await openReplay(session);
+      replay.finalCsv = finalCsv;
       if (!results.length) {
         await page.screenshot({ path: path.join(path.dirname(output), config.mode + '-venue-replay.png') });
         replay.interval = await reviewInterval(replay);

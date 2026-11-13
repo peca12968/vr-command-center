@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { matchesClipCsv } from '../../src/VrCommand.Api/wwwroot/console/world-clip-statistics.js';
 
-const code = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/world-clip-statistics.js', import.meta.url), 'utf8');
-const { matchesClipCsv } = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
 const header = '"reportVersion","rowType","sessionId","streamId","fromFrame","throughFrame","reportRoomId","reportPlayerId","playerId","playerName","playerRoomId","ammoUsed","shotsHit","matchedShots","kills","hitsReceived","damageTaken","accuracyPercent"\r\n';
 const report = { sessionId: 'session', streamId: 'stream', fromFrame: 7, throughFrame: 11, roomId: 2, playerId: 'player',
   players: [{ playerId: 'player', name: '  =名"稱\r\n', roomId: 2, ammoUsed: 2, shotsHit: 1, matchedShots: 1,

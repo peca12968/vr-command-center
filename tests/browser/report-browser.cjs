@@ -145,7 +145,37 @@ module.exports = async function reportBrowser({ context, tokens, base, api, sess
     const player1 = finalRows.find(row => row.playerRoomId === '1').playerId;
     const player2 = finalRows.find(row => row.playerRoomId === '2').playerId;
     const personalUrl = player => `${base}/api/sessions/${linked.id}/players/${player}/report.csv`;
+    async function rejectCsv(url, button, substitute) {
+      const count = downloads.length;
+      await page.route(url, async route => {
+        const original = await route.fetch();
+        const body = new TextDecoder('utf-8', { ignoreBOM: true }).decode(await original.body());
+        await route.fulfill({ response: original, body: substitute(body) });
+      });
+      try {
+        await button.click();
+        await page.locator('#report-status').filter({ hasText: '封存戰績不符' }).waitFor();
+        check(downloads.length === count && await button.isEnabled(), 'A mismatched CSV is rejected before download and permits retry');
+      } finally { await page.unroute(url); }
+    }
+    await rejectCsv(`${base}/api/sessions/${linked.id}/report.csv`, button, body => body.replaceAll(linked.id, session.id));
+    await scope.selectOption('1');
+    const roomUrl = `${base}/api/sessions/${linked.id}/rooms/1/report.csv`;
+    await rejectCsv(roomUrl, button, body => body.replace(/,"1"\r\n$/, ',"2"\r\n'));
+    await scopedDownload(1, 'Master');
+    await scope.selectOption('');
     await picker.selectOption(player1);
+    const otherPlayer = await fetch(personalUrl(player2), { headers: { Authorization: 'Bearer ' + tokens.Master } });
+    const otherCsv = '\uFEFF' + (await otherPlayer.text());
+    await rejectCsv(personalUrl(player1), personalButton, () => otherCsv);
+    await rejectCsv(personalUrl(player1), personalButton, body => {
+      const rows = body.split('\r\n'), header = rows[0].split(',');
+      const value = header.indexOf('"ammoUsed"');
+      // This original player's simple-name row has no comma in its text fields.
+      const columns = rows[1].split(',');
+      columns[value] = '"999"';
+      return [rows[0], columns.join(','), ''].join('\r\n');
+    });
     check(await personalButton.isEnabled() && await page.locator('#open-player-review').isDisabled(),
       'The sealed combat ledger allows a personal download while the world recording is unavailable');
     const personalHeld = await hold(personalUrl(player1));
