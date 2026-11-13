@@ -52,6 +52,12 @@ class WindowsInboxIncomplete(EvidenceError):
         self.inbox = inbox
 
 
+class WindowsLinkCriteriaFailed(EvidenceError):
+    def __init__(self, message, metrics):
+        super().__init__(message)
+        self.metrics = metrics
+
+
 class MissingEvidence(FileNotFoundError):
     def __init__(self, kind, reference):
         self.kind = kind
@@ -1418,21 +1424,21 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
                       for seat in sorted(received.keys() - measured.keys()))
     link_report = {}
     if measured or link_criteria is not None:
-        missing_metrics = sorted(set(selected.values()) - measured.keys())
-        metrics_summary = {
-            'verifiedSeats': len(measured),
-            'missingSeats': [seat_row(seat) for seat in missing_metrics],
-            'seats': [dict(seat_row(seat), file=received[seat], **measured[seat]) for seat in sorted(measured)],
-        }
-        if link_criteria is not None:
-            metrics_summary['criteria'] = link_criteria
-            metrics_summary['meetsCriteria'] = not missing_metrics and all(
-                not row.get('criteriaFailures') for row in measured.values())
-        link_report['windowsLinkMetrics'] = metrics_summary
+        missing_metrics = [seat_row(seat) for seat in sorted(set(selected.values()) - measured.keys())]
+        measured_rows = [dict(seat_row(seat), file=received[seat], **measured[seat]) for seat in sorted(measured)]
+        link_report['windowsLinkMetrics'] = windows_link_summary(measured_rows, missing_metrics, link_criteria)
     return groups, {'complete': not missing and not issues, 'expectedWindowsSeats': len(selected),
                     'receivedWindowsSeats': len(received), 'missingSeats': [seat_row(seat) for seat in missing],
                     'receivedSeats': [dict(seat_row(seat), file=received[seat]) for seat in sorted(received)], 'issues': issues,
                     **link_report, **reconnect_report}
+
+
+def windows_link_summary(rows, missing_seats, criteria):
+    summary = {'verifiedSeats': len(rows), 'missingSeats': missing_seats, 'seats': rows}
+    if criteria is not None:
+        summary['criteria'] = criteria
+        summary['meetsCriteria'] = not missing_seats and all(not row.get('criteriaFailures') for row in rows)
+    return summary
 
 
 def verify_windows_link(log_hash, connection, launch, raw_metrics, criteria=None):
@@ -2376,6 +2382,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
 
     rooms, summaries = {}, []
     quest_players, windows_players, windows_link_reports = 0, 0, 0
+    windows_seats = set()
     stream_ids, bindings, player_ids, admission_ids, end_times, exchanges = set(), set(), set(), set(), set(), set()
     start_times = set()
     begin_request = None
@@ -2475,6 +2482,15 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
             for address, path, launch_path, metrics_path, bundle in logs:
                 raw_log, raw_launch, raw_metrics = read_windows_evidence(path, launch_path, bundle)
                 log = raw_log.decode('utf-8-sig')
+                if raw_launch is None and link_criteria is None:
+                    yield address, log
+                    continue
+                connection, result = client_result(log)
+                owner = owners.get(result['playerId'])
+                require(owner is not None, 'Windows launcher evidence belongs to a different session player')
+                seat = {'roomId': owner['roomId'], 'seat': integer(owner['seat'], 0, 4) + 1}
+                if link_criteria is not None:
+                    windows_seats.add((seat['roomId'], seat['seat']))
                 if raw_launch is None:
                     yield address, log
                     continue
@@ -2487,10 +2503,6 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
                 launch = read_json(raw_launch)
                 require(bundle is None or raw_metrics is not None or 'linkMetrics' not in launch,
                         'Player ZIP lacks its recorded Windows link report')
-                connection, result = client_result(log)
-                owner = owners.get(result['playerId'])
-                require(owner is not None, 'Windows launcher evidence belongs to a different session player')
-                seat = {'roomId': owner['roomId'], 'seat': integer(owner['seat'], 0, 4) + 1}
                 if raw_metrics is not None:
                     link_rows.append({**seat, **verify_windows_link(log_hash, connection, launch, raw_metrics, link_criteria)})
                 if release is not None:
@@ -2557,14 +2569,23 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
     require(recorded_at in end_times and not expected, 'Closure time or session set differs from the terminal evidence')
     require(not quest_deployments, 'Quest deployment reports include seats without original Quest logcat evidence')
     require(not quest_readiness, 'Quest readiness refers to a session outside the original closure')
-    require(windows_link_reports in (0, windows_players), 'Windows link evidence must cover every Windows seat in the venue')
+    incomplete_links = 'Windows link evidence must cover every Windows seat in the venue'
+    all_or_none = windows_link_reports in (0, windows_players)
     if link_criteria is not None:
-        require(windows_link_reports == windows_players > 0,
+        metrics = sorted(chain.from_iterable(session.get('windowsLinkMetrics', ()) for session in summaries),
+                         key=lambda row: (row['roomId'], row['seat']))
+        measured = {(row['roomId'], row['seat']) for row in metrics}
+        missing = [{'roomId': room, 'seat': seat} for room, seat in sorted(windows_seats - measured)]
+        outside = [f"room {row['roomId']} seat {row['seat']}" for row in metrics if row.get('criteriaFailures')]
+        if not all_or_none or not metrics or outside:
+            diagnostic = windows_link_summary(metrics, missing, link_criteria)
+            diagnostic['meetsCriteria'] = False
+            reason = incomplete_links if not all_or_none else (
+                'Windows link criteria not met at ' + ', '.join(outside) if outside else
                 'Windows link criteria require original link reports for every Windows seat')
-        outside_criteria = sorted((row['roomId'], row['seat']) for session in summaries
-                                  for row in session.get('windowsLinkMetrics', ()) if row.get('criteriaFailures'))
-        require(not outside_criteria, 'Windows link criteria not met at ' +
-                ', '.join(f'room {room} seat {seat}' for room, seat in outside_criteria))
+            raise WindowsLinkCriteriaFailed(reason, diagnostic)
+    else:
+        require(all_or_none, incomplete_links)
     peer_ips = {address for sources in rooms.values() for address in sources}
     remote = peer_ips - server_ips
     if require_distinct_remote_roster:
@@ -2669,12 +2690,13 @@ def verify_venue_stages(plan_path, *, inspect=False):
     stage_keys = [(mode, players) for players in sizes for mode in modes]
     stages, entries, issues = {}, {}, []
 
-    def reject(message, *indices, missing=None, windows_inbox=None):
+    def reject(message, *indices, missing=None, windows_inbox=None, windows_link_metrics=None):
         if not inspect:
             raise EvidenceError(message)
         issues.append({'entries': sorted(set(indices)), 'reason': message,
                        **({'missingFile': missing} if missing else {}),
-                       **({'windowsInbox': windows_inbox} if windows_inbox is not None else {})})
+                       **({'windowsInbox': windows_inbox} if windows_inbox is not None else {}),
+                       **({'windowsLinkMetrics': windows_link_metrics} if windows_link_metrics is not None else {})})
 
     paths, used, releases = {}, {}, {}
     for index, name in enumerate(names, 1):
@@ -2707,6 +2729,9 @@ def verify_venue_stages(plan_path, *, inspect=False):
             require(not require_start or verified_start is not None, 'missing verified Windows start receipt')
         except WindowsInboxIncomplete as error:
             reject(f'Venue manifest entry {index}: {error}', index, windows_inbox=error.inbox)
+            continue
+        except WindowsLinkCriteriaFailed as error:
+            reject(f'Venue manifest entry {index}: {error}', index, windows_link_metrics=error.metrics)
             continue
         except EvidenceError as error:
             reject(f'Venue manifest entry {index}: {error}', index)

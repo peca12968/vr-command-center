@@ -590,6 +590,8 @@ python scripts/verify-field-results.py --venue-stages .\stages.json --inspect-ve
 
 若原批次使用 Windows ZIP 收件資料夾，總表會在該批的 `issues[].windowsInbox` 列出預期及已核對席數、缺少的房號和席號，以及錯批、重複或無法核對的 ZIP 檔名。使用電腦對照表時會附席位的電腦標籤。有連線量測資料時也會保留該次收件的逐席量測摘要。依原批次補齊或移出錯批檔案後，可再執行總表確認。
 
+若批次已設定 `windowsLinkCriteria`，Windows 收件核對完成但量測缺漏或未達門檻，總表會在 `issues[].windowsLinkMetrics` 顯示該批門檻、已核對席數、缺量測的房號與席號，以及已收到的逐席回覆數與 p95 往返時間。`criteriaFailures` 會指出該席未通過的門檻。原始資料可使用散檔、逐席 ZIP 或 Windows 收件資料夾。 [連線量測門檻](#逐席核對-windows-連線量測門檻)
+
 ##### 統一核對追蹤及遊戲射擊
 
 要讓六批都通過同時追蹤及遊戲射擊驗收，在 `stages.json` 加入 `"requireTrackedRoster": true` 及 `"requireConcurrentFire": true`。兩項可各自啟用。各批保留所有原玩家日誌及 `worldJournal`，啟用射擊驗收時另提供 `combatJournal`。啟用任一項後，總清單會將自己的 `minimumConcurrentMilliseconds` 套用到全部六批；若個別清單另有較長門檻，該批使用較長值。

@@ -548,7 +548,7 @@ def preflight_fixture(root, label, *, server, peer, port, exchange=None):
 
 class FieldResultsTests(unittest.TestCase):
     def staged_batch(self, root, mode, count, id_offset, minutes_after, *, remote=False, tracked_fire=False,
-                     missing_shot=False, runtime='Test OpenXR Runtime', windows_inbox=False):
+                     missing_shot=False, runtime='Test OpenXR Runtime', windows_inbox=False, windows_links=False):
         root.mkdir()
         path, manifest, _ = venue_fixture(root, mode, remote=remote, with_journals=True,
             room_sizes=(count,) * 5, id_offset=id_offset, minutes_after=minutes_after)
@@ -573,6 +573,8 @@ class FieldResultsTests(unittest.TestCase):
             self.concurrent_journals(root, manifest, offsets, capture_start=capture_start)
             manifest['minimumConcurrentMilliseconds'] = 1000
         self.add_shared_release(root, manifest, 0)
+        if windows_links:
+            self.add_windows_links(root, manifest)
         if count != 5:
             manifest['expectedPlayersPerRoom'] = count
         if windows_inbox:
@@ -694,6 +696,64 @@ class FieldResultsTests(unittest.TestCase):
             self.assertTrue(json.loads(clean.stdout)['complete'])
             verified = subprocess.run(command, capture_output=True, check=True)
             self.assertEqual(80, json.loads(verified.stdout)['serverAcknowledgements'])
+
+    def test_staged_inspection_lists_failed_and_missing_windows_measurements(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = self.staged_plan(root)
+            plan['venueManifests'][0] = self.staged_batch(root / 'link-measurements', 'Independent', 1, 99000, 1,
+                                                          windows_links=True)
+            names = plan['venueManifests']
+            criteria = {'minimumReplies': 29, 'maximumP95RoundTripMs': 13}
+            originals = []
+            for name in names[:2]:
+                manifest_path = root / name
+                manifest = json.loads(manifest_path.read_bytes())
+                originals.append(manifest_path.read_bytes())
+                manifest['windowsLinkCriteria'] = criteria
+                manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
+            path = root / 'stages.json'
+            path.write_text(json.dumps(plan), encoding='utf-8')
+            command = [sys.executable, str(SCRIPT), '--venue-stages', str(path)]
+            result = subprocess.run([*command, '--inspect-venue-stages'], capture_output=True)
+            self.assertEqual(1, result.returncode, result.stderr)
+            self.assertFalse(result.stderr)
+            inspection = json.loads(result.stdout)
+            self.assertEqual(['needs-evidence', 'needs-evidence', *(['verified'] * 4)],
+                             [row['status'] for row in inspection['entries']])
+            self.assertEqual([[1], [2]], [issue['entries'] for issue in inspection['issues']])
+            measured, missing = [issue['windowsLinkMetrics'] for issue in inspection['issues']]
+            for report in (measured, missing):
+                self.assertEqual(criteria, report['criteria'])
+                self.assertFalse(report['meetsCriteria'])
+            self.assertEqual(5, measured['verifiedSeats'])
+            self.assertEqual([], measured['missingSeats'])
+            self.assertEqual([(room, 1, 28, 13.5, ['minimumReplies', 'maximumP95RoundTripMs']) for room in range(1, 6)],
+                             [(row['roomId'], row['seat'], row['replies'], row['p95RoundTripMs'], row['criteriaFailures'])
+                              for row in measured['seats']])
+            self.assertEqual(0, missing['verifiedSeats'])
+            self.assertEqual([{'roomId': room, 'seat': 1} for room in range(1, 6)], missing['missingSeats'])
+            self.assertEqual([], missing['seats'])
+            self.assertNotIn(str(root), result.stdout.decode())
+            rejected = subprocess.run(command, capture_output=True)
+            self.assertEqual(1, rejected.returncode)
+            self.assertIn(b'Windows link criteria not met at room 1 seat 1', rejected.stderr)
+
+            first_path = root / names[0]
+            partial = json.loads(first_path.read_bytes())
+            partial['sessions'][0]['players'][0].pop('linkMetrics')
+            first_path.write_text(json.dumps(partial), encoding='utf-8')
+            incomplete = subprocess.run([*command, '--inspect-venue-stages'], capture_output=True)
+            self.assertEqual(1, incomplete.returncode)
+            partial_report = json.loads(incomplete.stdout)['issues'][0]['windowsLinkMetrics']
+            self.assertEqual(4, partial_report['verifiedSeats'])
+            self.assertEqual([{'roomId': 1, 'seat': 1}], partial_report['missingSeats'])
+            self.assertFalse(partial_report['meetsCriteria'])
+
+            for name, original in zip(names[:2], originals, strict=True):
+                (root / name).write_bytes(original)
+            accepted = subprocess.run(command, capture_output=True, check=True)
+            self.assertEqual(80, json.loads(accepted.stdout)['serverAcknowledgements'])
 
     def test_staged_venue_rejects_incomplete_repeated_misordered_or_mismatched_batches(self):
         with tempfile.TemporaryDirectory() as directory:
