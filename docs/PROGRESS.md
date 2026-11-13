@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 分房觀戰重連保留原畫格與鏡頭
+
+- 管理包 0.31.193 讓手動重連沿用原房、錄製來源及最後畫格序號。分房串流每格核對角色、敵軍設定與玩家統計的房間，相同序號可恢復連線而保留原畫格。發行版和解壓版各通過 37 項 Edge 檢查，涵蓋手動重連來源替換、序號倒退、跨房資料及原鏡頭。解壓版另通過 26 項即時觀戰測試與 107 項管理包檢查。 [管理包](../artifacts/VRCommand-ControlServer-0.31.193.zip) · [觀戰操作](WORLD_RECORDING.md)
+- C 槽空間用盡時的來源複製與套件還原失敗已保留。將工作及 NuGet 快取移至 F 槽後完成打包，並將三份既有建置暫存逐檔核對 SHA-256 後移至 F 槽。原 Chromium 啟動未進入驗證，已停止該批；Edge 使用 F 槽暫存時，測試發布器先逾時，恢復使用有空間的 Windows 預設暫存後重驗通過。568 筆包清單及原 Windows 遊戲包、Quest APK 的離線一致性皆已核對。 [驗證摘要](../artifacts/live-room-reconnect-193-validation.json)
+- 功能提交 `f1e170a` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、Quest 3、VIVE、MR 場地及廠商硬體仍待現地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43413295549)
+
 ## 2026-11-13 主控先核對目標快照再換房
 
 - Windows 管理包 0.31.192 切換即時觀戰房間時會先核對目標房的保存快照。快照有誤時保留原房畫面，切換後新串流中斷時保留已核對的目標快照。發行版與解壓版各通過 33 項 Chromium 檢查，涵蓋跨房角色資料及串流來源不符。另通過 107 項管理包檢查及離線發行一致性核對。 [管理包](../artifacts/VRCommand-ControlServer-0.31.192.zip) · [觀戰操作](WORLD_RECORDING.md)
