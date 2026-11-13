@@ -520,12 +520,16 @@ python scripts/prepare-venue-field-manifest.py `
     --venue-bundle .\management.zip --launcher-report .\venue-final.json `
     --topology direct-lan --server-ip 192.168.1.10 --server-ip 127.0.0.1 `
     --windows-inbox .\returned --venue-release-report .\release.json `
-    --udp-preflight-batch .\UDP\readiness.json --output .\venue.json
+    --udp-preflight-batch .\UDP\readiness.json `
+    --minimum-concurrent-ms 2000 --windows-minimum-replies 28 --windows-maximum-p95-ms 40 `
+    --output .\venue.json
 python scripts/verify-field-results.py --venue-manifest .\venue.json --inspect-windows-inbox
 python scripts/verify-field-results.py --venue-manifest .\venue.json
 ```
 
 每個本機 IPv4 各填一次 `--server-ip`。同機演練將 `--topology` 設為 `same-host`。5 席或 10 席的試跑分別使用 `--players-per-room 1` 或 `2`。若伺服器工作目錄已搬移，填入 `--server-work-root` 並保留其下的 `room-01` 至 `room-05` 或 `linked` 及原 `telemetry` 子目錄。證據與清單放在同一磁碟時，清單會使用相對路徑。將整批資料移到別處時，保留檔案之間的位置。輸出檔名須為新路徑。
+
+將範例的同時在線毫秒數、最低回覆數及最高 p95 換成本次驗收規格。三個選項可省略，Windows 兩個門檻須一起提供。產生器會將門檻寫進新清單，Windows ZIP 尚未收齊時也可先準備清單。收件指令可查看待補席位及量測結果，最後以完整驗收核對原封存的同時在線區間。六批總清單可另外指定共用的 Windows 門檻。 [六批量測規格](#六批共用-windows-連線量測門檻)
 
 使用 Windows 收件資料夾時一併提供原發行報告，混合 Quest 的場次再用 `--windows-seat-map` 指定 Windows 席位。沒有收件資料夾時，可在產生清單後填入 `windowsPlayers` 或逐場玩家證據。有 MR 校正資料時，可加上 `--room-alignment-bundle` 帶入原部署 ZIP。若有開場預檢，可用 `--udp-preflight-batch` 納入原報告，並保留其引用的原計畫、預覽和雙端紀錄。最後執行完整驗收，摘要會列出原終止報告的批次識別、SHA-256 及驗證場次數。 [Windows 收件](#按收件資料夾找缺件及錯批) · [UDP 預檢](#開場前核對五房-udp-報告)
 

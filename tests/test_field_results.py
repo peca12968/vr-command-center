@@ -2056,6 +2056,55 @@ class FieldResultsTests(unittest.TestCase):
                     archive.writestr(name, data)
             self.assertEqual(original, field.verify_venue(path))
 
+    def test_prepare_measured_windows_inbox_with_concurrent_roster(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, manifest, closure = venue_fixture(root, 'Independent', with_journals=True, room_sizes=(1,) * 5)
+            self.concurrent_journals(root, manifest, [0, 100, 200, 300, 400])
+            terminal, _, moved = self.terminal_venue_fixture(root, manifest, closure)
+            release = self.add_shared_release(root, manifest, 0)
+            self.add_windows_links(root, manifest)
+            inbox = self.windows_inbox_fixture(root, manifest)
+            returned = root / inbox['windowsEvidenceDirectory']
+            output = root / 'prepared.json'
+            command = [sys.executable, str(SCRIPT.with_name('prepare-venue-field-manifest.py')),
+                       '--venue-bundle', str(root / inbox['venueBundle']), '--launcher-report', str(terminal),
+                       '--topology', 'same-host', '--server-ip', manifest['serverIps'][0],
+                       '--server-work-root', str(moved), '--players-per-room', '1', '--windows-inbox', str(returned),
+                       '--venue-release-report', str(release), '--output', str(output)]
+            limits = ['--windows-minimum-replies', '28', '--windows-maximum-p95-ms', '14']
+            first_archive = sorted(returned.glob('*.ZIP'))[0]
+            raw = first_archive.read_bytes()
+            first_archive.unlink()
+            result = subprocess.run([*command, *limits, '--minimum-concurrent-ms', '2000'], capture_output=True)
+            self.assertEqual(0, result.returncode, result.stderr.decode())
+            prepared = json.loads(output.read_bytes())
+            criteria = {'minimumReplies': 28, 'maximumP95RoundTripMs': 14}
+            self.assertEqual(criteria, prepared['windowsLinkCriteria'])
+            self.assertEqual(2000, prepared['minimumConcurrentMilliseconds'])
+            self.assertEqual(1, prepared['expectedPlayersPerRoom'])
+            inspection, _ = field.verify_venue_batch(output, inspect_windows=True)
+            self.assertFalse(inspection['complete'])
+            self.assertEqual(4, inspection['receivedWindowsSeats'])
+            self.assertEqual(1, len(inspection['missingSeats']))
+            first_archive.write_bytes(raw)
+            accepted = field.verify_venue(output)
+            self.assertEqual(dict(criteria, seatsVerified=5), accepted['windowsLinkCriteria'])
+            self.assertGreaterEqual(accepted['concurrentRoster']['longestMilliseconds'], 2000)
+            self.assertEqual(5, accepted['serverAcknowledgements'])
+
+            for options, message in (
+                (limits[:2], b'Provide both Windows link criteria'),
+                ([*limits[:2], '--windows-maximum-p95-ms', '901'], b'Invalid numeric evidence'),
+                (['--minimum-concurrent-ms', '999'], b'Invalid numeric evidence'),
+            ):
+                with self.subTest(options=options):
+                    invalid = root / 'invalid.json'
+                    result = subprocess.run([*command[:-1], str(invalid), *options], capture_output=True)
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertIn(message, result.stderr)
+                    self.assertFalse(invalid.exists())
+
     def test_windows_link_criteria_report_measurement_failures_by_seat(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -87,6 +87,16 @@ def check_quest_inputs(manifest, expected, evidence_path, release, sources, serv
 
 
 def prepare(args, output):
+    windows_link_criteria = None
+    if args.windows_minimum_replies is not None or args.windows_maximum_p95_ms is not None:
+        field.require(args.windows_minimum_replies is not None and args.windows_maximum_p95_ms is not None,
+                      'Provide both Windows link criteria')
+        windows_link_criteria = field.read_windows_link_criteria({'windowsLinkCriteria': {
+            'minimumReplies': args.windows_minimum_replies, 'maximumP95RoundTripMs': args.windows_maximum_p95_ms,
+        }})
+    minimum = args.minimum_concurrent_ms
+    if minimum is not None:
+        field.integer(minimum, 1000, 900000)
     bundle, terminal = (path.resolve(strict=True) for path in (args.venue_bundle, args.launcher_report))
     mode = field.read_json(field.content(terminal))['topology']
     field.require(mode in ('Independent', 'Linked'), 'Invalid Windows venue launch mode')
@@ -187,6 +197,10 @@ def prepare(args, output):
         manifest['reconnectSourcePlan'] = ref(reconnect_path)
     if args.players_per_room != 5:
         manifest['expectedPlayersPerRoom'] = args.players_per_room
+    if minimum is not None:
+        manifest['minimumConcurrentMilliseconds'] = minimum
+    if windows_link_criteria is not None:
+        manifest['windowsLinkCriteria'] = windows_link_criteria
     release = windows_seats = None
     if args.venue_release_report is not None:
         release_path = args.venue_release_report.resolve(strict=True)
@@ -259,10 +273,13 @@ def main():
     parser.add_argument('--server-ip', action='append', required=True, help='Repeat for every assigned server IPv4')
     parser.add_argument('--server-work-root', type=Path, help='Moved batch workspace with the original room-01 through room-05 or linked folders')
     parser.add_argument('--players-per-room', type=int, choices=range(1, 6), default=5)
+    parser.add_argument('--minimum-concurrent-ms', type=int, help='Minimum continuous concurrent roster in milliseconds (1000 to 900000)')
     parser.add_argument('--venue-release-report', type=Path)
     parser.add_argument('--windows-inbox', type=Path)
     parser.add_argument('--windows-seat-map', type=Path)
     parser.add_argument('--windows-station-addresses', type=Path)
+    parser.add_argument('--windows-minimum-replies', type=int, help='Minimum replies per Windows seat (1 to 30)')
+    parser.add_argument('--windows-maximum-p95-ms', type=int, help='Maximum p95 round trip in milliseconds per Windows seat (0 to 900)')
     parser.add_argument('--venue-network-plan', type=Path, help='Original whole-venue network plan with all seat IPv4 assignments')
     parser.add_argument('--verify-reconnect-history', action='store_true', help='Check original reconnect histories at inbox intake and final verification')
     parser.add_argument('--reconnect-source-plan', type=Path, help='Ordered IPv4 changes for seats in the original End batch')
