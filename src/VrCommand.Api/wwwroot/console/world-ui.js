@@ -38,6 +38,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   let venueReview = null, venueAnchor = null;
   let beginReview = null;
   const venueBasis = $('world-venue-basis');
+  const frameNumber = $('world-frame-number'), frameGo = $('world-frame-go');
   const clipLoop = $('world-clip-loop');
   const liveEventKind = $('world-live-event-kind'), liveEventButton = $('world-live-event');
   const livePolicyKind = $('world-live-policy-kind'), livePolicyButton = $('world-live-policy');
@@ -68,6 +69,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   }
   function stopList() { listEpoch++; listController?.abort(); listController = null; }
   function reset() {
+    frameNumber.value = '';
     observerRoom = null;
     beginReview = null;
     reviewPlayer = returnLiveSource = null; clearClip(); bindVenueReview(null);
@@ -303,6 +305,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     $('world-older').disabled = !nextRecordingBefore || !!listController;
   }
   function resetRecording() {
+    frameNumber.value = '';
     observerRoom = null;
     beginReview = null;
     reviewPlayer = returnLiveSource = null; clearClip(); bindVenueReview(null);
@@ -538,6 +541,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     $('world-review').hidden = !showing;
     $('world-frame-back').disabled = !idle || frame.packet.sequence <= 1;
     const throughFrame = replayThroughFrame();
+    frameNumber.disabled = frameGo.disabled = !idle || $('world-recording').disabled;
+    frameNumber.max = throughFrame ?? '';
     savedClips.update(showing ? { sessionId: info.header.sessionId, streamId: info.header.streamId, roomIds: info.header.roomIds, throughFrame, complete: info.complete } : null,
       idle, clipEnd ? { startFrame: clipStart.sequence, endFrame: clipEnd.sequence } : null);
     shotTrace.update(showing ? { sessionId: info.header.sessionId, streamId: info.header.streamId, roomIds: info.header.roomIds,
@@ -983,6 +988,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     scene ??= new ReplayScene($('world-canvas'), selectActor, () => { $('world-camera').value = 'free'; }, key => actors.has(key));
     $('world-player').hidden = false;
     if (changed) {
+      frameNumber.value = '';
       clearClip();
       const rooms = visibleRooms(info);
       scene.load({ ...info.header, roomIds: rooms }); geometry = key; frame = null;
@@ -1190,6 +1196,12 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   });
   $('world-frame-back').addEventListener('click', () => step(-1));
   $('world-frame-next').addEventListener('click', () => step(1));
+  $('world-frame-jump').addEventListener('submit', async event => {
+    event.preventDefault();
+    const picker = $('world-recording'), sequence = frameNumber.valueAsNumber;
+    if (frameGo.disabled || !Number.isSafeInteger(sequence) || sequence < 1 || sequence > replayThroughFrame()) return;
+    if (await readFrame(sequence, () => !picker.disabled)) frameNumber.focus();
+  });
   $('world-begin-original').addEventListener('click', returnToBegin);
   $('world-begin-running').addEventListener('click', seekFirstRunning);
   $('world-frame-extend').addEventListener('click', extendSaved);

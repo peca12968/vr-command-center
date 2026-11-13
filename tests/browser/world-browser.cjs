@@ -416,6 +416,13 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await waitSavedEnd();
     check((await page.locator('#world-status').innerText()).includes('錄製未封存') && Number(await canvas.getAttribute('data-sequence')) === interrupted.acceptedSequence &&
       await page.locator('#world-frame-next').isDisabled(), 'Saved replay stops at the real interrupted tail and keeps the archive unsealed');
+    const frameNumber = page.locator('#world-frame-number'), frameGo = page.locator('#world-frame-go');
+    await frameNumber.fill(String(interrupted.acceptedSequence + 1));
+    await frameGo.click();
+    check(Number(await frameNumber.getAttribute('max')) === interrupted.acceptedSequence
+      && await frameNumber.evaluate(input => input.validity.rangeOverflow)
+      && Number(await canvas.getAttribute('data-sequence')) === interrupted.acceptedSequence,
+    'Direct frame jump uses the original saved tail as its input limit');
     await page.screenshot({ path: path.join(screenshots, 'world-saved-tail.png'), fullPage: true });
     const savedSearch = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/world/event-frames'));
     await page.locator('#world-event-search-here').click();

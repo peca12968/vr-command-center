@@ -169,6 +169,26 @@ module.exports = async function venueTimeReplayBrowser({ context, api, tokens, b
     await page.locator(`[data-venue-replay="${ids[0]}"]`).click();
     await canvasAt(5);
     for (const sequence of [4, 3]) { await page.locator('#world-frame-back').click(); await canvasAt(sequence); }
+    const frameNumber = page.locator('#world-frame-number'), frameGo = page.locator('#world-frame-go');
+    await frameNumber.fill('6');
+    await frameGo.click();
+    check(await frameNumber.getAttribute('max') === '5'
+      && await frameNumber.evaluate(input => input.validity.rangeOverflow)
+      && await page.locator('#world-canvas').getAttribute('data-sequence') === '3',
+    'Direct frame jump rejects a sequence beyond the sealed recording');
+    const direct = page.waitForResponse(value => new URL(value.url()).pathname.endsWith(`/sessions/${ids[0]}/world/frames/2`));
+    await frameNumber.fill('2');
+    await frameNumber.press('Enter');
+    assert.equal((await direct).status(), 200);
+    await canvasAt(2);
+    await page.waitForFunction(() => !document.querySelector('#world-frame-go').disabled, null, { polling: 100 });
+    check(await frameGo.isEnabled() && await picker.inputValue() === ids[0]
+      && await page.locator('#world-room').inputValue() === '1'
+      && (await page.locator('#world-frame-message').innerText()).includes('第 2 格'),
+    'Direct frame jump loads the exact original frame and stays paused in the same room');
+    await frameNumber.fill('3');
+    await frameGo.click();
+    await canvasAt(3);
     check(await align(1).isDisabled() && await align(2).isEnabled() && await page.locator('#world-venue-rooms button').count() === 5,
       'Paused history offers only its original room choices, with the currently displayed room disabled');
     await align(4).click();
@@ -190,7 +210,8 @@ module.exports = async function venueTimeReplayBrowser({ context, api, tokens, b
     assert.equal((await response).headers()['cache-control'], 'no-store');
     await note.filter({ hasText: '畫格早於對照時間 200 毫秒' }).waitFor();
     check(await picker.inputValue() === ids[1] && await page.locator('#world-room').inputValue() === '2'
-      && await page.locator('#world-camera').inputValue() === 'top' && await page.locator('#world-canvas').getAttribute('data-sequence') === '3',
+      && await page.locator('#world-camera').inputValue() === 'top' && await page.locator('#world-canvas').getAttribute('data-sequence') === '3'
+      && await frameNumber.inputValue() === '',
     'The verified match switches to the original room camera and pauses on the matched frame');
     await page.locator('#world-venue-review').screenshot({ path: path.join(screenshots, 'venue-time-aligned.png') });
     await align(3).click();

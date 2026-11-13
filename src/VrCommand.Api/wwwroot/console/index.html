@@ -469,6 +469,10 @@
           <section id="world-review" hidden aria-labelledby="world-review-heading">
             <h3 id="world-review-heading">逐格檢視</h3>
             <div class="button-row"><button id="world-frame-back" class="quiet" disabled>上一格</button><button id="world-frame-next" class="quiet" disabled>下一格</button><button id="world-frame-extend" class="quiet" hidden disabled>接續新保存片段</button></div>
+            <form id="world-frame-jump" class="replay-transport">
+              <label>畫格序號 <input id="world-frame-number" type="number" inputmode="numeric" min="1" step="1" required disabled></label>
+              <button id="world-frame-go" type="submit" class="quiet" disabled>跳到畫格</button>
+            </form>
             <p class="hint">暫停回放後可逐格檢視。每列是此快照保存的一筆事件。</p>
             <div id="world-begin-review" class="button-row" hidden><button id="world-begin-original" type="button" class="quiet" disabled>回到原開場畫格</button><button id="world-begin-running" type="button" class="quiet" disabled>跳到首個執行畫格</button></div>
             <p id="world-frame-message" class="hint" role="status"></p>
@@ -561,7 +565,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.187 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.188 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>
