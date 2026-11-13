@@ -985,7 +985,7 @@ def run(args):
                 fleet_report = json.loads((fleet_directory/'venue-report.json').read_bytes())
                 assert json.loads(fleet_stdout)==fleet_report and fleet_report['mode']==mode and not fleet_report['physicalDeliveryConfirmed']
                 manifest_path = folder/'venue-bindings.json'
-                assert fleet_report['version']==2 and fleet_report['bindingManifestSha256']==sha(manifest_path)
+                assert fleet_report['version']==3 and fleet_report['bindingManifestSha256']==sha(manifest_path)
                 assert fleet.returncode==int(mode=='Independent') and fleet_report['complete'] is (mode=='Linked') and fleet_stop.is_file()
                 assert len(set(venue_connections.values()))==5
                 assert [(row['roomId'],row['sessionId']) for row in fleet_report['rooms']]==list(owners.items())
@@ -995,7 +995,7 @@ def run(args):
                     original_report = fleet_directory/f'room-{room:02}-report.json'
                     assert row=={'roomId':room,'sessionId':owners[room],'exitCode':int(mismatch_room),
                                  'report':original_report.name,'error':None,'sha256':sha(original_report),
-                                 'bytes':original_report.stat().st_size}
+                                 'bytes':original_report.stat().st_size,'configurationSha256':sha(config_files[room])}
                     report = json.loads(original_report.read_bytes())
                     delivered = {delivery['signal']['reportId'] for attempt in report['attempts']
                                  if attempt['status']=='simulated-acknowledged' for delivery in attempt['deliveries']}
@@ -1022,17 +1022,27 @@ def run(args):
                 summary = json.loads(reviewed.stdout)
                 assert summary['verified'] and summary['rehearsalComplete'] is fleet_report['complete']
                 assert summary['bindingManifestSha256']==sha(manifest_path) and summary['physicalDeliveryConfirmed'] is False
+                assert summary['configurationsVerified'] is True
                 for row in summary['rooms']:
                     original = json.loads((fleet_directory/f"room-{row['roomId']:02}-report.json").read_bytes())
                     assert row['termination']==original['termination'] and row['acknowledged']==original['acknowledged']
                     assert row['cancelled']==sum(len(attempt['deliveries']) for attempt in original['attempts'] if attempt['status']=='cancelled')
                     assert row['mockFailed']==0
+                    assert [seat['seat'] for seat in row['seats']]==list(range(5))
+                    for seat in row['seats']:
+                        for count, status in [('acknowledged','simulated-acknowledged'),('cancelled','cancelled')]:
+                            assert seat[count]==sum(delivery['signal']['seat']==seat['seat']
+                                for attempt in original['attempts'] if attempt['status']==status for delivery in attempt['deliveries'])
+                        assert seat['mockFailed']==0
                 save(f'{label}-fleet-offline-review.json',summary)
                 check(True,f'{mode} offline review verifies all room reports and distinguishes completion from report consistency')
                 if mode=='Independent':
                     copied = runtime/'copied-venue-review'
                     shutil.copytree(fleet_directory,copied)
-                    assert review(copied).stdout==reviewed.stdout
+                    copied_bindings = runtime/'copied-venue-bindings'
+                    shutil.copytree(folder,copied_bindings)
+                    copied_manifest = copied_bindings/manifest_path.name
+                    assert review(copied,copied_manifest).stdout==reviewed.stdout
                     destination = copied/'room-01-report.json'
                     exact = destination.read_bytes()
                     original_manifest = manifest_path.read_bytes()
@@ -1045,13 +1055,42 @@ def run(args):
                     rejected.append(review(copied))
                     destination.write_bytes(exact)
                     copied_aggregate = copied/'venue-report.json'
-                    invalid = json.loads(copied_aggregate.read_bytes())
+                    original_aggregate = copied_aggregate.read_bytes()
+                    invalid = json.loads(original_aggregate)
                     invalid['rooms'][0]['report'] = '../room-01-report.json'
                     copied_aggregate.write_text(json.dumps(invalid),encoding='utf-8')
                     rejected.append(review(copied))
+                    copied_aggregate.write_bytes(original_aggregate)
+                    config_path = copied_bindings/'room-01.json'
+                    exact_config = config_path.read_bytes()
+                    config_path.write_bytes(exact_config+b'\n')
+                    rejected.append(review(copied,copied_manifest))
+                    config_path.unlink()
+                    rejected.append(review(copied,copied_manifest))
+                    config_path.write_bytes(exact_config)
+                    altered_room = json.loads(exact)
+                    altered_room['attempts'][0]['deliveries'][0]['deviceId'] = str(uuid.uuid4())
+                    destination.write_text(json.dumps(altered_room),encoding='utf-8')
+                    invalid = json.loads(original_aggregate)
+                    invalid['rooms'][0].update(sha256=sha(destination), bytes=destination.stat().st_size)
+                    copied_aggregate.write_text(json.dumps(invalid),encoding='utf-8')
+                    rejected.append(review(copied,copied_manifest))
                     assert all(result.returncode==1 and not result.stdout and b'Venue hardware report rejected:' in result.stderr
                                for result in rejected)
                     check(True,'Offline review survives relocation and rejects a changed manifest, changed or missing report, and a path outside the run')
+                    check(True,'Offline review rejects changed or missing configurations and a rehashed delivery for the wrong device')
+                    destination.write_bytes(exact)
+                    legacy = json.loads(original_aggregate)
+                    legacy['version'] = 2
+                    for room in legacy['rooms']:
+                        del room['configurationSha256']
+                    copied_aggregate.write_text(json.dumps(legacy),encoding='utf-8')
+                    old_review = review(copied)
+                    assert old_review.returncode==0 and not old_review.stderr
+                    old_summary = json.loads(old_review.stdout)
+                    assert old_summary['configurationsVerified'] is False
+                    assert all(row['seats'] is None for row in old_summary['rooms'])
+                    check(True,'Legacy version 2 remains readable without a claim about room configuration or seat counts')
                 if mode=='Linked':
                     fault_directory = out/'linked-fleet-authority-faults'
                     fault_stop = runtime/'linked-fleet-authority-faults.stop'

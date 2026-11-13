@@ -182,9 +182,14 @@ internal static partial class LiveHardwareGateway
         }
     }
 
-    private static Configuration ReadConfiguration(string input)
+    private static Configuration ReadConfiguration(string input) => ReadConfiguration(input, out _);
+
+    private static Configuration ReadConfiguration(string input, out string sha256)
     {
-        var config = ReadInput<Configuration>(input);
+        var bytes = ReadReportBytes(input, 8192);
+        sha256 = ReportHash(bytes);
+        var config = JsonSerializer.Deserialize<Configuration>(bytes, Wire)
+            ?? throw new InvalidDataException("Missing room configuration.");
         ValidateRoom(config.SessionId, config.RoomId, config.MockPort, config.Seconds);
         if (config.Version is not (1 or 2)
             || config.Bindings is not { Length: >= 1 and <= 5 } || config.Bindings.Any(b => b is null || b.DeviceId == Guid.Empty

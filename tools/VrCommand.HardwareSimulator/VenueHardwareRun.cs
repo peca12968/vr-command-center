@@ -3,7 +3,10 @@ using VrCommand.Core;
 
 internal static partial class LiveHardwareGateway
 {
-    private sealed record VenueRunResult(int RoomId, Guid SessionId, int ExitCode, string? Report, string? Error, string? Sha256, int? Bytes);
+    private sealed record VenueRunResult(int RoomId, Guid SessionId, int ExitCode, string? Report, string? Error, string? Sha256, int? Bytes)
+    {
+        public string? ConfigurationSha256 { get; init; }
+    }
     private sealed record VenueRunReport(int Version, bool Complete, SessionMode Mode, bool SimulatedHardwareOnly,
         bool PhysicalDeliveryConfirmed, string BindingManifestSha256, VenueRunResult[] Rooms);
 
@@ -18,11 +21,8 @@ internal static partial class LiveHardwareGateway
         var configs = manifest.Rooms.Select(room =>
         {
             var path = Path.Combine(Path.GetDirectoryName(manifestPath)!, room.Configuration);
-            var config = ReadConfiguration(path);
-            if (config.Version != 2 || config.RoomId != room.RoomId || config.SessionId != room.SessionId
-                || config.Bindings.Length != room.BoundSeats)
-                throw new InvalidDataException("A room configuration does not match the venue binding manifest.");
-            return (Path: path, Config: config);
+            var config = ReadVenueConfiguration(path, room, out var sha256);
+            return (Path: path, Config: config, Sha256: sha256);
         }).ToArray();
         var bindings = configs.SelectMany(entry => entry.Config.Bindings).ToArray();
         if (configs.Select(entry => entry.Config.ManagementUrl).Distinct(StringComparer.Ordinal).Count() != 1
@@ -59,10 +59,11 @@ internal static partial class LiveHardwareGateway
             try { Directory.Move(staging, output); }
             finally { if (Directory.Exists(staging)) Directory.Delete(staging); }
 
-            var rooms = await Task.WhenAll(configs.Select((entry, index) =>
-                RunVenueRoom(entry.Config, clients[index], entry.Path, output, stopFile, leases[index])));
+            var rooms = await Task.WhenAll(configs.Select(async (entry, index) =>
+                (await RunVenueRoom(entry.Config, clients[index], entry.Path, output, stopFile, leases[index]))
+                with { ConfigurationSha256 = entry.Sha256 }));
             var complete = rooms.All(room => room.ExitCode == 0);
-            var report = new VenueRunReport(2, complete, manifest.Mode, true, false, bindingManifestSha256, rooms);
+            var report = new VenueRunReport(3, complete, manifest.Mode, true, false, bindingManifestSha256, rooms);
             var stagedReport = Path.Combine(output, "venue-report.tmp");
             using (var file = new FileStream(stagedReport, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {

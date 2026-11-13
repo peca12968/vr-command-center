@@ -8,8 +8,9 @@ internal static partial class LiveHardwareGateway
     private sealed record RoomRunReport(int Version, bool Complete, bool SimulatedHardwareOnly, bool PhysicalDeliveryConfirmed,
         Guid SessionId, int RoomId, string Termination, int Connections, int Attachments, int ManagementFaults,
         int MockFaults, int Dropped, int Acknowledged, Attempt[] Attempts);
+    private sealed record SeatRunReview(int Seat, int Acknowledged, int Cancelled, int MockFailed);
     private sealed record RoomRunReview(int RoomId, Guid SessionId, int ExitCode, string? Termination, string? Error,
-        int? Acknowledged, int? Cancelled, int? MockFailed);
+        int? Acknowledged, int? Cancelled, int? MockFailed, SeatRunReview[]? Seats);
 
     private static byte[] ReadReportBytes(string path, int maximum)
     {
@@ -27,20 +28,29 @@ internal static partial class LiveHardwareGateway
     {
         var manifest = ReadVenueManifest(manifestPath, out var manifestHash);
         var report = JsonSerializer.Deserialize<VenueRunReport>(ReadReportBytes(Path.Combine(directory, "venue-report.json"), 8192), HeartbeatWire);
-        if (report is not { Version: 2, SimulatedHardwareOnly: true, PhysicalDeliveryConfirmed: false, Rooms.Length: SessionManager.RoomCount }
+        if (report is not { Version: 2 or 3, SimulatedHardwareOnly: true, PhysicalDeliveryConfirmed: false, Rooms.Length: SessionManager.RoomCount }
             || report.Mode != manifest.Mode || report.BindingManifestSha256 != manifestHash
             || report.Complete != report.Rooms.All(room => room?.ExitCode == 0))
             throw new InvalidDataException("Venue report does not match the original binding manifest.");
 
+        var configurationsVerified = report.Version == 3;
         var rooms = report.Rooms.Zip(manifest.Rooms, ReviewRoom).ToArray();
         Console.WriteLine(JsonSerializer.Serialize(new { version = 1, verified = true, rehearsalComplete = report.Complete,
-            report.Mode, report.BindingManifestSha256, simulatedHardwareOnly = true, physicalDeliveryConfirmed = false, rooms }, Wire));
+            report.Mode, report.BindingManifestSha256, configurationsVerified, simulatedHardwareOnly = true,
+            physicalDeliveryConfirmed = false, rooms }, Wire));
         return 0;
 
         RoomRunReview ReviewRoom(VenueRunResult row, VenueBindingRoom binding)
         {
             if (row is null || row.RoomId != binding.RoomId || row.SessionId != binding.SessionId || row.ExitCode is not (0 or 1))
                 throw new InvalidDataException("Venue room result does not match the original room.");
+            Configuration? config = null;
+            if (configurationsVerified)
+            {
+                config = ReadVenueConfiguration(Path.Combine(Path.GetDirectoryName(manifestPath)!, binding.Configuration), binding, out var sha256);
+                if (row.ConfigurationSha256 != sha256) throw new InvalidDataException("Room configuration bytes do not match.");
+            }
+            else if (row.ConfigurationSha256 is not null) throw new InvalidDataException("Unexpected configuration hash in version 2.");
             var fileName = FormattableString.Invariant($"room-{row.RoomId:00}-report.json");
             var path = Path.Combine(directory, fileName);
             if (row.Report is null)
@@ -48,7 +58,7 @@ internal static partial class LiveHardwareGateway
                 if (row.ExitCode != 1 || row.Error is not { Length: > 0 and <= 64 } || !row.Error.All(char.IsAsciiLetterOrDigit)
                     || row.Sha256 is not null || row.Bytes is not null)
                     throw new InvalidDataException("Unexpected room report for a room with a recorded error.");
-                return new(row.RoomId, row.SessionId, row.ExitCode, null, row.Error, null, null, null);
+                return new(row.RoomId, row.SessionId, row.ExitCode, null, row.Error, null, null, null, null);
             }
             if (row.Report != fileName || row.Error is not null) throw new InvalidDataException("Unexpected room report file name.");
             var bytes = ReadReportBytes(path, MaxRoomReportBytes);
@@ -69,10 +79,33 @@ internal static partial class LiveHardwareGateway
             var acknowledged = Count("simulated-acknowledged");
             var cancelled = Count("cancelled");
             if (acknowledged != room.Acknowledged) throw new InvalidDataException("Room acknowledgement count does not match.");
+            var seats = config is null ? null : ReviewSeats(config, room.Attempts);
             return new(row.RoomId, row.SessionId, row.ExitCode, room.Termination, null, acknowledged, cancelled,
-                room.Attempts.Sum(attempt => attempt.Deliveries.Length) - acknowledged - cancelled);
+                room.Attempts.Sum(attempt => attempt.Deliveries.Length) - acknowledged - cancelled, seats);
 
             int Count(string status) => room.Attempts.Where(attempt => attempt.Status == status).Sum(attempt => attempt.Deliveries.Length);
         }
+    }
+
+    private static SeatRunReview[] ReviewSeats(Configuration config, Attempt[] attempts)
+    {
+        var bySeat = config.Bindings.ToDictionary(binding => binding.Seat);
+        var counts = config.Bindings.ToDictionary(binding => binding.Seat, binding => new SeatRunReview(binding.Seat, 0, 0, 0));
+        foreach (var attempt in attempts)
+        foreach (var delivery in attempt.Deliveries)
+        {
+            var signal = delivery.Signal;
+            if (!bySeat.TryGetValue(signal.Seat, out var binding) || binding.DeviceId != delivery.DeviceId
+                || binding.PlayerId != signal.PlayerId || binding.AdmissionId != signal.AdmissionId)
+                throw new InvalidDataException("A reported delivery does not match its configured seat.");
+            var current = counts[signal.Seat];
+            counts[signal.Seat] = attempt.Status switch
+            {
+                "simulated-acknowledged" => current with { Acknowledged = current.Acknowledged + 1 },
+                "cancelled" => current with { Cancelled = current.Cancelled + 1 },
+                _ => current with { MockFailed = current.MockFailed + 1 }
+            };
+        }
+        return counts.Values.OrderBy(seat => seat.Seat).ToArray();
     }
 }

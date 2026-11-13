@@ -26,6 +26,15 @@ internal static partial class LiveHardwareGateway
         return manifest;
     }
 
+    private static Configuration ReadVenueConfiguration(string path, VenueBindingRoom room, out string sha256)
+    {
+        var config = ReadConfiguration(path, out sha256);
+        if (config.Version != 2 || config.RoomId != room.RoomId || config.SessionId != room.SessionId
+            || config.Bindings.Length != room.BoundSeats)
+            throw new InvalidDataException("A room configuration does not match the venue binding manifest.");
+        return config;
+    }
+
     internal static async Task<int> BindVenue(string input, string output)
     {
         var parent = Path.GetDirectoryName(output);
