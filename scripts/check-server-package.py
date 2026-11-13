@@ -618,7 +618,11 @@ def main():
         sources = [{'roomId': room, 'seat': seat, 'address': address}
                    for room in range(1, 6) for seat in range(1, players_per_room + 1)]
         network = out / (label + '-udp-network.json')
-        network.write_text(json.dumps({'version': 1, 'mode': topology, 'endpoints': endpoints, 'sources': sources}), encoding='utf-8')
+        expected = {'version': 1, 'mode': topology, 'endpoints': endpoints, 'sources': sources}
+        if args.check_venue_plan_ui:
+            check(read(network) == expected, label + ' uses the exact original browser UDP network download')
+        else:
+            network.write_text(json.dumps(expected), encoding='utf-8')
         pairs = []
         for value, endpoint in zip(values, endpoints, strict=True):
             suffix = label + '-rooms-' + '-'.join(map(str, endpoint['roomIds']))
@@ -662,6 +666,7 @@ def main():
               label + ' matching UDP addresses and ports cannot authorize a preview of another session')
         result, readiness = run(preview, '-udp-readiness')
         check(result.returncode == 0 and readiness['complete'] and readiness['verifiedSources'] == len(values)
+              and readiness['networkPlanSha256'] == control.sha(network)
               and readiness['launcherPreview']['sha256'] == hashlib.sha256(preview.read_bytes()).hexdigest()
               and readiness['launchBinding']['planSha256'] == hashlib.sha256(original_plan.read_bytes()).hexdigest()
               and readiness['launchBinding']['previewSha256'] == readiness['launcherPreview']['sha256']
@@ -813,10 +818,15 @@ def main():
                     kernel.CloseHandle(lease)
         if args.check_venue_plan_ui:
             driver=ROOT/'tests/browser/server-plan-browser.cjs'
-            def download_plan(suffix):
+            def download_plan(suffix, *, network=False):
                 file=runtime/(label+suffix+'.json')
+                payload={'base':uri,'token':keys['Master'],'plan':plan,'output':str(file)}
+                if network:
+                    payload['network']={'output':str(out/(label+'-udp-network.json')),
+                                        'seats':[{'roomId':room,'seat':seat,'address':address}
+                                                 for room in range(1,6) for seat in range(1,players_per_room+1)]}
                 completed=subprocess.run([shutil.which('node'),str(driver)],cwd=driver.parent,
-                    input=json.dumps({'base':uri,'token':keys['Master'],'plan':plan,'output':str(file)}),
+                    input=json.dumps(payload),
                     text=True,encoding='utf-8',capture_output=True,timeout=45,creationflags=subprocess.CREATE_NO_WINDOW)
                 diagnostic=completed.stderr
                 for key in keys.values():diagnostic=diagnostic.replace(key,'[redacted]')
@@ -971,7 +981,7 @@ def main():
                 shutil.copyfile(data/'operator-keys.json',private/'operator-keys.json')
                 marker.write_text(json.dumps(dict(read(data/'control-instance.json'),port=receipt_gate.server.server_port)),encoding='utf-8')
                 plan['controlInstance']=str(marker)
-            plan_file=download_plan('-browser-plan')
+            plan_file=download_plan('-browser-plan', network=args.check_venue_udp_readiness)
             if not linked and args.check_venue_preview:
                 previous=runtime/(label+'-previous-plan.json')
                 previous.write_text(json.dumps(dict(plan,version=2)),encoding='utf-8')
@@ -1794,6 +1804,8 @@ def main():
         if args.check_venue_udp_readiness:
             common['udpPreflightBatch'] = str(out / (label + '-venue-udp-readiness.json'))
             common['verifiedVenueStart'] = str(out / (label + '-venue-verified-start.json'))
+            if args.check_venue_plan_ui:
+                common['venueNetworkPlan'] = str(out / (label + '-venue-udp-network.json'))
         if label in venue_control_reports:
             common['venueControlBatches'] = venue_control_reports[label]
         debrief_file = None
@@ -2041,6 +2053,10 @@ def main():
                   'sha256': control.sha(original_launch), 'sessions': len(entries)},
                   label + ' sealed field report reads the untouched shared Windows terminal report')
         if args.check_venue_udp_readiness:
+            if args.check_venue_plan_ui:
+                check(summary['venueNetworkPlan'] == {'sha256': control.sha(Path(common['venueNetworkPlan'])),
+                      'expectedSeats': venue_players, 'verifiedSeats': venue_players, 'endpointsVerified': len(entries)},
+                      label + ' seal verifies every seat against the unchanged browser network download')
             receipt_path = Path(common['verifiedVenueStart'])
             check(summary['verifiedVenueStart'] == {'sha256': control.sha(receipt_path),
                   'launchId': summary['venueLauncherReport']['launchId'], 'sessionsVerified': len(entries)},

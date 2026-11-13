@@ -72,6 +72,8 @@ Unity 0.47.0 伺服器可搭配控制台 0.31.14。啟動器 1.5 可選擇待開
 
 控制台 0.31.162 可選取版本 1 的席位 IPv4 表，再按「下載 UDP 預檢清單 JSON」。五房需有相同席數，每房 1 至 5 席。預檢清單使用具體綁定位址，並與席位表同為私有區網或本機測試 IPv4。席位資料只在瀏覽器讀取，下載前仍會重新核對原場次。下載後沿用 Windows 啟動計畫與啟動器預覽，交給雙端 UDP 預檢。 [席位表與預檢流程](EXTERNAL_CLIENTS.md#從原啟動預覽產生網路清單)
 
+三包整合驗證可同時使用 `--check-venue-plan-ui`、`--check-venue-preview`、`--check-venue-udp-readiness`、`--peer-diagnostics` 和 `--venue-field-evidence`。Chromium 下載啟動計畫與預檢清單，後續預檢、Windows 啟動及戰後逐席核對都讀取同一份清單。命令另需 `--prepare-independent-set --check-venue-begin --check-venue-end --check-venue-launcher`。 [三包整合驗證](#三個可攜包整合驗證)
+
 `GET /api/venue/server-plan` 限主控，回應五房的場次、序號、任務識別及啟動條件。Windows 啟動器核對計畫並取得全館本機啟動鎖後，等待各遊戲程序準備自己的日誌來源 ID。第四版計畫透過 `PUT /api/venue/combat-streams` 在同一筆資料庫交易核對序號及登記全部來源。遊戲取得原批次與來源的回條後才開啟 UDP。任一房的原場次已變更時，整批登記會遭拒絕，可重新下載同一批場次。全館端點等所有 UDP 綁定確認後才一起公告。
 
 可在三包整合驗證加入 `--prepare-independent-set --check-venue-begin --check-venue-end --check-venue-launcher --check-venue-plan-ui`，使用 Chromium 下載原計畫再交給啟動器。

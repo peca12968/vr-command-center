@@ -37,6 +37,22 @@ async function download(page, filename, expected) {
   assert.deepEqual(JSON.parse(await fs.readFile(filename, 'utf8')), expected);
 }
 
+async function downloadNetwork(page, filename, plan, seats) {
+  await page.locator('#venue-server-seat-addresses').setInputFiles({
+    name: 'seat-addresses.json', mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({ version: 1, seats }))
+  });
+  const button = page.locator('#venue-server-network-download');
+  const [file] = await Promise.all([page.waitForEvent('download'), button.click()]);
+  assert.equal(file.suggestedFilename(), 'vr-command-venue-network.json');
+  await file.saveAs(filename);
+  assert.deepEqual(JSON.parse(await fs.readFile(filename, 'utf8')), {
+    version: 1, mode: plan.topology,
+    endpoints: plan.servers.map(({ roomIds, port }) => ({ roomIds, address: plan.address, port })),
+    sources: seats
+  });
+}
+
 async function checkServerPlan({ context, api, tokens, base, screenshots, check, captureErrors }) {
   const page = await context.newPage(), active = new Set();
   captureErrors(page);
@@ -365,7 +381,7 @@ if (require.main === module) {
     const { chromium } = require('playwright');
     const input = [];
     for await (const chunk of process.stdin) input.push(chunk);
-    const { base, token, plan, missions, invalidMission, linkedArchive, output, useMissionFile } = JSON.parse(Buffer.concat(input).toString('utf8'));
+    const { base, token, plan, missions, invalidMission, linkedArchive, output, useMissionFile, network } = JSON.parse(Buffer.concat(input).toString('utf8'));
     assert.match(base, /^http:\/\/127\.0\.0\.1:\d+$/);
     const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_SERVER_PLAN_CHROMIUM });
     try {
@@ -380,6 +396,7 @@ if (require.main === module) {
         await page.locator('#venue-server-read').click();
         await page.locator('#venue-server-form').waitFor();
         await download(page, output, plan);
+        if (network) await downloadNetwork(page, network.output, plan, network.seats);
       }
     } finally { await browser.close(); }
   })().catch(error => { console.error(error); process.exitCode = 1; });
