@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 UDP 離線重驗指出缺件端別
+
+- `start-verified-venue.py --verify-only` 可從可讀的一端對照原計畫，在待補席位標示 `missingRole` 為 `listener` 或 `probe`。雙端都無法確認時，仍列待補席位及配對數量。合併模式共用來源時會列出該來源涵蓋的全部席位。 [操作方式](WINDOWS_SERVER_PACKAGE.md#以-udp-預檢報告啟動五房)
+- Windows 三包通過 449 項檢查。用同機 UDP 原報告測試缺任一端，獨立模式每次指出 5 席，合併模式指出 25 席。原檔齊備後兩種模式各以 25 位同機模擬玩家開場，核對兩份啟動回條、50 份戰績回條、6 份 CSV 與 1,243 格回放。清理後 C／F 的 215 個非資料庫檔案雜湊相符。 [驗證摘要](../artifacts/venue-udp-offline-counterpart-validation.json)
+- 16 項 LAN、122 項封存與 12 項 Quest UDP 測試通過，既有六批正式驗收與收件摘要逐位元相符。`d95dd20` 已推送，GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43398946590)
+
 ## 2026-11-13 下載尚未儲存的任務草稿
 
 - 0.31.186 在「任務範本」提供「下載草稿範本」。可將目前任務及物件保留在本機，再用既有範本流程取回。儲存回應遺失時，下載原送出的任務內容並保留待確認請求。開發版與解壓包各通過 53 項 Chromium 檢查，兩份下載檔雜湊相同，匯入後保留原簡報換行、修改後的 180 秒任務及 X 4.25 公尺物件位置。 [操作方式](MISSION_VERSIONS.md#在管理實例間交接任務範本) · [驗證摘要](../artifacts/mission-draft-186-validation.json)
