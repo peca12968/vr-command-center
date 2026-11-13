@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 全館 UDP 收件列出待補席位與端別
+
+- UDP 收件問題若可對上原網路清單中的伺服器端點與探測來源，會附受影響的房號與席號。缺對端會指出監聽端或探測端。六批總表列出席位與端別，原檔名留在個別 UDP 預檢報告。 [操作說明](EXTERNAL_CLIENTS.md#從資料夾配對-udp-報告)
+- 以兩次同機 UDP 交換各留一端，總表指出合併 10 席的兩類缺件，其他五批通過。補回原檔後重試核對兩個來源。122 項封存、16 項 LAN、12 項 Quest UDP 測試通過，六批原正式與收件摘要逐位元相符，共 80 份伺服器回條。 [驗證摘要](../artifacts/venue-udp-inbox-seat-validation.json) · [收件範例](../artifacts/venue-udp-inbox-seat-inspection.json)
+- `3577adc` 已推送，GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、實體頭盔、MR 場地與廠商硬體待驗。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43390127390)
+
 ## 2026-11-13 補齊原收件夾後重跑全館 UDP 預檢
 
 - 缺少監聽端或探測端原檔時，補進同一收件夾即可使用 `--retry-report` 重跑。原路徑的同一對檔案只計一次，工具仍重新核對原雜湊和有效期限。原檔變更及重複角色檔案仍會使預檢不完整。 [操作說明](EXTERNAL_CLIENTS.md#補測未完成的全館-udp-預檢)
