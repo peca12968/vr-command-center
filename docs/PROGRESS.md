@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 Windows 啟動前離線重驗 UDP 原檔
+
+- `start-verified-venue.py --verify-only` 沿用正式啟動的原計畫、預覽和雙端 UDP 證據核對，輸出可重用的來源數及待補席位。只做檔案與時限核對，實際啟動仍會確認最新場次與名冊。 [操作說明](WINDOWS_SERVER_PACKAGE.md#以-udp-預檢報告啟動五房)
+- Windows 三包通過 688 項。離線重驗核對獨立五個來源與合併一個來源，缺一份探測原檔時分別列出 5 席與 25 席，管理端場次不變。正式啟動後兩種模式各 25 位同機模擬玩家，核對 50 份戰績回條、6 份 CSV 與 1,117 格回放。隔離程序清理後 C／F 259 個非資料庫檔案雜湊相符。 [驗證摘要](../artifacts/venue-udp-offline-recheck-validation.json)
+- 122 項封存、16 項 LAN、12 項 Quest UDP 測試通過。首輪 LAN 測試把共用來源誤預期為每房一席，按原清單修正為每房三席後通過。`3c18006` 已推送，GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、實體頭盔、MR 場地與廠商硬體待驗。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43390852330)
+
 ## 2026-11-13 全館 UDP 收件列出待補席位與端別
 
 - UDP 收件問題若可對上原網路清單中的伺服器端點與探測來源，會附受影響的房號與席號。缺對端會指出監聽端或探測端。六批總表列出席位與端別，原檔名留在個別 UDP 預檢報告。 [操作說明](EXTERNAL_CLIENTS.md#從資料夾配對-udp-報告)
