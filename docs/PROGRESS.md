@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 玩家回放顯示任務活動時間與來源暫停
+
+- 管理包 0.31.173 的玩家回放可分別查看片段播放時間與任務活動時間，並可跳到保存的遊戲來源暫停或恢復畫格。全場版及單房版均支援，舊檔缺少計時或暫停資訊時仍可開啟。 [操作說明](WORLD_RECORDING.md) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.173.zip)
+- 用一份已封存的 Windows 25 席合併錄製匯出全場與第 4 房各 11 格，逐格核對來源資料。兩份檔案皆在 390 像素寬的 Chromium 播放器跳到第 91 格暫停和第 98 格恢復，暫停期間片段時間前進而任務活動時間停在 6 秒。播放器未發出 API 請求。另通過 140 項觀戰回放、138 項串流、107 項套件及 7 項單元測試。 [本機驗證摘要](../artifacts/player-replay-source-pause-validation.json)
+- 功能來源 `ce2209c` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機、頭盔、MR 與廠商硬體仍待現場驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43369041992)
+
 ## 2026-11-13 觀戰與回放定位遊戲來源暫停及恢復
 
 - 控制台 0.31.172 新增「遊戲來源暫停／恢復」篩選。即時觀戰可定位最近一筆，暫停回放後可用清單或上一筆／下一筆跳到原畫格。手動暫停可從「場次階段」查閱。若讀回的暫停狀態與搜尋結果不符，保留目前畫面。 [操作說明](WORLD_RECORDING.md) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.172.zip)
