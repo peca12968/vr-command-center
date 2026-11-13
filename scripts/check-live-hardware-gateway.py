@@ -946,7 +946,8 @@ def run(args):
                 local_report_path = fleet_directory/'room-02-report.json'
                 local_report_bytes = local_report_path.read_bytes()
                 assert fleet.poll() is None and not fleet_stop.exists() and not (fleet_directory/'venue-report.json').exists()
-                assert all(row['state']=='current' for room,row in zip(rooms,venue_status(fleet_directory),strict=True) if room!=2)
+                wait(lambda:all(row['state']=='current' for room,row in zip(rooms,venue_status(fleet_directory),strict=True) if room!=2),
+                     f'{mode} the four unaffected rooms publish current snapshots after room two stops')
                 fleet_delivered[5] |= send_venue_batch(5, 1)
                 wait(lambda:venue_status(fleet_directory)[4]['status']['progress']['acknowledged']==6,
                      f'{mode} room five acknowledges on its original connection after room two stops')
@@ -1245,7 +1246,7 @@ def run(args):
 
                         def observed_result():
                             row = venue_status(continuity_directory)[room-1]
-                            if row['state']=='stopped' or row['status']['progress']['acknowledged'] > 1:
+                            if row['state']=='stopped' or (row['status'] and row['status']['progress']['acknowledged'] > 1):
                                 return row
 
                         terminal = wait(observed_result, f'{mode} {kind} after a newer authority read')
