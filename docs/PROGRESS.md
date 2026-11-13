@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 全館命令遭拒時顯示受影響房間
+
+- Windows 管理台 0.31.179 從管理服務回應取得受影響房號。五房獨立列出有變更的房間。五房合併共用同一場次版本，因此該版本變更時會列出五房。批次遭拒後，主控重新整理並核對開場條件，再確認一次。 [操作說明](PLAYER_READINESS.md#五房追蹤驗收開場) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.179.zip)
+- Chromium 在開場請求抵達管理服務前為第 2 房加一席，收到 409 並顯示第 2 房，原批次所有場次維持準備中。原生排演也以過期開場計畫分別核對獨立的第 5 房及合併的五房。重新讀取後兩種模式各 25 位同機模擬玩家完成入場及結算，通過 539 項三包整合，核對 50 筆戰績回條、6 份 CSV、1,094 格回放與雙封存。清理後 C／F 共 255 個非資料庫檔案雜湊一致。 [三包驗收](../artifacts/server-package-checks/run-4fc2b62e9b1744b6ad26cfb4967d0776/checks.json)
+- 通過 1,105 項核心、825 項 HTTP、107 項管理包、來源及解壓包各 133 項場次瀏覽器檢查，以及 1,157 項完整瀏覽器回歸。解壓核對 567 筆清單，193 個建置來源與提交 `16b1248` 相符，其中 29 檔按 Git 換行正規化比對。Windows 套件與原 Quest APK 通過離線版本及簽章核對。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體仍待驗收。 [驗證摘要](../artifacts/console-venue-phase-conflict-validation.json) · [離線核對](../artifacts/console-venue-phase-conflict-venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43379348348)
+
 ## 2026-11-13 全館就緒結果顯示即時開場席位
 
 - Windows 管理台 0.31.178 在核對原來源與端點後，於逐房名冊捷徑旁顯示準備中場次的席號與姿態狀態。未編列、入場待同步、姿態未就緒、合成及追蹤各自標示。快照過期會撤下原席位結果。開場仍由全館場次控制確認。 [操作說明](WINDOWS_SERVER_PACKAGE.md#核對未確認的啟動報告) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.178.zip)
