@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-13 玩家回放可帶離場館
+
+- 單檔 HTML 播放器由管理包 0.31.189 的玩家頁產生。場館可把 HTML 與匯出的原 JSON 一起交付。兩次建置雜湊相同，並已驗證重跑不會覆寫既有檔案。 [下載播放器](../artifacts/VRCommand-Player-Replay-0.31.189.html) · [交付方式](WORLD_RECORDING.md#讓玩家開啟回放)
+- Chromium 以本機檔案網址及離線模式開啟單檔播放器。實際匯出的片段可顯示 3D 場景、按原序號定位並播到原末格，期間沒有外部請求。共通過 150 項觀戰回放瀏覽器檢查及 7 項回放模型與時鐘檢查。程式提交 `838d2ec` 已推送。GitHub Actions 因帳務或支出上限未啟動。 [驗證摘要](../artifacts/standalone-player-replay-189/validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43409655866)
+
 ## 2026-11-13 玩家離線回放可跳到原畫格
 
 - 管理包 0.31.189 的玩家回放頁可輸入場館提供的原畫格序號。驗證從第 2 格開始的真實匯出片段，跳至原末格或播放中定位皆維持本機讀取，並保留房間視角與循環選項。重新載入會清除舊序號。已檢視解壓版的小螢幕畫面。 [操作方式](WORLD_RECORDING.md) · [管理包](../artifacts/VRCommand-ControlServer-0.31.189.zip)
