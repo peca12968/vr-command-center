@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 六批 Windows 啟動與連線量測合併驗收
+
+- 使用管理包 0.31.170 與遊戲 0.50.7，完成 5、10、25 席獨立及合併六批同機排演。總清單核對 18 場原啟動與封存、80 份原連線量測及戰績回條。1,453 項套件檢查通過，含 7,653 格封存回放。三輪皆清理完畢，C／F 共 705 份封存快照檔雜湊相符。 [本機驗證摘要](../artifacts/staged-venue-native-link-and-start-validation.json)
+- 六批均通過事先採用的每席至少 28 次回覆及 p95 不超過 40 毫秒門檻。各席均為 30 次回覆，最高 p95 為 38.76 毫秒。總表逐批顯示回覆最少和 p95 最高的席位。測試另以 0 毫秒上限確認六批會被拒絕，並在移除一份 ZIP 的副本指出第六批第 1 房第 1 席。補回原 ZIP 後六批通過。 [六批結果](../artifacts/staged-venue-native-link-and-start/stages-with-start-and-link-criteria-results.json) · [收件方式](EXTERNAL_CLIENTS.md#六批共用-windows-連線量測門檻)
+- 通過 118 項封存及 12 項 Quest UDP 測試，舊六批正式摘要重驗後逐位元相符。功能來源 `d8aa725` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43357068140)
+
 ## 2026-11-13 六批 Quest 原始日誌缺件與損毀
 
 - 六批收件總表可按房號及席號定位已標示完成但缺少、毀損或無法讀取的 Quest 日誌。兩批測試在同一輪找出五筆問題，補回原檔後核對 80 份模擬回條，正式摘要逐位元一致。既有 Windows 同機六批的 80 份原回條及正式摘要也重驗相符。 [收件方式](EXTERNAL_CLIENTS.md#一次查看六批待補件)
