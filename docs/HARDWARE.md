@@ -170,7 +170,8 @@ dotnet .\VrCommand.HardwareSimulator.dll --live ..\room-1.json --output ..\room-
 | `paused` | 任務已暫停，閘道未連接模擬設備 |
 | `connecting`、`active` | 正在握手，或已握手並接上本房回饋來源 |
 | `awaiting-ack` | 批次等候確認，`acknowledged` 只計入已核對的模擬訊號 |
-| `mock-unavailable`、`management-unavailable` | 模擬連線或管理讀取發生錯誤，`fault` 可顯示模擬斷線、逾時或無效回覆 |
+| `mock-unavailable` | `fault` 顯示模擬斷線、逾時或無效回覆 |
+| `management-unavailable` | `fault` 為 `management-service-unavailable`（HTTP 502、503 或 504）、`management-timeout`（管理讀取逾時）或 `management-transport`（傳輸中斷等連線錯誤） |
 | `stopped` | 終止原因已確定，報告檔已寫出並關閉 |
 
 沒有看到 `stopped` 時，請核對程序退出碼和報告。指定 `--status` 時，原結束摘要仍會接在狀態列後面。程式讀取時可用 `kind` 區分兩者。狀態不含金鑰、位址或玩家識別，`physicalDeliveryConfirmed` 固定為 `false`。
@@ -185,6 +186,8 @@ dotnet .\VrCommand.HardwareSimulator.dll --venue-status ..\venue\venue-bindings.
 ```
 
 第二行只讀本機檔案，無須金鑰。可重複執行以取得最新快照。每房依原場次 UUID 及房號核對，`current` 的 `progress.phase` 顯示閘道正在等待、連線、模擬確認或發生故障。超過三秒未更新的執行中狀態會顯示 `stale`，隱藏該房上次的模擬確認計數。未發布狀態顯示 `waiting`，房號或場次不合顯示 `mismatch`，損壞或未來時間顯示 `invalid`。`stopped` 可查最後計數及停止原因。重啟同房後會換新的 `runId` 並重算計數。這些狀態記錄的是本機模擬，`physicalDeliveryConfirmed` 固定為 `false`。
+
+從模擬器 0.2.15 起，五房狀態和單房終端共用上述管理讀取故障碼。恢復後，該房以新模擬連線與當前游標重新附掛，正常狀態的 `fault` 會清除。查詢也可讀取舊版 `fault` 為 `null` 的管理故障快照。
 
 ### 同房閘道的互斥與重新啟動
 

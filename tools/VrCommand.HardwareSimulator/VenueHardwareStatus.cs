@@ -103,7 +103,12 @@ internal static partial class LiveHardwareGateway
                     or "active" or "awaiting-ack" or "mock-unavailable" or "management-unavailable" or "stopped")
                 || (progress.Phase == "stopped" ? status.Termination is not ("duration" or "ended" or "attempt-limit"
                     or "binding-mismatch" or OperatorStop or OperatorRoomStop or ManagementRefused or ManagementInvalidResponse) : status.Termination is not null)
-                || (progress.Phase == "mock-unavailable" ? status.Fault is not ("mock-disconnected" or "mock-timeout" or "mock-invalid-reply") : status.Fault is not null))
+                || (progress.Phase switch
+                {
+                    "mock-unavailable" => status.Fault is not ("mock-disconnected" or "mock-timeout" or "mock-invalid-reply"),
+                    "management-unavailable" => status.Fault is not (null or ManagementTimeout or ManagementTransport or ManagementServiceUnavailable),
+                    _ => status.Fault is not null
+                }))
                 return ("invalid", null);
             if (status.RoomId != room.RoomId || status.SessionId != room.SessionId) return ("mismatch", null);
             var age = DateTimeOffset.UtcNow - status.ObservedAtUtc;

@@ -1,6 +1,7 @@
 """Run the compiled gateway, real isolated management API and separate loopback mock processes."""
 import argparse
 from contextlib import closing, contextmanager
+from datetime import datetime, timezone
 import hashlib
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -46,6 +47,11 @@ def authority_gate(port, owners):
             fault = faults.get(room)
             if fault is not None:
                 injected.add(room)
+            if fault == 'delay':
+                time.sleep(1.1)
+                return
+            if fault == 'disconnect':
+                return
             if fault is not None and not callable(fault):
                 status, body = fault
             elif room is not None or path == '/api/me':
@@ -76,7 +82,7 @@ def authority_gate(port, owners):
 
 
 def run(args):
-    out = ROOT/'artifacts/live-hardware-gateway'/('run-'+uuid.uuid4().hex)
+    out = args.evidence_root.resolve()/('run-'+uuid.uuid4().hex)
     out.mkdir(parents=True)
     print(json.dumps({'stage':'starting','directory':str(out)}), flush=True)
     keys = {role:secrets.token_hex(32) for role in ('Master','GameServer',*(f'Room{room}' for room in range(1,6)))}
@@ -1025,8 +1031,23 @@ def run(args):
                         faults[recovered_room] = (503, b'')
                         outage_close = recovery_peer.read('closed')
                         assert outage_close['connectionId']==prior_connection
-                        wait(lambda:venue_status(fault_directory)[3]['status']['progress']['phase']=='management-unavailable',
-                             'room 4 closes its pending batch during a temporary outage')
+                        outage_statuses = []
+                        for fault, reason in [((503, b''), 'management-service-unavailable'), ('delay', 'management-timeout'),
+                                              ('disconnect', 'management-transport')]:
+                            faults[recovered_room] = fault
+                            def observed_fault():
+                                row = venue_status(fault_directory)[recovered_room-1]
+                                status = row['status']
+                                return status if row['state']=='current' and status['progress']['phase']=='management-unavailable' \
+                                    and status['fault']==reason else None
+
+                            observed = wait(observed_fault, 'room 4 reports ' + reason)
+                            assert observed['progress']['acknowledged']==1 and observed['progress']['attachments']==1
+                            outage_statuses.append(observed)
+                        check(all(later['sequence']>earlier['sequence'] and later['runId']==earlier['runId']
+                                  for earlier,later in zip(outage_statuses,outage_statuses[1:])),
+                              'A 503 response, read deadline and disconnected HTTP response publish distinct sanitized faults in the same run')
+                        save('linked-fleet-management-statuses.json', outage_statuses)
                         del faults[recovered_room]
                         new_hello = recovery_peer.read('hello')
                         assert new_hello['connectionId']!=prior_connection and new_hello['roomId']==recovered_room
@@ -1035,8 +1056,22 @@ def run(args):
                              'room 4 attaches after management recovers')
                         venue_connections[recovered_room] = new_hello['connectionId']
                         fresh = send_venue_batch(recovered_room, 1)
-                        wait(lambda:venue_status(fault_directory)[3]['status']['progress']['acknowledged']==2,
-                             'room 4 only acknowledges fresh feedback on the recovered connection')
+                        recovered_status = wait(lambda:status if (status:=venue_status(fault_directory)[3]['status'])
+                                                and status['progress']['acknowledged']==2 else None,
+                                                'room 4 only acknowledges fresh feedback on the recovered connection')
+                        assert recovered_status['fault'] is None and recovered_status['runId']==outage_statuses[0]['runId']
+
+                        compatibility = runtime/'legacy-management-status'
+                        compatibility.mkdir()
+                        snapshot = compatibility/'room-04.status.json'
+                        legacy = dict(outage_statuses[0], fault=None, observedAtUtc=datetime.now(timezone.utc).isoformat())
+                        snapshot.write_text(json.dumps(legacy),encoding='utf-8')
+                        legacy_row = venue_status(compatibility)[3]
+                        snapshot.write_text(json.dumps(dict(legacy, fault='mock-timeout')),encoding='utf-8')
+                        rejected_row = venue_status(compatibility)[3]
+                        check(legacy_row['state']=='current' and legacy_row['status']['fault'] is None
+                              and rejected_row['state']=='invalid' and rejected_row['status'] is None,
+                              'Legacy management fault snapshots remain readable and mock fault codes in the management phase are refused')
 
                         cases = [(1, (403, b''), 'management-refused'),
                                  (2, (200, b'{'), 'management-invalid-response'),
@@ -1359,4 +1394,5 @@ if __name__ == '__main__':
     parser.add_argument('--api-dll',type=Path,default=ROOT/'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')
     parser.add_argument('--simulator-dll',type=Path,default=ROOT/'tools/VrCommand.HardwareSimulator/bin/Release/net10.0/VrCommand.HardwareSimulator.dll')
     parser.add_argument('--mock-peer-script',type=Path,default=ROOT/'scripts/hardware-mock-peer.py')
+    parser.add_argument('--evidence-root',type=Path,default=ROOT/'artifacts/live-hardware-gateway')
     run(parser.parse_args())

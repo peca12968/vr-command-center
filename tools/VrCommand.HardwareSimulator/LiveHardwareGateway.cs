@@ -11,6 +11,8 @@ internal static partial class LiveHardwareGateway
 {
     private const int MaxBatch = 32, MaxAttempts = 1024, MaxFrameBytes = 32 * 1024;
     private const string ManagementRefused = "management-refused", ManagementInvalidResponse = "management-invalid-response";
+    private const string ManagementTimeout = "management-timeout", ManagementTransport = "management-transport";
+    private const string ManagementServiceUnavailable = "management-service-unavailable";
     private const string OperatorStop = "operator-stop", OperatorRoomStop = "operator-room-stop";
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(150);
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromMilliseconds(750);
@@ -322,7 +324,17 @@ internal static partial class LiveHardwareGateway
                 }
                 catch (MockFailure failure) { mockFaults++; PublishStatus("mock-unavailable", fault: failure.Message); }
                 catch (Exception failure) when (failure is HttpRequestException or TimeoutException || failure is IOException && failure is not InvalidDataException)
-                { managementFaults++; PublishStatus("management-unavailable"); }
+                {
+                    managementFaults++;
+                    var fault = failure switch
+                    {
+                        TimeoutException => ManagementTimeout,
+                        HttpRequestException { StatusCode: HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable
+                            or HttpStatusCode.GatewayTimeout } => ManagementServiceUnavailable,
+                        _ => ManagementTransport
+                    };
+                    PublishStatus("management-unavailable", fault: fault);
+                }
                 await Task.Delay(PollInterval, run.Token);
             }
         }
@@ -413,7 +425,7 @@ internal static partial class LiveHardwareGateway
             using var response = await client.GetAsync(path, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden) throw new AccessDeniedException("Room identity refused.");
             if (response.StatusCode is HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout)
-                throw new HttpRequestException("Management service temporarily unavailable.");
+                throw new HttpRequestException("Management service temporarily unavailable.", inner: null, response.StatusCode);
             if (!response.IsSuccessStatusCode) throw new InvalidDataException("Management response failed.");
             using var body = await response.Content.ReadAsStreamAsync(deadline.Token);
             const int limit = 192 * 1024;

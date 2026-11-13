@@ -3,7 +3,7 @@ import argparse,hashlib,json,shutil,uuid,zipfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 FILES=['VrCommand.HardwareSimulator.dll','VrCommand.HardwareSimulator.deps.json','VrCommand.HardwareSimulator.runtimeconfig.json','VrCommand.Core.dll','VrCommand.Simulation.dll']
-VERSION='0.2.14'
+VERSION='0.2.15'
 README=f'''VR Command 硬體回饋模擬器 {VERSION}
 
 需要 .NET 10 runtime，本機使用10.0.14驗證。這不是Unity玩家程式或廠商SDK。
@@ -35,6 +35,7 @@ dotnet VrCommand.HardwareSimulator.dll --live-venue <包外venue-bindings.json> 
 排演中若管理服務拒絕本房讀取或回覆無效，本房關閉模擬連線並寫出終止報告。原因分別為 management-refused 及 management-invalid-response。待確認批次取消，先前已確認的模擬回饋保留。
 每次附掛都核對戰鬥串流與來源。已附掛的串流若回報不同來源，該房以 management-invalid-response 結束。短暫的管理連線故障則關閉原連線，恢復後用新連線及當前游標。
 同一輪房間排演會保留最近已核對的管理序號與檢查時間。任一值倒退時取消待確認批次，以 management-invalid-response 結束該房。
+management-unavailable 可從 fault 區分 management-service-unavailable、management-timeout 與 management-transport。恢復正常時會清除故障碼。
 配置範例、模擬協議和操作方式見專案 docs/HARDWARE.md。憑證放在程序環境，設定與報告放在包外。
 即時模式以唯讀 HTTP 取事件，模擬連線僅使用 127.0.0.1 TCP。回覆只確認模擬批次，physicalDeliveryConfirmed 固定為 false。
 閘道等待確認時會繼續檢查管理狀態。已暫停、結束或失效的批次會中止，模擬設備可用 --manual 的 observe-close 觀察該連線關閉。
@@ -58,7 +59,7 @@ def sha(p):
 def verify(folder):
     folder=folder.resolve();manifest=read(folder/'hardware-package.json')
     version=(manifest.get('toolVersion'),manifest.get('mode'))
-    if manifest.get('schemaVersion')!=1 or version not in {('0.1.0','OfflineSimulationOnly'),('0.2.0','OfflineAndLiveSimulation'),('0.2.1','OfflineAndLiveSimulation'),('0.2.2','OfflineAndLiveSimulation'),('0.2.3','OfflineAndLiveSimulation'),('0.2.4','OfflineAndLiveSimulation'),('0.2.5','OfflineAndLiveSimulation'),('0.2.6','OfflineAndLiveSimulation'),('0.2.7','OfflineAndLiveSimulation'),('0.2.8','OfflineAndLiveSimulation'),('0.2.9','OfflineAndLiveSimulation'),('0.2.10','OfflineAndLiveSimulation'),('0.2.11','OfflineAndLiveSimulation'),('0.2.12','OfflineAndLiveSimulation'),('0.2.13','OfflineAndLiveSimulation'),(VERSION,'OfflineAndLiveSimulation')}:raise ValueError('Unsupported simulator package')
+    if manifest.get('schemaVersion')!=1 or version not in {('0.1.0','OfflineSimulationOnly'),('0.2.0','OfflineAndLiveSimulation'),('0.2.1','OfflineAndLiveSimulation'),('0.2.2','OfflineAndLiveSimulation'),('0.2.3','OfflineAndLiveSimulation'),('0.2.4','OfflineAndLiveSimulation'),('0.2.5','OfflineAndLiveSimulation'),('0.2.6','OfflineAndLiveSimulation'),('0.2.7','OfflineAndLiveSimulation'),('0.2.8','OfflineAndLiveSimulation'),('0.2.9','OfflineAndLiveSimulation'),('0.2.10','OfflineAndLiveSimulation'),('0.2.11','OfflineAndLiveSimulation'),('0.2.12','OfflineAndLiveSimulation'),('0.2.13','OfflineAndLiveSimulation'),('0.2.14','OfflineAndLiveSimulation'),(VERSION,'OfflineAndLiveSimulation')}:raise ValueError('Unsupported simulator package')
     expected=set(FILES)|{'example.json','README.txt'}
     if version[1]=='OfflineAndLiveSimulation':expected.add('mock-device.py')
     if set(manifest['files'])!=expected:raise ValueError('Unexpected simulator package payload')
