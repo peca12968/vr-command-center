@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 Quest 單席安裝核對原發行 APK
+
+- `deploy-quest.ps1` 的單席流程可搭配 `-ReleaseReport` 與 `-ApkPath`。`-CheckOnly` 可在無頭盔時核對本機 APK 與原連線檔。正式安裝以核對過的暫存副本執行，讀回裝置 APK 雜湊後才傳送及啟用玩家設定。 [操作方式](QUEST3.md#powershell-部署)
+- 實際 0.50.7 APK 通過第 4 房第 2 席的本機預檢，混入 0.50.6 在 ADB 呼叫前被拒絕。以同一份原 APK 搭配模擬 ADB，確認裝置雜湊不符時未傳送玩家設定，雜湊相符時才傳送設定並送出啟動。兩次暫存檔均清理，3 個原檔雜湊相符。 [驗證摘要](../artifacts/quest-single-seat-release-validation.json)
+- 55 項 Quest 部署回歸及追加的 1 項 ZIP 單席預檢通過，另通過 8 項發行核對。功能 `92b71eb` 和測試 `47271c2` 已推送，兩次 GitHub Actions 因帳務或支出上限未啟動。Quest 實機安裝、VIVE、跨機、MR 場地及廠商硬體待驗。 [功能 CI](https://github.com/peca12968/vr-command-center/actions/runs/43401667855) · [測試 CI](https://github.com/peca12968/vr-command-center/actions/runs/43401900230)
+
 ## 2026-11-13 離線發行核對指出混版與 APK 簽署差異
 
 - `verify-venue-release.py` 可指出 Windows 與 Quest 建置來源或網路識別的差異欄位。Windows 共用檔不一致時，列出差異數量及最多三個套件內相對路徑。APK 發行回條有記載簽署憑證指紋時，會與 Android 工具驗出的憑證核對，並逐欄核對有記載的套件 ID、SDK 及 v2 簽章。 [操作說明](EXTERNAL_CLIENTS.md#發送前離線核對交付套件)
