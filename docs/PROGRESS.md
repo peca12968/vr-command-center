@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 補齊原收件夾後重跑全館 UDP 預檢
+
+- 缺少監聽端或探測端原檔時，補進同一收件夾即可使用 `--retry-report` 重跑。原路徑的同一對檔案只計一次，工具仍重新核對原雜湊和有效期限。原檔變更及重複角色檔案仍會使預檢不完整。 [操作說明](EXTERNAL_CLIENTS.md#補測未完成的全館-udp-預檢)
+- 以兩次實際同機 UDP 交換重現舊版重試退出 1，新版退出 0 並保留一個原來源。核對四份雙端原檔雜湊相同。首輪對照的隔離目錄漏帶 PowerShell 驗證腳本，補齊後在新目錄重跑。另通過 16 項 LAN、12 項 Quest UDP 與 122 項封存測試，六批原收件與正式摘要逐位元相符，共 80 份伺服器回條。 [驗證摘要](../artifacts/venue-udp-original-inbox-retry-validation.json)
+- 功能提交 `73ccf3e` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地與廠商硬體仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43389457530)
+
 ## 2026-11-13 從 Windows 結束報告開啟原批次戰績
 
 - 管理台 0.31.183 核對全館結束報告後，可直接選取原批次的戰績與回條。點選時重新讀取並比對原場次、房號、錄製來源與封存尾端。解壓版在兩種模式各以替換尾端的回應驗證會保留原選取。逐房個別結束的場次仍可開啟其原回放。 [操作說明](WINDOWS_SERVER_PACKAGE.md#核對未確認的啟動報告) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.183.zip)
