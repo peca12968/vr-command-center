@@ -101,6 +101,14 @@ runtime只收VrCommand.exe／UnityPlayer／CrashHandler／WinPix及D3D12、MonoB
 
 ### Windows OpenXR 啟動
 
+在頭盔到場前，可從專案目錄用 PowerShell 檢查這台 Windows 電腦的 OpenXR 設定。
+
+```powershell
+pwsh -NoProfile -File .\scripts\check-windows-openxr.ps1
+```
+
+命令先看目前程序的 `XR_RUNTIME_JSON`，未設定時讀取 Windows 64 位元登錄中的 `ActiveRuntime`。`x64-runtime-files-found` 表示已讀到本機清單及其所指向的 x64 DLL 標頭。若清單只指定 DLL 檔名，會回報 `library-search-required`，可在正式啟動時確認載入器能否找到它。此預檢只讀取本機檔案，OpenXR 初始化、頭盔連線及追蹤仍需用玩家端驗收。 [Khronos Windows 執行環境設定](https://registry.khronos.org/OpenXR/specs/1.1/loader.html#windows-active-runtime-location)
+
 五房場館的主控可先用原 ZIP 和電腦對照表匯出各 Windows 席位的連線檔。 [分發連線檔](EXTERNAL_CLIENTS.md#依電腦分發-windows-vr-連線檔)
 
 先讓相容的頭盔連上 Windows OpenXR 執行環境，再用啟動器選「Windows OpenXR」及「開始遊戲」，或從解壓後的玩家包資料夾執行下列命令。兩種方式都使用主控簽發的四欄 VR 玩家連線檔。
