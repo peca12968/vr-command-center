@@ -95,6 +95,36 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
     check(JSON.stringify(await api('/sessions')) === JSON.stringify(before)
       && requests.length > 0 && requests.every(([method, body]) => method === 'GET' && body === null),
       'Actual download retains the five room revisions and mission IDs without exposing credentials or sending the local path to management');
+    const inventoryInput = page.locator('#venue-server-seat-addresses'), networkButton = page.locator('#venue-server-network-download');
+    const seats = [1, 2, 3, 4, 5].map(roomId => ({ roomId, seat: 1, address: `192.168.1.${20 + roomId}` }));
+    const upload = value => inventoryInput.setInputFiles({ name: 'seat-addresses.json', mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(value)) });
+    await upload({ version: 1, seats: [...seats].reverse() });
+    await page.locator('#venue-server-network-status').filter({ hasText: '已讀取五房共 5 席' }).waitFor();
+    check(await networkButton.isDisabled() && !await page.locator(issue).isDisabled(),
+      'A wildcard bind remains valid for launch but cannot generate a UDP preflight plan');
+    await page.locator('#venue-server-bind').fill(independentPlan.address);
+    const [networkFile] = await Promise.all([page.waitForEvent('download'), networkButton.click()]);
+    const networkOutput = path.join(screenshots, 'independent-venue-network.json');
+    assert.equal(networkFile.suggestedFilename(), 'vr-command-venue-network.json');
+    await networkFile.saveAs(networkOutput);
+    assert.deepEqual(JSON.parse(await fs.readFile(networkOutput, 'utf8')), {
+      version: 1, mode: 'Independent',
+      endpoints: independentPlan.servers.map(({ roomIds, port }) => ({ roomIds, address: independentPlan.address, port })),
+      sources: seats
+    });
+    check(requests.every(([method, body]) => method === 'GET' && body === null),
+      'Browser downloads the five original UDP endpoints and private seat inventory without transmitting the file');
+    await upload({ version: 1, seats: [...seats.slice(0, 4), seats[0]] });
+    await page.locator('#venue-server-network-status').filter({ hasText: '無法讀取' }).waitFor();
+    check(await networkButton.isDisabled(), 'A duplicate seat invalidates the previously selected inventory');
+    await upload({ version: 1, seats });
+    await page.locator('#venue-server-network-status').filter({ hasText: '已讀取五房共 5 席' }).waitFor();
+    await page.locator('#venue-server-address').fill('127.0.0.1');
+    await page.locator('#venue-server-bind').fill('');
+    check(await networkButton.isDisabled(), 'A loopback server cannot export a preflight plan with LAN seat addresses');
+    await page.locator('#venue-server-address').fill(independentPlan.address);
+    await page.locator('#venue-server-bind').fill(independentPlan.listenAddress);
     await page.locator(panel).screenshot({ path: path.join(screenshots, 'venue-server-plan.png') });
 
     const unexpected = [];
@@ -140,6 +170,16 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
     await download(page, path.join(screenshots, 'linked-venue-server-plan.json'), linkedPlan);
     check(await page.locator(ports).count() === 1 && unexpected.length === 2,
       'A Linked venue downloads one port and one exact session revision for all five original rooms');
+    await page.locator('#venue-server-bind').fill(linkedPlan.address);
+    const [linkedNetwork] = await Promise.all([page.waitForEvent('download'), networkButton.click()]);
+    const linkedOutput = path.join(screenshots, 'linked-venue-network.json');
+    await linkedNetwork.saveAs(linkedOutput);
+    assert.deepEqual(JSON.parse(await fs.readFile(linkedOutput, 'utf8')), {
+      version: 1, mode: 'Linked',
+      endpoints: [{ roomIds: [1, 2, 3, 4, 5], address: linkedPlan.address, port: linkedPlan.servers[0].port }],
+      sources: seats
+    });
+    await page.locator('#venue-server-bind').fill(linkedPlan.listenAddress);
     await end(linked.id);
     const replacement = [];
     for (const room of [1, 2, 3, 4, 5]) replacement.push(await create(vr, 'Independent', [room]));
@@ -153,6 +193,8 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
     await page.locator(panel + ' summary').click();
     check(await page.locator('#venue-server-instance').inputValue() === '' && await page.locator('#venue-server-form').isHidden(),
       'Leaving operations discards the local path and the selected plan');
+    check(await inventoryInput.inputValue() === '' && await networkButton.isDisabled(),
+      'Leaving operations clears the selected private seat inventory');
     await page.locator('#venue-server-read').click();
     await page.locator('#venue-server-form').waitFor();
     check((await page.locator(ports).evaluateAll(inputs => inputs.map(input => input.value))).join(',') === '7777,7778,7779,7780,7781',

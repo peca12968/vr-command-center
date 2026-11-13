@@ -43,12 +43,41 @@ function instancePath(value) {
   return path;
 }
 
+function privateAddressKind(address) {
+  if (!validDestination(address, 7777)) return null;
+  const [first, second] = address.split('.').map(Number);
+  if (first === 127) return 'loopback';
+  if (first === 10 || first === 172 && second >= 16 && second <= 31 || first === 192 && second === 168) return 'lan';
+  return null;
+}
+
+function parseSeatInventory(value) {
+  if (value?.version !== 1 || !Array.isArray(value.seats) || Object.keys(value).length !== 2
+      || value.seats.length < 5 || value.seats.length > 25) throw new Error('Invalid seat inventory');
+  const seen = new Set(), counts = [0, 0, 0, 0, 0], kinds = new Set();
+  const seats = value.seats.map(row => {
+    const { roomId, seat, address } = row;
+    const kind = privateAddressKind(address), key = roomId * 10 + seat;
+    if (Object.keys(row).length !== 3 || !Number.isInteger(roomId) || roomId < 1 || roomId > 5
+        || !Number.isInteger(seat) || seat < 1 || seat > 5 || !kind || seen.has(key)) throw new Error('Invalid seat');
+    seen.add(key);
+    counts[roomId - 1]++;
+    kinds.add(kind);
+    return { roomId, seat, address };
+  });
+  if (!counts.every(count => count === counts[0]) || kinds.size !== 1) throw new Error('Invalid coverage');
+  seats.sort((left, right) => left.roomId - right.roomId || left.seat - right.seat);
+  return { seats, kind: kinds.values().next().value };
+}
+
 export function mountVenueServerPlan(getState, api, download) {
   const $ = name => document.getElementById('venue-server-' + name);
   const panel = document.getElementById('venue-server-plan'), form = $('form'), fields = $('fields');
   const instance = $('instance'), address = $('address'), bind = $('bind'), ports = $('ports');
+  const seatFile = $('seat-addresses'), networkDownload = $('network-download'), networkStatus = $('network-status');
   const portDrafts = new Map();
   let active = false, generation = 0, pending = false, preview = null;
+  let seatRead = 0, seatsPending = false, inventory = null, inventoryError = '';
 
   function plan() {
     if (!preview?.ready) return null;
@@ -74,7 +103,23 @@ export function mountVenueServerPlan(getState, api, download) {
     $('read').disabled = panel.hidden || busy || !!command || pending;
     fields.disabled = $('read').disabled;
     form.hidden = !preview?.ready;
-    $('download').disabled = fields.disabled || !plan();
+    const current = plan();
+    $('download').disabled = fields.disabled || !current;
+    networkDownload.disabled = fields.disabled || seatsPending || !networkPlan(current);
+    networkStatus.textContent = seatsPending ? '正在讀取席位 IPv4 表…' : inventoryError;
+    if (inventory) {
+      const count = `已讀取五房共 ${inventory.seats.length} 席。`;
+      networkStatus.textContent = current && !networkPlan(current)
+        ? count + ' UDP 預檢需要具體綁定位址，並使用同類型的私有網路或本機 IPv4。' : count;
+    }
+  }
+
+  function networkPlan(current) {
+    if (!current || !inventory || current.address !== current.listenAddress
+        || privateAddressKind(current.address) !== inventory.kind) return null;
+    return { version: 1, mode: current.topology,
+      endpoints: current.servers.map(({ roomIds, port }) => ({ roomIds, address: current.address, port })),
+      sources: inventory.seats };
   }
 
   function resetPreview() {
@@ -130,11 +175,30 @@ export function mountVenueServerPlan(getState, api, download) {
     } finally { request.finish(); }
   });
 
+  seatFile.addEventListener('change', async () => {
+    const file = seatFile.files[0], attempt = ++seatRead;
+    inventory = null;
+    inventoryError = '';
+    seatsPending = !!file;
+    update();
+    if (!file) return;
+    try {
+      if (file.size > 32768) throw new Error('Seat inventory too large');
+      const parsed = parseSeatInventory(JSON.parse(await file.text()));
+      if (attempt === seatRead) inventory = parsed;
+    } catch {
+      if (attempt === seatRead) inventoryError = '無法讀取席位 IPv4 表。請確認五房席數相同、席位無重複，且使用同類型 IPv4。';
+    } finally {
+      if (attempt === seatRead) { seatsPending = false; update(); }
+    }
+  });
   form.addEventListener('input', update);
   form.addEventListener('submit', async event => {
     event.preventDefault();
     const value = plan();
-    if ($('download').disabled || !value) return;
+    const wantsNetwork = event.submitter === networkDownload;
+    const payload = wantsNetwork ? networkPlan(value) : value;
+    if ((wantsNetwork ? networkDownload : $('download')).disabled || !payload) return;
     const expected = preview;
     const request = begin('正在重新核對原場次…');
     try {
@@ -148,8 +212,10 @@ export function mountVenueServerPlan(getState, api, download) {
         $('status').textContent = `場次狀態已變更${scope}，請重新讀取五房場次。已保留本頁輸入的 UDP 埠。`;
         return;
       }
-      download('vr-command-venue-server-plan.json', new Blob([JSON.stringify(value, null, 2) + '\n'], { type: 'application/json' }));
-      $('status').textContent = '已下載整批來源登記計畫。請使用 Windows 啟動器 1.15 以上版本。場次有變更時請重新讀取並下載。';
+      const name = wantsNetwork ? 'vr-command-venue-network.json' : 'vr-command-venue-server-plan.json';
+      download(name, new Blob([JSON.stringify(payload, null, 2) + '\n'], { type: 'application/json' }));
+      $('status').textContent = wantsNetwork ? '已下載 UDP 預檢網路清單。'
+        : '已下載整批來源登記計畫。請使用 Windows 啟動器 1.15 以上版本。場次有變更時請重新讀取並下載。';
     } catch {
       if (request.current()) {
         resetPreview();
@@ -162,6 +228,7 @@ export function mountVenueServerPlan(getState, api, download) {
     active = on;
     if (!on) {
       generation++; pending = false;
+      seatRead++; seatsPending = false; inventory = null; inventoryError = '';
       resetPreview(); portDrafts.clear(); form.reset(); panel.open = false;
       $('status').textContent = '';
     }

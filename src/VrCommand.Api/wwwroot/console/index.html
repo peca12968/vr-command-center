@@ -68,6 +68,11 @@
               </div>
               <div id="venue-server-ports" class="form-row"></div>
               <button id="venue-server-download" type="submit" class="secondary" disabled>下載啟動計畫 JSON</button>
+              <div class="form-row">
+                <label>席位 IPv4 表<input id="venue-server-seat-addresses" type="file" accept=".json,application/json"></label>
+                <button id="venue-server-network-download" type="submit" class="secondary" disabled>下載 UDP 預檢清單 JSON</button>
+              </div>
+              <p id="venue-server-network-status" class="hint" role="status"></p>
             </fieldset>
           </form>
         </details>
@@ -543,7 +548,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.161 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.162 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>
