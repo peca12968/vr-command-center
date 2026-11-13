@@ -1085,11 +1085,31 @@ def main():
                           and all(request('/api/sessions/' + row['id']) == row for row in states),
                           label + f' offline verification reports affected seats and missing {role} without launching or changing sessions')
                     offline['missing' if role == 'probe' else 'missingListener'] = bad_summary
+                changed_pair = out / f'{label}-udp-changed-original.json'
+                changed = read(readiness_path)
+                reference = changed['groups'][-1]['udpSourcePreflights'][0]
+                listener = out / reference['listener']
+                replacement = out / f'{label}-udp-reformatted-listener.ndjson'
+                replacement.write_bytes(listener.read_bytes() + b'\n')
+                reference['listener'] = replacement.name
+                save(changed_pair.name, changed)
+                changed_evidence = subprocess.run([*verify_only, '--readiness', str(changed_pair)],
+                                                  capture_output=True, encoding='utf-8', timeout=45)
+                changed_summary = json.loads(changed_evidence.stdout)
+                check(changed_evidence.returncode == 1 and changed_summary['verifiedSources'] == len(states) - 1
+                      and changed_summary['pendingSeats'] == [
+                          {'roomId': seat['roomId'], 'seat': seat['seat'], 'status': 'invalid-or-expired', 'reason': 'changed-original'}
+                          for seat in original_network['sources'] if seat['roomId'] in changed['groups'][-1]['roomIds']]
+                      and not any(path.exists() for path in (work, ready, report, start_receipt))
+                      and all(request('/api/sessions/' + row['id']) == row for row in states),
+                      label + ' offline verification rejects different bytes in an otherwise valid original exchange')
+                offline['changedOriginal'] = changed_summary
                 save(label + '-offline-udp-check.json', offline)
                 for reason, input_plan, input_report in (
                     ('complete venue UDP readiness report', plan_file, incomplete),
                     ('launch plan differs', wrong_plan, readiness_path),
                     ('UDP readiness is no longer complete', plan_file, missing_pair),
+                    ('UDP readiness is no longer complete', plan_file, changed_pair),
                 ):
                     blocked = subprocess.run([*guarded_start, '--launch-plan', str(input_plan),
                                               '--readiness', str(input_report), '--work', str(work),

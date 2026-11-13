@@ -413,6 +413,8 @@ class LanPreflightTests(unittest.TestCase):
         self.assertTrue(report['complete'])
         self.assertEqual([15, 10], [len(row['seats']) for row in group['sources']])
         self.assertEqual([first, second], group['udpSourcePreflights'])
+        self.assertEqual([[hashlib.sha256(original_reports[pair[role]]).hexdigest() for role in ('listener', 'probe')]
+                          for pair in (first, second)], group['udpSourcePreflightSha256'])
         copied = self.venue_check(plan, 'copied.json', '--batch', self.root / 'readiness.json')
         self.assertEqual(group, copied['groups'][0])
 
@@ -490,6 +492,35 @@ class LanPreflightTests(unittest.TestCase):
                                      capture_output=True, timeout=15)
         self.assertEqual(2, conflicting.returncode, conflicting.stderr)
         self.assertFalse((self.root / 'work').exists())
+        bound_path = self.root / 'bound.json'
+        bound_bytes = bound_path.read_bytes()
+        replacement = self.venue_pair(port, '127.0.0.2', 'replacement')
+        legacy = json.loads(bound_bytes)
+        legacy['groups'][0].pop('udpSourcePreflightSha256')
+        legacy_path = self.venue_json('legacy-readiness.json', legacy)
+        for role in ('listener', 'probe'):
+            (self.root / first[role]).write_bytes((self.root / replacement[role]).read_bytes())
+        try:
+            rejected = subprocess.run([*verify, '--readiness', str(bound_path)], capture_output=True, timeout=15)
+            self.assertEqual(1, rejected.returncode, rejected.stderr)
+            diagnostic = json.loads(rejected.stdout)
+            self.assertEqual(1, diagnostic['verifiedSources'])
+            self.assertEqual([{'roomId': room, 'seat': seat, 'status': 'invalid-or-expired', 'reason': 'changed-original'}
+                              for room in rooms for seat in (1, 2, 3)], diagnostic['pendingSeats'])
+            self.assertNotIn(str(self.root).encode(), rejected.stdout)
+            spec = importlib.util.spec_from_file_location('field_results', ROOT / 'scripts/verify-field-results.py')
+            field = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(field)
+            with self.assertRaisesRegex(field.EvidenceError, 'UDP report bytes differ from the original venue preflight'):
+                field.read_udp_preflight_batch(bound_path, 'Linked', [rooms])
+            accepted = subprocess.run([*verify, '--readiness', str(legacy_path)], capture_output=True, timeout=15)
+            self.assertEqual(0, accepted.returncode, accepted.stderr)
+        finally:
+            for name, data in original_reports.items():
+                (self.root / name).write_bytes(data)
+        self.assertEqual(bound_bytes, bound_path.read_bytes())
+        restored = subprocess.run([*verify, '--readiness', str(bound_path)], capture_output=True, timeout=15)
+        self.assertEqual(0, restored.returncode, restored.stderr)
         outdated = self.venue_json('outdated-preview.json', {**launch, 'servers': [dict(guarded,
             sessionId='00000000-0000-4000-8000-000000000072', missionId='00000000-0000-4000-8000-000000000073', sessionSequence=6)]})
         refused = self.venue_check(plan, 'outdated.json', '--batch', self.root / 'readiness.json',

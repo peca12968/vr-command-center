@@ -1693,9 +1693,43 @@ def read_udp_launch_binding(batch, directory, mode, expected_sessions=None):
     return checked, plan[2]
 
 
-def read_udp_preflight_batch(path, mode, expected_rooms, *, expected_sessions=None, venue_plan_hash=None):
+def read_udp_preflight_batch(path, mode, expected_rooms, *, expected_sessions=None, venue_plan_hash=None, original_pairs=None):
     batch = read_json(content(path))
-    return udp_preflight_batch(batch, path, mode, expected_rooms, expected_sessions=expected_sessions, venue_plan_hash=venue_plan_hash)
+    parsed = udp_preflight_batch(batch, path, mode, expected_rooms, expected_sessions=expected_sessions,
+                                 venue_plan_hash=venue_plan_hash)
+    if batch['scope'] == 'venue-udp-preflight-only':
+        for group in batch['groups']:
+            for pair, hashes in zip(group['udpSourcePreflights'], udp_pair_digests(group), strict=True):
+                if hashes is not None:
+                    require(type(pair) is dict and set(pair) == {'listener', 'probe'}, 'Invalid UDP report paths')
+                    paths = tuple(resolve_evidence_reference(path.parent, pair[role], kind) for role, kind in
+                                  (('listener', 'udpListener'), ('probe', 'udpProbe')))
+                    require(udp_pair_hashes(paths) == hashes, 'UDP report bytes differ from the original venue preflight')
+                    if original_pairs is not None:
+                        require(original_pairs.setdefault(paths, hashes) == hashes, 'UDP batches disagree on original report bytes')
+    return parsed
+
+
+def udp_pair_hashes(paths):
+    hashes = []
+    for path in paths:
+        with path.open('rb') as stream:
+            raw = stream.read(32769)
+        require(1 <= len(raw) <= 32768, 'Invalid UDP report size')
+        hashes.append(hashlib.sha256(raw).hexdigest())
+    return hashes
+
+
+def udp_pair_digests(group):
+    count = len(group['udpSourcePreflights'])
+    if 'udpSourcePreflightSha256' not in group:
+        return [None] * count
+    hashes = group['udpSourcePreflightSha256']
+    require(type(hashes) is list and len(hashes) == count and all(
+        type(pair) is list and len(pair) == 2 and all(type(digest) is str and re.fullmatch('[0-9a-f]{64}', digest)
+                                                     for digest in pair) for pair in hashes),
+        'Invalid UDP report digests in venue preflight')
+    return hashes
 
 
 def inspect_incomplete_udp_preflight(path, mode, expected_rooms, players_per_room, venue_network):
@@ -2584,7 +2618,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
                                                   start_readiness_path, venue_launcher, venue_results, mode,
                                                   terminal_path=terminal_path)
         venue_launcher.pop('instanceId')
-    batch_pairs, udp_launch_bindings = {}, {}
+    batch_pairs, udp_launch_bindings, original_pairs = {}, {}, {}
     if batch_supplied and not inspect_windows:
         batch_names = [manifest['udpPreflightBatch']] if single_batch else manifest['udpPreflightBatches']
         require(type(batch_names) is list and 1 <= len(batch_names) <= 25, 'Provide 1 to 25 Quest UDP batch reports')
@@ -2592,7 +2626,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
             path = start_readiness_path or (udp_batch_paths[index] if udp_batch_paths is not None else evidence_path(name, kind='udpPreflightBatch'))
             batch, launch = read_udp_preflight_batch(path, mode, expected_rooms,
                                                      expected_sessions={tuple(row['roomIds']): sid for sid, row in expected.items()},
-                                                     venue_plan_hash=venue_network['sha256'] if venue_network else None)
+                                                     venue_plan_hash=venue_network['sha256'] if venue_network else None,
+                                                     original_pairs=original_pairs)
             if launch is not None:
                 for group, planned in launch[1].items():
                     require(udp_launch_bindings.setdefault(group, planned) == planned, 'UDP launch plans disagree on the original room binding')
@@ -2838,6 +2873,10 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
                                          control_batches=controls.get(session['id'], ()), observed_quest_addresses=observed_quest_addresses,
                                          quest_readiness=quest_readiness.pop(session['id'], ()),
                                          planned_seat_addresses=planned_seat_addresses, reconnect_sources=reconnect_sources)
+        for paths in source_paths or ():
+            hashes = original_pairs.get(paths)
+            if hashes is not None:
+                require(udp_pair_hashes(paths) == hashes, 'UDP report bytes differ from the original venue preflight')
         require(set(sources) == set(row['roomIds']) and all(len(peers) == players_per_room for peers in sources.values()),
                 'Verified player count differs from the expected seats in an original room')
         if debrief_receipts is not None:
