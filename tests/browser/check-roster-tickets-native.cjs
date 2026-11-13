@@ -24,7 +24,9 @@ async function main() {
       assert.equal(await page.locator('#roster-room').inputValue(), String(roomId));
       assert.equal(await page.locator('#roster tr:visible').count(), players.length);
       await page.waitForFunction(({ address, port }) =>
-        document.querySelector('#game-address').value === address && Number(document.querySelector('#game-port').value) === port,
+        document.querySelector('#game-address').value === address && Number(document.querySelector('#game-port').value) === port
+        && document.querySelector('#roster-ticket-destination').textContent === `配票端點 ${address}:${port}`
+        && !document.querySelector('#download-roster-room-tickets').disabled,
       { address, port });
       const route = `/api/sessions/${sessionId}/rooms/${roomId}/join-ticket-bundle`;
       const [file, response] = await Promise.all([

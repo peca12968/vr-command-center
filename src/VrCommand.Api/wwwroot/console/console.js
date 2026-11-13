@@ -42,7 +42,7 @@ const readiness = mountReadiness(() => state, logout, () => Number($('roster-roo
 const roomReadiness = mountRoomReadiness(() => state, logout, applyVenuePermissions, venueClimateText, venueEnemyText, target => {
   if (!state.busy && !state.pending) tab('world', target);
 });
-const connections = mountConnections(() => state, logout);
+const connections = mountConnections(() => state, logout, updateRosterTicketButton);
 const closure = mountClosure(() => state, logout, target => tab('world', target), report);
 const alignment = mountAlignment(api, download);
 const seatDeployments = ['VR', 'MR'].map(mode => mountSeatDeployment(() => state, api, mode));
@@ -1306,12 +1306,19 @@ function filterRoster() {
 function updateRosterTicketButton() {
   const session = state.session, roomId = Number($('roster-room').value);
   const button = $('download-roster-room-tickets');
+  const status = $('roster-ticket-destination');
+  const destination = configuredTicketDestination();
   button.hidden = !session?.roomIds.includes(roomId) || !ownsRoom(roomId);
   button.disabled = button.hidden || state.busy || !!state.pending || !canIssueTicket(session, roomId)
-    || !session.players.some(player => player.roomId === roomId);
+    || !destination || !session.players.some(player => player.roomId === roomId);
   if (!button.hidden) button.textContent = `下載房間 ${roomId} 連線檔 ZIP`;
+  status.hidden = button.hidden;
+  const text = button.hidden ? '' : destination ? `配票端點 ${destination.address}:${destination.port}`
+    : '請先設定下方的遊戲伺服器 IPv4 與連線埠。';
+  if (status.textContent !== text) status.textContent = text;
 }
 $('roster-room').addEventListener('change', filterRoster);
+for (const id of ['game-address', 'game-port']) $(id).addEventListener('input', updateRosterTicketButton);
 function environment(prefix) { return { mode: prefix === 'live' ? state.session.environment.mode : $('draft-mode').value, weather: $(prefix + '-weather').value, timeOfDay: $(prefix + '-time').value, lightning: $(prefix + '-lightning').checked }; }
 function enemies(prefix) { return { count: Number($(prefix + '-count').value), behavior: $(prefix + '-behavior').value, autoAttack: $(prefix + '-auto-attack').checked }; }
 function setEnvironment(prefix, value) { $(prefix + '-mode').value = value.mode; $(prefix + '-weather').value = value.weather; $(prefix + '-time').value = value.timeOfDay; $(prefix + '-lightning').checked = value.lightning; }
@@ -1520,13 +1527,17 @@ function download(filename, blob) {
   const url = URL.createObjectURL(blob);
   const anchor = element('a'); anchor.href = url; anchor.download = filename; document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-function ticketDestination() {
+function configuredTicketDestination() {
   const address = $('game-address').value.trim(), port = Number($('game-port').value);
-  if (!validDestination(address, port)) {
+  return validDestination(address, port) ? { address, port } : null;
+}
+function ticketDestination() {
+  const destination = configuredTicketDestination();
+  if (!destination) {
     notify('請輸入完整 IPv4 位址（例如 192.168.1.100）及 1024–65535 的連線埠。', true);
     return null;
   }
-  return { address, port };
+  return destination;
 }
 async function confirmTicketRoster(session, roomId, players, { wholeRoom = false, view }) {
   const applies = () => view === operationsViewEpoch && !$('operations-view').hidden

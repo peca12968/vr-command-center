@@ -12,14 +12,14 @@ export function validEndpoint(value, session) {
     && validDestination(value.address, value.port) && typeof value.sessionEnded === 'boolean';
 }
 
-export function mountConnections(getState, unauthorized) {
+export function mountConnections(getState, unauthorized, destinationChanged) {
   const address = document.getElementById('game-address'), port = document.getElementById('game-port');
   const status = document.getElementById('connection-endpoint-status'), apply = document.getElementById('apply-connection-endpoint');
   let active = false, identity = '', generation = 0, controller, attempted = -Infinity, value, revision = 0, applied = '', message = '';
   for (const field of [address, port]) field.addEventListener('input', () => { revision++; });
   function stop() { generation++; controller?.abort(); controller = null; }
-  function reset() { stop(); identity = ''; attempted = -Infinity; value = null; revision = 0; applied = ''; message = ''; address.value = ''; port.value = '7777'; render(); }
-  function use() { address.value = value.address; port.value = String(value.port); applied = value.streamId; }
+  function reset() { stop(); identity = ''; attempted = -Infinity; value = null; revision = 0; applied = ''; message = ''; address.value = ''; port.value = '7777'; render(); destinationChanged(); }
+  function use() { address.value = value.address; port.value = String(value.port); applied = value.streamId; destinationChanged(); }
   function render() {
     const state = getState(), valid = validEndpoint(value, state.session);
     const ended = state.session?.state === 'Ended' || value?.sessionEnded === true;

@@ -62,10 +62,17 @@ async function checkTicketDownloadFence({ context, api, tokens, base, screenshot
         await page.locator('#ticket-room').selectOption('');
         await page.locator(`[data-begin-room="${roomId}"] button`).click();
         await page.locator('#roster-title:focus').waitFor();
-        check(await page.locator('#ticket-room').inputValue() === '' && await shortcut.isEnabled(),
-          'Roster shortcut uses the chosen room without changing the separate ticket selector');
+        check(await page.locator('#ticket-room').inputValue() === '' && await shortcut.isDisabled()
+          && (await page.locator('#roster-ticket-destination').textContent()).includes('請先設定'),
+          'Roster shortcut waits for a valid endpoint without changing the separate ticket selector');
       }
       await page.locator('#game-address').fill('127.0.0.1');
+      if (scope === 'roster-room') {
+        await page.locator('#game-port').fill('17777');
+        check(await shortcut.isEnabled()
+          && (await page.locator('#roster-ticket-destination').textContent()).includes('127.0.0.1:17777'),
+          'Manual endpoint edits immediately update the roster shortcut');
+      }
       const button = scope === 'roster-room' ? shortcut
         : isRoom ? page.locator('#download-room-tickets') : page.locator('[data-player-action=ticket]');
       const result = await holdTicketResponse(page, routeUrl, () => button.click(), async () => {
@@ -84,6 +91,7 @@ async function checkTicketDownloadFence({ context, api, tokens, base, screenshot
     const [file, response] = await Promise.all([page.waitForEvent('download'),
       page.waitForResponse(reply => reply.url() === url && reply.request().method() === 'POST'), shortcut.click()]);
     assert.equal(response.status(), 200);
+    assert.equal(response.request().postDataJSON().port, 17777);
     assert.deepEqual(response.request().postDataJSON().players, [{ playerId, admissionId: player.admissionId }]);
     assert.equal(file.suggestedFilename(), `room-${String(roomId).padStart(2, '0')}-connections.zip`);
     await file.delete();
