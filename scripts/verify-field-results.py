@@ -92,6 +92,13 @@ class MissingEvidence(FileNotFoundError):
         self.file_name = Path(reference).name
 
 
+class MissingSessionEvidence(MissingEvidence):
+    def __init__(self, files):
+        first = files[0]
+        super().__init__(first['kind'], first['name'])
+        self.files = files
+
+
 def resolve_evidence_reference(base, reference, kind):
     try:
         return (base / reference).resolve(strict=True)
@@ -2447,7 +2454,49 @@ def read_windows_link_criteria(document):
     return criteria
 
 
+def inspect_session_evidence(entries, expected, base, *, packed, shared_launcher):
+    fields = [('launcherReport', 'serverLauncherReport'), ('evidenceZip', 'sessionEvidenceZip'),
+              ('serverLog', 'serverLog'), ('worldJournal', 'worldJournal'), ('combatJournal', 'combatJournal')]
+    missing = []
+    for index, entry in enumerate(entries, 1):
+        if type(entry) is not dict:
+            continue
+        entry_missing = []
+        for field, kind in fields:
+            if (field == 'launcherReport' and shared_launcher) or (field == 'evidenceZip' and packed):
+                continue
+            reference = entry.get(field)
+            if type(reference) is not str or not reference:
+                continue
+            try:
+                resolve_evidence_reference(base, reference, kind)
+            except MissingEvidence as error:
+                entry_missing.append({'kind': kind, 'name': error.file_name, 'sessionEntry': index})
+            except (OSError, ValueError, RuntimeError):
+                # The regular verifier reports malformed and unreadable references.
+                continue
+        if not entry_missing:
+            continue
+        session_id = entry.get('sessionId')
+        session = expected.get(session_id) if type(session_id) is str else None
+        # Older manifests carry the session ID in their per-session launcher receipt.
+        launcher = entry.get('launcherReport')
+        if session is None and not shared_launcher and type(launcher) is str and launcher:
+            try:
+                report = read_json(content(resolve_evidence_reference(base, launcher, 'serverLauncherReport')))
+                session = expected.get(identity(report['sessionId']))
+            except (OSError, ValueError, KeyError, TypeError, RecursionError, RuntimeError):
+                pass
+        for item in entry_missing:
+            if session is not None:
+                item['roomIds'] = session['roomIds']
+            missing.append(item)
+    if missing:
+        raise MissingSessionEvidence(missing)
+
+
 def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_logs=False, inspect_udp=False,
+                       inspect_missing_sessions=False,
                        staged_roster=None, staged_link_criteria=None, expected_stage=None):
     manifest_path = manifest_path.resolve(strict=True)
     with manifest_path.open('rb') as stream:
@@ -2512,6 +2561,9 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     expected_rooms, expected = venue_closure_sessions(mode, rows)
     require(type(entries) is list and len(entries) == len(rows),
             'Venue must contain the original five independent sessions or one linked session')
+    if inspect_missing_sessions:
+        inspect_session_evidence(entries, expected, manifest_path.parent, packed=packed,
+                                 shared_launcher='venueLauncherReport' in manifest)
     require(receipt_bytes is None or 'venueDebriefReceipts' not in manifest, 'Use either bundled or separate management debrief receipts')
     debrief_receipts, debrief_hash = None, None
     if not inspect_windows:
@@ -3101,6 +3153,7 @@ def verify_venue_stages(plan_path, *, inspect=False):
         paths[path] = index
         try:
             report, batch = verify_venue_batch(path, inspect_quest_logs=inspect, inspect_udp=inspect,
+                                               inspect_missing_sessions=inspect,
                                                staged_roster=staged_roster, staged_link_criteria=link_criteria,
                                                expected_stage=expected_stage)
             key = (report['mode'], report['players'])
@@ -3139,7 +3192,8 @@ def verify_venue_stages(plan_path, *, inspect=False):
             continue
         except MissingEvidence as error:
             reject(f'Venue manifest entry {index}: missing original evidence file', index,
-                   missingFile={'kind': error.kind, 'name': error.file_name})
+                   missingFile={'kind': error.kind, 'name': error.file_name},
+                   **({'missingFiles': error.files} if isinstance(error, MissingSessionEvidence) else {}))
             continue
         except (OSError, ValueError, ArithmeticError, AttributeError, KeyError, TypeError, RecursionError,
                 zipfile.BadZipFile, zlib.error, RuntimeError):

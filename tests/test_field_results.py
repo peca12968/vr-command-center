@@ -765,10 +765,15 @@ class FieldResultsTests(unittest.TestCase):
 
             document = json.loads((root / names[4]).read_bytes())
             document['sessions'][0]['worldJournal'] = str(root / 'private-directory' / 'room-01.worldlog')
+            document['sessions'][2]['serverLog'] = str(root / 'other-private-directory' / 'room-03-server.log')
             (root / names[4]).write_text(json.dumps(document), encoding='utf-8')
             inspection = field.verify_venue_stages(path, inspect=True)
             self.assertEqual({'entries': [5], 'reason': 'Venue manifest entry 5: missing original evidence file',
-                              'missingFile': {'kind': 'worldJournal', 'name': 'room-01.worldlog'}}, inspection['issues'][-1])
+                              'missingFile': {'kind': 'worldJournal', 'name': 'room-01.worldlog'},
+                              'missingFiles': [
+                                  {'kind': 'worldJournal', 'name': 'room-01.worldlog', 'sessionEntry': 1, 'roomIds': [1]},
+                                  {'kind': 'serverLog', 'name': 'room-03-server.log', 'sessionEntry': 3, 'roomIds': [3]}
+                              ]}, inspection['issues'][-1])
             self.assertNotIn('private-directory', json.dumps(inspection))
 
     def test_staged_inspection_locates_incomplete_venue_and_quest_udp_reports(self):
