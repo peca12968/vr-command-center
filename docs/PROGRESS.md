@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 全館就緒結果顯示即時開場席位
+
+- Windows 管理台 0.31.178 在核對原來源與端點後，於逐房名冊捷徑旁顯示準備中場次的席號與姿態狀態。未編列、入場待同步、姿態未就緒、合成及追蹤各自標示。快照過期會撤下原席位結果。開場仍由全館場次控制確認。 [操作說明](WINDOWS_SERVER_PACKAGE.md#核對未確認的啟動報告) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.178.zip)
+- Windows 三包整合通過 537 項。從兩種模式的原始就緒檔核對各五房 25 個合成姿態席位。原開場序號一致，兩批共 50 筆戰績回條、6 份 CSV、1,084 格回放。停止後 C／F 共 255 個非資料庫檔案雜湊一致。 [三包驗收](../artifacts/server-package-checks/run-543527daeed84cb59b6035fbefdc2439/checks.json)
+- 通過 825 項 HTTP、107 項管理包、91 項追蹤政策專項、來源與解壓包各 22 項就緒核對，以及 1,156 項完整瀏覽器回歸。首次專項的任務有敵軍，但測試快照未提供敵軍，修正測試任務後通過。解壓核對 567 筆清單，193 個建置來源與提交 `c06876c` 相符，核對時比對換行正規化後的 Git 檔案。Windows 套件及原 Quest APK 通過離線版本及簽章核對。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、實體頭盔、MR 場地及廠商硬體仍待驗收。 [驗證摘要](../artifacts/console-ready-live-seats-validation.json) · [離線核對](../artifacts/console-ready-live-seats-venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43378128134)
+
 ## 2026-11-13 從全館就緒結果開啟原房間名冊
 
 - Windows 管理台 0.31.177 在核對到原管理實例、場次來源及公告端點後，提供逐房名冊捷徑。合併場可從共用端點的結果選擇任一房。點選時重讀原場次，若已結束或來源不符，畫面要求重新核對就緒檔。 [操作說明](WINDOWS_SERVER_PACKAGE.md#核對未確認的啟動報告) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.177.zip)
