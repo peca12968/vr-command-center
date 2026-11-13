@@ -254,6 +254,13 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     }
   }
   function stopRoomSwitch() { roomSwitch?.abort(); roomSwitch = null; }
+  function matchesRoomFrame(value, roomId) {
+    const packet = value?.packet, world = packet?.frame;
+    const inRoom = actors => Array.isArray(actors) && actors.every(actor => actor?.roomId === roomId);
+    return value?.observerRoomId === roomId && inRoom(world?.players) && inRoom(world?.enemies)
+      && (world.roomEnemyPolicies == null || inRoom(world.roomEnemyPolicies))
+      && Array.isArray(packet.events) && inRoom(value.statistics);
+  }
   async function switchLiveRoom(roomId) {
     const recording = liveRooms.get(roomId), picker = $('world-recording');
     if (!active || !canWriteClips() || !recording || roomSwitch || listController || connecting || picker.disabled) return;
@@ -271,12 +278,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
         throw new Error('Room recording changed');
       const value = await (await response(`${endpoint}/frames/${verified.acceptedSequence}${scope}`, signal)).json();
       const packet = value?.packet;
-      if (value?.observerRoomId !== roomId || packet?.sequence !== verified.acceptedSequence
-        || packet.elapsedMilliseconds !== verified.durationMilliseconds
-        || !Array.isArray(packet.frame?.players) || !packet.frame.players.every(actor => actor.roomId === roomId)
-        || !Array.isArray(packet.frame.enemies) || !packet.frame.enemies.every(actor => actor.roomId === roomId)
-        || !Array.isArray(packet.events)
-        || !Array.isArray(value.statistics) || !value.statistics.every(player => player.roomId === roomId))
+      if (!matchesRoomFrame(value, roomId) || packet.sequence !== verified.acceptedSequence
+        || packet.elapsedMilliseconds !== verified.durationMilliseconds)
         throw new Error('Room snapshot changed');
       const rooms = await (await response('/api/rooms', signal)).json();
       if (roomSwitch !== request || !active || picker.disabled) return;
@@ -625,7 +628,10 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     return replayAt(0, sequence);
   }
   function openLive() {
-    const target = returnLiveSource ? { mode: 'live', sessionId: $('world-recording').value, sourceKey: returnLiveSource } : null;
+    const sameLiveRoom = observerRoom !== null && mode === 'live' && frame;
+    const sourceKey = returnLiveSource ?? (sameLiveRoom ? geometry : null);
+    const target = sourceKey ? { mode: 'live', sessionId: $('world-recording').value, sourceKey,
+      initialFrame: sameLiveRoom ? frame.packet.sequence : 0 } : null;
     returnLiveSource = null;
     bindVenueReview(null);
     return connect('live', 0, null, null, target);
@@ -1036,7 +1042,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     let recentJump = Boolean(target?.sourceKey || returnLiveSource || (clip && sequence < frame?.packet.sequence));
     let playerFrame = null, playerComplete = false, witnessFrame = null;
     const initialLiveSequence = target?.initialFrame ?? 0;
-    let lastLiveSequence = liveAttempt ? frame?.packet.sequence ?? 0 : 0;
+    let lastLiveSequence = liveAttempt ? frame?.packet.sequence ?? initialLiveSequence : initialLiveSequence;
     let announcedLiveSequence = 0, announcedLiveComplete = false;
     let idleTimer, idleExpired = false, transportFailure = false;
     function watchLive() {
@@ -1109,11 +1115,15 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
               if (!clip) { info = data; savedFinished = false; }
               showRecording(target?.roomId);
             } else if (type === 'frame') {
+              if (observerRoom !== null && !matchesRoomFrame(data, observerRoom)) throw new Error('快照含其他房間的資料。');
               if (nextMode === 'live') {
                 const current = data.packet.sequence;
                 if (!hasHeader || !Number.isSafeInteger(current) || current < 1 || current < Math.max(lastLiveSequence, initialLiveSequence))
                   throw new Error('即時觀戰的快照序號不符。');
-                if (current === lastLiveSequence) continue;
+                if (current === lastLiveSequence) {
+                  if (!received) { received = performance.now(); status(); }
+                  continue;
+                }
                 lastLiveSequence = current; liveAttempt = 0;
               }
               if (playerReview) {

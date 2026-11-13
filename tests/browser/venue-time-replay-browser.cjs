@@ -117,6 +117,36 @@ module.exports = async function venueTimeReplayBrowser({ context, api, tokens, b
     check(await page.locator('#world-canvas').getAttribute('data-sequence') === '4'
       && (await page.locator('#world-status').innerText()).includes('顯示最後保存格'),
     'A mismatched live stream leaves the verified destination snapshot visible');
+    const room2Watch = url => url.pathname === `/api/sessions/${ids[1]}/world/watch`
+      && url.searchParams.get('observerRoomId') === '2' && url.searchParams.get('mode') === 'live';
+    const room2Recording = await api(`/sessions/${ids[1]}/world?observerRoomId=2`);
+    const room2Frame = await api(`/sessions/${ids[1]}/world/frames/4?observerRoomId=2`);
+    const foreignHeader = { ...room2Recording, header: { ...room2Recording.header, streamId: randomUUID() } };
+    const foreignFrame = { ...room2Frame, statistics: room2Frame.statistics.map(row => ({ ...row, roomId: 1 })) };
+    const earlierFrame = await api(`/sessions/${ids[1]}/world/frames/3?observerRoomId=2`);
+    for (const [header, snapshot, error, description] of [
+      [foreignHeader, room2Frame, '錄製來源不同', 'Manual reconnection cannot substitute a different recording for the displayed room'],
+      [room2Recording, earlierFrame, '快照序號不符', 'Manual reconnection cannot regress to an earlier room snapshot'],
+      [room2Recording, foreignFrame, '快照含其他房間的資料', 'Room-scoped SSE checks statistics even when the sequence matches the displayed snapshot']
+    ]) {
+      const body = [['header', header], ['frame', snapshot]]
+        .map(([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`).join('');
+      await page.route(room2Watch, route => route.fulfill({ status: 200, contentType: 'text/event-stream', body }), { times: 1 });
+      await page.locator('#world-live').click();
+      await page.locator('#world-message').filter({ hasText: '觀戰已中斷' }).waitFor();
+      check((await page.locator('#world-message').innerText()).includes(error)
+        && await picker.inputValue() === ids[1] && await page.locator('#world-room').inputValue() === '2'
+        && await page.locator('#world-canvas').getAttribute('data-sequence') === '4',
+      description);
+    }
+    await page.locator('#world-camera').selectOption('overview');
+    const reconnected = page.waitForResponse(response => room2Watch(new URL(response.url())) && response.ok());
+    await page.locator('#world-live').click();
+    await reconnected;
+    await page.locator('#world-message').filter({ hasText: '頭手來源請見角色資訊' }).waitFor();
+    check(await page.locator('#world-camera').inputValue() === 'overview'
+      && await page.locator('#world-canvas').getAttribute('data-sequence') === '4',
+    'Manual reconnection to the genuine room retains the camera and the verified snapshot');
     await openLiveRoom(1, ids[0], 4);
     await openLiveRoom(2, ids[1], 4);
     check(await liveRoom(1).isEnabled() && await liveRoom(2).isDisabled() && (await liveRoom(2).innerText()).includes('觀戰中'),
