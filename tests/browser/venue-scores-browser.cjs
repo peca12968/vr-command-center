@@ -162,6 +162,25 @@ module.exports = async ({ context, api, tokens, base, screenshots, check, captur
       check(roomDownloads === 0 && await exportRoom(1).isEnabled(),
         'A substituted player row with the original filename is rejected and the room can retry');
     } finally { page.off('download', countRoomDownload); }
+    await page.evaluate(pathname => {
+      const original = window.fetch;
+      window.fetch = (...args) => {
+        if (new URL(args[0], location.href).pathname !== pathname) return original(...args);
+        window.fetch = original;
+        document.body.dataset.roomExportFixture = 'waiting';
+        return new Promise((resolve, reject) => args[1].signal.addEventListener('abort', () => {
+          document.body.dataset.roomExportFixture = 'aborted';
+          reject(args[1].signal.reason);
+        }, { once: true }));
+      };
+    }, '/api' + roomUrl(independent, 1));
+    await exportRoom(1).click();
+    await page.locator('body[data-room-export-fixture="waiting"]').waitFor();
+    await page.locator('#tab-world').click();
+    await page.locator('body[data-room-export-fixture="aborted"]').waitFor();
+    await page.locator('#tab-operations').click();
+    check(await exportRoom(1).isEnabled() && (await roomStatus.innerText()) === '',
+      'Leaving venue operations cancels the pending room CSV and returning permits a new download');
     await table.screenshot({ path: path.join(screenshots, 'venue-battle-scores-awaiting-seal.png') });
     const latestWithReceipts = base + '/api' + scoresUrl() + '&includeDebriefReceipts=true';
     const corrupt = async route => {
