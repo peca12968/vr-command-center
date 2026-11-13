@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 五房 UDP 離線重驗可匯出補件報告
+
+- `start-verified-venue.py --verify-only --retry-output` 可在原計畫與預覽仍相符、UDP 報告需要補件時保存有效原檔，供既有 `--retry-report` 接續。全部通過時不建立補件檔。 [補件指令](EXTERNAL_CLIENTS.md#補測未完成的全館-udp-預檢)
+- Windows 三包同機驗證通過 541 項。獨立模式補回一組並保留四組原檔，合併模式補回一組共用原檔。兩種模式各 25 個同機模擬客戶端完成入場，共核對 50 份戰績與 1,212 格封存回放。16 項 LAN 及 12 項 Quest UDP 回歸通過。 [驗證摘要](../artifacts/venue-udp-recheck-retry-validation.json)
+- 功能提交 `a842b71` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、Quest 3 與 VIVE 實機、MR 場地和廠商硬體仍待現場驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43406616404)
+
 ## 2026-11-13 五房開場與封存核對原 UDP 報告
 
 - 新版全館預檢保存雙端原檔的 SHA-256。開場重驗拒絕同一端點重新量測後替換的檔案，也會拒絕只有換行差異的副本，並以 `changed-original` 列出受影響席位。封存驗收也核對雙端原檔。舊版無雜湊報告仍按原流程處理。 [開場操作](WINDOWS_SERVER_PACKAGE.md#以-udp-預檢報告啟動五房)
