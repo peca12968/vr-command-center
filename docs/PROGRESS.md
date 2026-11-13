@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 遊戲伺服器暫停與恢復診斷
+
+- 遊戲伺服器日誌可區分管理更新失敗、管理更新逾時及封存錯誤，並保存恢復序號。Windows 受控 503 複驗通過 9 項。原管理序號 5 暫停後恢復，另在世界發布中斷後核對 772 格封存回放、到期時鐘及原入場的戰績回條。上一輪 25 席合併場的暫停原因仍待查。 [操作方式](CLOCK_RECOVERY.md) · [驗證摘要](../artifacts/management-suspension-diagnostics-validation.json)
+- 前兩次故障驗收保留為失敗。測試代理曾拒絕新版戰績回條，加入同場原路由後，管理端收到原入場確認，代理未再拒絕路由。三次 C／F 共 116 個已關閉快照檔雜湊相符。273 項 Unity Editor 與 10 項代理測試通過。
+- Windows 伺服器、玩家包與 Quest 開發 APK 完成同源建置及離線一致性驗證。功能來源 `e45f4a2`、測試工具來源 `0826c18` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體仍待現場驗收。 [離線交付報告](../artifacts/venue-release-control-0.31.170-game-0.50.7-authority-diagnostics.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43363065632)
+
 ## 2026-11-13 Windows 0.50.7 五房丟包複驗
 
 - 用已交付的 Windows 0.50.7 與管理 API 0.31.170，在同機用每條連線的上、下行各每 20 個 UDP 封包丟棄 1 個。複驗通過 24 項，獨立與合併各 25 個模擬玩家端，核對 3,995 格回放、六份 CSV、100 次伺服器接受的射擊及 50 份戰績確認。無注入丟包的同機對照通過 22 項及 3,996 格回放。 [重跑方式](DESKTOP_EXERCISE.md#五房-udp-丟包驗證)
