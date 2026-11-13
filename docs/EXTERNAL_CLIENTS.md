@@ -649,6 +649,8 @@ python scripts/verify-field-results.py --venue-stages .\stages.json --inspect-ve
 
 在 `stages.json` 加入 `"requireVerifiedVenueStart": true`，並在六份批次清單各自引用原 `verifiedVenueStart`。驗收會逐批核對原預檢、就緒及結束報告，並拒絕重複使用同一個啟動批次 ID。缺少回條時，錯誤會指出總清單中的項次。摘要會顯示各批已核對的回條及原啟動 ID。 [保存及引用回條](#核對-windows-五房啟動回條)
 
+用 `--inspect-venue-stages` 檢查待補資料。回條記載的 SHA-256 與所引用的檔案不符時，`issues[].evidenceMismatch` 會列出 `kind`、檔名 `name` 及 `sha256-mismatch`。`kind` 對應 `venueLauncherReport`（結束報告）、`udpPreflightBatch`（原 UDP 預檢）或 `windowsReadyReport`（就緒報告）。檔案不存在時，查看 `missingFile` 或 `udpPreflight` 的對應項目。這些欄位只列檔名，正式驗收仍會拒絕缺檔或雜湊不一致的批次。
+
 ### 核對 25 席各自的直連來源
 
 每席使用不同 IPv4 的場館，可在原五房驗收清單加入下列欄位。請完整填寫 `serverIps` 的伺服器介面位址，並保留每席原程序的完整日誌、每場啟用 UDP 來源診斷的伺服器日誌及原封存 `worldJournal`。

@@ -72,6 +72,12 @@ class UdpPreflightIncomplete(EvidenceError):
         self.reports = reports
 
 
+class VerifiedStartDigestMismatch(EvidenceError):
+    def __init__(self, message, kind, path):
+        super().__init__(message)
+        self.evidence = {'kind': kind, 'name': path.name, 'status': 'sha256-mismatch'}
+
+
 class VenueStageMismatch(EvidenceError):
     def __init__(self, expected, observed):
         super().__init__(f"expected {expected['mode']} with {expected['players']} seats, "
@@ -2260,17 +2266,21 @@ def read_terminal_venue_launcher(path, mode, expected, *, include_instance=False
             **({'instanceId': instance_id} if include_instance else {})}, results
 
 
-def read_verified_venue_start(path, readiness_path, terminal, results, mode):
+def read_verified_venue_start(path, readiness_path, terminal, results, mode, *, terminal_path):
     receipt, raw = read_quest_document(path)
     fields = {'version', 'scope', 'mode', 'checkedAtUtc', 'readinessSha256', 'terminalSha256', 'readyReport', 'readySha256'}
     require(set(receipt) in (fields, fields | {'requireDistinctRemoteRoster'})
             and integer(receipt['version'], 1, 1) == 1 and receipt['scope'] == 'verified-windows-venue-start'
-            and receipt['mode'] == mode and receipt['terminalSha256'] == terminal['sha256'],
+            and receipt['mode'] == mode,
             'Verified start receipt differs from the original terminal venue report')
+    if receipt['terminalSha256'] != terminal['sha256']:
+        raise VerifiedStartDigestMismatch('Verified start receipt differs from the original terminal venue report',
+                                          'venueLauncherReport', terminal_path)
     with readiness_path.open('rb') as stream:
         readiness = limited_read(stream)
-    require(receipt['readinessSha256'] == hashlib.sha256(readiness).hexdigest(),
-            'Verified start receipt differs from the original UDP readiness report')
+    if receipt['readinessSha256'] != hashlib.sha256(readiness).hexdigest():
+        raise VerifiedStartDigestMismatch('Verified start receipt differs from the original UDP readiness report',
+                                          'udpPreflightBatch', readiness_path)
     preflight = read_json(readiness.decode('utf-8-sig'))
     require(type(preflight) is dict and preflight.get('scope') == 'venue-udp-preflight-only'
             and preflight.get('complete') is True and preflight.get('mode') == mode
@@ -2283,8 +2293,10 @@ def read_verified_venue_start(path, readiness_path, terminal, results, mode):
     require(type(receipt['readyReport']) is str and receipt['readyReport'], 'Verified start receipt lacks the original ready report')
     ready_path = resolve_evidence_reference(path.parent, receipt['readyReport'], 'windowsReadyReport')
     ready, ready_raw = read_quest_document(ready_path)
-    require(receipt['readySha256'] == hashlib.sha256(ready_raw).hexdigest()
-            and integer(ready['schemaVersion'], 1, 1) == 1 and ready['status'] == 'venue-ready'
+    if receipt['readySha256'] != hashlib.sha256(ready_raw).hexdigest():
+        raise VerifiedStartDigestMismatch('Verified start receipt differs from the original ready venue report',
+                                          'windowsReadyReport', ready_path)
+    require(integer(ready['schemaVersion'], 1, 1) == 1 and ready['status'] == 'venue-ready'
             and ready['topology'] == mode and identity(ready['instanceId']) == terminal['instanceId'],
             'Verified start receipt differs from the original ready venue report')
     checked = datetime.fromisoformat(receipt['checkedAtUtc'])
@@ -2522,15 +2534,16 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     if 'venueLauncherReport' in manifest:
         require(all('launcherReport' not in entry and 'sessionId' in entry for entry in entries),
                 'Use sessionId instead of a per-session launcher report with venueLauncherReport')
-        venue_launcher, venue_results = read_terminal_venue_launcher(
-            evidence_path(manifest['venueLauncherReport'], kind='venueLauncherReport'), mode, expected,
-            include_instance=wants_verified_start)
+        terminal_path = evidence_path(manifest['venueLauncherReport'], kind='venueLauncherReport')
+        venue_launcher, venue_results = read_terminal_venue_launcher(terminal_path, mode, expected,
+                                                                     include_instance=wants_verified_start)
     start_readiness_path = None
     if wants_verified_start:
         start_readiness_path = (udp_batch_paths[0] if udp_batch_paths is not None
                                 else evidence_path(manifest['udpPreflightBatch'], kind='udpPreflightBatch'))
         verified_start = read_verified_venue_start(evidence_path(manifest['verifiedVenueStart'], kind='verifiedVenueStart'),
-                                                  start_readiness_path, venue_launcher, venue_results, mode)
+                                                  start_readiness_path, venue_launcher, venue_results, mode,
+                                                  terminal_path=terminal_path)
         venue_launcher.pop('instanceId')
     batch_pairs, udp_launch_bindings = {}, {}
     if batch_supplied and not inspect_windows:
@@ -3022,6 +3035,9 @@ def verify_venue_stages(plan_path, *, inspect=False):
             continue
         except UdpPreflightIncomplete as error:
             reject(f'Venue manifest entry {index}: {error}', index, udpPreflight=error.reports)
+            continue
+        except VerifiedStartDigestMismatch as error:
+            reject(f'Venue manifest entry {index}: {error}', index, evidenceMismatch=error.evidence)
             continue
         except EvidenceError as error:
             reject(f'Venue manifest entry {index}: {error}', index)

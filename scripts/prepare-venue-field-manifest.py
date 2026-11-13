@@ -246,7 +246,7 @@ def prepare(args, output):
     if args.verified_start_receipt is not None:
         field.require('udpPreflightBatch' in manifest, 'Verified start requires one original UDP readiness report')
         receipt_path = evidence_path(args.verified_start_receipt.resolve(strict=True))
-        field.read_verified_venue_start(receipt_path, paths[0], launch, results, mode)
+        field.read_verified_venue_start(receipt_path, paths[0], launch, results, mode, terminal_path=terminal)
         manifest['verifiedVenueStart'] = ref(receipt_path)
     if args.quest_capture_report:
         captures = {'reports': [ref(path.resolve(strict=True)) for path in args.quest_capture_report]}

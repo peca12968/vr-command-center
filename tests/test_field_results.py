@@ -595,6 +595,34 @@ class FieldResultsTests(unittest.TestCase):
         return {'version': 1, 'topology': 'direct-lan' if remote else 'same-host',
                 'minimumConcurrentMilliseconds': 2000, 'venueManifests': names}
 
+    def test_verified_start_reports_each_original_digest_mismatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            terminal_path = root / 'venue-final.json'
+            readiness_path = root / 'venue-udp.json'
+            ready_path = root / 'venue-ready.json'
+            receipt_path = root / 'verified-start.json'
+            checked = '2026-11-09T00:00:00+00:00'
+            readiness_path.write_text(json.dumps({'scope': 'venue-udp-preflight-only', 'complete': True,
+                'mode': 'Linked', 'launchBinding': {}, 'checkedAtUtc': checked}), encoding='utf-8')
+            ready_path.write_text(json.dumps({'schemaVersion': 1, 'status': 'venue-ready', 'topology': 'Linked',
+                'instanceId': id_for(1), 'servers': []}), encoding='utf-8')
+            terminal = {'sha256': 'a' * 64, 'instanceId': id_for(1), 'launchId': id_for(2)}
+            receipt = {'version': 1, 'scope': 'verified-windows-venue-start', 'mode': 'Linked',
+                       'checkedAtUtc': checked, 'terminalSha256': terminal['sha256'], 'readyReport': ready_path.name,
+                       'readinessSha256': hashlib.sha256(readiness_path.read_bytes()).hexdigest(),
+                       'readySha256': hashlib.sha256(ready_path.read_bytes()).hexdigest()}
+            for key, kind, original in (('terminalSha256', 'venueLauncherReport', terminal_path),
+                                        ('readinessSha256', 'udpPreflightBatch', readiness_path),
+                                        ('readySha256', 'windowsReadyReport', ready_path)):
+                with self.subTest(kind=kind):
+                    receipt_path.write_text(json.dumps(receipt | {key: '0' * 64}), encoding='utf-8')
+                    with self.assertRaises(field.VerifiedStartDigestMismatch) as raised:
+                        field.read_verified_venue_start(receipt_path, readiness_path, terminal, {}, 'Linked',
+                                                       terminal_path=terminal_path)
+                    self.assertEqual({'kind': kind, 'name': original.name, 'status': 'sha256-mismatch'},
+                                     raised.exception.evidence)
+
     def test_staged_venue_checks_original_batches_and_has_one_report_per_mode_and_size(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
