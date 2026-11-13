@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-13 主控可一併下載播放器與回放片段
+
+- Windows 管理包 0.31.191 的「下載回放 ZIP」會打包單檔播放器及所選範圍的原回放 JSON。驗證了場次與指定房間的 JSON 逐位元相符、房控請求遭拒，以及解壓後能以瀏覽器離線播到原末格。 [下載管理包](../artifacts/VRCommand-ControlServer-0.31.191.zip) · [回放交付](WORLD_RECORDING.md#讓玩家開啟回放)
+- 發行版與解壓版各通過 155 項瀏覽器檢查，另通過 107 項管理包、7 項封裝及 8 項發行核對。核對 568 筆管理包清單及同源 Windows 遊戲包、Quest APK 的離線發行。功能提交 `d3936b6` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體仍待現地驗收。 [驗證摘要](../artifacts/control-replay-zip-191-validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43410819068)
+
 ## 2026-11-13 控制台可下載離線播放器
 
 - Windows 管理包 0.31.190 的「已保存的共用片段」提供「下載離線播放器」。管理包由同一份玩家頁產生單檔 HTML，經附件下載後可與原回放 JSON 一起交付。解壓版瀏覽器測試核對下載檔名、位元內容及離線播放至原末格，全程沒有外部請求。 [下載管理包](../artifacts/VRCommand-ControlServer-0.31.190.zip) · [交付方式](WORLD_RECORDING.md#讓玩家開啟回放)
