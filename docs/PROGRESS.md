@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 名冊整房連線檔的 Windows 入場與結算
+
+- `--check-roster-room-tickets` 讓 Chromium 逐房使用控制台 0.31.165 的名冊捷徑，將下載的原 ZIP 交給 Windows 玩家包。逐席核對原入場與遊戲端點。 [重跑方式](EXTERNAL_CLIENTS.md#按房間下載連線檔)
+- 獨立與合併模式各 25 個同機模擬玩家完成入場與結算。通過 495 項整合檢查及 10 項伺服器包測試。核對 10 份原 ZIP、50 份原連線檔、50 份戰績回條及 1,081 格封存回放，收尾無遺留程序。 [本機驗證摘要](../artifacts/venue-roster-ticket-native-validation.json)
+- 驗證來源 `2d91aec` 已推送，控制台來源為 `5fb016d`。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43345337355)
+
 ## 2026-11-13 從本房名冊下載整房連線檔
 
 - 控制台 0.31.165 可從指定房間名冊直接下載該房 ZIP，沿用原 IPv4、UDP 埠及名冊再次核對。 [操作方式](EXTERNAL_CLIENTS.md#按房間下載連線檔)
