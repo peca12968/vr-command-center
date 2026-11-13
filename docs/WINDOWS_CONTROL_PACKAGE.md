@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-13 `VRCommand-ControlServer-0.31.186.zip` 為 53,156,497 bytes，SHA-256 `d26b43c610f526812a2b5c62cddd44b179db5e063afe04b90cdf418ddae56cdb`。解壓核對 567 筆清單。任務編輯器可在本機下載尚未儲存的草稿範本。 [管理包](../artifacts/VRCommand-ControlServer-0.31.186.zip) · [操作說明](MISSION_VERSIONS.md#在管理實例間交接任務範本)
+
 2026-11-13 `VRCommand-ControlServer-0.31.185.zip` 為 53,155,138 bytes，SHA-256 `8d32dc994de2d4d2216b11d8c8c06808975d0503f773b996e679aecac4ecbccf`。解壓核對 567 筆清單。玩家頁可在瀏覽器循環播放場館交付的回放檔。 [管理包](../artifacts/VRCommand-ControlServer-0.31.185.zip) · [回放操作](WORLD_RECORDING.md)
 
 2026-11-13 `VRCommand-ControlServer-0.31.184.zip` 為 53,154,739 bytes，SHA-256 `df119a1d89a2b436d88785579ad96452536f297771d9c34a5098dcc52a3d2beb`。解壓核對 567 筆清單。主控可逐台查看工作站回條未通過的原因。 [管理包](../artifacts/VRCommand-ControlServer-0.31.184.zip) · [工作站操作](#核對主控與五房控的直連來源)
