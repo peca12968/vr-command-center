@@ -735,11 +735,28 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     });
     await olderRecordings.click();
     const earlierPage = await (await earlierCatalog).json();
-    await page.locator('#world-list-status').filter({ hasText: `已載入 ${30 + earlierPage.recordings.length} 筆錄製` }).waitFor();
-    check(earlierPage.recordings.some(row => row.header.sessionId === ending.id) && earlierPage.nextBefore === null
-      && await olderRecordings.isHidden() && await recording.locator(`option[value="${ending.id}"]`).count() === 1
+    let loaded = 30 + earlierPage.recordings.length, nextBefore = earlierPage.nextBefore;
+    await page.locator('#world-list-status').filter({ hasText: `已載入 ${loaded} 筆錄製` }).waitFor();
+    check(earlierPage.recordings.some(row => row.header.sessionId === ending.id)
+      && await recording.locator(`option[value="${ending.id}"]`).count() === 1
       && await recording.inputValue() === ending.id && await playerCanvas.isVisible(),
       'Loading older recordings preserves the selected replay and shows the original recording only once');
+    while (nextBefore !== null) {
+      const cursor = nextBefore;
+      const following = page.waitForResponse(response => {
+        const url = new URL(response.url());
+        return archiveListRoute(url) && url.searchParams.get('before') === cursor;
+      });
+      await olderRecordings.click();
+      const result = await (await following).json();
+      assert.notEqual(result.nextBefore, cursor);
+      loaded += result.recordings.length;
+      nextBefore = result.nextBefore;
+      await page.locator('#world-list-status').filter({ hasText: `已載入 ${loaded} 筆錄製` }).waitFor();
+    }
+    check(await olderRecordings.isHidden() && await recording.locator(`option[value="${ending.id}"]`).count() === 1
+      && await recording.inputValue() === ending.id && await playerCanvas.isVisible(),
+      'The archive cursor ends without duplicating or deselecting the original replay');
     await page.locator('#tab-operations').click();
     const reportsUrl = base + '/api' + reportsPath;
     const fetchReports = () => fetch(reportsUrl, { headers: { Authorization: 'Bearer ' + tokens.Master } });
