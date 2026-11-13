@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 六批收件可一次列出各場次缺檔
+
+- 六批收件檢查會逐批列出已引用但缺少的啟動器報告、場次 ZIP、伺服器日誌、世界及戰鬥日誌。每筆附清單項次，能對上原場次時也附房號。 [收件方式](EXTERNAL_CLIENTS.md#一次查看六批待補件)
+- 以既有六批 Windows 同機資料的清單副本驗證，收件一次列出獨立場三份及合併場兩份缺檔。正式驗收拒絕缺件副本，原清單重驗摘要逐位元相符，仍核對 80 筆伺服器戰績確認。122 項封存測試及最終缺檔個案通過。 [收件結果](../artifacts/staged-missing-session-files/inspection.json) · [原六批重驗](../artifacts/staged-missing-session-files/original-verification.json)
+- 功能提交 `6752703` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商設備仍待現場驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43419715026)
+
 ## 2026-11-13 五房硬體模擬報告可用單一 ZIP 交接
 
 - 模擬器 0.2.18 以同一份原始檔案執行核對及打包，接收方可直接核對 ZIP。合併及獨立各保留 12 份原檔，舊版本 2 的 ZIP 保留 7 份。拒絕缺件、修改、重複名稱與非原定路徑，且保留既有輸出。 [下載套件](../artifacts/hardware-packages/hardware-simulator-0.2.18-net10.zip) · [交接方式](HARDWARE.md#離線核對五房排演結果)

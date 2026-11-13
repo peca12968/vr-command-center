@@ -627,7 +627,9 @@ python scripts/verify-field-results.py --venue-stages .\stages.json --inspect-ve
 
 準備指令會在 `expectedStages` 保存每個路徑預期的模式及總席數。收件報告即使遇到檔案缺失，也會顯示該項的 `expectedStage`。路徑指向不同模式或席數時，問題會同時列出預期批次與該檔宣告的 `observedStage`，正式驗收亦會拒絕。若手動加上此欄位，請依 `venueManifests` 的順序填入六筆 `{"mode":"Independent","players":5}` 格式的資料，每種模式及席數組合各一次。原清單省略此欄位時，仍接受任意批次順序。
 
-清單或驗收引用的原檔找不到時，`issues[].missingFile` 會列出檔案類型 `kind` 和檔名 `name`，例如 `worldJournal` 或 `windowsReadyReport`。報告只保留檔名，請依 `entries` 的項次回到該批清單核對存放位置。補齊後再次執行，可接續定位該批後續的缺件。
+清單或驗收引用的原檔找不到時，`issues[].missingFile` 會列出檔案類型 `kind` 和檔名 `name`，例如 `worldJournal` 或 `windowsReadyReport`。報告只保留檔名，請依 `entries` 的項次回到該批清單核對存放位置。
+
+批次封存清單可讀時，`issues[].missingFiles` 會一次列出該批 `sessions` 引用但找不到的啟動器報告、場次證據 ZIP、伺服器日誌、世界與戰鬥日誌。每筆含從 1 起算的 `sessionEntry`，能對上原封存場次時附 `roomIds`。原場次由清單的識別或既有啟動器回條查找，與項目排列順序無關。補齊後再執行收件檢查及正式驗收。
 
 若原批次使用 Windows ZIP 收件資料夾，總表會在該批的 `issues[].windowsInbox` 列出預期及已核對席數、缺少的房號和席號，以及錯批、重複或無法核對的 ZIP 檔名。使用電腦對照表時會附席位的電腦標籤。有連線量測資料時也會保留該次收件的逐席量測摘要。依原批次補齊或移出錯批檔案後，可再執行總表確認。
 
