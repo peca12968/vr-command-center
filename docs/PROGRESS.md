@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 六批收件總表列出 UDP 待補席位
+
+- `--inspect-venue-stages` 在 `issues[].udpPreflight` 列出未完成的全館與 Quest UDP 預檢。回報包含原報告的檔名、項次、待補房號與席號。若缺少原報告、來源重複或啟動計畫比對失敗，也會列出相應狀態。正式驗收仍要求原預檢完整通過。 [操作說明](EXTERNAL_CLIENTS.md#一次查看六批待補件)
+- 以 25 席獨立及合併的既有同機資料重新產生兩份缺件預檢，總表指出 30 席缺少來源與 20 席紀錄已過期。另四批通過，兩份待補批次均遭正式驗收拒絕。首輪驗證只預期列出刻意移除的來源，補入原交換已超過有效時間的實際結果後重新核對。六批原封存的收件及正式摘要逐位元相符，共核對 80 份戰績回條。 [缺件範例](../artifacts/staged-venue-udp-intake-final-inspection.json)
+- 通過 121 項封存、16 項 LAN 預檢及 12 項 Quest UDP 測試。功能來源 `b261ff6` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體仍待驗收。 [驗證摘要](../artifacts/staged-venue-udp-intake-validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43381012798)
+
 ## 2026-11-13 全館命令遭拒時顯示受影響房間
 
 - Windows 管理台 0.31.179 從管理服務回應取得受影響房號。五房獨立列出有變更的房間。五房合併共用同一場次版本，因此該版本變更時會列出五房。批次遭拒後，主控重新整理並核對開場條件，再確認一次。 [操作說明](PLAYER_READINESS.md#五房追蹤驗收開場) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.179.zip)
