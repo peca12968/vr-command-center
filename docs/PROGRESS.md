@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 從原批次下載單房戰績
+
+- Windows 管理包 0.31.195 的「全館收尾」可從已就緒的房間列下載最終 CSV。管理 API 依原批次查房，並使用既有分房 CSV 格式。控制台核對原場次、封存序號及玩家資料。 [管理包](../artifacts/VRCommand-ControlServer-0.31.195.zip) · [操作方式](REPORTS.md#在全館收尾比較分房戰績)
+- 發行版及解壓版各通過 30 項 Edge 檢查，涵蓋其他房尚未封存時下載、空房、合併場分房、房間重用、拒絕被替換的玩家列，以及離開頁面取消下載。另通過 1,109 項領域、825 項 HTTP、107 項管理包檢查及 568 筆清單核對。既有 Windows 遊戲包和 Quest APK 完成離線一致性核對。 [驗證摘要](../artifacts/venue-room-reports-195-validation.json)
+- 功能提交 `047dfcb` 與新增取消測試 `e57878a` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、Quest 3、VIVE、MR 場地及廠商硬體仍待現場驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43416399801)
+
 ## 2026-11-13 獨立場結束後可先看已完成的分房戰績
 
 - Windows 管理包 0.31.194 會在「全館收尾」顯示原批次已就緒的分房戰績，未就緒的房間保留等待列。五房合併沿用共同封存。本批合計、整批 ZIP 與合計 CSV 要等所有原場次的最終戰鬥報表就緒。 [管理包](../artifacts/VRCommand-ControlServer-0.31.194.zip) · [分房戰績](REPORTS.md#在全館收尾比較分房戰績)
