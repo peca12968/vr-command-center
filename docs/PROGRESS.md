@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 從 Windows 結束報告開啟原批次戰績
+
+- 管理台 0.31.183 核對全館結束報告後，可直接選取原批次的戰績與回條。點選時重新讀取並比對原場次、房號、錄製來源與封存尾端。解壓版在兩種模式各以替換尾端的回應驗證會保留原選取。逐房個別結束的場次仍可開啟其原回放。 [操作說明](WINDOWS_SERVER_PACKAGE.md#核對未確認的啟動報告) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.183.zip)
+- Windows 三包通過 686 項。獨立與合併各 25 位同機模擬玩家，兩份原結束報告各開啟對應批次及五房回放，核對共 50 份戰績回條、6 份 CSV 與 1,031 格回放。隔離程序清理後 C／F 的 259 個非資料庫檔案雜湊相符。 [驗證摘要](../artifacts/console-venue-terminal-closure-validation.json)
+- 通過 825 項 HTTP、107 項管理包、來源及解壓包各 31 項報告專項、1,166 項完整瀏覽器檢查。解壓核對 567 筆清單與提交 `996e85e` 的 193 個建置來源，其中 29 檔以換行正規化比對。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、實體頭盔、完整桌面操作、MR 場地及廠商硬體仍待驗收。 [離線核對](../artifacts/console-venue-terminal-closure-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43388243938)
+
 ## 2026-11-13 從 Windows 結束報告對齊獨立房間回放
 
 - 管理台 0.31.182 在管理實例、五房雙封存及同一筆全館結束命令均核對後，從 Windows 報告開啟的回放可按 UTC 或任務活動時間對齊同批房間。合併場繼續在同一錄製內切換房間。首次核心測試發現同批房間的 End 時間戳可不同，改按原命令及完整場次核對，並覆蓋重啟、房間重用及不同批次。 [操作說明](WORLD_RECORDING.md#對齊同批獨立房間的回放) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.182.zip)
