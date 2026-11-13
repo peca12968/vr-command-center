@@ -2,7 +2,7 @@ const fs = require('node:fs/promises');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { spawn } = require('node:child_process');
+const { spawn, execFileSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const { isDeepStrictEqual } = require('node:util');
 const readCsv = require('./csv.cjs');
@@ -895,6 +895,8 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     const offlineFile = path.join(directory, 'player-replay-offline.html');
     const { packagePlayerReplay } = await import('../../scripts/package-player-replay.mjs');
     const offlineLink = page.locator('#saved-clip-offline-player');
+    const zipButton = page.locator('#saved-clip-export-zip');
+    let offlineClip = bytes;
     if (process.env.VR_COMMAND_EXPECT_OFFLINE_REPLAY === '1') {
       const attachment = await page.request.head(base + '/console/player-replay-offline.html');
       check(attachment.ok() && attachment.headers()['content-disposition'] === 'attachment; filename=VRCommand-Player-Replay.html'
@@ -910,9 +912,42 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       await packagePlayerReplay(expectedFile);
       check((await fs.readFile(offlineFile)).equals(await fs.readFile(expectedFile)),
         'The downloaded player is the exact standalone bundle of the original player page');
+      const zipRoute = `${savedRoute}/${originalClip.id}/player-replay.zip`;
+      await api(zipRoute, 'GET', undefined, 'Room2', 403);
+      const scopedPath = '/api' + zipRoute + '?roomId=2';
+      const scopedJson = await page.request.get(base + scopedPath.replace('.zip', '.json'), {
+        headers: { Authorization: 'Bearer ' + tokens.Master }
+      });
+      const scopedZip = await page.request.get(base + scopedPath, { headers: { Authorization: 'Bearer ' + tokens.Master } });
+      assert.equal(scopedJson.status(), 200);
+      assert.equal(scopedZip.status(), 200);
+      assert.equal(scopedZip.headers()['cache-control'], 'no-store');
+      await api(zipRoute + '?roomId=1', 'GET', undefined, 'Master', 400);
+      const verifyZip = (archive, expectedJson, name) => {
+        const unpacked = execFileSync('python', ['-c', `import base64, io, json, sys, zipfile
+with zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())) as archive:
+    print(json.dumps([[name, base64.b64encode(archive.read(name)).decode('ascii')] for name in archive.namelist()]))`],
+        { input: archive, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 10000, windowsHide: true });
+        const entries = JSON.parse(unpacked).map(([entryName, content]) => [entryName, Buffer.from(content, 'base64')]);
+        assert.deepEqual(entries, [['VRCommand-Player-Replay.html', playerBytes], [name, expectedJson]]);
+        return entries;
+      };
+      const playerBytes = await fs.readFile(offlineFile);
+      const stem = `vr-command-replay-${originalClip.id}`;
+      verifyZip(await scopedZip.body(), await scopedJson.body(), stem + '-room-02.json');
+      check(true, 'The room-scoped replay ZIP carries the exact scoped JSON and requires the original export role');
+      const pendingZip = page.waitForEvent('download');
+      await zipButton.click();
+      const downloadedZip = await pendingZip;
+      assert.equal(downloadedZip.suggestedFilename(), stem + '.zip');
+      const entries = verifyZip(await fs.readFile(await downloadedZip.path()), bytes, stem + '.json');
+      await fs.writeFile(offlineFile, entries[0][1]);
+      offlineClip = entries[1][1];
+      check(true, 'The console ZIP download contains only the original player and exported clip');
     } else {
       const asset = await page.request.head(base + '/console/player-replay-offline.html');
-      if (asset.status() === 404) check(await offlineLink.isHidden(), 'The development console hides the download when no standalone player was published');
+      if (asset.status() === 404) check(await offlineLink.isHidden() && await zipButton.isHidden(),
+        'The development console hides offline downloads when no standalone player was published');
       await packagePlayerReplay(offlineFile);
     }
     const offlineContext = await context.browser().newContext({ offline: true, viewport: { width: 390, height: 844 } });
@@ -925,7 +960,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       await offline.goto(fileUrl);
       const input = offline.locator('#player-replay-file');
       const position = offline.locator('#player-replay-frame');
-      await input.setInputFiles({ name: 'exported-clip.json', mimeType: 'application/json', buffer: bytes });
+      await input.setInputFiles({ name: 'exported-clip.json', mimeType: 'application/json', buffer: offlineClip });
       await position.filter({ hasText: `第 ${eventSequence} 格` }).waitFor();
       check(await offline.locator('#player-replay-title').innerText() === clipName
         && await offline.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)

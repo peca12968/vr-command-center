@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -9,6 +10,8 @@ namespace VrCommand.Api;
 
 public static class WorldRoutes
 {
+    internal const string OfflinePlayerPath = "/console/player-replay-offline.html";
+    internal const string OfflinePlayerName = "VRCommand-Player-Replay.html";
     private static OperatorIdentity Actor(HttpContext context) => (OperatorIdentity)context.Items[typeof(OperatorIdentity)]!;
     public static void MapWorldRoutes(this WebApplication app)
     {
@@ -164,10 +167,34 @@ public static class WorldRoutes
         {
             context.Response.Headers.CacheControl = "no-store";
             var replay = store.ExportPlayerReplay(id, clip, roomId, Actor(context), context.RequestAborted);
-            var name = roomId is int room ? FormattableString.Invariant($"vr-command-replay-{clip:D}-room-{room:00}.json") : $"vr-command-replay-{clip:D}.json";
-            return Results.File(replay, "application/json", name);
+            return Results.File(replay, "application/json", ReplayFileStem(clip, roomId) + ".json");
         });
+        app.MapGet("/api/sessions/{id:guid}/world/clips/{clip:guid}/player-replay.zip",
+            async (Guid id, Guid clip, int? roomId, WorldRecordings store, IWebHostEnvironment environment, HttpContext context) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                var cancellation = context.RequestAborted;
+                var replay = store.ExportPlayerReplay(id, clip, roomId, Actor(context), cancellation);
+                var player = environment.WebRootFileProvider.GetFileInfo(OfflinePlayerPath);
+                if (!player.Exists || player.IsDirectory || player.Length is < 1 or > 2 * 1024 * 1024)
+                    return Results.NotFound(new { error = "此管理包未提供離線播放器。" });
+
+                var stem = ReplayFileStem(clip, roomId);
+                using var output = new MemoryStream();
+                using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
+                {
+                    using (var entry = FieldEvidence.Entry(archive, OfflinePlayerName).Open())
+                    using (var input = player.CreateReadStream())
+                        await input.CopyToAsync(entry, cancellation);
+                    using (var entry = FieldEvidence.Entry(archive, stem + ".json").Open())
+                        await entry.WriteAsync(replay, cancellation);
+                }
+                return Results.File(output.ToArray(), "application/zip", stem + ".zip");
+            });
     }
+
+    private static string ReplayFileStem(Guid clip, int? roomId) => roomId is int room
+        ? FormattableString.Invariant($"vr-command-replay-{clip:D}-room-{room:00}") : $"vr-command-replay-{clip:D}";
 
     private static async Task Publish(Guid id, WorldRecordings store, SessionManager manager, HttpContext context)
     {

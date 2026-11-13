@@ -72,8 +72,8 @@ app.UseStaticFiles(new StaticFileOptions
 {
     OnPrepareResponse = context =>
     {
-        if (context.Context.Request.Path.Equals("/console/player-replay-offline.html", StringComparison.OrdinalIgnoreCase))
-            context.Context.Response.Headers.ContentDisposition = "attachment; filename=VRCommand-Player-Replay.html";
+        if (context.Context.Request.Path.Equals(WorldRoutes.OfflinePlayerPath, StringComparison.OrdinalIgnoreCase))
+            context.Context.Response.Headers.ContentDisposition = $"attachment; filename={WorldRoutes.OfflinePlayerName}";
     }
 });
 

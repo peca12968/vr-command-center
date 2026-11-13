@@ -53,7 +53,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     reviewControls();
   }, value => filteredEvents(value).length);
   const policyFrames = mountWorldPolicyFrames(response, readFrame);
-  const savedClips = mountSavedClips(response, canWriteClips, loadClip);
+  const savedClips = mountSavedClips(response, canWriteClips, loadClip, download);
   const clipStatistics = mountWorldClipStatistics(response, download);
   const shotTrace = mountWorldShotTrace(response, readFrame, eventNames);
   function message(text, error = false) { $('world-message').textContent = text; $('world-message').classList.toggle('replay-error', error); }

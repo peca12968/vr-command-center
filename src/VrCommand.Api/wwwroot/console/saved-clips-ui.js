@@ -12,10 +12,10 @@ function validClip(clip, streamId) {
     && Number.isSafeInteger(clip.endMilliseconds) && clip.endMilliseconds >= clip.startMilliseconds;
 }
 
-export function mountSavedClips(request, canWrite, load) {
+export function mountSavedClips(request, canWrite, load, download) {
   let scope = null, idle = false, draft = null, rows = [], pending = null, work = null;
   const select = $('select'), name = $('name'), exportRoom = $('export-room');
-  const offlinePlayer = $('offline-player');
+  const offlinePlayer = $('offline-player'), exportZip = $('export-zip');
   let checkedOfflinePlayer = false;
   const selected = () => rows.find(clip => clip.id === select.value);
   const route = () => `/api/sessions/${scope.sessionId}/world/clips`;
@@ -36,6 +36,8 @@ export function mountSavedClips(request, canWrite, load) {
     $('export').disabled = !idle || !row || !!work || !!pending || !scope.complete
       || row.endFrame > scope.throughFrame || row.endFrame - row.startFrame >= MAX_REPLAY_FRAMES;
     exportRoom.disabled = $('export').disabled;
+    exportZip.hidden = offlinePlayer.hidden;
+    exportZip.disabled = exportZip.hidden || $('export').disabled;
     $('retry').hidden = !pending || !!work;
   }
   function options(preferred = select.value) {
@@ -93,41 +95,44 @@ export function mountSavedClips(request, canWrite, load) {
     load(clip);
     message(`已載入「${clip.name}」的起訖標記。`);
   });
-  $('export').addEventListener('click', async () => {
-    if ($('export').disabled || !canWrite()) return;
+  async function exportClip(zip) {
+    if ((zip ? exportZip : $('export')).disabled || !canWrite()) return;
     const clip = selected(), { sessionId, streamId, roomIds } = scope;
     const room = Number(exportRoom.value) || null, expectedRooms = room === null ? roomIds : [room];
-    const path = `${route()}/${clip.id}/player-replay.json${room === null ? '' : '?roomId=' + room}`;
+    const extension = zip ? 'zip' : 'json';
+    const suffix = room === null ? '' : '-room-' + String(room).padStart(2, '0');
+    const filename = `vr-command-replay-${clip.id}${suffix}.${extension}`;
+    const path = `${route()}/${clip.id}/player-replay.${extension}${room === null ? '' : '?roomId=' + room}`;
     const own = work = new AbortController();
     controls();
     try {
       const response = await request(path, AbortSignal.any([own.signal, AbortSignal.timeout(15000)]));
-      if (response.status !== 200 || !response.headers.get('content-type')?.startsWith('application/json'))
+      if (response.status !== 200 || response.headers.get('content-type')?.split(';')[0].trim() !== (zip ? 'application/zip' : 'application/json'))
         throw new Error('無法讀取片段檔案。');
+      if (zip && !response.headers.get('content-disposition')?.split(';').some(part => part.trim() === 'filename=' + filename))
+        throw new Error('下載回覆的回放 ZIP 名稱不符。');
       const file = await response.blob();
-      if (!file.size || file.size > MAX_REPLAY_BYTES) throw new Error('回放檔案大小不符。');
-      const replay = readPlayerReplay(JSON.parse(await file.text()));
+      if (!file.size || file.size > (zip ? 11 * 1024 * 1024 : MAX_REPLAY_BYTES)) throw new Error('回放檔案大小不符。');
+      if (!zip) {
+        const replay = readPlayerReplay(JSON.parse(await file.text()));
+        if (replay.header.sessionId !== sessionId || replay.header.streamId !== streamId
+          || replay.clipName !== clip.name || replay.startFrame !== clip.startFrame || replay.endFrame !== clip.endFrame
+          || (room === null ? replay.playerReplayVersion !== 1 : replay.roomId !== room)
+          || replay.header.roomIds.length !== expectedRooms.length
+          || expectedRooms.some((id, index) => id !== replay.header.roomIds[index]))
+          throw new Error('下載回覆的錄製來源或範圍不符。');
+      }
       if (work !== own) return;
-      if (replay.header.sessionId !== sessionId || replay.header.streamId !== streamId
-        || replay.clipName !== clip.name || replay.startFrame !== clip.startFrame || replay.endFrame !== clip.endFrame
-        || (room === null ? replay.playerReplayVersion !== 1 : replay.roomId !== room)
-        || replay.header.roomIds.length !== expectedRooms.length
-        || expectedRooms.some((id, index) => id !== replay.header.roomIds[index]))
-        throw new Error('下載回覆的錄製來源或範圍不符。');
-      const url = URL.createObjectURL(file);
-      const link = document.createElement('a');
-      link.href = url;
-      const suffix = room === null ? '' : '-room-' + String(room).padStart(2, '0');
-      link.download = `vr-command-replay-${clip.id}${suffix}.json`;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      message(`已下載「${clip.name}」的${room === null ? '玩家回放檔' : '房間 ' + room + ' 回放檔'}。`);
+      download(filename, file);
+      message(`已下載「${clip.name}」的${room === null ? '玩家' : '房間 ' + room + ' '}回放${zip ? ' ZIP' : '檔'}。`);
     } catch (error) {
       if (work === own) message(error.message, true);
     } finally {
       if (work === own) { work = null; controls(); }
     }
-  });
+  }
+  $('export').addEventListener('click', () => exportClip(false));
+  exportZip.addEventListener('click', () => exportClip(true));
   $('save').addEventListener('click', () => {
     if ($('save').disabled || !canWrite()) return;
     const title = name.value.trim();
@@ -158,6 +163,7 @@ export function mountSavedClips(request, canWrite, load) {
               .then(response => {
                 offlinePlayer.hidden = !response.ok || !response.headers.get('Content-Disposition')?.startsWith('attachment;');
                 if (response.status !== 404 && !response.ok) checkedOfflinePlayer = false;
+                controls();
               })
               .catch(() => { checkedOfflinePlayer = false; });
           }
