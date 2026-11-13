@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 主控先核對目標快照再換房
+
+- Windows 管理包 0.31.192 切換即時觀戰房間時會先核對目標房的保存快照。快照有誤時保留原房畫面，切換後新串流中斷時保留已核對的目標快照。發行版與解壓版各通過 33 項 Chromium 檢查，涵蓋跨房角色資料及串流來源不符。另通過 107 項管理包檢查及離線發行一致性核對。 [管理包](../artifacts/VRCommand-ControlServer-0.31.192.zip) · [觀戰操作](WORLD_RECORDING.md)
+- 同一台 Windows 電腦以 25 個用戶端分別排演五房獨立與五房合併。兩種模式各切換五房並關閉四條前房串流，封存後讀回相同畫格。553 項檢查通過，核對 1,299 個回放畫格、50 筆玩家結果及 50 筆伺服器確認。首次排演通過獨立換房，封存驗證因測試工具使用缺少場次批次來源的舊計畫而失敗。修正計畫後另用每房一席重驗兩種模式，329 項檢查通過。兩輪成功排演均完成清理。 [驗證摘要](../artifacts/live-room-snapshot-192-validation.json)
+- 功能提交 `c791b63` 及測試工具修正 `5f15272` 已推送。兩次 GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、Quest 3、VIVE、MR 場地及廠商硬體仍待現地驗收。 [功能 CI](https://github.com/peca12968/vr-command-center/actions/runs/43411410770) · [測試修正 CI](https://github.com/peca12968/vr-command-center/actions/runs/43411834890)
+
 ## 2026-11-13 主控可一併下載播放器與回放片段
 
 - Windows 管理包 0.31.191 的「下載回放 ZIP」會打包單檔播放器及所選範圍的原回放 JSON。驗證了場次與指定房間的 JSON 逐位元相符、房控請求遭拒，以及解壓後能以瀏覽器離線播到原末格。 [下載管理包](../artifacts/VRCommand-ControlServer-0.31.191.zip) · [回放交付](WORLD_RECORDING.md#讓玩家開啟回放)
