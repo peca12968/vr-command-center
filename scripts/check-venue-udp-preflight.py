@@ -121,10 +121,11 @@ def pair_reference(paths, directory):
     return dict(zip(('listener', 'probe'), (path_reference(path, directory) for path in paths), strict=True))
 
 
-def verify_source(address, paths, checked_at, hashes=None):
+def verify_source(address, paths, checked_at, hashes=None, *, failure_reason=False):
     server, port, peer = address
     before = pair_hashes(paths) if hashes is None else hashes
-    summary, _ = field.verify_udp_preflight(paths, {'address': server, 'port': port, 'observedAtUtc': checked_at}, {field.ipv4(peer)})
+    summary, _ = field.verify_udp_preflight(paths, {'address': server, 'port': port, 'observedAtUtc': checked_at},
+                                           {field.ipv4(peer)}, failure_reason=failure_reason)
     field.require(pair_hashes(paths) == before, 'UDP pair files changed during verification')
     return summary, before
 
@@ -185,7 +186,7 @@ def retained_sources(path, report, mode, expected, launch_check, binding, checke
 
 
 def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, launch_plan=None, retry_report=None, inbox=None,
-                *, require_distinct_remote_roster=False):
+                *, require_distinct_remote_roster=False, explain_failures=False):
     document, raw = field.read_quest_document(plan)
     mode, endpoints, sources = field.parse_quest_network_plan(document, allow_shared_sources=True)
     inventory_checked = 'serverIps' in document
@@ -235,6 +236,7 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
         observed[address].append(paths)
         path_counts.update(paths)
     unmatched = unreadable = 0
+    unreadable_sources = set()
     inbox_summary = None
     if inbox is not None:
         inbox_pairs, inbox_summary = load_inbox(inbox, expected)
@@ -250,6 +252,20 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
             address = probe_identity(paths[1])
         except (OSError, ValueError, KeyError, TypeError, RecursionError):
             unreadable += 1
+            if explain_failures and declared_group is not None:
+                # Either readable original can identify the planned source even if its counterpart is missing.
+                identities = set()
+                for key, role in (('listener', 'listen'), ('probe', 'probe')):
+                    try:
+                        row = field.read_json(read_report_lines(base / pair[key])[-1])
+                        if row.get('mode') == role and row.get('scope') == 'authenticated-udp-only':
+                            identities.add(report_address(row, role))
+                    except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError, RecursionError):
+                        continue
+                if len(identities) == 1:
+                    source, = identities
+                    if source in expected and room_groups[expected[source][0][0]] == declared_group:
+                        unreadable_sources.add(source)
             continue
         if address not in expected or (declared_group is not None and
                                       declared_group != room_groups[expected[address][0][0]]):
@@ -265,14 +281,19 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
         if not choices:
             if address in expired:
                 row['status'] = 'invalid-or-expired'
+            elif address in unreadable_sources:
+                row['reason'] = 'unreadable-original'
             continue
         if len(choices) != 1 or any(path_counts[path] != 1 for path in choices[0]):
             row['status'] = 'duplicate-pair'
             continue
         try:
-            summary, hashes = retained[address][1:] if address in retained else verify_source(address, choices[0], checked_at)
-        except (OSError, ValueError, KeyError, RecursionError):
+            summary, hashes = retained[address][1:] if address in retained else verify_source(
+                address, choices[0], checked_at, failure_reason=explain_failures)
+        except (OSError, ValueError, KeyError, RecursionError) as error:
             row['status'] = 'invalid-or-expired'
+            if explain_failures:
+                row['reason'] = getattr(error, 'reason', None) or 'invalid-report'
             continue
         row.update(status='verified', summary=summary, paths=choices[0], hashes=hashes)
         exchange_counts[summary['exchangeSha256']] += 1
@@ -284,7 +305,8 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
             if row['status'] == 'verified' and exchange_counts[row['summary']['exchangeSha256']] > 1:
                 row['status'] = 'duplicate-exchange'
         complete = all(row['status'] == 'verified' for row in bindings)
-        entries = [{'seats': [{'roomId': room, 'seat': seat} for room, seat in row['seats']], 'status': row['status']}
+        entries = [{'seats': [{'roomId': room, 'seat': seat} for room, seat in row['seats']], 'status': row['status'],
+                    **({'reason': row['reason']} if 'reason' in row else {})}
                    for row in bindings]
         result = {'roomIds': list(group), 'complete': complete, 'sources': entries}
         if complete:

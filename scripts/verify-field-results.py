@@ -933,7 +933,13 @@ def verify_room_alignments(session, header, alignments):
     return evidence
 
 
-def verify_udp_preflight(paths, binding, addresses):
+class UdpPairRejected(EvidenceError):
+    def __init__(self, reason):
+        super().__init__('UDP preflight differs from the game binding, accepted peer or preflight window')
+        self.reason = reason
+
+
+def verify_udp_preflight(paths, binding, addresses, *, failure_reason=False):
     require(bool(addresses), 'UDP preflight needs an observed peer for this game binding')
     powershell = None
     if os.name == 'nt':
@@ -947,11 +953,23 @@ def verify_udp_preflight(paths, binding, addresses):
                '-ListenerReport', str(paths[0]), '-ProbeReport', str(paths[1]), '-ExpectedServerAddress', binding['address'],
                '-ExpectedGamePort', str(binding['port']), '-ExpectedPeerAddresses', ','.join(map(str, sorted(addresses))),
                '-BindingObservedAtUtc', binding['observedAtUtc']]
+    if failure_reason:
+        command.append('-FailureReason')
     try:
         response = subprocess.run(command, capture_output=True, timeout=10, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     except subprocess.TimeoutExpired:
         raise EvidenceError('UDP preflight report verification timed out') from None
-    require(response.returncode == 0, 'UDP preflight differs from the game binding, accepted peer or preflight window')
+    if response.returncode != 0:
+        reason = None
+        if failure_reason:
+            try:
+                rejected = read_json(response.stdout.decode('utf-8-sig'))
+                if isinstance(rejected, dict) and rejected.get('reason') in (
+                        'invalid-report', 'exchange-mismatch', 'binding-mismatch', 'expired', 'clock-ahead'):
+                    reason = rejected['reason']
+            except (ValueError, RecursionError):
+                pass
+        raise UdpPairRejected(reason)
     receipt = read_json(response.stdout.decode('utf-8-sig'))
     require(receipt.get('complete') is True and receipt.get('endpointVerified') is True and receipt.get('stage') == 'pair-verified',
             'UDP preflight pair has no binding confirmation')

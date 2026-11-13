@@ -88,20 +88,21 @@ def launch(args):
         network = Path(directory) / 'venue-network.json'
         network.write_bytes(network_raw)
         checked = preflight.check_venue(network, None, [readiness], readiness, preview, snapshot,
-                                        require_distinct_remote_roster=distinct)
+                                        require_distinct_remote_roster=distinct, explain_failures=args.verify_only)
         with readiness.open('rb') as stream:
             field.require(checked['networkPlanSha256'] == report.get('networkPlanSha256')
                           and field.limited_read(stream) == original
                           and checked['launchBinding']['previewSha256'] == binding['previewSha256'],
                           'The original network plan, readiness report or preview changed')
         if args.verify_only:
+            pending = [{**seat, 'status': row['status'], **({'reason': row['reason']} if 'reason' in row else {})}
+                       for group in checked['groups'] for row in group['sources'] if row['status'] != 'verified'
+                       for seat in row['seats']]
             print(json.dumps({'status': 'udp-evidence-verified' if checked['complete'] else 'udp-evidence-incomplete',
                               'mode': checked['mode'], 'verifiedSources': checked['verifiedSources'],
                               'expectedSources': checked['expectedSources'], 'unreadablePairs': checked['unreadablePairs'],
                               'unmatchedPairs': checked['unmatchedPairs'],
-                              'pendingSeats': sorted(({**seat, 'status': row['status']}
-                                  for group in checked['groups'] for row in group['sources'] if row['status'] != 'verified'
-                                  for seat in row['seats']), key=lambda seat: (seat['roomId'], seat['seat']))}), flush=True)
+                              'pendingSeats': sorted(pending, key=lambda seat: (seat['roomId'], seat['seat']))}), flush=True)
             return 0 if checked['complete'] else 1
         field.require(checked['complete'], 'UDP readiness is no longer complete or within its original time window')
         distinct = field.udp_preflight_distinct_roster(checked)

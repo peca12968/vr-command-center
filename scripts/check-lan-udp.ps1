@@ -9,6 +9,7 @@ param(
     [Parameter(ParameterSetName = 'Pair')][ValidateRange(1024, 65535)][int]$ExpectedGamePort,
     [Parameter(ParameterSetName = 'Pair')][string]$ExpectedPeerAddresses,
     [Parameter(ParameterSetName = 'Pair')][string]$BindingObservedAtUtc,
+    [Parameter(ParameterSetName = 'Pair')][switch]$FailureReason,
     [Parameter(Mandatory, ParameterSetName = 'Network')][string]$LocalAddress,
     [Parameter(Mandatory, ParameterSetName = 'Network')][string]$PeerAddress,
     [Parameter(Mandatory, ParameterSetName = 'Network')][ValidateRange(1024, 65535)][int]$Port,
@@ -24,6 +25,7 @@ $random = [Security.Cryptography.RandomNumberGenerator]::Create()
 $hmac = $null
 $udp = $null
 $step = 'key'
+$reason = 'invalid-report'
 
 function Write-Result($Value) {
     [Console]::WriteLine((ConvertTo-Json -InputObject $Value -Depth 5 -Compress))
@@ -145,7 +147,10 @@ try {
         $probe = Read-CompleteReport $ProbeReport 'probe'
         if ($listener.port -ne $probe.port -or $listener.matched -ne $probe.matched -or
             $listener.localAddress -cne $probe.peerAddress -or $listener.peerAddress -cne $probe.localAddress -or
-            $listener.exchangeSha256 -cne $probe.exchangeSha256) { throw 'The reports describe different UDP exchanges.' }
+            $listener.exchangeSha256 -cne $probe.exchangeSha256) {
+            $reason = 'exchange-mismatch'
+            throw 'The reports describe different UDP exchanges.'
+        }
         $result = @{ version = 1; stage = 'pair-verified'; port = $listener.port; matched = $listener.matched
             exchangeSha256 = $listener.exchangeSha256; complete = $true; scope = 'authenticated-udp-only' }
         if ($ExpectedServerAddress -or $ExpectedGamePort -or $ExpectedPeerAddresses -or $BindingObservedAtUtc) {
@@ -159,8 +164,12 @@ try {
             foreach ($peerAddress in $peers) { [void](Read-Address $peerAddress) }
             $binding = Read-UtcTime $BindingObservedAtUtc
             $finished = Read-UtcTime $listener.completedAtUtc
-            if ($listener.localAddress -cne $ExpectedServerAddress -or $listener.port -ne $ExpectedGamePort -or
-                $probe.localAddress -cnotin $peers -or $finished -ge $binding -or $binding - $finished -gt [TimeSpan]::FromMinutes(30)) {
+            if ($listener.localAddress -cne $ExpectedServerAddress -or $listener.port -ne $ExpectedGamePort -or $probe.localAddress -cnotin $peers) {
+                $reason = 'binding-mismatch'
+                throw 'The UDP exchange differs from the original binding, accepted peers or preflight window.'
+            }
+            if ($finished -ge $binding -or $binding - $finished -gt [TimeSpan]::FromMinutes(30)) {
+                $reason = if ($finished -ge $binding) { 'clock-ahead' } else { 'expired' }
                 throw 'The UDP exchange differs from the original binding, accepted peers or preflight window.'
             }
             $result.endpointVerified = $true
@@ -255,7 +264,9 @@ try {
     if ($received -eq $Count) { exit 0 }
     exit 1
 } catch {
-    Write-Result @{ version = 1; stage = 'failed'; step = $step; complete = $false }
+    $failed = @{ version = 1; stage = 'failed'; step = $step; complete = $false }
+    if ($FailureReason) { $failed.reason = $reason }
+    Write-Result $failed
     exit 1
 } finally {
     if ($udp) { $udp.Dispose() }

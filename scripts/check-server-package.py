@@ -1074,7 +1074,8 @@ def main():
                       and good_summary['verifiedSources'] == len(states) and not good_summary['pendingSeats']
                       and bad_evidence.returncode == 1 and bad_summary['status'] == 'udp-evidence-incomplete'
                       and bad_summary['verifiedSources'] == len(states) - 1 and bad_summary['unreadablePairs'] == 1
-                      and bad_summary['pendingSeats'] == [{'roomId': seat['roomId'], 'seat': seat['seat'], 'status': 'missing'}
+                      and bad_summary['pendingSeats'] == [{'roomId': seat['roomId'], 'seat': seat['seat'], 'status': 'missing',
+                                                           'reason': 'unreadable-original'}
                           for seat in original_network['sources'] if seat['roomId'] in missing_rooms]
                       and not any(path.exists() for path in (work, ready, report, start_receipt))
                       and all(request('/api/sessions/' + row['id']) == row for row in states),

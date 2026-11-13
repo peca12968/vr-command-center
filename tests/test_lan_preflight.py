@@ -456,10 +456,32 @@ class LanPreflightTests(unittest.TestCase):
         self.assertEqual(1, failure.returncode, failure.stderr)
         self.assertEqual({'status': 'udp-evidence-incomplete', 'mode': 'Linked', 'verifiedSources': 1,
                           'expectedSources': 2, 'unreadablePairs': 1, 'unmatchedPairs': 0,
-                          'pendingSeats': [{'roomId': room, 'seat': seat, 'status': 'missing'}
+                          'pendingSeats': [{'roomId': room, 'seat': seat, 'status': 'missing', 'reason': 'unreadable-original'}
                                            for room in rooms for seat in (1, 2, 3)]},
                          json.loads(failure.stdout))
         self.assertNotIn(b'private', failure.stdout)
+        for reason, stamp in [('expired', datetime.now(timezone.utc) - timedelta(minutes=31)),
+                              ('clock-ahead', datetime.now(timezone.utc) + timedelta(minutes=2)),
+                              ('exchange-mismatch', None), ('invalid-report', None)]:
+            with self.subTest(reason=reason):
+                variant = json.loads((self.root / 'bound.json').read_bytes())
+                pair = variant['groups'][0]['udpSourcePreflights'][0]
+                listener = json.loads((self.root / pair['listener']).read_text(encoding='utf-8').splitlines()[-1])
+                if stamp is not None:
+                    listener['completedAtUtc'] = stamp.isoformat()
+                elif reason == 'exchange-mismatch':
+                    listener['exchangeSha256'] = '0' * 64
+                else:
+                    listener['matched'] = 0
+                pair['listener'] = self.venue_json(f'{reason}-listener.json', listener).name
+                path = self.venue_json(f'{reason}-readiness.json', variant)
+                rejected = subprocess.run([*verify, '--readiness', str(path)], capture_output=True, timeout=15)
+                self.assertEqual(1, rejected.returncode, rejected.stderr)
+                diagnostic = json.loads(rejected.stdout)
+                self.assertEqual(1, diagnostic['verifiedSources'])
+                self.assertEqual(15, len(diagnostic['pendingSeats']))
+                self.assertEqual({('invalid-or-expired', reason)}, {(seat['status'], seat['reason']) for seat in diagnostic['pendingSeats']})
+                self.assertNotIn(str(self.root).encode(), rejected.stdout)
         conflicting = subprocess.run([*verify, '--readiness', str(missing_path), '--work', str(self.root / 'work')],
                                      capture_output=True, timeout=15)
         self.assertEqual(2, conflicting.returncode, conflicting.stderr)

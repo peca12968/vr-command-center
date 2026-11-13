@@ -100,6 +100,8 @@ Unity 0.47.0 伺服器可搭配控制台 0.31.14。啟動器 1.5 可選擇待開
 
 可先用 `start-verified-venue.py --verify-only --launch-plan .\venue-plan.json --network-plan .\venue-network.json --readiness .\venue-readiness.json` 重驗完整預檢所引用的原檔。成功回傳 `udp-evidence-verified`，發現雙端原檔缺失或已逾期時，回傳 `udp-evidence-incomplete` 和待補房號、席號，退出碼為 1。這一步只核對檔案和預檢有效期限，實際啟動仍會向管理服務確認最新名冊與場次。
 
+待補席位的 `reason` 可指出原檔無法讀取（`unreadable-original`）、超過 30 分鐘（`expired`）、量測時間未早於核對時間（`clock-ahead`）、雙端屬不同交換（`exchange-mismatch`）、端點不符（`binding-mismatch`）或報告無效（`invalid-report`）。原檔缺少且無法從任一端確認來源時，仍會列出待補席位及無法讀取的配對數量。
+
 需要在開場前重驗預檢時，從專案目錄執行以下指令。使用本次的網路清單、原啟動計畫，以及核對計畫和預覽後產生的完整 `venue-readiness.json`。保留報告所引用的原始雙端檔案及預覽路徑。工作目錄和兩份結果檔使用新路徑。
 
 ```powershell
