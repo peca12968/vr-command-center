@@ -373,7 +373,7 @@ def main():
                 files = []
                 for role, report in reports.items():
                     path = output / ('workstation-' + role + '.json')
-                    path.write_text(json.dumps(report), encoding='utf-8')
+                    path.write_text(json.dumps(report['networkWitness'] if role == 'room5' else report), encoding='utf-8')
                     files.append(str(path))
                 rejected = subprocess.run([sys.executable, str(ROOT / 'scripts/check-venue-operator.py'), status['httpsBinding'],
                                            '--role', 'master', '--ca-file', str(ca), '--certificate-sha256', fingerprint,
@@ -382,8 +382,19 @@ def main():
                                           timeout=20, capture_output=True, text=True)
                 verdict = json.loads(rejected.stdout)
                 check(rejected.returncode == 1 and verdict == {'schemaVersion': 1, 'complete': False, 'failedCheck': 'workstations',
-                                                              'error': 'unexpected-http-400'} and not rejected.stderr,
-                      'the master CLI cannot claim six workstations from six same-PC signed reports')
+                                                              'error': mismatch['code'], 'issues': mismatch['issues']} and not rejected.stderr,
+                      'the master CLI identifies all five same-PC source mismatches using mixed original reports')
+                partial = subprocess.run([sys.executable, str(ROOT / 'scripts/check-venue-operator.py'), status['httpsBinding'],
+                                          '--role', 'master', '--ca-file', str(ca), '--certificate-sha256', fingerprint,
+                                          '--venue-challenge', challenge, '--verify-workstations', str(inventory_file), *files[:4]],
+                                         stdin=subprocess.DEVNULL, env={key: value for key, value in os.environ.items()
+                                             if key.upper() != 'VR_COMMAND_OPERATOR_KEY'},
+                                         timeout=20, capture_output=True, text=True)
+                missing = json.loads(partial.stdout)
+                check(partial.returncode == 1 and missing == {**verdict, 'issues': [
+                    {'workstation': room, 'reason': 'missing-role'} for room in (4, 5)]} and not partial.stderr,
+                    'the master CLI diagnoses partial files before requesting an operator key')
+                (output / 'workstation-partial.json').write_text(json.dumps(missing), encoding='utf-8')
                 (output / 'workstation-same-pc-rejected.json').write_text(json.dumps(verdict), encoding='utf-8')
                 if args.operator_network_browser:
                     subprocess.run(['node', str(ROOT / 'tests/browser/operator-network-browser.cjs'), status['httpsBinding'],

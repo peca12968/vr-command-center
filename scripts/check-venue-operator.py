@@ -17,12 +17,21 @@ import warnings
 
 
 ROLES = {'master': None, **{f'room{i}': i for i in range(1, 6)}}
+WORKSTATION_ROLES = tuple(ROLES)
+ISSUE_REASONS = ('missing-role', 'duplicate-role', 'invalid-witness', 'invalid-signature', 'challenge-mismatch',
+                 'expired', 'clock-ahead', 'listener-mismatch', 'source-mismatch')
 KEY_ENV = 'VR_COMMAND_OPERATOR_KEY'
 BODY_LIMIT = 128 * 1024
 
 
 class CheckFailed(Exception):
     pass
+
+
+class WorkstationsRejected(CheckFailed):
+    def __init__(self, issues):
+        super().__init__('operator-network-witnesses-rejected')
+        self.issues = issues
 
 
 def endpoint(origin):
@@ -50,7 +59,8 @@ def tls_context(ca_file):
     return context
 
 
-def read_route(host, port, context, fingerprint, path, status, content_type=None, token=None, *, body=None):
+def read_route(host, port, context, fingerprint, path, status, content_type=None, token=None, *, body=None,
+               workstation_diagnostics=False):
     try:
         with closing(http.client.HTTPSConnection(host, port, timeout=5, context=context)) as connection:
             connection.connect()
@@ -67,7 +77,8 @@ def read_route(host, port, context, fingerprint, path, status, content_type=None
                 headers['Content-Type'] = 'application/json'
                 connection.request('POST', path, body=json.dumps(body).encode(), headers=headers)
             with connection.getresponse() as response:
-                if response.status != status:
+                diagnostic = workstation_diagnostics and response.status == 400
+                if response.status != status and not diagnostic:
                     raise CheckFailed(f'unexpected-http-{response.status}')
                 if status == 401:
                     if response.getheader('WWW-Authenticate', '').lower() != 'bearer':
@@ -75,12 +86,17 @@ def read_route(host, port, context, fingerprint, path, status, content_type=None
                     return None
                 received_type = response.getheader('Content-Type', '').split(';', 1)[0].strip().lower()
                 if received_type != content_type:
+                    if diagnostic:
+                        raise CheckFailed('unexpected-http-400')
                     raise CheckFailed('unexpected-content-type')
                 data = response.read(BODY_LIMIT + 1)
                 if len(data) > BODY_LIMIT or response.length not in (None, 0):
                     raise CheckFailed('invalid-response-length')
                 if content_type == 'application/json':
-                    return json.loads(data)
+                    value = json.loads(data)
+                    if diagnostic:
+                        raise WorkstationsRejected(workstation_issues(value))
+                    return value
                 return data
     except ssl.SSLCertVerificationError:
         raise CheckFailed('certificate-trust-or-hostname-failed') from None
@@ -179,6 +195,29 @@ def local_json(path):
     raise CheckFailed('invalid-workstation-json-file')
 
 
+def workstation_issues(value):
+    issues = value.get('issues') if isinstance(value, dict) else None
+    if (not isinstance(issues, list) or not 1 <= len(issues) <= len(ROLES)
+            or value.get('code') != 'operator-network-witnesses-rejected'):
+        raise CheckFailed('unexpected-http-400')
+    roles = set()
+    sanitized = []
+    for issue in issues:
+        if (not isinstance(issue, dict) or type(issue.get('workstation')) is not int
+                or not 0 <= issue['workstation'] < len(ROLES) or issue['workstation'] in roles
+                or issue.get('reason') not in ISSUE_REASONS):
+            raise CheckFailed('unexpected-http-400')
+        roles.add(issue['workstation'])
+        sanitized.append({'workstation': issue['workstation'], 'reason': issue['reason']})
+    return sanitized
+
+
+def rejected_workstations(issues):
+    return {'schemaVersion': 1, 'complete': False, 'failedCheck': 'workstations',
+            'error': 'operator-network-witnesses-rejected',
+            'issues': sorted(issues, key=lambda issue: issue['workstation'])}
+
+
 def verify_workstations(host, port, context, fingerprint, challenge, inventory_file, report_files):
     if not re.fullmatch(r'[0-9a-fA-F]{64}', fingerprint):
         raise CheckFailed('invalid-certificate-fingerprint')
@@ -189,19 +228,38 @@ def verify_workstations(host, port, context, fingerprint, challenge, inventory_f
             or not isinstance(inventory['masterAddress'], str) or not isinstance(inventory['roomAddresses'], list)
             or len(inventory['roomAddresses']) != 5 or any(not isinstance(item, str) for item in inventory['roomAddresses'])):
         raise CheckFailed('invalid-workstation-inventory')
-    witnesses = {}
+    if not 1 <= len(report_files) <= len(ROLES):
+        raise CheckFailed('provide-one-to-six-workstation-reports')
+    witnesses, duplicates = {}, set()
     for path in report_files:
         report = local_json(path)
-        role = report.get('expectedRole') if isinstance(report, dict) else None
-        if (not isinstance(role, str) or role not in ROLES or role in witnesses or report.get('complete') is not True
-                or report.get('origin') != origin or report.get('expectedCertificateSha256') != fingerprint):
+        if not isinstance(report, dict):
             raise CheckFailed('workstation-report-does-not-match-venue-or-role')
-        witnesses[role] = require_witness(report.get('networkWitness'), challenge, role)
-    if witnesses.keys() != ROLES.keys():
-        raise CheckFailed('require-master-and-five-room-reports')
+        if 'workstation' in report:
+            workstation = report['workstation']
+            if type(workstation) is not int or not 0 <= workstation < len(ROLES):
+                raise CheckFailed('workstation-report-does-not-match-venue-or-role')
+            role, value = WORKSTATION_ROLES[workstation], report
+        else:
+            role = report.get('expectedRole')
+            if (not isinstance(role, str) or role not in ROLES or report.get('complete') is not True
+                    or report.get('origin') != origin or report.get('expectedCertificateSha256') != fingerprint):
+                raise CheckFailed('workstation-report-does-not-match-venue-or-role')
+            value = report.get('networkWitness')
+        checked = require_witness(value, challenge, role)
+        if role in witnesses:
+            duplicates.add(role)
+        witnesses[role] = checked
+    if duplicates or witnesses.keys() != ROLES.keys():
+        return rejected_workstations([{'workstation': index, 'reason': 'duplicate-role' if role in duplicates else 'missing-role'}
+                                      for index, role in enumerate(ROLES) if role in duplicates or role not in witnesses])
     read_route(host, port, context, fingerprint, '/api/me', 401)
-    value = read_route(host, port, context, fingerprint, '/api/operator-network/verify', 200, 'application/json',
-                       operator_key(), body={'challenge': challenge, 'inventory': inventory, 'witnesses': list(witnesses.values())})
+    try:
+        value = read_route(host, port, context, fingerprint, '/api/operator-network/verify', 200, 'application/json',
+                           operator_key(), body={'challenge': challenge, 'inventory': inventory, 'witnesses': list(witnesses.values())},
+                           workstation_diagnostics=True)
+    except WorkstationsRejected as error:
+        return rejected_workstations(error.issues)
     expected = [inventory['masterAddress'], *inventory['roomAddresses']]
     if (not isinstance(value, dict) or value.get('challenge') != challenge or value.get('workstationAddresses') != expected
             or any((w['listener'], w['port']) != (value.get('listener'), value.get('port')) for w in witnesses.values())):
@@ -227,11 +285,13 @@ def main():
     parser.add_argument('--certificate-sha256', required=True, help='Expected SHA-256 of the leaf certificate DER, from the administrator')
     parser.add_argument('--ca-file', type=Path, help='Explicit trusted PEM CA bundle for this check only')
     parser.add_argument('--venue-challenge', type=challenge_value, help='Shared UUID for the six direct venue workstation checks')
-    parser.add_argument('--verify-workstations', nargs=7, type=Path, metavar='FILE',
-                        help='Verify the inventory JSON followed by all six signed workstation reports')
+    parser.add_argument('--verify-workstations', nargs='+', type=Path, metavar='FILE',
+                        help='Inventory JSON followed by one to six original browser or CLI reports')
     args = parser.parse_args()
     if args.verify_workstations and (args.role != 'master' or not args.venue_challenge):
         parser.error('--verify-workstations requires --role master and --venue-challenge.')
+    if args.verify_workstations and not 2 <= len(args.verify_workstations) <= len(ROLES) + 1:
+        parser.error('--verify-workstations requires one inventory and one to six reports.')
     try:
         host, port = endpoint(args.origin)
         context = tls_context(args.ca_file)

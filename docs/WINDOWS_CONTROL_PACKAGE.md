@@ -391,6 +391,8 @@ python .\scripts\check-venue-operator.py https://control.venue.example --role ma
 
 `complete: true` 表示六個角色各有一份同輪回條，簽章、時限與管理服務實際觀察到的來源都符合配置。管理服務重新啟動後，請使用新代號重做。回條含站台與工作站位址，留在場館私人資料夾。這項核對涵蓋直接管理連線的角色及位址，實體電腦標籤、玩家 UDP、場次操作及頭盔仍由現場驗收。 [玩家跨機驗收](EXTERNAL_CLIENTS.md#第二台電腦的驗收步驟)
 
+`--verify-workstations` 可混用瀏覽器下載的原回條及命令列 JSON。可先傳入清單及已收到的一至六份檔案，命令列會在本機列出缺少或重複的角色，收齊後才連線。管理包 0.31.184 回傳的逐台拒絕原因也會列在 `issues`。`workstation` 的 0 代表主控，1 至 5 代表房號。失敗輸出不包含回條簽章或位址，退出碼為 1。
+
 ## 啟動與停止的證據
 
 啟動器先核對manifest與來源檔案，再取得所選實例的exclusive lease。只啟動自己包內的API apphost，顯式指定資料／金鑰路徑並清除繼承的角色金鑰等覆寫。API在原始資料恢復與服務啟動成功後，透過私有stdout輸出本次隨機token的就緒事件；啟動器另核對原child仍存活、實際coreclr來自本包及原Master身分。單純程序啟動、埠號已開或別的服務回應不算就緒。

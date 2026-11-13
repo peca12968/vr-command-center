@@ -145,6 +145,7 @@ class VenueOperatorTests(unittest.TestCase):
         files = {role: {'complete': True, 'origin': 'https://venue.example:443', 'expectedCertificateSha256': FINGERPRINT,
                         'expectedRole': role, 'networkWitness': witness(index)} for index, role in enumerate(roles)}
         files['inventory'] = inventory
+        files['room5'] = witness(5)  # Original browser receipt, without the CLI wrapper.
         result = {'challenge': CHALLENGE, 'workstationAddresses': expected, 'listener': '10.31.0.1', 'port': 443}
         with patch.object(operator, 'local_json', side_effect=files.__getitem__), patch.object(operator, 'operator_key', return_value=KEY):
             with patch.object(operator, 'read_route', side_effect=[None, result]) as route:
@@ -154,10 +155,34 @@ class VenueOperatorTests(unittest.TestCase):
                 self.assertNotIn('e' * 64, json.dumps(report))
                 self.assertEqual('/api/operator-network/verify', route.call_args.args[4])
                 self.assertEqual([witness(index) for index in range(5, -1, -1)], route.call_args.kwargs['body']['witnesses'])
-            with patch.object(operator, 'read_route') as route:
-                with self.assertRaises(operator.CheckFailed):
-                    operator.verify_workstations('venue.example', 443, object(), FINGERPRINT, CHALLENGE, 'inventory', [*roles[:5], 'room4'])
+            with patch.object(operator, 'read_route') as route, patch.object(operator, 'operator_key') as key:
+                report = operator.verify_workstations('venue.example', 443, object(), FINGERPRINT, CHALLENGE, 'inventory', [*roles[:4], 'room3'])
+                self.assertFalse(report['complete'])
+                self.assertEqual([{'workstation': 3, 'reason': 'duplicate-role'}, {'workstation': 4, 'reason': 'missing-role'},
+                                  {'workstation': 5, 'reason': 'missing-role'}], report['issues'])
                 route.assert_not_called()
+                key.assert_not_called()
+
+    def test_workstation_rejection_returns_only_known_role_and_reason(self):
+        first = {'workstation': 1, 'reason': 'expired', 'signature': 'private-signature'}
+        second = {'workstation': 3, 'reason': 'source-mismatch', 'source': 'private-address'}
+        for rows, accepted in [([second, first], True), ([first, first], False),
+                               ([dict(first, workstation=True)], False), ([dict(first, reason='private-address')], False)]:
+            with self.subTest(rows=rows), patch.object(operator.http.client, 'HTTPSConnection') as https:
+                connection = https.return_value
+                connection.sock.getpeercert.return_value = b'certificate fixture'
+                value = {'code': 'operator-network-witnesses-rejected', 'issues': rows, 'error': 'private-server-text'}
+                connection.getresponse.return_value = Response(400, json.dumps(value).encode(), **{'Content-Type': 'application/json'})
+                with self.assertRaises(operator.CheckFailed) as raised:
+                    operator.read_route('venue.example', 443, object(), FINGERPRINT, '/api/operator-network/verify',
+                                        200, 'application/json', KEY, body={}, workstation_diagnostics=True)
+                if accepted:
+                    self.assertIsInstance(raised.exception, operator.WorkstationsRejected)
+                    output = operator.rejected_workstations(raised.exception.issues)
+                    self.assertEqual([{'workstation': 1, 'reason': 'expired'}, {'workstation': 3, 'reason': 'source-mismatch'}], output['issues'])
+                    self.assertNotIn('private-', json.dumps(output))
+                else:
+                    self.assertEqual('unexpected-http-400', str(raised.exception))
 
     def test_verify_post_cannot_send_bearer_until_certificate_matches(self):
         with patch.object(operator.http.client, 'HTTPSConnection') as https:
