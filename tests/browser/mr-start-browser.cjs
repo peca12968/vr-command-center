@@ -102,7 +102,9 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     check(await waitingRoom.innerText() === '房間 4 · 3 / 5 追蹤就緒 · 等候席位 2、5'
       && await panel.getByText('5 / 5 追蹤就緒', { exact: false }).count() === 4,
       'Real accepted MR snapshots identify exactly two waiting seats among five rooms and 25 roster entries');
-    check(await venueRoom(4, 'WaitingPlayers').innerText() === '房間 4 · 等候席位 2、5 的追蹤'
+    const venueStatus = await venueRoom(4, 'WaitingPlayers').evaluate(row =>
+      [...row.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join('').trim());
+    check(venueStatus === '房間 4 · 等候席位 2、5 的追蹤'
       && await page.locator('[data-begin-state="WaitingLinkedRooms"]').count() === 4 && await venueButton.isDisabled(),
       'Only the linked room with missing tracking names waiting seats, and the entire shared session remains blocked');
     const fourthSeats = page.locator('[data-begin-seat-room="4"] td');
