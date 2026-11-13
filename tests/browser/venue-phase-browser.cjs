@@ -267,6 +267,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const beginEvidence = page.locator('#venue-begin-evidence');
     const beginButton = page.locator('#venue-begin');
     const beginRoom = room => page.locator(`[data-begin-room="${room}"]`);
+    const beginRoomText = room => beginRoom(room).evaluate(row =>
+      [...row.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join('').trim());
     const preview = await getBegin();
     const firstReady = await api(`/sessions/${preparing[0]}`);
     const declinedBegin = await api('/venue/phase', 'POST', { action: 'Begin', targets: preview }, 'Master', 409, undefined, randomUUID());
@@ -275,8 +277,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       await beginRoom(1).getAttribute('data-begin-state') === 'Ready' && await beginRoom(2).getAttribute('data-begin-state') === 'EmptyRoster');
     check(declinedBegin.code === 'venue-begin-not-ready' && declinedBegin.roomIds.join() === '2' && await beginButton.isDisabled(),
       'A missing roster and source in one room blocks the whole Begin batch in both HTTP and Chromium');
-    check(await beginRoom(1).innerText() === '房間 1 · 1 席姿態就緒'
-      && await beginRoom(2).innerText() === '房間 2 · 名冊尚無玩家' && await page.locator('[data-begin-room]').count() === 2,
+    check(await beginRoomText(1) === '房間 1 · 1 席姿態就緒'
+      && await beginRoomText(2) === '房間 2 · 名冊尚無玩家' && await page.locator('[data-begin-room]').count() === 2,
       'The master sees only the target rooms and can distinguish a ready VR room from an empty independent roster');
     await beginRoom(1).filter({ hasText: '快照已過期' }).waitFor();
     check(await beginButton.isDisabled() && await beginRoom(2).getAttribute('data-begin-state') === 'EmptyRoster',
