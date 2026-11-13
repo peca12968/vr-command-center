@@ -151,11 +151,36 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         `${mode} operator sees the missing seat before sending Begin`);
       check(await seatState(5, 5) === 'Vacant' && await seatState(1, 5) === 'Simulated',
         `${mode} seat matrix distinguishes an empty seat from an eligible simulated pose`);
+      await status(5).getByRole('button', { name: '查看房間 5 名冊' }).click();
+      await page.locator('#roster-title:focus').waitFor();
+      check(await page.locator('#session-select').inputValue() === forRoom(5).id
+        && await page.locator('#roster-room').inputValue() === '5'
+        && await page.locator('#roster tr:visible').count() === 4
+        && await page.locator('#roster tr[data-roster-room="5"]:visible').count() === 4,
+        `${mode} opening shortcut selects the original room and shows only its four registered seats`);
+      check(await option.isChecked() && (await api('/sessions')).every(session => session.state === 'Preparing'),
+        `${mode} visiting a roster leaves the active Begin policy and original phases intact`);
+      if (mode === 'Linked') {
+        await page.locator('#roster-room').selectOption('');
+        check(await page.locator('#roster tr:visible').count() === 24,
+          'Linked roster can return to all rooms without changing the selected session');
+        await login('Room1');
+        await page.locator('#session-panel').waitFor();
+        check(await status(5).getByRole('button').count() === 0 && await page.locator('#roster-room-filter').isHidden()
+          && await page.locator('#roster-room option[value="5"]').count() === 0,
+          'Room controller has no foreign opening shortcut or room filter option');
+        await login('Master');
+        await option.check();
+        await status(5).getByRole('button', { name: '查看房間 5 名冊' }).click();
+        await page.locator('#roster-title:focus').waitFor();
+      }
       await page.locator('#venue-phase').screenshot({ path: path.join(screenshots, `full-participation-${mode.toLowerCase()}-waiting.png`) });
       const last = sources.find(source => source.route === `/sessions/${forRoom(5).id}`);
       const newRoster = await admit(forRoom(5).id, 5, 5);
       await page.locator('#refresh').click();
       await publishUntil(sources, false, async () => (await status(5).getAttribute('data-begin-state')) === 'WaitingRevision');
+      check(await page.locator('#roster-room').inputValue() === '5' && await page.locator('#roster tr:visible').count() === 5,
+        `${mode} roster refresh keeps the original room filter and shows its new admission`);
       check(await seatState(5, 5) === 'AwaitingAdmission' && await seatState(5, 4) === 'WaitingRevision' && await start.isDisabled(),
         `${mode} the previous revision cannot mark the new admission or any seat in that room ready`);
       last.snapshot = newRoster;

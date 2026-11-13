@@ -213,6 +213,8 @@ function logout() {
   state.rooms = []; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
   $('venue-full-tracking').checked = false;
   $('venue-full-participation').checked = false;
+  $('roster-room').value = '';
+  delete $('roster-room').dataset.preferred;
   renderVenueBegin([], false);
   venueHistory.reset(); renderVenueClosure(null);
   state.props = []; state.prop = -1; clearPropHistory(); propMove.reset();
@@ -403,7 +405,7 @@ function renderRooms() {
   }));
   roomReadiness.update();
 }
-function resetSelection(id) {
+function resetSelection(id, rosterRoom = '') {
   roomEnemyDraft = roomEnemyPolicySequences = null;
   state.settingRevisions = liveSettingDrafts.environment = liveSettingDrafts.enemies = null;
   report.reset(); readiness.reset(); connections.reset(); state.statistics = null; state.selected = id; state.session = null;
@@ -412,11 +414,13 @@ function resetSelection(id) {
   seatDeployments.forEach(panel => panel.reset());
   $('statistics-scope').hidden = true; $('statistics-scope-status').textContent = '';
   $('session-panel').hidden = true;
+  $('roster-room').value = '';
+  $('roster-room').dataset.preferred = rosterRoom;
 }
-async function selectSession(id) {
+async function selectSession(id, rosterRoom = '') {
   if (state.pending || state.busy) { notify('請先確認目前命令的結果。', true); return; }
   const selection = ++selectionEpoch, epoch = state.epoch;
-  resetSelection(id);
+  resetSelection(id, rosterRoom);
   if (state.refreshPromise) { try { await state.refreshPromise; } catch { /* Refresh below reports errors. */ } }
   if (selection !== selectionEpoch || epoch !== state.epoch) return;
   try { await refresh(); } catch (error) { showRefreshError(error); }
@@ -885,7 +889,7 @@ const beginSeatLabels = { Vacant: '未編列', AwaitingAdmission: '等待入場�
 function renderVenueBegin(targets, waiting, policy) {
   const summary = $('venue-begin-evidence'), list = $('venue-begin-rooms');
   const rows = targets.flatMap(target => target.roomIds.map(roomId => ({
-    roomId, ...roomReadiness.venueBegin(target, roomId, policy)
+    roomId, sessionId: target.sessionId, ...roomReadiness.venueBegin(target, roomId, policy)
   })));
   if (policy !== 'normal' && rows.length) {
     for (const roomId of [1, 2, 3, 4, 5])
@@ -896,13 +900,29 @@ function renderVenueBegin(targets, waiting, policy) {
   const message = !rows.length ? '' : `準備開始房間 ${venueRoomText(targets)} · `
     + (waiting ? '仍有開場條件待確認，請查看各房狀態。' : '目標場次已就緒。');
   if (summary.textContent !== message) summary.textContent = message;
-  const signature = JSON.stringify(rows);
+  const locked = state.busy || !!state.pending;
+  const signature = JSON.stringify([rows, locked]);
   if (list.dataset.rows === signature) return;
   list.dataset.rows = signature;
-  list.replaceChildren(...rows.map(({ roomId, state, text }) => {
+  list.replaceChildren(...rows.map(({ roomId, sessionId, state: status, text }) => {
     const item = element('li', `房間 ${roomId} · ${text}`);
     item.dataset.beginRoom = roomId;
-    item.dataset.beginState = state;
+    item.dataset.beginState = status;
+    if (sessionId) {
+      const button = element('button', '查看名冊', 'quiet small');
+      button.type = 'button'; button.disabled = locked;
+      button.setAttribute('aria-label', `查看房間 ${roomId} 名冊`);
+      button.addEventListener('click', async () => {
+        if (!master() || state.busy || state.pending
+            || !venueTargets('Begin').some(target => target.sessionId === sessionId && target.roomIds.includes(roomId))) return;
+        await selectSession(sessionId, String(roomId));
+        if (state.session?.id === sessionId && $('roster-room').value === String(roomId)) {
+          $('roster-title').scrollIntoView({ block: 'start' });
+          $('roster-title').focus({ preventScroll: true });
+        }
+      });
+      item.append(' ', button);
+    }
     return item;
   }));
   const matrix = $('venue-begin-seats');
@@ -1239,6 +1259,12 @@ function renderSession(statistics, events) {
     $('ticket-room').dataset.session === session.id ? undefined : '');
   $('ticket-room').dataset.session = session.id;
   $('player-count').textContent = `${session.players.length} / ${session.roomIds.length * 5} 人（名冊）`;
+  const rosterRoom = $('roster-room'), rosterFilter = $('roster-room-filter');
+  const visibleRooms = session.roomIds.filter(ownsRoom);
+  fillOptions('roster-room', [['', '全部房間'], ...visibleRooms.map(id => [String(id), `房間 ${id}`])],
+    rosterRoom.dataset.preferred ?? rosterRoom.value);
+  delete rosterRoom.dataset.preferred;
+  rosterFilter.hidden = visibleRooms.length < 2;
   $('roster').replaceChildren(...session.players.map(player => {
     const actions = element('div', undefined, 'button-row');
     for (const [kind, label, action, cls] of [['ticket', '下載連線檔', () => downloadTicket(player), 'secondary'], ['remove', '移除', () => removePlayer(player), 'danger']]) {
@@ -1247,9 +1273,12 @@ function renderSession(statistics, events) {
       button.addEventListener('click', () => runSession(action)); actions.append(button);
     }
     const participation = element('span', '等待本次入場同步'); participation.dataset.readinessPlayer = player.id; participation.dataset.admission = player.admissionId;
-    return row([player.name, `${player.roomId} / ${player.seat + 1}`, player.headset === 'Quest3' ? 'Quest 3' : 'VIVE XR', participation, actions]);
+    const item = row([player.name, `${player.roomId} / ${player.seat + 1}`, player.headset === 'Quest3' ? 'Quest 3' : 'VIVE XR', participation, actions]);
+    item.dataset.rosterRoom = player.roomId;
+    return item;
   }));
   if (!session.players.length) emptyTable('roster', 5, '尚未加入玩家');
+  filterRoster();
   readiness.update();
   connections.update();
   $('statistics-origin').textContent = statistics.origin === 'Simulation' ? '模擬資料' : statistics.origin === 'GameServer' ? '遊戲伺服器回報' : '尚無戰鬥資料';
@@ -1262,6 +1291,16 @@ function renderSession(statistics, events) {
     const item = element('li'); item.append(element('span', time(event.recordedAtUtc), 'event-time'), element('span', `#${event.sequence} ${eventNames[event.kind] || event.kind}`), element('span', event.actor?.id || '舊版紀錄', 'event-actor')); return item;
   }));
 }
+function filterRoster() {
+  const room = $('roster-room').value;
+  let shown = 0;
+  for (const item of $('roster').querySelectorAll('[data-roster-room]')) {
+    item.hidden = !!room && item.dataset.rosterRoom !== room;
+    if (!item.hidden) shown++;
+  }
+  $('roster-filter-empty').hidden = !room || shown !== 0 || !state.session?.players.length;
+}
+$('roster-room').addEventListener('change', filterRoster);
 function environment(prefix) { return { mode: prefix === 'live' ? state.session.environment.mode : $('draft-mode').value, weather: $(prefix + '-weather').value, timeOfDay: $(prefix + '-time').value, lightning: $(prefix + '-lightning').checked }; }
 function enemies(prefix) { return { count: Number($(prefix + '-count').value), behavior: $(prefix + '-behavior').value, autoAttack: $(prefix + '-auto-attack').checked }; }
 function setEnvironment(prefix, value) { $(prefix + '-mode').value = value.mode; $(prefix + '-weather').value = value.weather; $(prefix + '-time').value = value.timeOfDay; $(prefix + '-lightning').checked = value.lightning; }
