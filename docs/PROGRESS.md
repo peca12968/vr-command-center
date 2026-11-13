@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 從 Windows 結束報告對齊獨立房間回放
+
+- 管理台 0.31.182 在管理實例、五房雙封存及同一筆全館結束命令均核對後，從 Windows 報告開啟的回放可按 UTC 或任務活動時間對齊同批房間。合併場繼續在同一錄製內切換房間。首次核心測試發現同批房間的 End 時間戳可不同，改按原命令及完整場次核對，並覆蓋重啟、房間重用及不同批次。 [操作說明](WORLD_RECORDING.md#對齊同批獨立房間的回放) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.182.zip)
+- 解壓三包通過 592 項。獨立與合併各 25 個同機模擬玩家，核對 10 個房間回放入口、50 份戰績回條、6 份 CSV 和 1,163 格回放。從原獨立結束報告開啟第 1 房，任務刻 4 對齊同批第 2 房刻 3。隔離程序清理後 C／F 259 個非資料庫檔案雜湊相符。 [本機驗證](../artifacts/console-venue-terminal-alignment-validation.json)
+- 另通過 1,108 項核心、825 項 HTTP、107 項管理包、來源及解壓包各 30 項報告專項、29 項時間對齊專項，以及 1,165 項完整瀏覽器檢查。解壓核對 567 筆清單及 `fa7850d` 的 193 個建置來源，其中 29 檔以換行正規化比對。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、完整桌面操作、頭盔、MR 場地與廠商硬體待驗。 [離線核對](../artifacts/console-venue-terminal-alignment-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43387013950)
+
 ## 2026-11-13 從 Windows 封存結果開啟原房間回放
 
 - 管理台 0.31.181 在管理實例和雙封存相符後，提供逐房回放捷徑。觀戰頁重新比對原場次、來源、房間與封存尾端。瀏覽器專項覆蓋房間已重用及錄製尾端變動，來源與解壓包各通過 29 項。首次專項等待了錯誤的提示欄位，修正測試選擇器後通過。 [操作說明](WINDOWS_SERVER_PACKAGE.md#核對未確認的啟動報告) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.181.zip)

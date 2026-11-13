@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-13 `VRCommand-ControlServer-0.31.182.zip` 為 53,149,900 bytes，SHA-256 `4bd23d126015466b4c4f8a8d296536e4e35ae96b159248df51e4ab1c5522b05d`。解壓核對 567 筆清單。由 Windows 結束報告開啟的獨立房間回放可對齊同批房間。 [管理包](../artifacts/VRCommand-ControlServer-0.31.182.zip) · [回放操作](WORLD_RECORDING.md#對齊同批獨立房間的回放)
+
 2026-11-13 `VRCommand-ControlServer-0.31.181.zip` 為 53,148,887 bytes，SHA-256 `75dbf9738dac50f4edbfd64b9250e60c434fe43a33632eceb8c2882edaa7bb06`。解壓核對 567 筆清單。核對 Windows 結束報告後，可逐房開啟原封存回放。 [管理包](../artifacts/VRCommand-ControlServer-0.31.181.zip) · [操作說明](WINDOWS_SERVER_PACKAGE.md#核對未確認的啟動報告)
 
 2026-11-13 `VRCommand-ControlServer-0.31.180.zip` 為 53,148,494 bytes，SHA-256 `b2282b16e71a279281db5fbd64adeb33b11d5e1f567dfb59c4f2273d12463450`。解壓核對 567 筆清單。主控可匯入第四版 Windows 全館正常結束報告，核對五房原戰鬥與回放的封存序號。 [管理包](../artifacts/VRCommand-ControlServer-0.31.180.zip) · [核對操作](WINDOWS_SERVER_PACKAGE.md#核對未確認的啟動報告)
