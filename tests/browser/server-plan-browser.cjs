@@ -195,6 +195,31 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
       endpoints: [{ roomIds: [1, 2, 3, 4, 5], address: linkedPlan.address, port: linkedPlan.servers[0].port }],
       sources: seats
     });
+    const otherIps = page.locator('#venue-server-other-ips');
+    const networkStatus = page.locator('#venue-server-network-status');
+    await otherIps.fill('192.168.1.25');
+    check(await networkButton.isDisabled() && !await page.locator(issue).isDisabled()
+      && (await networkStatus.innerText()).includes('房間 5 席位 1'),
+      'An additional server address conflicting with a player names the seat and only blocks the network export');
+    await otherIps.fill('192.168.1.10');
+    check(await networkButton.isDisabled() && (await networkStatus.innerText()).includes('公告位址會自動加入'),
+      'The address inventory rejects a repeated advertised IP');
+    await otherIps.fill('192.168.1.40\n192.168.1.9');
+    await upload({ version: 1, seats: [...seats.slice(0, 4), { ...seats[4], address: seats[0].address }] });
+    await networkStatus.filter({ hasText: '房間 1 席位 1、房間 5 席位 1' }).waitFor();
+    check(await networkButton.isDisabled(), 'Adding server addresses requires a distinct IPv4 for each seat');
+    await upload({ version: 1, seats });
+    await networkStatus.filter({ hasText: '將核對逐席直連' }).waitFor();
+    const [strictNetwork] = await Promise.all([page.waitForEvent('download'), networkButton.click()]);
+    const strictOutput = path.join(screenshots, 'linked-venue-network-with-server-ips.json');
+    await strictNetwork.saveAs(strictOutput);
+    const strictPlan = JSON.parse(await fs.readFile(strictOutput, 'utf8'));
+    assert.deepEqual(strictPlan, { ...JSON.parse(await fs.readFile(linkedOutput, 'utf8')),
+      serverIps: ['192.168.1.9', '192.168.1.10', '192.168.1.40'] });
+    check(strictPlan.serverIps.length === 3
+      && requests.every(([method, body]) => method === 'GET' && body === null),
+      'The browser downloads the canonical address inventory without sending it to the management API');
+    await page.locator(panel).screenshot({ path: path.join(screenshots, 'venue-server-ip-inventory.png') });
     await page.locator('#venue-server-bind').fill(linkedPlan.listenAddress);
     await end(linked.id);
     const replacement = [];
@@ -209,8 +234,8 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
     await page.locator(panel + ' summary').click();
     check(await page.locator('#venue-server-instance').inputValue() === '' && await page.locator('#venue-server-form').isHidden(),
       'Leaving operations discards the local path and the selected plan');
-    check(await inventoryInput.inputValue() === '' && await networkButton.isDisabled(),
-      'Leaving operations clears the selected private seat inventory');
+    check(await inventoryInput.inputValue() === '' && await otherIps.inputValue() === '' && await networkButton.isDisabled(),
+      'Leaving operations clears the selected private seat and server address inventories');
     await page.locator('#venue-server-read').click();
     await page.locator('#venue-server-form').waitFor();
     check((await page.locator(ports).evaluateAll(inputs => inputs.map(input => input.value))).join(',') === '7777,7778,7779,7780,7781',

@@ -75,6 +75,7 @@ export function mountVenueServerPlan(getState, api, download) {
   const panel = document.getElementById('venue-server-plan'), form = $('form'), fields = $('fields');
   const instance = $('instance'), address = $('address'), bind = $('bind'), ports = $('ports');
   const seatFile = $('seat-addresses'), networkDownload = $('network-download'), networkStatus = $('network-status');
+  const otherIps = $('other-ips');
   const portDrafts = new Map();
   let active = false, generation = 0, pending = false, preview = null;
   let seatRead = 0, seatsPending = false, inventory = null, inventoryError = '';
@@ -104,22 +105,47 @@ export function mountVenueServerPlan(getState, api, download) {
     fields.disabled = $('read').disabled;
     form.hidden = !preview?.ready;
     const current = plan();
+    const network = networkPlan(current);
     $('download').disabled = fields.disabled || !current;
-    networkDownload.disabled = fields.disabled || seatsPending || !networkPlan(current);
+    networkDownload.disabled = fields.disabled || seatsPending || !network.payload;
     networkStatus.textContent = seatsPending ? '正在讀取席位 IPv4 表…' : inventoryError;
     if (inventory) {
       const count = `已讀取五房共 ${inventory.seats.length} 席。`;
-      networkStatus.textContent = current && !networkPlan(current)
-        ? count + ' UDP 預檢需要具體綁定位址，並使用同類型的私有網路或本機 IPv4。' : count;
+      networkStatus.textContent = count + (network.error ? ' ' + network.error
+        : network.payload?.serverIps ? ' 將核對逐席直連及全部伺服器位址。' : '');
     }
   }
 
   function networkPlan(current) {
-    if (!current || !inventory || current.address !== current.listenAddress
-        || privateAddressKind(current.address) !== inventory.kind) return null;
-    return { version: 1, mode: current.topology,
+    if (!current || !inventory) return {};
+    if (current.address !== current.listenAddress || privateAddressKind(current.address) !== inventory.kind)
+      return { error: 'UDP 預檢需要具體綁定位址，並使用同類型的私有網路或本機 IPv4。' };
+    const payload = { version: 1, mode: current.topology,
       endpoints: current.servers.map(({ roomIds, port }) => ({ roomIds, address: current.address, port })),
       sources: inventory.seats };
+    const extra = otherIps.value.split('\n').map(line => line.trim()).filter(Boolean);
+    if (!extra.length) return { payload };
+    const serverIps = new Set([current.address, ...extra]);
+    if (extra.length > 127 || serverIps.size !== extra.length + 1 || inventory.kind !== 'lan'
+        || extra.some(value => !privateAddressKind(value)))
+      return { error: '請逐行填寫有效且不重複的伺服器 IPv4，公告位址會自動加入。玩家及遊戲端點須使用私有網路。' };
+    const seatsByAddress = new Map();
+    for (const { roomId, seat, address } of inventory.seats) {
+      if (!seatsByAddress.has(address)) seatsByAddress.set(address, []);
+      seatsByAddress.get(address).push(`房間 ${roomId} 席位 ${seat}`);
+    }
+    const collisions = [], shared = [];
+    for (const [value, seats] of seatsByAddress) {
+      if (serverIps.has(value)) collisions.push(...seats);
+      if (seats.length > 1) shared.push(seats.join('、'));
+    }
+    if (collisions.length || shared.length) return { error: [
+      collisions.length ? `席位與伺服器位址衝突：${collisions.join('、')}。` : '',
+      shared.length ? `席位共用玩家 IPv4：${shared.join('；')}。` : ''
+    ].filter(Boolean).join(' ') };
+    const numeric = value => value.split('.').reduce((total, octet) => total * 256 + Number(octet), 0);
+    payload.serverIps = [...serverIps].sort((left, right) => numeric(left) - numeric(right));
+    return { payload };
   }
 
   function resetPreview() {
@@ -197,7 +223,7 @@ export function mountVenueServerPlan(getState, api, download) {
     event.preventDefault();
     const value = plan();
     const wantsNetwork = event.submitter === networkDownload;
-    const payload = wantsNetwork ? networkPlan(value) : value;
+    const payload = wantsNetwork ? networkPlan(value).payload : value;
     if ((wantsNetwork ? networkDownload : $('download')).disabled || !payload) return;
     const expected = preview;
     const request = begin('正在重新核對原場次…');

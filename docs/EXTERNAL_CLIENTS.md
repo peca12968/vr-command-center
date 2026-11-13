@@ -349,6 +349,8 @@ python .\scripts\prepare-venue-network-plan.py `
 
 若伺服器有多張網卡，產生清單時可重複加上 `--server-ip`，列出所有公告位址及其他伺服器 IPv4。清單會保存這些位址並啟用逐席直連檢查。預檢與啟動會讀取同一份清單，任何席位若填到其中一個伺服器位址，工具會指出房號及席號。
 
+管理台 0.31.174 可在「Windows 遊戲伺服器啟動計畫」匯入席位表，於「伺服器其他 IPv4」每行填一個位址，再下載 UDP 預檢清單。公告位址會自動加入。管理台會在下載前指出共用或誤用伺服器位址的房號與席號。
+
 #### 用原網路清單核對封存席位
 
 在 `venue.json` 加入 `"venueNetworkPlan": "venue-network.json"`，或在 `prepare-venue-field-manifest.py` 加 `--venue-network-plan .\venue-network.json`。使用開場前的全館清單，涵蓋本階段所有 Windows 與 Quest 席位。工具會比對每房原封存端點及原名冊，再將伺服器已確認戰績的 UDP 來源逐席核對。收件模式會列出來源不符的 Windows ZIP，並將對應席位列為待補件。
