@@ -1045,12 +1045,12 @@ def run(args):
                 packed = handoff(*pack_args,package)
                 assert packed.returncode==0 and packed.stdout==reviewed.stdout and not packed.stderr
                 with zipfile.ZipFile(package) as zipped:
-                    files = {name:zipped.read(name) for name in zipped.namelist()}
+                    archive_files = {name:zipped.read(name) for name in zipped.namelist()}
                 expected = {f'bindings/{name}':(folder/name).read_bytes()
                     for name in ['venue-bindings.json',*[f'room-{room:02}.json' for room in rooms]]}
                 expected.update({f'reports/{name}':(fleet_directory/name).read_bytes()
                     for name in ['venue-report.json',*[f'room-{room:02}-report.json' for room in rooms]]})
-                assert files==expected
+                assert archive_files==expected
                 assert handoff('--verify-venue-zip',package).stdout==reviewed.stdout
                 check(True,f'{mode} handoff ZIP preserves exactly the original evidence and verifies without extraction')
                 if mode=='Independent':
@@ -1127,9 +1127,9 @@ def run(args):
                     assert not list(runtime.glob('.vr-hardware-handoff-*.tmp'))
                     for label_suffix, entries in (
                         ('outside-path', [(name if name!='reports/room-01-report.json' else '../extra.json',data)
-                                          for name,data in files.items()]),
-                        ('changed', [(name,data+b'\n' if name=='bindings/room-01.json' else data) for name,data in files.items()]),
-                        ('missing', [(name,data) for name,data in files.items() if name!='reports/room-01-report.json']),
+                                          for name,data in archive_files.items()]),
+                        ('changed', [(name,data+b'\n' if name=='bindings/room-01.json' else data) for name,data in archive_files.items()]),
+                        ('missing', [(name,data) for name,data in archive_files.items() if name!='reports/room-01-report.json']),
                     ):
                         invalid_zip = runtime/f'{label_suffix}-handoff.zip'
                         with zipfile.ZipFile(invalid_zip,'x') as zipped:
