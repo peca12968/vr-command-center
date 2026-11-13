@@ -46,6 +46,14 @@ module.exports = async ({ context, api, tokens, base, screenshots, check, captur
     check(apiResponse.ok && apiResponse.headers.get('cache-control') === 'no-store' && bytes.equals(Buffer.from(await apiResponse.arrayBuffer()))
       && download.suggestedFilename() === filename && bytes.subarray(0, 3).equals(Buffer.from([239, 187, 191])), label);
     await fs.writeFile(path.join(screenshots, filename), bytes);
+    const archiveReady = page.waitForEvent('download');
+    const archiveResponse = page.waitForResponse(response => new URL(response.url()).pathname === `/api/venue/closure/${requestId}/reports.zip`);
+    await page.locator('#export-venue-reports').click();
+    const [archive, response] = await Promise.all([archiveReady, archiveResponse]);
+    check(response.ok() && new URL(response.url()).searchParams.get('includeScores') === 'true'
+      && archive.suggestedFilename() === `vr-command-venue-reports-v1-${requestId}.zip`
+      && (await fs.readFile(await archive.path())).equals(await response.body()),
+      'The selected batch downloads the exact API ZIP with its room and venue totals requested');
   }
   const shot = (playerId, hit) => {
     const shotId = randomUUID(), enemyId = randomUUID();

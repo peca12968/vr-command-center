@@ -344,11 +344,11 @@ app.MapGet("/api/venue/closure/{id:guid}/linked-plan", (Guid id, SessionManager 
 
     return new { batch.RequestId, SessionId = session.Id, session.RoomIds, Revision = store.Version(session.Mission.Id, actor) };
 });
-app.MapGet("/api/venue/closure/{id:guid}/reports.zip", (Guid id, SessionManager manager, HttpContext context) =>
+app.MapGet("/api/venue/closure/{id:guid}/reports.zip", (Guid id, bool? includeScores, SessionManager manager, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";
     var report = manager.FinalVenueReports(id, Actor(context));
-    return Results.File(FinalReportCsv.EncodeVenueBundle(report), "application/zip", $"vr-command-venue-reports-v1-{id:D}.zip");
+    return Results.File(FinalReportCsv.EncodeVenueBundle(report, includeScores == true), "application/zip", $"vr-command-venue-reports-v1-{id:D}.zip");
 });
 app.MapGet("/api/venue/closure/{id:guid}/scores.csv", (Guid id, SessionManager manager, HttpContext context) =>
 {

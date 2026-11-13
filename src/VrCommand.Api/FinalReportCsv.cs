@@ -27,8 +27,9 @@ public static class FinalReportCsv
         return output.ToArray();
     }
 
-    internal static byte[] EncodeVenueBundle(FinalVenueReport venue)
+    internal static byte[] EncodeVenueBundle(FinalVenueReport venue, bool includeScores)
     {
+        const string scoresName = "scores.csv";
         var sessions = venue.Sessions.Select(session =>
         {
             var rooms = session.Report.RoomIds.Select(session.Report.ForRoom);
@@ -37,23 +38,30 @@ public static class FinalReportCsv
         using var output = new MemoryStream();
         using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
         {
-            using (var manifest = OpenEntry(archive, "manifest.json"))
-                JsonSerializer.Serialize(manifest, new
+            var manifestData = new Dictionary<string, object>
+            {
+                ["schemaVersion"] = 1,
+                ["requestId"] = venue.RequestId,
+                ["recordedAtUtc"] = venue.RecordedAtUtc,
+                ["sessions"] = sessions.Select(item => new
                 {
-                    schemaVersion = 1,
-                    venue.RequestId,
-                    venue.RecordedAtUtc,
-                    sessions = sessions.Select(item => new
-                    {
-                        item.Session.Report.SessionId,
-                        item.Session.Report.RoomIds,
-                        item.Session.AppliedAtSequence,
-                        item.Session.Report.ThroughSequence,
-                        files = item.Files.Select(file => new { roomId = file.ReportRoomId, name = FileName(file.SessionId, file.ReportRoomId) })
-                    })
-                }, JsonFormat.Options);
+                    item.Session.Report.SessionId,
+                    item.Session.Report.RoomIds,
+                    item.Session.AppliedAtSequence,
+                    item.Session.Report.ThroughSequence,
+                    files = item.Files.Select(file => new { roomId = file.ReportRoomId, name = FileName(file.SessionId, file.ReportRoomId) })
+                })
+            };
+            if (includeScores) manifestData["scoresFile"] = scoresName;
+            using (var manifest = OpenEntry(archive, "manifest.json"))
+                JsonSerializer.Serialize(manifest, manifestData, JsonFormat.Options);
             foreach (var item in sessions)
                 foreach (var file in item.Files) WriteCsv(archive, file);
+            if (includeScores)
+            {
+                using var scores = OpenEntry(archive, scoresName);
+                scores.Write(EncodeVenueScores(VenueBattleScores.From(venue)));
+            }
         }
         return output.ToArray();
     }

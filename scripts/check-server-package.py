@@ -2343,7 +2343,8 @@ def main():
     def verify_venue_reports(entries, receipt, linked):
         mode = 'linked' if linked else 'independent'
         key = receipt['requestId']
-        route = f'/api/venue/closure/{key}/reports.zip'
+        original_route = f'/api/venue/closure/{key}/reports.zip'
+        route = original_route + '?includeScores=true'
         raw, headers = request(route, raw_response=True)
         check(headers.get_content_type() == 'application/zip' and headers['Cache-Control'] == 'no-store'
               and f'vr-command-venue-reports-v1-{key}.zip' in headers['Content-Disposition'],
@@ -2374,12 +2375,22 @@ def main():
                       f'{mode} batch room {room} preserves its {players_per_room} sealed native rows')
             manifest_sessions.append({'sessionId': sid, 'roomIds': rooms, 'appliedAtSequence': sequences[sid],
                 'throughSequence': entry['sealed']['statistics']['throughSequence'], 'files': files})
-        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        original, _ = request(original_route, raw_response=True)
+        scores, _ = request(f'/api/venue/closure/{key}/scores.csv', raw_response=True)
+        with zipfile.ZipFile(io.BytesIO(original)) as legacy, zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            legacy_manifest = json.loads(legacy.read('manifest.json'))
+            check(legacy.namelist() == ['manifest.json', *expected] and legacy.testzip() is None
+                  and all(legacy.read(name) == value for name, value in expected.items())
+                  and legacy_manifest['schemaVersion'] == 1 and legacy_manifest['requestId'] == key
+                  and legacy_manifest['sessions'] == manifest_sessions and 'scoresFile' not in legacy_manifest,
+                  f'{mode} default batch ZIP preserves its original manifest and scoped CSVs')
             manifest = json.loads(archive.read('manifest.json'))
-            check(archive.namelist() == ['manifest.json', *expected] and archive.testzip() is None
+            check(archive.namelist() == ['manifest.json', *expected, 'scores.csv'] and archive.testzip() is None
                   and all(archive.read(name) == value for name, value in expected.items())
-                  and manifest['schemaVersion'] == 1 and manifest['requestId'] == key and manifest['sessions'] == manifest_sessions,
-                  f'{mode} batch ZIP matches the original session manifest and exact scoped CSV bytes')
+                  and manifest == {**legacy_manifest, 'scoresFile': 'scores.csv'}
+                  and archive.read('scores.csv') == scores,
+                  f'{mode} batch ZIP adds the exact standalone score CSV and preserves every original report')
+        (out/f'{mode}-venue-scores.csv').write_bytes(scores)
         (out/f'{mode}-venue-reports.zip').write_bytes(raw)
         return route, raw
 

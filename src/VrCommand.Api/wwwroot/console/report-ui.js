@@ -131,12 +131,12 @@ export function mountReport(current, unauthorized, scopeChanged) {
 export function mountVenueReport(current, unauthorized, save) {
   const reports = mountVenueDownload(current, unauthorized, save, {
     actions: 'venue-report-actions', button: 'export-venue-reports', status: 'venue-report-status',
-    route: 'reports', filename: 'reports',
+    route: 'reports', query: '?includeScores=true', filename: 'reports',
     ready: session => ['Sealed', 'NoSource'].includes(session.combat),
     waiting: rooms => `等待房間 ${rooms} 的戰鬥資料封存。`,
     available: '本批戰績已可匯出。', loading: '正在下載本批戰績 ZIP…',
     conflict: '本批仍在等待戰鬥資料封存。', invalid: '報表格式不符，可重新下載。',
-    failed: '本批戰績下載失敗，可重新整理後再試。', saved: '已下載本批戰績與原場次清單。'
+    failed: '本批戰績下載失敗，可重新整理後再試。', saved: '已下載本批戰績、分房與全館合計。'
   });
   const scores = mountVenueDownload(current, unauthorized, save, {
     actions: 'venue-score-actions', button: 'export-venue-scores', status: 'venue-score-status',

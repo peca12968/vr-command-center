@@ -649,7 +649,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       && await page.locator('#venue-debrief-only-missing').isChecked(),
       'The group shows the sealed independent room and calls out the still-unsealed occupied room');
     await page.locator('#venue-debrief-seats-close').click();
-    const reportsPath = `/venue/closure/${closure.requestId}/reports.zip`;
+    const reportsPath = `/venue/closure/${closure.requestId}/reports.zip?includeScores=true`;
     const reportButton = page.locator('#export-venue-reports');
     const reportStatus = page.locator('#venue-report-status');
     const fieldPath = id => `/venue/closure/${id}/field-evidence.zip`;
