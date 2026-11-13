@@ -274,9 +274,22 @@ python .\scripts\check-venue-udp-preflight.py `
 
 可將完整報告的路徑填入封存驗收清單的 `udpPreflightBatch`。請保留原雙端報告，以及 `launchBinding` 所引用的原計畫和預覽，並維持檔案間的路徑。結束後，驗收工具會用遊戲伺服器實際綁定時間與已確認的玩家來源重驗每組，並比對原計畫與封存的場次、任務版本及端點。若透過 `--batch` 重新納入含 `launchBinding` 的報告，須再次提供相同的計畫和預覽。`network` 為 `same-host` 的結果代表同機 UDP，跨機連線與頭盔仍須現場測試。
 
+#### 從資料夾配對 UDP 報告
+
+把本次監聽端及探測端的原始 `.json` 或 `.ndjson` 放入專用收件夾，並用 `--inbox` 直接核對。工具依端點、來源與同一次交換的 SHA-256 配對，檔名可以各自命名。每個資料夾讀取最上層最多 100 份報告。將網路清單、金鑰、啟動資料及輸出的驗收報告放在收件夾外。
+
+```powershell
+python .\scripts\check-venue-udp-preflight.py `
+  --network-plan .\venue-network.json --inbox .\udp-inbox `
+  --launch-plan .\venue-plan.json --launcher-preview .\venue-preview.json `
+  --output .\venue-readiness.json
+```
+
+`inbox.issues` 列出無法讀取的原始報告、缺少對端的檔案及同一交換中重複提交的檔案。已配成對的報告仍會核對完整樣本與時限。可另用 `--batch` 加入 Quest 批次，並以同樣的方式提供所用的啟動原檔。
+
 #### 補測未完成的全館 UDP 預檢
 
-全館檢查未完成且已提供的啟動資料核對通過時，報告會在 `retrySources` 保留已驗證的來源、雙端報告路徑與雜湊。補測缺漏或失敗來源後，用 `--retry-report` 指定前一份未完成的全館報告，並用 `--pairs` 或 `--batch` 帶入補測的雙端資料。每輪使用新的輸出路徑。重試須沿用同一份網路清單，以及前一輪提供的啟動計畫或預覽原檔。
+全館檢查未完成且已提供的啟動資料核對通過時，報告會在 `retrySources` 保留已驗證的來源、雙端報告路徑與雜湊。補測缺漏或失敗來源後，用 `--retry-report` 指定前一份未完成的全館報告，並用 `--pairs`、`--inbox` 或 `--batch` 帶入補測的雙端資料。用收件夾補測時，另建資料夾放待補來源的雙端原檔，並保留上一輪已通過資料的原路徑。每輪使用新的輸出路徑。重試須沿用同一份網路清單，以及前一輪提供的啟動計畫或預覽原檔。
 
 ```powershell
 python .\scripts\check-venue-udp-preflight.py `

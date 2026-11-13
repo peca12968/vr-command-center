@@ -361,6 +361,57 @@ class LanPreflightTests(unittest.TestCase):
         self.assertEqual(before, (self.root / 'readiness.json').read_bytes())
         self.assertEqual(original_reports, {name: (self.root / name).read_bytes() for name in original_reports})
 
+    def test_venue_inbox_pairs_original_exchanges_and_resumes_without_manual_paths(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reserved:
+            reserved.bind((LOOPBACK, 0))
+            port = reserved.getsockname()[1]
+        rooms = list(range(1, 6))
+        plan = self.venue_json('inbox-network.json', {'version': 1, 'mode': 'Linked',
+            'endpoints': [{'roomIds': rooms, 'address': LOOPBACK, 'port': port}],
+            'sources': [{'roomId': room, 'seat': seat, 'address': f'127.0.0.{seat + 1}'
+                         } for room in rooms for seat in (1, 2)]})
+        first = self.venue_pair(port, '127.0.0.2', 'inbox-first', encoding='utf-16')
+        second = self.venue_pair(port, '127.0.0.3', 'inbox-second', encoding='utf-8-sig')
+        inbox = self.root / '收件箱'
+        inbox.mkdir()
+        first_pair = {'listener': '104.JSON', 'probe': '200.NDJSON'}
+        second_pair = {'listener': '300.ndjson', 'probe': '101.json'}
+        for role, name in first_pair.items():
+            shutil.copyfile(self.root / first[role], inbox / name)
+        shutil.copyfile(self.root / second['probe'], inbox / second_pair['probe'])
+        shutil.copyfile(inbox / first_pair['listener'], inbox / 'copy.json')
+        (inbox / 'broken.json').write_text('{', encoding='utf-8')
+        (inbox / 'notes.txt').write_text('notes', encoding='utf-8')
+        (inbox / 'subfolder.json').mkdir()
+
+        invalid = self.venue_check(plan, 'inbox-invalid.json', '--inbox', inbox, status=1)
+        self.assertEqual({'files': 5, 'pairedExchanges': 0, 'issues': [
+            {'status': 'invalid-report', 'files': ['broken.json']},
+            {'status': 'missing-counterpart', 'files': ['101.json']},
+            {'status': 'duplicate-role', 'files': ['104.JSON', '200.NDJSON', 'copy.json']},
+        ]}, invalid['inbox'])
+        (inbox / 'copy.json').unlink()
+        (inbox / 'broken.json').unlink()
+        partial = self.venue_check(plan, 'inbox-partial.json', '--inbox', inbox, status=1)
+        self.assertEqual((1, 1), (partial['verifiedSources'], partial['inbox']['pairedExchanges']))
+        self.assertEqual([{'status': 'missing-counterpart', 'files': ['101.json']}], partial['inbox']['issues'])
+
+        retry_inbox = self.root / '補件箱'
+        retry_inbox.mkdir()
+        shutil.copyfile(inbox / second_pair['probe'], retry_inbox / second_pair['probe'])
+        shutil.copyfile(self.root / second['listener'], retry_inbox / second_pair['listener'])
+        reports = {path: path.read_bytes() for folder in (inbox, retry_inbox)
+                   for path in folder.iterdir() if path.is_file()}
+        complete = self.venue_check(plan, 'inbox-complete.json', '--inbox', retry_inbox,
+                                    '--retry-report', self.root / 'inbox-partial.json')
+        self.assertEqual((2, 1), (complete['verifiedSources'], complete['retainedSources']))
+        self.assertEqual({'files': 2, 'pairedExchanges': 1, 'issues': []}, complete['inbox'])
+        refs = complete['groups'][0]['udpSourcePreflights']
+        self.assertEqual([{role: (folder / name).resolve() for role, name in pair.items()}
+                          for folder, pair in ((inbox, first_pair), (retry_inbox, second_pair))],
+                         [{role: (self.root / name).resolve() for role, name in pair.items()} for pair in refs])
+        self.assertEqual(reports, {path: path.read_bytes() for path in reports})
+
     def test_venue_independent_requires_a_pair_per_port_for_the_same_source(self):
         ports = []
         sockets = []
@@ -394,6 +445,19 @@ class LanPreflightTests(unittest.TestCase):
         self.assertTrue(report['launchBinding']['complete'])
         self.assertEqual([[1], [2], [3], [4], [5]], [group['roomIds'] for group in report['groups']])
         self.assertEqual([[pair] for pair in pairs], [group['udpSourcePreflights'] for group in report['groups']])
+        inbox = self.root / 'independent-inbox'
+        inbox.mkdir()
+        for index, pair in enumerate(pairs):
+            shutil.copyfile(self.root / pair['listener'], inbox / f'{len(pairs) - index}.ndjson')
+            shutil.copyfile(self.root / pair['probe'], inbox / f'{index + 1}.json')
+        collected = self.venue_check(generated, 'independent-inbox.json', '--inbox', inbox,
+                                     '--launcher-preview', preview, '--launch-plan', launch)
+        self.assertEqual({'files': 10, 'pairedExchanges': 5, 'issues': []}, collected['inbox'])
+        self.assertEqual([group['sources'] for group in report['groups']], [group['sources'] for group in collected['groups']])
+        for old, new in zip(report['groups'], collected['groups'], strict=True):
+            for role, path in old['udpSourcePreflights'][0].items():
+                self.assertEqual((self.root / path).read_bytes(),
+                                 (self.root / new['udpSourcePreflights'][0][role]).read_bytes())
         plan_value['sources'][4]['address'] = '127.0.0.3'
         wrong = self.venue_json('wrong-source.json', plan_value)
         invalid = self.venue_check(wrong, 'unmatched.json', '--pairs', manifest, status=1)
