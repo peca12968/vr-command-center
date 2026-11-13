@@ -2612,7 +2612,7 @@ def verify_venue_stages(plan_path):
     plan = read_json(raw_plan.decode('utf-8-sig'))
     required = {'version', 'topology', 'minimumConcurrentMilliseconds', 'venueManifests'}
     roster_options = ('requireTrackedRoster', 'requireConcurrentFire')
-    require(type(plan) is dict and required <= plan.keys() <= required | {'requireDistinctRemoteRoster', *roster_options},
+    require(type(plan) is dict and required <= plan.keys() <= required | {'requireDistinctRemoteRoster', 'requireVerifiedVenueStart', *roster_options},
             'Invalid staged venue plan fields')
     integer(plan['version'], 1, 1)
     topology = plan['topology']
@@ -2621,6 +2621,8 @@ def verify_venue_stages(plan_path):
     distinct = plan.get('requireDistinctRemoteRoster', False)
     require(type(distinct) is bool and (not distinct or topology == 'direct-lan'),
             'Distinct staged roster requires a boolean option and direct-lan topology')
+    require_start = plan.get('requireVerifiedVenueStart', False)
+    require(type(require_start) is bool, 'Staged verified Windows start option must be boolean')
     requirements = {key: plan.get(key, False) for key in roster_options}
     require(all(type(value) is bool for value in requirements.values()), 'Staged tracked roster and concurrent fire options must be boolean')
     staged_roster = {'minimumConcurrentMilliseconds': minimum, **requirements} if any(requirements.values()) else None
@@ -2633,6 +2635,7 @@ def verify_venue_stages(plan_path):
     require(plan_path not in paths and len(set(paths)) == len(paths), 'Staged venue manifest paths must be distinct')
 
     stages, used = {}, {}
+    start_launches = set()
     release_hash = None
     for index, path in enumerate(paths, 1):
         try:
@@ -2657,6 +2660,13 @@ def verify_venue_stages(plan_path):
                 'Venue batch lacks the continuous concurrent roster required by the staged plan')
         require(not distinct or report.get('distinctRemoteRoster', {}).get('seatsVerified') == players,
                 'Venue batch lacks distinct original remote sources for every seat')
+        verified_start = report.get('verifiedVenueStart')
+        require(not require_start or verified_start is not None,
+                f'Venue manifest entry {index}: missing verified Windows start receipt')
+        if verified_start is not None:
+            launch_id = verified_start['launchId']
+            require(launch_id not in start_launches, f'Venue manifest entry {index}: reused verified Windows launch identity')
+            start_launches.add(launch_id)
         stages[key] = (report, batch)
 
     for mode in modes:
@@ -2676,11 +2686,13 @@ def verify_venue_stages(plan_path):
                             'worldJournalsVerified': report['worldJournalsVerified'],
                             'concurrentRoster': report['concurrentRoster'],
                             **{field: report[field] for field in ('combatJournalsVerified', 'distinctRemoteRoster', 'windowsLinkCriteria',
-                                                                'windowsStationAddresses', 'venueNetworkPlan', 'reconnectSourcePlan')
+                                                                'windowsStationAddresses', 'venueNetworkPlan', 'reconnectSourcePlan',
+                                                                'verifiedVenueStart')
                                if field in report}})
     return {'version': 1, 'consistent': True, 'declaredTopology': topology,
             'planSha256': hashlib.sha256(raw_plan).hexdigest(), 'venueReleaseSha256': release_hash,
             'minimumConcurrentMilliseconds': minimum, 'requireDistinctRemoteRoster': distinct,
+            **({'requireVerifiedVenueStart': require_start} if 'requireVerifiedVenueStart' in plan else {}),
             **{key: requirements[key] for key in roster_options if key in plan}, 'stages': results,
             'serverAcknowledgements': sum(stage['serverAcknowledgements'] for stage in results),
             'physicalHostsVerified': False, 'networkCapacityAccepted': False}

@@ -607,6 +607,14 @@ class FieldResultsTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256(release.read_bytes()).hexdigest(), report['venueReleaseSha256'])
             self.assertFalse(report['physicalHostsVerified'])
             self.assertFalse(report['networkCapacityAccepted'])
+            self.assertNotIn('requireVerifiedVenueStart', report)
+            self.assertTrue(all('verifiedVenueStart' not in row for row in report['stages']))
+            path.write_text(json.dumps(dict(plan, requireVerifiedVenueStart=True)), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'Venue manifest entry 1: missing verified Windows start receipt'):
+                field.verify_venue_stages(path)
+            path.write_text(json.dumps(dict(plan, requireVerifiedVenueStart=1)), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'verified Windows start option must be boolean'):
+                field.verify_venue_stages(path)
 
     def test_staged_venue_rejects_incomplete_repeated_misordered_or_mismatched_batches(self):
         with tempfile.TemporaryDirectory() as directory:

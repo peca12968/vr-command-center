@@ -574,6 +574,10 @@ python scripts/verify-field-results.py --venue-stages .\stages.json
 
 兩項同時啟用時，同一段共同執行區間須包含全體原席位的有效追蹤，以及每席至少一筆已封存的遊戲射擊。批次清單可省略這兩項，總清單仍會照樣核對。摘要逐批列出 `concurrentRoster.rigKind`、`playersWithConfirmedFire` 及實際採用的 `minimumMilliseconds`。若原始證據未通過，錯誤會指出 `venueManifests` 陣列中從 1 開始計算的項次。
 
+##### 六批使用各自的 Windows 啟動回條
+
+在 `stages.json` 加入 `"requireVerifiedVenueStart": true`，並在六份批次清單各自引用原 `verifiedVenueStart`。驗收會逐批核對原預檢、就緒及結束報告，並拒絕重複使用同一個啟動批次 ID。缺少回條時，錯誤會指出總清單中的項次。摘要會顯示各批已核對的回條及原啟動 ID。 [保存及引用回條](#核對-windows-五房啟動回條)
+
 ### 核對 25 席各自的直連來源
 
 每席使用不同 IPv4 的場館，可在原五房驗收清單加入下列欄位。請完整填寫 `serverIps` 的伺服器介面位址，並保留每席原程序的完整日誌、每場啟用 UDP 來源診斷的伺服器日誌及原封存 `worldJournal`。
