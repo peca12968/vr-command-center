@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 Windows 玩家包 1.15 內建 OpenXR 預檢
+
+- 場館可從解壓後的玩家包執行 `Launch-Player.exe --check-openxr --report`，檢查 64 位元登錄或目前程序所選的 OpenXR 清單及 x64 DLL 標頭。報告只包含來源及檔案檢查狀態。發行核對通過，與同源 1.14.1 包比對有 329 個清單檔案雜湊一致。 [操作方式與下載](WINDOWS_PLAYER_PACKAGE.md#windows-openxr-啟動)
+- 解壓玩家包通過 45 項檢查，包含 21 項 WinForms 處理程式檢查及 14 個預檢執行案例。Unity Mock Runtime 的雙玩家同機驗證通過 80 項，回放 105 格。額外的 Vive Menu 重連案例起初使用缺少重連確認功能的舊測試 DLL，等待確認逾時。以目前測試原始碼重編 DLL 後，87 項通過，含 UDP 中斷、同一玩家程序重入及 458 格雙封存回放。三次執行皆已清理，初次逾時紀錄保留。 [驗證摘要](../artifacts/windows-player-1.15-validation.json)
+- 功能提交 `03496fb` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3 與 VIVE 實機、跨機 25 人、MR 場地與廠商硬體仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43403573918)
+
 ## 2026-11-13 Windows OpenXR 執行環境預檢
 
 - `check-windows-openxr.ps1` 唯讀檢查 64 位元登錄中的 `ActiveRuntime` 或目前程序的 `XR_RUNTIME_JSON`，辨識缺少的清單、無法定位的 DLL 及錯誤架構。本機登錄設定與 Unity Mock Runtime 都通過檔案預檢，缺失的環境變數指定清單回報 `manifest-missing`。登錄值及模擬執行環境檔案經前後比對一致。三項 Windows 測試通過。本機 Windows PowerShell 的執行原則拒絕載入腳本，驗證以 PowerShell 7 完成。 [操作方式](WINDOWS_PLAYER_PACKAGE.md#windows-openxr-啟動)
