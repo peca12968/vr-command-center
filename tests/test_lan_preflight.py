@@ -134,6 +134,43 @@ class NetworkPlanPreparationTests(unittest.TestCase):
             {'roomId': 1, 'seat': 1, 'serial': 'fixture-a'}, {'roomId': 5, 'seat': 1, 'serial': 'fixture-b'}]})
         rejects('distinct IPv4 for each mapped Quest', '--quest-device-map', devices)
 
+    def test_distinct_remote_mode_names_conflicting_seats_before_creating_the_plan(self):
+        for mode, ports in (('Independent', range(7777, 7782)), ('Linked', [7777])):
+            with self.subTest(mode=mode):
+                launch_value, preview_value = guarded_documents(mode, ports, '192.168.5.10')
+                launch = self.store('launch.json', launch_value)
+                preview = self.store('preview.json', preview_value)
+                rows = [{'roomId': room, 'seat': 1, 'address': f'192.168.5.{20 + room}'} for room in range(1, 6)]
+                inventory = self.store('seats.json', {'version': 1, 'seats': rows})
+                good = self.root / f'{mode}-direct.json'
+                default = self.root / f'{mode}-standard.json'
+                arguments = ('--players-per-room', 1)
+                result = prepare_network(launch, preview, inventory, good, *arguments, '--require-distinct-remote-roster')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                result = prepare_network(launch, preview, inventory, default, *arguments)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(good.read_bytes(), default.read_bytes())
+                rows[2]['address'] = launch_value['address']
+                rows[4]['address'] = rows[0]['address']
+                self.store(inventory.name, {'version': 1, 'seats': rows})
+                refused = self.root / f'{mode}-refused.json'
+                result = prepare_network(launch, preview, inventory, refused, *arguments, '--require-distinct-remote-roster')
+                self.assertEqual(result.returncode, 1)
+                self.assertIn('server or non-private source: room 3 seat 1', result.stderr)
+                self.assertIn('shared source: room 1 seat 1, room 5 seat 1', result.stderr)
+                self.assertNotIn('192.168.', result.stderr)
+                self.assertFalse(refused.exists())
+                fallback = prepare_network(launch, preview, inventory, refused, *arguments)
+                self.assertEqual(fallback.returncode, 0, fallback.stderr)
+                readiness = self.root / f'{mode}-readiness.json'
+                checked = subprocess.run([sys.executable, str(ROOT / 'scripts/check-venue-udp-preflight.py'),
+                                          '--network-plan', str(refused), '--output', str(readiness),
+                                          '--require-distinct-remote-roster'], capture_output=True, text=True, timeout=15)
+                self.assertEqual(checked.returncode, 1)
+                self.assertIn('server or non-private source: room 3 seat 1', checked.stderr)
+                self.assertIn('shared source: room 1 seat 1, room 5 seat 1', checked.stderr)
+                self.assertFalse(readiness.exists())
+
 
 def packet(key, kind, nonce):
     prefix = f'VRLAN1{kind}:{nonce}'.encode('ascii')

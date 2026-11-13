@@ -1639,6 +1639,26 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertFalse(report['physicalHostsVerified'])
                 self.assertNotIn('192.168', json.dumps(report))
 
+                plan = {'version': 1, 'mode': mode, 'endpoints': [], 'sources': []}
+                for entry in manifest['sessions']:
+                    session, _, endpoint = field.management_zip(root / entry['evidenceZip'])
+                    plan['endpoints'].append({'roomIds': session['roomIds'], 'address': endpoint['address'], 'port': endpoint['port']})
+                    plan['sources'].extend({'roomId': owner['roomId'], 'seat': owner['seat'] + 1, 'address': player['address']}
+                                           for owner, player in zip(session['players'], entry['players'], strict=True))
+                plan_path = root / 'distinct-network.json'
+                plan_path.write_text(json.dumps(plan), encoding='utf-8')
+                path.write_text(json.dumps(dict(manifest, venueNetworkPlan=plan_path.name)), encoding='utf-8')
+                self.assertEqual(field.verify_venue(path)['venueNetworkPlan']['verifiedSeats'], 25)
+                last_source = plan['sources'][-1]
+                extra_server = '192.168.5.254'
+                last_source['address'] = extra_server
+                plan_path.write_text(json.dumps(plan), encoding='utf-8')
+                path.write_text(json.dumps(dict(manifest, venueNetworkPlan=plan_path.name,
+                                                serverIps=manifest['serverIps'] + [extra_server])), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, f"server or non-private source: room {last_source['roomId']} seat {last_source['seat']}"):
+                    field.verify_venue(path)
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+
                 for changed, error in (
                     (server_text.replace(f"endpoint={first['address']}:5100", 'endpoint=192.168.5.250:5100'), 'Historical UDP peer'),
                     (server_text + 'VR_SERVER_ADMISSION_APPROVED id=101\n', 'every approved connection'),

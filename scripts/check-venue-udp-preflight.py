@@ -166,11 +166,14 @@ def read_retry(path, mode, plan_hash, expected, launch_check, binding, checked_a
     return valid, seen - valid.keys(), hashlib.sha256(raw).hexdigest()
 
 
-def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, launch_plan=None, retry_report=None, inbox=None):
+def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, launch_plan=None, retry_report=None, inbox=None,
+                *, require_distinct_remote_roster=False):
     document, raw = field.read_quest_document(plan)
     mode, endpoints, sources = field.parse_quest_network_plan(document, allow_shared_sources=True)
     plan_hash = hashlib.sha256(raw).hexdigest()
     field.require({room for room, _ in sources} == set(field.QUEST_ROOMS), 'Plan a source for every room')
+    if require_distinct_remote_roster:
+        field.require_distinct_remote_sources(sources, endpoints.values())
     field.require(launch_plan is None or launcher_preview is not None, 'A launch plan requires its original launcher preview')
     preview = field.read_udp_launcher_document(launcher_preview, preview=True) if launcher_preview else None
     launch_check = field.check_udp_launcher_endpoints(preview, mode, endpoints) if preview else None
@@ -285,6 +288,8 @@ def main():
     parser.add_argument('--retry-report', type=Path, help='Incomplete venue report whose verified sources should be checked again')
     parser.add_argument('--launcher-preview', type=Path, help='Original successful Launch-Server.exe --venue-check report')
     parser.add_argument('--launch-plan', type=Path, help='Original revision-guarded Windows launch plan for the provided preview')
+    parser.add_argument('--require-distinct-remote-roster', action='store_true',
+                        help='Require each planned seat to have its own private IPv4 outside the server endpoints')
     parser.add_argument('--output', required=True, type=Path, help='New readiness report (also usable for sealed verification)')
     args = parser.parse_args()
     if len(args.batch) > 25:
@@ -292,7 +297,8 @@ def main():
     try:
         field.require(not args.output.exists(), 'Use a new output file')
         result = check_venue(args.network_plan, args.pairs, args.batch, args.output.resolve(), args.launcher_preview,
-                             args.launch_plan, args.retry_report, args.inbox)
+                             args.launch_plan, args.retry_report, args.inbox,
+                             require_distinct_remote_roster=args.require_distinct_remote_roster)
         with args.output.open('x', encoding='utf-8', newline='\n') as stream:
             json.dump(result, stream, indent=2)
             stream.write('\n')

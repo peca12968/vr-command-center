@@ -1,6 +1,7 @@
 """Check sealed Windows server results against Windows player logs or Quest logcat."""
 import argparse
 from bisect import bisect_left
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_EVEN
 import hashlib
@@ -213,6 +214,23 @@ def read_venue_network_plan(path, mode, players_per_room):
                 {ipv4(address).is_loopback for address, _ in endpoints.values()}) == 1,
             'Use only loopback or only private LAN addresses in one venue network plan')
     return {'sha256': hashlib.sha256(raw).hexdigest(), 'endpoints': endpoints, 'seats': addresses}
+
+
+def require_distinct_remote_sources(seats, endpoints, server_ips=()):
+    bindings = {ipv4(address) for address, _ in endpoints}
+    require(all(any(address in network for network in LAN) for address in bindings),
+            'Distinct remote roster requires private LAN server endpoints')
+    servers = bindings | {ipv4(address) for address in server_ips}
+    by_source = defaultdict(list)
+    for seat, address in sorted(seats.items()):
+        by_source[ipv4(address)].append(f'room {seat[0]} seat {seat[1]}')
+    issues = []
+    for address, labels in by_source.items():
+        if address in servers or not any(address in network for network in LAN):
+            issues.append('server or non-private source: ' + ', '.join(labels))
+        if len(labels) > 1:
+            issues.append('shared source: ' + ', '.join(labels))
+    require(not issues, 'Distinct remote roster requires a unique private player IPv4 outside the server addresses for every seat (' + '; '.join(issues) + ')')
 
 
 def check_venue_network_session(plan, session, endpoint, binding):
@@ -2279,6 +2297,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     require(type(require_distinct_remote_roster) is bool, 'requireDistinctRemoteRoster must be a boolean')
     require(not require_distinct_remote_roster or (topology == 'direct-lan' and concurrency is not None),
             'requireDistinctRemoteRoster requires direct-lan and minimumConcurrentMilliseconds')
+    if require_distinct_remote_roster and venue_network is not None:
+        require_distinct_remote_sources(planned_seat_addresses, venue_network['endpoints'].values(), server_ips)
     verify_player_sources = manifest.get('verifyPlayerSources', False)
     require(type(verify_player_sources) is bool and (not verify_player_sources or journals),
             'Player source verification requires a boolean option and the original world journals for the full batch')

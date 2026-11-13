@@ -80,7 +80,8 @@ def launch(args):
     with tempfile.TemporaryDirectory(prefix='vr-verified-venue-') as directory:
         snapshot = Path(directory) / 'venue-plan.json'
         snapshot.write_bytes(raw_plan)
-        checked = preflight.check_venue(args.network_plan, None, [readiness], readiness, preview, snapshot)
+        checked = preflight.check_venue(args.network_plan, None, [readiness], readiness, preview, snapshot,
+                                        require_distinct_remote_roster=args.require_distinct_remote_roster)
         with readiness.open('rb') as stream:
             field.require(checked['networkPlanSha256'] == report.get('networkPlanSha256')
                           and field.limited_read(stream) == original
@@ -139,6 +140,8 @@ def main():
     parser.add_argument('--ready-report', type=Path, required=True)
     parser.add_argument('--report', type=Path, required=True)
     parser.add_argument('--start-receipt', type=Path, help='New optional receipt after the original batch seals and stops')
+    parser.add_argument('--require-distinct-remote-roster', action='store_true',
+                        help='Require each planned seat to have its own private IPv4 outside the server endpoints')
     parser.add_argument('--peer-diagnostics', action='store_true')
     args = parser.parse_args()
     try:

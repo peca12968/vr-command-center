@@ -11,7 +11,7 @@ field = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(field)
 
 
-def prepare(launch_path, preview_path, seat_path, players_per_room, device_path=None):
+def prepare(launch_path, preview_path, seat_path, players_per_room, device_path=None, *, require_distinct_remote_roster=False):
     launch = field.read_udp_launcher_document(launch_path, preview=False)
     preview = field.read_udp_launcher_document(preview_path, preview=True)
     checked = field.compare_udp_launch_documents(launch, preview)
@@ -34,6 +34,8 @@ def prepare(launch_path, preview_path, seat_path, players_per_room, device_path=
     addresses = {row['address'] for row in endpoints} | set(seats.values())
     field.require(len({field.ipv4(address).is_loopback for address in addresses}) == 1,
                   'Use only loopback or only private LAN addresses in one plan')
+    if require_distinct_remote_roster:
+        field.require_distinct_remote_sources(seats, ((row['address'], row['port']) for row in endpoints))
 
     included = seats
     if device_path is not None:
@@ -58,11 +60,14 @@ def main():
     parser.add_argument('--seat-addresses', required=True, type=Path, help='Version 1 inventory of the planned seats and their IPv4 addresses')
     parser.add_argument('--players-per-room', type=int, choices=range(1, 6), default=5)
     parser.add_argument('--quest-device-map', type=Path, help='Include only these Quest seats in the generated plan')
+    parser.add_argument('--require-distinct-remote-roster', action='store_true',
+                        help='Require each planned seat to have its own private IPv4 outside the server endpoints')
     parser.add_argument('--output', required=True, type=Path, help='New version 1 network plan JSON')
     args = parser.parse_args()
     try:
         field.require(not args.output.exists(), 'Use a new output file')
-        plan, summary = prepare(args.launch_plan, args.launcher_preview, args.seat_addresses, args.players_per_room, args.quest_device_map)
+        plan, summary = prepare(args.launch_plan, args.launcher_preview, args.seat_addresses, args.players_per_room,
+                                args.quest_device_map, require_distinct_remote_roster=args.require_distinct_remote_roster)
         payload = json.dumps(plan, indent=2) + '\n'
         with args.output.open('x', encoding='utf-8', newline='\n') as stream:
             stream.write(payload)
