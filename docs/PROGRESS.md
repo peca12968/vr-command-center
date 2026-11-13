@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 五房開場與封存核對原 UDP 報告
+
+- 新版全館預檢保存雙端原檔的 SHA-256。開場重驗拒絕同一端點重新量測後替換的檔案，也會拒絕只有換行差異的副本，並以 `changed-original` 列出受影響席位。封存驗收也核對雙端原檔。舊版無雜湊報告仍按原流程處理。 [開場操作](WINDOWS_SERVER_PACKAGE.md#以-udp-預檢報告啟動五房)
+- Windows 三包同機驗證通過 539 項。替換副本在獨立模式影響第 5 房 5 席，在合併模式影響 25 席。兩次都在啟動前拒絕，原檔齊備後各 25 個同機模擬客戶端完成入場、50 份戰績及 1,255 格封存回放。兩種模式的封存 CLI 都拒絕替換檔，並接受原始檔。16 項 LAN、122 項封存及 12 項 Quest UDP 測試通過。 [驗證摘要](../artifacts/venue-udp-original-reports-validation.json)
+- 功能提交 `70d8a1e` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地與廠商硬體仍待現地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43405875434)
+
 ## 2026-11-13 玩家視窗檢查 Windows OpenXR
 
 - 玩家包 1.16 可在載入票券前按「檢查 OpenXR」或 Alt+X。背景檢查沿用命令列規則，在視窗顯示本機清單及 x64 DLL 的檢查結果。重按會重新讀取設定。檢查保留已載入的連線檔及遊戲模式。 [玩家包與操作方式](WINDOWS_PLAYER_PACKAGE.md#windows-openxr-啟動)
