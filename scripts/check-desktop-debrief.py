@@ -33,13 +33,13 @@ def final_result(venue, name):
     return json.loads(lines[0]) if lines else None
 
 
-def validate_result(result, entry, player, sealed):
+def validate_result(result, entry, player, sealed, *, expected_origin='Simulation'):
     if not sealed['world']['complete'] or sealed['statistics']['pendingTelemetry']:
         raise ValueError('Result is not backed by both final seals')
     expected = next(p for p in sealed['statistics']['players'] if p['playerId'] == player['id'])
     if result['version'] != 1 or result['sessionId'] != entry['id'] or result['playerId'] != player['id'] or result['admissionId'] != player['admissionId']:
         raise ValueError('Debrief identity is not the original admission')
-    if result['origin'] != 'Simulation' or result['roomId'] != player['roomId'] or result['throughSequence'] != sealed['statistics']['throughSequence']:
+    if result['origin'] != expected_origin or result['roomId'] != player['roomId'] or result['throughSequence'] != sealed['statistics']['throughSequence']:
         raise ValueError('Debrief source / room / ledger sequence differs')
     for field in ['ammoUsed', 'shotsHit', 'kills', 'hitsReceived', 'damageTaken', 'health', 'accuracyPercent']:
         if result[field] != expected[field]: raise ValueError('Debrief / sealed statistics differ: ' + field)

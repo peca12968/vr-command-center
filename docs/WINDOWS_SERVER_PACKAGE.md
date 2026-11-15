@@ -1,5 +1,7 @@
 # Windows 遊戲伺服器包
 
+2026-11-16 `VRCommand-GameServer-0.50.8-1.24-win-x64.zip` 為 84,984,763 bytes，SHA-256 `9949eeb0c2f1c07ad983783e126c1bb8e93f854d2add56f8c67b5d17f5877f62`。解壓核對 331 筆清單，支援 VR 場次的 `GameServer` 追蹤來源。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.8-1.24-win-x64.zip) · [發行核對](../artifacts/venue-release-tracked-vr-0508.json)
+
 2026-11-13 `VRCommand-GameServer-0.50.7-1.23-win-x64.zip` 為 84,984,410 bytes，SHA-256 `1b5a6789d6ba8d5ea6f63495866359fc75bc33bf854b3703f391e9a936f6b2ae`。解壓核對 331 筆清單。五房批次視窗可複製本輪就緒與結果報告的完整路徑。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.7-1.23-win-x64.zip)
 
 2026-11-13 `VRCommand-GameServer-0.50.7-1.22-win-x64.zip` 為 84,983,846 bytes，SHA-256 `7043c427022e40f4f4048e6801992504671e75d9a779b260964d0aeb9d19a293`。解壓核對 331 筆清單。五房批次啟動視窗可逐房查看已登記的席號。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.7-1.22-win-x64.zip)
@@ -348,6 +350,22 @@ Quest 小批次驗證可在三包命令加上 `--check-vr-venue-tickets --check-
 
 原PC原型v3主包為`artifacts/server-packages/windows-server-0.39.0-v3-win-x64.zip`，**82,664,818 bytes**、SHA256 **`6cecfbeeffba1277000f93bc168c4ac387b825c34b73142628098dba28f67500`**，311個manifest檔案／ZIP312含manifest。v1、v2候選原件保留。沿用Unity **0.39.0／code49／NGO29／e0d60e4ed6cefe5cd885e6aabe1621939da945ce00d56b3ed8820c0aed4db879**，API/UI仍0.31.0，沒有修改Unity來源、重建Editor／APK或更新原場景／prefab ID。
 
+## VR 場次使用實機追蹤
+
+場館使用頭盔進行 VR 驗收時，在單場或「五房批次啟動」視窗勾選「VR 房間只接受追蹤姿態」。啟動器 1.24 會用 `GameServer` 來源登記該場次。遊戲伺服器 0.50.8 起，只有 `Tracked` 姿態能取得參戰狀態；玩家可用主控台的席位狀態確認追蹤。單房和五房開啟此模式時，請搭配原發行報告部署同版頭盔程式。 [Quest 單房流程](QUEST3.md#單房實機追蹤驗收)
+
+單場 `--run` 或五房 `--venue-run` 可加 `--tracked-vr on`。透過 `start-verified-venue.py` 啟動五房時加 `--tracked-vr`。有需保留的 UDP 與戰績連線證據時，可同時啟用來源診斷。一般桌面排演可沿用預設的 `Simulation`。MR 場次採用 `GameServer`，並依原房間校正與追蹤規則開場。
+
+### 無人值守時關閉私人網路入站提示
+
+新解壓路徑的遊戲程式可能觸發 Windows 安全性的入站連線提示。若這台測試電腦使用私人網路、希望自動測試期間安靜執行，請在系統管理員 PowerShell 執行以下設定。它只關閉私人網路的防火牆入站通知，現有允許及封鎖規則仍生效。 [Microsoft Windows 防火牆命令列設定](https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/configure-with-command-line)
+
+```powershell
+Set-NetFirewallProfile -Profile Private -NotifyOnListen False
+Get-NetFirewallProfile -PolicyStore ActiveStore -Name Private |
+    Select-Object Enabled, NotifyOnListen, DefaultInboundAction
+```
+
 ## 操作流程與目前限制
 
 1. 完整解壓管理、伺服器及玩家包。先開管理服務，在網頁控制台建立Preparing VR場次。
@@ -366,7 +384,7 @@ Quest 小批次驗證可在三包命令加上 `--check-vr-venue-tickets --check-
 
 每輪使用新的包外資料夾與日誌，核對 Preparing、VR／MR 模式及來源未綁定，再取得以 API 地址及場次命名的本機 mutex。UDP 探查會拒絕啟動前衝突，正式就緒另由原 Unity 程序的綁定與錄製來源確認。
 
-Unity 先核對自己的戰鬥串流識別、來源、接受序號與封存狀態，再啟動伺服器並記下 `VR_NETWORK_STARTED ... started=True ... port=...`。啟動器讀取本次啟動日誌，並透過 API 核對同場次的戰鬥串流和世界錄製來源。VR 使用 Simulation，MR 使用 GameServer。核對後以原 GameServer 角色公告連線端點，並比對回條的場次、串流、IPv4 與埠。
+Unity 先核對自己的戰鬥串流識別、來源、接受序號與封存狀態，再啟動伺服器並記下 `VR_NETWORK_STARTED ... started=True ... port=...`。啟動器讀取本次啟動日誌，並透過 API 核對同場次的戰鬥串流和世界錄製來源。VR 實機追蹤與 MR 使用 `GameServer`，一般 VR 排演使用 `Simulation`。核對後以原 GameServer 角色公告連線端點，並比對回條的場次、串流、IPv4 與埠。
 
 Windows子程序以suspended建立，先加入私人kill-on-close Job，再Resume，原生OS handle保留至實際退出。只設定KILL_ON_JOB_CLOSE，沒有改優先序、CPU／記憶體限制或系統設定。已加入Job的父程序被終止後，原Unity handle實際退出；這不是斷電恢復、未落盤queue保障，或建立程序到指派Job之間所有崩潰時點的證明。API雙seal＋36秒留存＋原child終止後，報告才complete；玩家送達欄位明確null。參考[Microsoft Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)與[AssignProcessToJobObject](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-assignprocesstojobobject)。
 

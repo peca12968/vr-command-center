@@ -236,6 +236,7 @@ def main():
     p.add_argument('--check-mr-venue-write-gate', action='store_true', help='Verify a managed MR source interruption between two mock Quest writes')
     p.add_argument('--mixed-venue-bundle-only', action='store_true', help='Verify a mixed five-room console ZIP and mapped mock Quest deployment from native publishers')
     p.add_argument('--openxr-mock-only', action='store_true', help='Verify a packaged graphical OpenXR client with the installed Unity mock runtime')
+    p.add_argument('--check-tracked-vr-source', action='store_true', help='Verify the tracked VR source with a mock OpenXR client and a desktop peer')
     p.add_argument('--check-openxr-reconnect', action='store_true', help='Interrupt the tracked UDP client and reload its ticket with the mock right Vive menu button')
     p.add_argument('--check-openxr-revocation', action='store_true', help='Reject a revoked OpenXR ticket when the same seat receives a new admission')
     p.add_argument('--openxr-mock-pose-dll', type=Path, help='Compiled tests/fixtures/openxr-mock-pose.c for the OpenXR mock check')
@@ -254,6 +255,9 @@ def main():
     if args.mr_venue_bundle_only and args.mixed_venue_bundle_only:p.error('Choose a single venue bundle check')
     if args.openxr_mock_only and (venue_only or not args.player_package):
         p.error('--openxr-mock-only requires a player package and its own native room')
+    if args.check_tracked_vr_source and (not args.openxr_mock_only or args.check_openxr_reconnect or args.check_openxr_revocation
+                                        or args.observe_closure_ui or args.hardware_simulator_package):
+        p.error('--check-tracked-vr-source requires the standalone --openxr-mock-only check')
     if args.check_openxr_reconnect and (not args.openxr_mock_only or args.game_address is not None):
         p.error('--check-openxr-reconnect requires --openxr-mock-only on loopback')
     if args.check_openxr_revocation and (not args.openxr_mock_only or args.check_openxr_reconnect):
@@ -689,11 +693,13 @@ def main():
               label + ' readiness matches the original launch plan and preview for every room group')
         return pairs
 
-    def launch(state,label, *, listen_address=None, verify_layout=True):
+    def launch(state,label, *, listen_address=None, verify_layout=True, tracked_vr=False):
         value=config(state['id'], listenAddress=listen_address or address);file=runtime/(label+'.json');file.write_text(json.dumps(value),encoding='utf-8');ready=out/(label+'-ready.json');report=out/(label+'-final.json');work=runtime/(label+'-work')
         preflight = verify_lan_preflight(value, label) if args.check_lan_preflight and label in ('room-1', 'room-2', 'room-3', 'room-4', 'room-5', 'linked') else None
         diagnostics=args.peer_diagnostics and (label=='linked' or (args.venue_field_evidence and label in {f'room-{i}' for i in range(1,6)}))
         options=['--peer-diagnostics','on'] if diagnostics else []
+        if tracked_vr:
+            options.extend(('--tracked-vr','on'))
         child=subprocess.Popen([str(exe),'--run',str(file),'--work',str(work),'--seconds','600','--ready-report',str(ready),'--report',str(report),*options],cwd=out,env=env);entry={'process':child,'readyPath':ready,'reportPath':report,'work':work,'config':value,'label':label,'sessionId':state['id'],'witness':None,'peerDiagnostics':diagnostics};runners.append(entry)
         def is_ready():
             if child.poll() is not None:raise RuntimeError('Server launcher exited before ready '+label)
@@ -3056,7 +3062,8 @@ def main():
     def check_openxr_mock():
         nonlocal observer,observer_log
         stage('native-openxr-mock')
-        label='openxr-mock'
+        tracked_vr=args.check_tracked_vr_source
+        label='tracked-vr-source' if tracked_vr else 'openxr-mock'
         pose_dll=args.openxr_mock_pose_dll.resolve(strict=True)
         tracking_loss=runtime/'openxr-tracking-loss.request'
         trigger_command=runtime/'openxr-trigger.request'
@@ -3070,7 +3077,7 @@ def main():
             reconnect_command.write_text('0',encoding='ascii')
             mock_environment.update(VR_COMMAND_OPENXR_RECONNECT_COMMAND=str(reconnect_command),
                                     VR_COMMAND_OPENXR_RECONNECT_ACK=str(reconnect_ack))
-        entry=launch(create([1],label),label)
+        entry=launch(create([1],label),label,tracked_vr=tracked_vr)
         sid=entry['sessionId']
         session='/api/sessions/'+sid
         owners=[]
@@ -3129,6 +3136,8 @@ def main():
         tracked_connection_ids=tracked_connections()
         revocation_frames=[]
         expected={owners[0]['id']:(owners[0]['admissionId'],'Simulated'),owners[1]['id']:(owners[1]['admissionId'],'Tracked')}
+        if tracked_vr:
+            expected.pop(owners[0]['id'])
         latest=None
         def readiness():
             nonlocal latest
@@ -3137,10 +3146,17 @@ def main():
             actual={row['playerId']:(row['admissionId'],row['rigKind']) for row in report['players'] if row['canParticipate']}
             return report if report['sourceState']=='Fresh' and report['observedSequence']==report['sessionSequence'] and actual==expected else None
         try:
-            wait(readiness,25,'exact simulated and tracked accepted admissions')
+            wait(readiness,25,'exact accepted admissions and rig kinds')
         finally:
             save(label+'-readiness.json',latest)
-        check(True,'management recognizes mock head and hands as tracked, and the separate desktop peer as simulated')
+        if tracked_vr:
+            rows={row['playerId']:row for row in latest['players']}
+            check(set(rows)=={owner['id'] for owner in owners} and not rows[owners[0]['id']]['canParticipate']
+                  and latest['origin']=='GameServer'
+                  and read(entry['work']/'server-config.json')['telemetryOrigin']=='GameServer',
+                  'the GameServer source accepts only the mock tracked pose after both players sign in')
+        else:
+            check(True,'management recognizes mock head and hands as tracked, and the separate desktop peer as simulated')
         if args.check_openxr_revocation:
             stage('native-openxr-revocation')
             previous=tracked['player']
@@ -3244,7 +3260,7 @@ def main():
             frame=packet['frame']
             rigs={row['id']:row['rig']['kind'] for row in frame['players'] if row['connected']}
             return packet if packet['observedSequence']>=begin and frame['phase']=='Running' and frame['tick']>=minimum_tick and rigs=={key:value[1] for key,value in expected.items()} else None
-        packet=wait(running,15,'original Running replay frame with both rig types')
+        packet=wait(running,15,'original Running replay frame with the expected rig kinds')
         save(label+'-running-pose.json',packet)
         tracked_pose=next(row for row in packet['frame']['players'] if row['id']==tracked['player']['id'])
         head=tracked_pose['head']
@@ -3294,6 +3310,35 @@ def main():
 
         def magazine_at(frame):
             return next(row['magazine'] for row in frame['frame']['players'] if row['id']==tracked_id)
+        if tracked_vr:
+            expect_trigger('0 0')
+            set_trigger('2','2 1','2 0')
+            def fired_once():
+                frame=running(packet['frame']['tick']+1)
+                return frame if frame and magazine_at(frame)==magazine-1 else None
+            fired=wait(fired_once,12,'one accepted tracked shot in the GameServer source')
+            command(sid,'End')
+            finish(entry)
+            replay=read(out/(label+'-replay.json'))
+            shots=[event for record in replay for event in record['packet']['events'] if event['kind']=='ShotFired']
+            check(entry['sealed']['world']['header']['origin']==entry['sealed']['statistics']['origin']=='GameServer'
+                  and replay[fired['sequence']-1]['packet']==fired
+                  and not any(row['rig']['kind']=='Simulated' for record in replay for row in record['packet']['frame']['players'])
+                  and len(shots)==1 and shots[0]['hasRay'] and shots[0]['playerId']==tracked_id,
+                  'the complete GameServer replay preserves the tracked shot and contains no simulated poses')
+            for client in clients_for_room:
+                log=client_log(client)
+                finals=[json.loads(line.removeprefix('VR_CLIENT_DEBRIEF_FINAL ')) for line in log.splitlines() if line.startswith('VR_CLIENT_DEBRIEF_FINAL ')]
+                connections=re.findall(r'^VR_CLIENT_CONNECTED id=(\d+)$',log,re.M)
+                check(venue.player_result_phase(log)=='acknowledged' and len(finals)==len(connections)==1,
+                      'each original connection confirms one final result')
+                debrief.validate_result(finals[0],{'id':sid},client['player'],entry['sealed'],expected_origin='GameServer')
+                check(finals[0]['ammoUsed']==int(client is tracked),'sealed ammunition matches the tracked-only shot')
+                client.update(final=finals[0],connection=int(connections[0]))
+                save(client['player']['id']+'-result.json',client['final'])
+                stop_player(client)
+            verify_delivery(entry,clients_for_room)
+            return
         if args.observe_closure_ui:
             node=shutil.which('node')
             if not node:

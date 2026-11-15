@@ -6,7 +6,7 @@ ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('server_player_package',ROOT/'scripts/package-windows-player.py');player=importlib.util.module_from_spec(spec);spec.loader.exec_module(player)
 digest=player.digest;plain=player.plain
 TOP='VRCommand-GameServer'
-README='''VR Command Windows 遊戲伺服器啟動器 1.23／Windows 遊戲程式
+README='''VR Command Windows 遊戲伺服器啟動器 1.24／Windows 遊戲程式
 
 完整解壓後開啟 Launch-Server.exe。先啟動配套的管理服務，在網頁控制台建立 Preparing VR 或 MR 場次。
 按「選擇檔案」選control-instance.json，或在路徑欄直接貼上完整檔案路徑，按 Enter 或「載入／更新」。只使用既有GameServer角色金鑰。
@@ -55,7 +55,7 @@ seconds為60..86400，期限結束仍未完成封存與36秒保留則失敗；�
 
 本機記錄：%LOCALAPPDATA%/VrCommand/GameServers（含私人金鑰）與GameServerReports。
 Windows x64與.NET Framework4.8；操作人員不需Python、Unity Editor或.NET SDK。
-VR 使用 Simulation 來源，MR 使用 GameServer 來源。遊戲建置來源見 Runtime/build-receipt.json。頭盔、實體場地和廠商硬體須另行驗收。
+VR 預設使用 Simulation 來源。頭盔測試請勾選「VR 房間只接受追蹤姿態」，或在單場／五房 CLI 啟動加 --tracked-vr on。遊戲伺服器 0.50.8 起使用 GameServer 來源並只接受追蹤姿態。MR 使用 GameServer 來源。遊戲建置來源見 Runtime/build-receipt.json。
 Windows 玩家包與 Quest APK 須使用與伺服器相同的遊戲版本。升級時先結束既有場次，再一併更新伺服器及玩家端。
 未修改防火牆、未提供NAT/中繼；跨機網路與25位同時操作須另外驗收。
 server-package.json是SHA256完整性清單，不是數位簽章。Runtime/build-receipt.json保留原實際Unity建置紀錄。
@@ -91,7 +91,7 @@ def main():
     with (stage/'compile.log').open('xb') as log:subprocess.run([str(compiler),'/nologo','/warnaserror','/codepage:65001','/target:winexe','/platform:x64','/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Web.Extensions.dll','/out:'+str(folder/'Launch-Server.exe'),str(frozen)],stdout=log,stderr=subprocess.STDOUT,check=True)
     if digest(source)!=source_hash:raise ValueError('Launcher source changed during compilation')
     (folder/'README.txt').write_text(README,encoding='utf-8')
-    manifest={'schemaVersion':1,'target':'win-x64','launcherVersion':'1.23.0','createdAtUtc':datetime.now(timezone.utc).isoformat(),'build':receipt,'launcherSourceSha256':source_hash,'scope':'Standalone server launcher; no keys, tickets or databases; manifest is not a signature.',
+    manifest={'schemaVersion':1,'target':'win-x64','launcherVersion':'1.24.0','createdAtUtc':datetime.now(timezone.utc).isoformat(),'build':receipt,'launcherSourceSha256':source_hash,'scope':'Standalone server launcher; no keys, tickets or databases; manifest is not a signature.',
         'files':[{'path':p.relative_to(folder).as_posix(),'bytes':p.stat().st_size,'sha256':digest(p)} for p in sorted(folder.rglob('*')) if p.is_file()]}
     (folder/'server-package.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8');verify(folder)
     output=plain(args.output);output.parent.mkdir(parents=True,exist_ok=True)

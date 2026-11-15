@@ -1,5 +1,7 @@
 # Quest 3 接入與工具鏈
 
+2026-11-16 Quest 開發 APK `0.50.8`／73 為 61,039,210 bytes，SHA-256 `04a84cdb6739891c8ff8fd5da7874e6239e15140f27fa0960553d89d3ee3d9e9`。通過 ARM64、SDK 32／35、OpenXR 程式庫、APK v2 簽章及同版 Windows 來源核對。實體部署待 USB 偵錯接通。 [APK](../artifacts/quest/VrCommand.apk) · [發行報告](../artifacts/venue-release-tracked-vr-0508.json)
+
 2026-11-11 Quest 開發 APK 0.50.7／72 為 61,037,854 bytes，SHA-256 `74457e3422ae4d312ba4d073fca1e3e982aedc55bccf9312656a21c638cf0473`。發行核對通過 ARM64、最低 SDK 32、目標 SDK 35、OpenXR 預載及 APK v2 開發簽章。安裝與操作待頭盔。 [APK](../artifacts/quest-packages/vr-command-quest-0.50.7-arm64-debug.apk) · [發行核對](../artifacts/venue-release-0.50.7-local-profiler.json)
 
 2026-11-11 Quest 開發 APK 0.50.6／71 為 61,037,858 bytes，SHA-256 `d8047b1358b4f6ef355b15791b44a747977a56b0e2d62a7bf8cdf977d6a6a79a`。已核對 ARM64、最低 SDK 32、目標 SDK 35、APK v2 開發簽章與 OpenXR 預載。 [APK](../artifacts/quest-packages/vr-command-quest-0.50.6-arm64-debug.apk) · [發行核對](../artifacts/venue-release-0.50.6-xr-startup.json)
@@ -20,12 +22,19 @@
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -SmokeTest -Serial '<ADB 序號>' `
-  -ReleaseReport .\artifacts\venue-release-control-195.json
+  -ReleaseReport .\artifacts\venue-release-tracked-vr-0508.json
 ```
 
 工具核對指定 Quest 3，在目前 Android 使用者下安裝 APK，並讀回裝置上的 APK 雜湊。沒有既有玩家設定時，工具等待 Android 確認啟動，接著讀取該程序的 Unity 與 AndroidRuntime 日誌，並在三秒後重查原程序。成功輸出 JSON 的 `status` 為 `process-observed`。`unityLogLines` 是查到的 Unity 日誌列數，允許為零。工具遇到既有安裝會停止，若安裝後檢查失敗，已安裝的 APK 仍留在頭盔上。
 
-這項檢查無需玩家票券。後續備妥測試場次，依[區域網路原型操作](#區域網路原型操作)部署新配發的玩家設定，再驗證入場、OpenXR 追蹤、MR 對位及操作。
+這項檢查無需玩家票券。後續備妥測試場次，依[單房實機追蹤驗收](#單房實機追蹤驗收)部署新配發的玩家設定，再驗證入場、OpenXR 追蹤、MR 對位及操作。
+
+### 單房實機追蹤驗收
+
+1. 啟動 Windows 管理服務。用主控台建立一場單房 VR 任務，將 Quest 3 玩家登記在該房。
+2. 從伺服器啟動器選擇同一場次，填入頭盔能連到的場館 IPv4 及 UDP 埠。勾選「VR 房間只接受追蹤姿態」及「記錄本次玩家連線來源（場館驗收）」。CLI 使用 `--tracked-vr on --peer-diagnostics on`。 [伺服器操作](WINDOWS_SERVER_PACKAGE.md#vr-場次使用實機追蹤)
+3. 等伺服器就緒，在主控台下載同一席的最新連線檔，再用 `deploy-quest.ps1 -ClientConfig` 及原發行報告部署。頭盔入場後，核對本房名冊的席位、`Tracked` 狀態及玩家頭手是否正確。
+4. 開始任務前啟動[原始日誌擷取](#收集-quest-場館驗收日誌)。結束後保持遊戲開啟至戰績確認完成，保存伺服器的戰鬥與世界封存及同一席的日誌。 [單場封存核對](EXTERNAL_CLIENTS.md#核對封存戰績與-udp-來源)
 
 ## 開場前從頭盔執行 UDP 預檢
 
@@ -231,7 +240,7 @@ embedded package `com.vrcommand.simulation` 現為 0.11.0。Runtime asmdef 已�
 
 ## 區域網路原型操作
 
-以下頭盔與區域網路操作仍待驗證；目前僅有同機 Windows server／雙 client 的實際執行證據。管理 API 預設留在伺服器本機 `127.0.0.1:5080`；頭盔只連遊戲伺服器的 UDP 7777。同一場館網路與防火牆須允許該連線；此原型沒有遠端中繼或網際網路部署。
+以下原型流程使用 `Simulation` 來源。管理 API 預設留在伺服器本機 `127.0.0.1:5080`，玩家只連遊戲伺服器的 UDP 7777。場館網路與防火牆須允許該連線。實機驗收請使用[單房實機追蹤驗收](#單房實機追蹤驗收)。
 
 1. 用 `.\scripts\start-local.ps1` 啟動 API，保留其視窗。
 2. 建置桌面與 Quest 後，再產生連線資料，避免票券在建置期間到期：

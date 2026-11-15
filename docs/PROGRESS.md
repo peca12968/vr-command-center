@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 VR 場次接受追蹤姿態
+
+- Windows 啟動器 1.24 在單房或五房可選 `--tracked-vr on`，並支援同一選項的圖形操作。Unity 0.50.8 以 `GameServer` 發布這類 VR 場次，只接受 `Tracked` 姿態。一般桌面排演採原 `Simulation` 模式。 [伺服器操作](WINDOWS_SERVER_PACKAGE.md#vr-場次使用實機追蹤)
+- Windows 單房使用實際 Unity 伺服器、OpenXR 模擬玩家與桌面玩家，通過 72 項。76 格完整回放沒有桌面模擬姿態，追蹤玩家在封存保留一發射擊，逐席統計、兩份戰績和 CSV 相符。原 `Simulation` 對照場通過 80 項、112 格完整回放，也核對了追蹤中斷及恢復。首輪共用戰績驗證器只接受 `Simulation`，造成測試失敗。修正為明確核對各場來源後重跑通過。 [追蹤場](../artifacts/server-package-checks/run-90d9e8c7bd5a45d3bab7102735ff9c4c/) · [排演場](../artifacts/server-package-checks/run-330b85e1f5084f1ebec21e5bc3270577/)
+- 273 項 Unity EditMode、47 項 Python 相關檢查通過。Windows 伺服器、玩家各有 331 筆清單，Quest 0.50.8／73 通過 ARM64、OpenXR 程式庫、同源網路識別及 APK v2 簽章核對。原 0.50.7 兩平台輸出與紀錄已封存。五房新追蹤模式、實體頭盔及跨機驗收仍待完成。 [發行報告](../artifacts/venue-release-tracked-vr-0508.json)
+
 ## 2026-11-16 Quest 3 首次安裝與啟動檢查
 
 - 部署工具新增 `-SmokeTest`。可核對原發行 APK、指定 Quest 3、安裝及讀回雜湊，再確認 Android 啟動結果、讀取該程序的日誌並觀察程序存活。已安裝的套件會停止首次安裝流程。場次入場、追蹤及 MR 對位另做實機測試。 [操作方式](QUEST3.md#首次安裝與啟動檢查)

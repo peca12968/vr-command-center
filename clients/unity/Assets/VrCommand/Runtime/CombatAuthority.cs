@@ -300,7 +300,7 @@ namespace VrCommand.Unity
         }
         public bool AcceptPose(ulong client, AvatarPose pose, Vector3 root, Quaternion rotation)
         {
-            if (!IsServer || !serverReady || !pose.Valid()) return false;
+            if (!IsServer || !serverReady || !pose.Valid() || (Outbox?.Origin == "GameServer" && pose.source != 2)) return false;
             var admission = VenueBootstrap.Instance?.Admission(client);
             if (admission == null || !Guid.TryParse(admission.playerId, out var player)) return false;
             var forward = rotation * pose.rightRotation * Vector3.forward;

@@ -137,6 +137,8 @@ def launch(args):
                    '--seconds', str(args.seconds), '--ready-report', str(ready_path), '--report', str(result_path)]
         if args.peer_diagnostics:
             command.extend(('--peer-diagnostics', 'on'))
+        if args.tracked_vr:
+            command.extend(('--tracked-vr', 'on'))
         with subprocess.Popen(command) as process:
             try:
                 code = process.wait()
@@ -187,6 +189,7 @@ def main():
     parser.add_argument('--require-distinct-remote-roster', action='store_true',
                         help='Require each planned seat to have its own private IPv4 outside the server endpoints')
     parser.add_argument('--peer-diagnostics', action='store_true')
+    parser.add_argument('--tracked-vr', action='store_true', help='Launch VR rooms with GameServer evidence and accept tracked poses only')
     args = parser.parse_args()
     launch_options = ('launcher', 'work', 'seconds', 'ready_report', 'report')
     if args.verify_only:

@@ -63,6 +63,18 @@ internal static class ServerLauncher
         while (folders.Count > 0) { var folder = folders.Pop(); Plain(folder); foreach (var file in Directory.GetFiles(folder)) { Plain(file); Need(actual.Add(file.Substring(Root.Length + 1).Replace('\\', '/')), "伺服器包路徑重複。"); } foreach (var child in Directory.GetDirectories(folder)) { Plain(child); folders.Push(child); } }
         var expected = new HashSet<string>(seen, StringComparer.OrdinalIgnoreCase); expected.Add("server-package.json"); Need(actual.SetEquals(expected), "程式包有額外檔案；私人設定與結果須放在包外。");
     }
+    static void RequireTrackedVrBuild()
+    {
+        var build = Read(Path.Combine(Root, "Runtime", "build-receipt.json"), 8192);
+        Need(Num(build, "trackedVrSourceVersion") == 1, "VR 實機追蹤需要支援追蹤來源的遊戲伺服器 0.50.8 或以上版本。");
+    }
+    static bool TrackedVrOption(Dictionary<string, string> options)
+    {
+        string value;
+        if (!options.TryGetValue("--tracked-vr", out value)) return false;
+        Need(value == "on", "VR 實機追蹤只接受 on。");
+        return true;
+    }
     internal static string IPv4(string value, bool wildcard)
     {
         Need(value != null, "需要IPv4地址。"); var parts = value.Split('.'); Need(parts.Length == 4, "IPv4格式錯誤。");
@@ -488,9 +500,15 @@ internal static class ServerLauncher
             Config = config; Work = Full(work); Plain(Work); Need(!Inside(Work, Root) && !Inside(Root, Work) && !Directory.Exists(Work) && !File.Exists(Work), "請使用程式包之外的新資料夾。");
         }
         internal void Start(Func<bool> cancelled = null, bool peerDiagnostics = false, bool packageVerified = false,
-            Action beforeNative = null, bool deferPublication = false, Action candidateReady = null)
+            Action beforeNative = null, bool deferPublication = false, Action candidateReady = null, bool trackedVr = false)
         {
-            Config.Validate(); if (!packageVerified) Verify(); Config.Identity(); var state = Config.Request("/api/sessions/" + Config.Session);
+            Config.Validate();
+            if (!packageVerified)
+            {
+                Verify();
+                if (trackedVr) RequireTrackedVrBuild();
+            }
+            Config.Identity(); var state = Config.Request("/api/sessions/" + Config.Session);
             var experience = Text(Child(state, "environment"), "mode");
             object streamValue;
             Need(Text(state, "id") == Config.Session && Text(state, "state") == "Preparing" && state.TryGetValue("combatStream", out streamValue) && streamValue == null
@@ -500,7 +518,7 @@ internal static class ServerLauncher
                 var missing = Choice.MissingAlignment(state, Choice.ReadRooms(state, Text(state, "mode")));
                 if (missing.Length > 0) throw new InvalidDataException(Choice.AlignmentPrompt(missing));
             }
-            Origin = experience == "MR" ? "GameServer" : "Simulation";
+            Origin = experience == "MR" || trackedVr ? "GameServer" : "Simulation";
             string name; using (var sha = SHA256.Create()) name = Hex(sha.ComputeHash(Encoding.UTF8.GetBytes(Config.Api + "/" + Config.Session)));
             bool created; lease = new Mutex(true, "Local\\VRCommand.Server." + name, out created); ownsLease = created; Need(created, "此場次已有本機啟動器。");
             Config.CheckPort();
@@ -733,7 +751,8 @@ internal static class ServerLauncher
         outputValid = false;
         string diagnostics; var peerDiagnostics = options.TryGetValue("--peer-diagnostics", out diagnostics);
         Need(!peerDiagnostics || diagnostics == "on", "來源診斷只接受 on。");
-        Need(options.Count == (peerDiagnostics ? 6 : 5) && options.ContainsKey("--work")
+        var trackedVr = TrackedVrOption(options);
+        Need(options.Count == 5 + (peerDiagnostics ? 1 : 0) + (trackedVr ? 1 : 0) && options.ContainsKey("--work")
             && options.ContainsKey("--seconds") && options.ContainsKey("--ready-report"), "需要venue-run/work/seconds/ready-report/report五個參數。");
         int seconds; Need(Int32.TryParse(options["--seconds"], out seconds) && seconds >= 60 && seconds <= 86400, "執行期限須為60至86400秒。");
         var planPath = Full(options["--venue-run"]); var work = Full(options["--work"]);
@@ -749,7 +768,7 @@ internal static class ServerLauncher
         Output(report, work); Output(ready, work);
         Need(!String.Equals(Full(report), Full(ready), StringComparison.OrdinalIgnoreCase), "結果路徑不能重複。");
         outputValid = true;
-        return ExecuteVenue(LoadVenuePlan(plan, instancePath), work, seconds, ready, report, peerDiagnostics, () => false);
+        return ExecuteVenue(LoadVenuePlan(plan, instancePath), work, seconds, ready, report, peerDiagnostics, () => false, trackedVr);
     }
 
     static string VenueInstancePath(Dictionary<string, object> plan)
@@ -826,9 +845,10 @@ internal static class ServerLauncher
                 "房間 " + String.Join("、", server.Choice.Rooms) + " 的原遊戲程序或 UDP 綁定已失效。");
     }
 
-    static int ExecuteVenue(VenuePlan plan, string work, int seconds, string ready, string report, bool peerDiagnostics, Func<bool> cancel)
+    static int ExecuteVenue(VenuePlan plan, string work, int seconds, string ready, string report, bool peerDiagnostics, Func<bool> cancel, bool trackedVr)
     {
         Need(!cancel(), "已中止啟動；此輪未完成。");
+        if (trackedVr) RequireTrackedVrBuild();
         var servers = plan.Servers;
         var launchId = plan.Version >= 4 ? Guid.NewGuid().ToString("D") : null;
         foreach (var server in servers)
@@ -880,7 +900,7 @@ internal static class ServerLauncher
                                 {
                                     signaledCandidate = true;
                                     candidates.Signal();
-                                });
+                                }, trackedVr: trackedVr);
                                 server.Ready = true;
                             }
                             catch (Exception error) { server.Error = Safe(error); gate.Abort = true; }
@@ -1027,6 +1047,7 @@ internal static class ServerLauncher
         readonly Button copyReady = new Button { Text = "複製就緒路徑", Enabled = false },
             copyFinal = new Button { Text = "複製結果路徑", Enabled = false };
         readonly CheckBox peers = new CheckBox { Text = "記錄本次玩家連線來源（場館驗收）", AutoSize = true };
+        readonly CheckBox tracked = new CheckBox { Text = "VR 房間只接受追蹤姿態", AutoSize = true };
         readonly Label summary = new Label { AutoEllipsis = true };
         readonly Label copyFeedback = new Label { AutoEllipsis = true };
         readonly ListView rooms = new ListView { View = View.Details, FullRowSelect = true, ShowItemToolTips = true, AccessibleName = "五房計畫明細" };
@@ -1048,7 +1069,7 @@ internal static class ServerLauncher
             rooms.Columns.Add("房間", 92); rooms.Columns.Add("已登記席號", 138); rooms.Columns.Add("任務", 202);
             rooms.Columns.Add("場次 ID", 325); rooms.Columns.Add("公告位址與 UDP", 184);
             Add(rooms, 22, 126, 956, 195);
-            Add(peers, 22, 329, 600, 29); Add(start, 22, 368, 165, 36); Add(abort, 200, 368, 165, 36);
+            Add(peers, 22, 329, 480, 29); Add(tracked, 520, 329, 430, 29); Add(start, 22, 368, 165, 36); Add(abort, 200, 368, 165, 36);
             Add(copyReady, 378, 368, 150, 36); Add(copyFinal, 540, 368, 150, 36);
             Add(copyFeedback, 702, 374, 276, 30);
             Add(status, 22, 416, 956, 56);
@@ -1127,14 +1148,14 @@ internal static class ServerLauncher
 
         void Background(Action work, Action<Exception> complete)
         {
-            busy = true; path.Enabled = browse.Enabled = check.Enabled = start.Enabled = peers.Enabled = false;
+            busy = true; path.Enabled = browse.Enabled = check.Enabled = start.Enabled = peers.Enabled = tracked.Enabled = false;
             new Thread(delegate()
             {
                 Exception failure = null;
                 try { work(); } catch (Exception error) { failure = error; }
                 BeginInvoke((Action)delegate
                 {
-                    busy = false; path.Enabled = browse.Enabled = check.Enabled = peers.Enabled = true;
+                    busy = false; path.Enabled = browse.Enabled = check.Enabled = peers.Enabled = tracked.Enabled = true;
                     abort.Enabled = false; readyPath = null;
                     complete(failure);
                     start.Enabled = preview != null;
@@ -1165,6 +1186,7 @@ internal static class ServerLauncher
             if (reviewed == null || busy) return;
             var selectedPath = path.Text.Trim();
             var capturePeers = peers.Checked;
+            var trackedVr = tracked.Checked;
             SetReports(null, null);
             cancel = false; readyShown = false; abort.Enabled = true;
             status.Text = "正在重新核對計畫，然後啟動全館。";
@@ -1187,10 +1209,10 @@ internal static class ServerLauncher
                 Plain(runs); Plain(reports);
                 Directory.CreateDirectory(runs); Directory.CreateDirectory(reports);
                 Output(ready, work); Output(report, work);
-                result = ExecuteVenue(current, work, 86400, ready, report, capturePeers, () => cancel);
+                result = ExecuteVenue(current, work, 86400, ready, report, capturePeers, () => cancel, trackedVr);
             }, failure =>
             {
-                preview = null; rooms.Items.Clear(); peers.Checked = false;
+                preview = null; rooms.Items.Clear(); peers.Checked = tracked.Checked = false;
                 status.Text = result == 0 ? "全館任務已封存並停止。"
                     : "未完成：" + (failure != null ? Safe(failure) : "請核對各房結果。");
                 SetReports(ready, report);
@@ -1208,6 +1230,7 @@ internal static class ServerLauncher
         readonly Button open = new Button { Text = "選擇檔案" }, refresh = new Button { Text = "載入／更新" }, start = new Button { Text = "啟動伺服器 (&S)", Enabled = false }, abort = new Button { Text = "中止伺服器", Enabled = false },
             venue = new Button { Text = "五房批次啟動 (&V)" };
         readonly CheckBox peerDiagnostics = new CheckBox { Text = "記錄本次玩家連線來源（場館驗收）" };
+        readonly CheckBox tracked = new CheckBox { Text = "VR 房間只接受追蹤姿態" };
         readonly Label state = new Label { Text = "先啟動管理服務，再載入其管理實例。", AutoSize = false }, detail = new Label { Text = "請先載入，再明確選擇要啟動的房間與任務。", AutoEllipsis = true };
         readonly CatalogState catalog = new CatalogState(); Run active; volatile bool cancel; Thread worker; bool loading;
         internal Window()
@@ -1220,6 +1243,7 @@ internal static class ServerLauncher
             Add(new Label { Text = "公告IPv4", AutoSize = true }, 24, 327, 210, 28); Add(address, 24, 358, 230, 32); Add(new Label { Text = "本機綁定IPv4", AutoSize = true }, 284, 327, 230, 28); Add(bind, 284, 358, 230, 32); Add(new Label { Text = "UDP 埠 (&P)", AutoSize = true }, 544, 327, 130, 28); Add(port, 544, 358, 130, 32);
             Add(peerDiagnostics, 24, 400, 430, 30);
             Add(new Label { Text = "開啟後，來源 IP 與埠會寫入本機私有 server.log。", AutoSize = true }, 463, 404, 427, 28);
+            Add(tracked, 24, 427, 430, 23);
             Add(start, 24, 452, 260, 40); Add(abort, 310, 452, 260, 40); Add(venue, 630, 452, 260, 40); Add(state, 24, 510, 866, 64);
             selected.TextChanged += delegate { catalog.Edit(selected.Text); start.Enabled = session.Enabled = false; detail.Text = "路徑已變更，請重新載入；未沿用舊場次。"; };
             open.Click += async delegate
@@ -1282,10 +1306,11 @@ internal static class ServerLauncher
             var work = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrCommand", "GameServers", DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N"));
             var reports = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrCommand", "GameServerReports"); Directory.CreateDirectory(reports); var report = Path.Combine(reports, Guid.NewGuid().ToString("N") + ".json");
             var capturePeers = peerDiagnostics.Checked;
-            active = new Run(config, work); cancel = false; open.Enabled = refresh.Enabled = start.Enabled = selected.Enabled = address.Enabled = bind.Enabled = port.Enabled = session.Enabled = peerDiagnostics.Enabled = venue.Enabled = false; abort.Enabled = true;
-            worker = new Thread(delegate() { string error = null; try { active.Start(() => cancel, capturePeers); active.Wait(86400, () => cancel); } catch (Exception e) { error = Safe(e); } finally { try { active.Dispose(); } catch (Exception e) { error = Safe(e); } }
+            var trackedVr = tracked.Checked;
+            active = new Run(config, work); cancel = false; open.Enabled = refresh.Enabled = start.Enabled = selected.Enabled = address.Enabled = bind.Enabled = port.Enabled = session.Enabled = peerDiagnostics.Enabled = tracked.Enabled = venue.Enabled = false; abort.Enabled = true;
+            worker = new Thread(delegate() { string error = null; try { active.Start(() => cancel, capturePeers, trackedVr: trackedVr); active.Wait(86400, () => cancel); } catch (Exception e) { error = Safe(e); } finally { try { active.Dispose(); } catch (Exception e) { error = Safe(e); } }
                 try { Save(report, active.Report(active.Complete && active.Cleanup ? "sealed-stopped" : "incomplete", error)); } catch (Exception e) { error = Safe(e); }
-                var final = error == null && active.Complete && active.Cleanup ? "任務已封存並停止。" : "未完成：" + (error ?? "封存未確認。"); BeginInvoke((Action)delegate { active = null; catalog.Edit(selected.Text); session.Enabled = false; detail.Text = "此輪已收尾；再次啟動前請重新載入場次。"; state.Text = final + " 結果：" + report; peerDiagnostics.Checked = false; open.Enabled = refresh.Enabled = selected.Enabled = address.Enabled = bind.Enabled = port.Enabled = peerDiagnostics.Enabled = venue.Enabled = true; abort.Enabled = false; }); }); worker.IsBackground = false; worker.Start();
+                var final = error == null && active.Complete && active.Cleanup ? "任務已封存並停止。" : "未完成：" + (error ?? "封存未確認。"); BeginInvoke((Action)delegate { active = null; catalog.Edit(selected.Text); session.Enabled = false; detail.Text = "此輪已收尾；再次啟動前請重新載入場次。"; state.Text = final + " 結果：" + report; peerDiagnostics.Checked = tracked.Checked = false; open.Enabled = refresh.Enabled = selected.Enabled = address.Enabled = bind.Enabled = port.Enabled = peerDiagnostics.Enabled = tracked.Enabled = venue.Enabled = true; abort.Enabled = false; }); }); worker.IsBackground = false; worker.Start();
         }
     }
     [STAThread] static int Main(string[] args)
@@ -1313,11 +1338,12 @@ internal static class ServerLauncher
             string diagnostics;
             var peerDiagnostics = options.TryGetValue("--peer-diagnostics", out diagnostics);
             Need(!peerDiagnostics || diagnostics == "on", "來源診斷只接受 on。");
-            Need(options.Count == (peerDiagnostics ? 6 : 5) && options.ContainsKey("--run") && options.ContainsKey("--work") && options.ContainsKey("--seconds") && options.ContainsKey("--ready-report"), "需要run/work/seconds/ready-report/report五個參數。");
+            var trackedVr = TrackedVrOption(options);
+            Need(options.Count == 5 + (peerDiagnostics ? 1 : 0) + (trackedVr ? 1 : 0) && options.ContainsKey("--run") && options.ContainsKey("--work") && options.ContainsKey("--seconds") && options.ContainsKey("--ready-report"), "需要run/work/seconds/ready-report/report五個參數。");
             int seconds; Need(Int32.TryParse(options["--seconds"], out seconds) && seconds >= 60 && seconds <= 86400, "執行期限須為60至86400秒。");
             var configPath = Full(options["--run"]); var work = Full(options["--work"]); Need(!Inside(configPath, Root) && !Inside(configPath, work) && !Inside(work, configPath), "設定必須在程式包與新資料夾之外。");
             Output(report, work); Output(options["--ready-report"], work); Need(!String.Equals(Full(report), Full(options["--ready-report"]), StringComparison.OrdinalIgnoreCase), "結果路徑不能重複。");
-            run = new Run(Settings.From(Read(configPath, 8192)), work); run.Start(peerDiagnostics: peerDiagnostics); Save(options["--ready-report"], run.Ready()); run.Wait(seconds, () => false);
+            run = new Run(Settings.From(Read(configPath, 8192)), work); run.Start(peerDiagnostics: peerDiagnostics, trackedVr: trackedVr); Save(options["--ready-report"], run.Ready()); run.Wait(seconds, () => false);
         }
         catch (Exception e) { error = Safe(e); }
         finally { if (run != null) try { run.Dispose(); } catch (Exception e) { error = Safe(e); } }

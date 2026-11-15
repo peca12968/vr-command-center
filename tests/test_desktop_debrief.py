@@ -20,6 +20,13 @@ class DebriefEvidenceTests(unittest.TestCase):
             'origin': 'Simulation', 'streamId': 'stream', 'worldSequence': 27, 'throughSequence': 42, **self.metrics}
     def test_exact_sealed_native_result_is_accepted(self):
         self.assertEqual(self.result, debrief.validate_result(self.result, self.entry, self.player, self.sealed))
+    def test_game_server_result_requires_the_explicit_source(self):
+        result = {**self.result, 'origin': 'GameServer'}
+        self.assertEqual(result, debrief.validate_result(result, self.entry, self.player, self.sealed, expected_origin='GameServer'))
+        with self.assertRaises(ValueError):
+            debrief.validate_result(result, self.entry, self.player, self.sealed)
+        with self.assertRaises(ValueError):
+            debrief.validate_result(self.result, self.entry, self.player, self.sealed, expected_origin='GameServer')
     def test_old_or_foreign_admission_is_rejected(self):
         for field in ['sessionId', 'playerId', 'admissionId']:
             with self.subTest(field=field):
