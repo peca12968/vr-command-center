@@ -4,6 +4,7 @@
 
 - `-VerifyPlayerTracking` 的成功回條包含原入場雜湊。戰後的 `--quest-readiness-report` 將每席回條對回原始 Quest 日誌、已封存的 GameServer 準備畫格及戰績入場。摘要列出核對後的世界序號、管理序號與席位數。 [保存開場回條](QUEST3.md#單房實機追蹤驗收) · [戰後核對](EXTERNAL_CLIENTS.md#核對單場-quest-開場追蹤回條)
 - 本機通過 124 項封存與場館驗收測試、62 項 Quest 部署與擷取測試。涵蓋同房兩席順序互換，以及拒絕錯誤入場、重複席位、任務開始後畫格、缺少原封存與 Windows 日誌替代。使用測試資料與模擬 ADB。現有 ADB 服務回報零台，實機追蹤、跨機與場館驗收仍待進行。
+- 功能提交 `0729b9e` 已推送。GitHub Actions 回報帳務或支出上限阻擋，工作執行步驟數為零。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43756585627/job/132941904932)
 
 ## 2026-11-16 Quest 3 更新票券前重新核對入場
 
