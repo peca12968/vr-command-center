@@ -25,6 +25,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 ADB_FIXTURE = r"""
 $remote = Join-Path $env:QUEST_TEST_ROOT 'remote'
+$installedApp = Join-Path $env:QUEST_TEST_ROOT 'installed-app'
 [IO.File]::AppendAllText((Join-Path $env:QUEST_TEST_ROOT 'adb.log'), (($args -join ' ') + "`n"))
 if ($args[0] -eq 'devices') {
     "List of devices attached"
@@ -41,6 +42,11 @@ switch ($args[2]) {
         }
         if ($env:QUEST_TEST_ALTER_ALIGNMENT) {
             [IO.File]::WriteAllText($env:QUEST_TEST_ALTER_ALIGNMENT, '{}')
+        }
+        if ($args[3] -ceq '-R') {
+            if ($env:QUEST_TEST_FAIL -eq 'install-rejected') { 'Failure [INSTALL_FAILED_ALREADY_EXISTS]'; exit 0 }
+            [IO.File]::WriteAllText($installedApp, 'installed')
+            'Success'
         }
         exit 0
     }
@@ -76,6 +82,16 @@ switch ($args[2]) {
                 exit 0
             }
             'pm' {
+                if (($args[4..9] -join ' ') -ceq 'list packages -u --user current com.vrcommand.quest') {
+                    if (Test-Path -LiteralPath $installedApp) { 'package:com.vrcommand.quest' }
+                    exit 0
+                }
+                if (($args[4..13] -join ' ') -ceq 'resolve-activity --brief --user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p com.vrcommand.quest') {
+                    if ($env:QUEST_TEST_FAIL -eq 'missing-activity') { 'No activity found'; exit 0 }
+                    'priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=false'
+                    'com.vrcommand.quest/com.unity3d.player.UnityPlayerActivity'
+                    exit 0
+                }
                 if ($env:QUEST_TEST_RELEASE_HASH -and ($args[4..7] -join ' ') -ceq 'path --user current com.vrcommand.quest') {
                     'package:/data/app/fixture/base.apk'; exit 0
                 }
@@ -104,9 +120,36 @@ switch ($args[2]) {
                 Remove-Item -LiteralPath (Join-Path $remote ($args[5].Split('/')[-1])) -ErrorAction SilentlyContinue
                 exit 0
             }
-            'am' { if ($env:QUEST_TEST_FAIL -eq 'force-stop') { exit 1 }; exit 0 }
+            'test' {
+                if (($args[4..6] -join ' ') -cne '! -e /sdcard/Android/data/com.vrcommand.quest/files/vr-connection.json') { exit 98 }
+                if (Test-Path -LiteralPath (Join-Path $remote 'vr-connection.json')) { exit 1 }
+                exit 0
+            }
+            'pidof' {
+                if ($args[4] -cne 'com.vrcommand.quest') { exit 98 }
+                if ($env:QUEST_TEST_FAIL -eq 'process-restarted' -and (Test-Path -LiteralPath (Join-Path $remote 'observed-process'))) { '4243' }
+                else { '4242' }
+                exit 0
+            }
+            'am' {
+                if ($env:QUEST_TEST_FAIL -eq 'force-stop') { exit 1 }
+                if ($args[4] -ceq 'start') {
+                    if (($args[5..13] -join ' ') -cne '-W --user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n com.vrcommand.quest/com.unity3d.player.UnityPlayerActivity') { exit 98 }
+                    if ($env:QUEST_TEST_FAIL -eq 'launch-timeout') { 'Status: timeout' } else { 'Status: ok' }
+                    'Activity: com.vrcommand.quest/com.unity3d.player.UnityPlayerActivity'
+                }
+                exit 0
+            }
             { $_ -in @('mkdir', 'monkey') } { exit 0 }
         }
+    }
+    'logcat' {
+        if (($args[3..11] -join ' ') -cne '-d -t 1000 --pid=4242 -v brief -s Unity AndroidRuntime') { exit 98 }
+        if ($env:QUEST_TEST_FAIL -eq 'log-unavailable') { exit 1 }
+        if ($env:QUEST_TEST_FAIL -eq 'process-restarted') { [IO.File]::WriteAllText((Join-Path $remote 'observed-process'), '4242') }
+        if ($env:QUEST_TEST_FAIL -eq 'process-crashed') { 'E/AndroidRuntime( 4242): FATAL EXCEPTION: main' }
+        'I/Unity   ( 4242): startup fixture log'
+        exit 0
     }
 }
 exit 98
@@ -213,6 +256,75 @@ class QuestDeployTests(unittest.TestCase):
         self.assertIn(' shell monkey ', commands[-1])
         self.assertEqual(self.player, json.loads((self.remote/'vr-connection.json').read_bytes()))
         self.assertEqual(expected, hashlib.sha256(apk.read_bytes()).hexdigest())
+
+    def run_smoke(self, serial='fixture', failure=''):
+        apk = self.root / 'sample.apk'
+        apk.write_bytes(b'first-launch test APK')
+        expected = hashlib.sha256(apk.read_bytes()).hexdigest()
+        release = self.root / 'release.json'
+        self.write(release, {'verified': True, 'scope': 'offline-package-consistency', 'quest': {
+            'applicationId': 'com.vrcommand.quest', 'architecture': 'arm64-v8a', 'signatureV2': True,
+            'versionCode': 72, 'sha256': expected}})
+        env = {**os.environ, 'QUEST_TEST_ROOT': str(self.root), 'QUEST_TEST_FAIL': failure,
+               'QUEST_TEST_ALTER_ALIGNMENT': '', 'QUEST_TEST_RELEASE_HASH': expected}
+        return subprocess.run(['pwsh','-NoProfile','-NonInteractive','-File',str(self.script), '-SmokeTest',
+                               '-Serial', serial, '-AdbPath', str(self.adb), '-ApkPath', str(apk), '-ReleaseReport', str(release)],
+                              env=env, capture_output=True, encoding='utf-8', timeout=25)
+
+    def test_fresh_quest_launch_verifies_apk_and_observes_started_process(self):
+        result = self.run_smoke()
+        self.assertEqual(0, result.returncode, result.stderr)
+        receipt = json.loads(result.stdout)
+        self.assertEqual(('quest-first-launch', 'process-observed', 'Quest 3', 72, True, 3, 1),
+                         tuple(receipt[key] for key in ('phase', 'status', 'model', 'versionCode', 'apkVerified',
+                                                        'processObservationSeconds', 'unityLogLines')))
+        self.assertEqual(hashlib.sha256((self.root/'sample.apk').read_bytes()).hexdigest(), receipt['apkSha256'])
+        self.assertNotIn('startup fixture log', result.stdout)
+        commands = self.commands.read_text(encoding='utf-8').splitlines()
+        staged = commands[3].split(' --pkg com.vrcommand.quest ', 1)[1]
+        self.assertIn(' install -R --user current ', commands[3])
+        self.assertFalse(Path(staged).exists())
+        self.assertIn('sha256sum /data/app/fixture/base.apk', commands[5])
+        self.assertIn(' shell pm resolve-activity ', commands[7])
+        self.assertIn(' shell am start -W ', commands[8])
+        self.assertIn(' logcat -d ', commands[10])
+        self.assertFalse(list(self.remote.iterdir()))
+        self.assert_rejected(self.run_smoke(), 'requires a headset without an existing VR Command app')
+        self.assertEqual(1, self.commands.read_text(encoding='utf-8').count(' install '))
+
+    def test_quest_first_launch_stops_for_missing_access_and_bad_startup(self):
+        cases = (
+            ('other', '', 'ADB state: unauthorized', False, False),
+            ('missing', '', 'ADB state: missing', False, False),
+            ('fixture', 'model', 'Select an authorized Meta Quest 3', False, False),
+            ('fixture', 'install-rejected', 'installation did not return Success', True, False),
+            ('fixture', 'installed-apk-mismatch', 'Installed Quest APK could not be verified', True, False),
+            ('fixture', 'existing-config', 'has no existing player configuration', True, False),
+            ('fixture', 'missing-activity', 'Could not resolve a launcher activity', True, False),
+            ('fixture', 'launch-timeout', 'did not confirm that the Quest launcher activity started', True, True),
+            ('fixture', 'log-unavailable', 'Could not read the launched Quest process logs', True, True),
+            ('fixture', 'process-restarted', 'process exited, restarted or reported a fatal error', True, True),
+            ('fixture', 'process-crashed', 'process exited, restarted or reported a fatal error', True, True),
+        )
+        for serial, failure, message, install, launch in cases:
+            with self.subTest(serial=serial, failure=failure):
+                self.commands.unlink(missing_ok=True)
+                (self.root/'installed-app').unlink(missing_ok=True)
+                (self.remote/'observed-process').unlink(missing_ok=True)
+                config = self.remote/'vr-connection.json'
+                config.unlink(missing_ok=True)
+                if failure == 'existing-config':
+                    self.write(config, self.player)
+                result = self.run_smoke(serial, failure)
+                self.assert_rejected(result, message)
+                self.assertEqual('', result.stdout)
+                commands = self.commands.read_text(encoding='utf-8')
+                self.assertEqual(install, ' install ' in commands)
+                self.assertEqual(launch, ' am start ' in commands)
+                self.assertNotIn(' push ', commands)
+                self.assertNotIn(' force-stop ', commands)
+                if failure == 'existing-config':
+                    self.assertEqual(self.player, json.loads(config.read_bytes()))
 
     def ticket_refresh(self, installed_expiry, *, mode='MR'):
         identities = [uuid.uuid4() for _ in range(3)]

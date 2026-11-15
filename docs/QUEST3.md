@@ -12,6 +12,21 @@
 
 2026-11-10 Quest 3 開發 APK 為 0.50.0／65，檔案 `vr-command-quest-0.50.0-arm64-debug.apk` 為 60,997,166 bytes，SHA-256 `0cb23ff041b1787e24a694b0ae9b8184764f150740710876c8cceef70d9f1bba`。與同版 Windows 玩家和伺服器使用相同的遊戲來源及場景網路識別。已核對 ARM64、最低 SDK 32、目標 SDK 35 及 APK v2 開發簽章。頭盔安裝及現場 MR 驗收待實機。 [建置紀錄](PROGRESS.md#2026-11-10-合併場分房敵軍策略)
 
+## 首次安裝與啟動檢查
+
+準備一台尚未安裝 VR Command 的 Quest 3。在手機 Meta Horizon App 開啟頭盔的開發者模式，接上資料線，再於頭盔內允許 USB 偵錯。從 `adb devices -l` 取得狀態為 `device` 的裝置序號。Windows 若只顯示 Reality Labs 的 USB 介面，請確認開發者模式、重啟頭盔並重新連接。 [Meta 實機設定](https://developers.meta.com/vr/documentation/android-apps/enable-developer-mode/) · [Android Debug Bridge](https://developer.android.com/tools/adb)
+
+以目前 `artifacts/quest/VrCommand.apk` 對應的原發行報告執行以下檢查。`-ApkPath` 可指定另存的原 APK；兩者的 SHA-256 必須一致。
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -SmokeTest -Serial '<ADB 序號>' `
+  -ReleaseReport .\artifacts\venue-release-control-195.json
+```
+
+工具核對指定 Quest 3，在目前 Android 使用者下安裝 APK，並讀回裝置上的 APK 雜湊。沒有既有玩家設定時，工具等待 Android 確認啟動，接著讀取該程序的 Unity 與 AndroidRuntime 日誌，並在三秒後重查原程序。成功輸出 JSON 的 `status` 為 `process-observed`。`unityLogLines` 是查到的 Unity 日誌列數，允許為零。工具遇到既有安裝會停止，若安裝後檢查失敗，已安裝的 APK 仍留在頭盔上。
+
+這項檢查無需玩家票券。後續備妥測試場次，依[區域網路原型操作](#區域網路原型操作)部署新配發的玩家設定，再驗證入場、OpenXR 追蹤、MR 對位及操作。
+
 ## 開場前從頭盔執行 UDP 預檢
 
 使用獨立的 `vr-command-quest-udp-probe-0.1.0.apk`（套件 `com.vrcommand.udpprobe`）做場館診斷。它透過已授權的 ADB 裝置執行，從頭盔指定的 IPv4 傳送與 Windows 監聽端相同的 UDP 挑戰。報告可以納入逐來源封存驗收。 [Windows 監聽與封存操作](EXTERNAL_CLIENTS.md#核對每個玩家來源的-udp-預檢) · [Android Debug Bridge](https://developer.android.com/tools/adb)

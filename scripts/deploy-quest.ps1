@@ -1,8 +1,9 @@
 [CmdletBinding(DefaultParameterSetName='Player')]
 param(
     [Parameter(Mandatory, ParameterSetName='Player')][Parameter(Mandatory, ParameterSetName='Refresh')][string]$ClientConfig,
-    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Refresh')][string]$Serial,
-    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Refresh')][string]$AdbPath = 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe',
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Refresh')][Parameter(Mandatory, ParameterSetName='Smoke')][string]$Serial,
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Refresh')][Parameter(ParameterSetName='Smoke')][string]$AdbPath = 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe',
+    [Parameter(Mandatory, ParameterSetName='Smoke')][switch]$SmokeTest,
     [Parameter(Mandatory, ParameterSetName='Refresh')][switch]$RefreshPlayerTicket,
     [Parameter(ParameterSetName='Player')][string]$AlignmentFile,
     [Parameter(ParameterSetName='Player')][switch]$Passthrough,
@@ -16,8 +17,8 @@ param(
     [Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='CapturePlan')][switch]$AllowPartialMap,
     [Parameter(Mandatory, ParameterSetName='CapturePlan')][switch]$ReadCapturePlan,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,2147483647)][int]$ExpectedVersionCode,
-    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$ReleaseReport,
-    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$ApkPath,
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Smoke')][ValidateNotNullOrEmpty()][string]$ReleaseReport,
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Smoke')][ValidateNotNullOrEmpty()][string]$ApkPath,
     [Parameter(ParameterSetName='Bundle')][switch]$DeployMappedSeats,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$RetryIncomplete,
     [Parameter(ParameterSetName='Bundle')][switch]$VerifyTrackedSeats,
@@ -765,6 +766,23 @@ function Confirm-LocalQuestApk([string]$Path, [string]$ExpectedHash) {
     }
 }
 
+function New-VerifiedQuestApk([string]$Path, [string]$ExpectedHash) {
+    $stagePath = Join-Path ([IO.Path]::GetTempPath()) ('vr-command-' + [Guid]::NewGuid().ToString('N') + '.apk')
+    $source = [IO.File]::OpenRead((Resolve-Path -LiteralPath $Path).ProviderPath)
+    try {
+        $destination = [IO.File]::Open($stagePath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try {
+            try { $source.CopyTo($destination) }
+            finally { $destination.Dispose() }
+            Confirm-LocalQuestApk $stagePath $ExpectedHash
+        } catch {
+            Remove-Item -LiteralPath $stagePath -ErrorAction SilentlyContinue
+            throw
+        }
+    } finally { $source.Dispose() }
+    return $stagePath
+}
+
 function Get-MappedQuestStatus($Row, $Inventory, [int]$VersionCode, [string]$ExpectedHash) {
     $result = [ordered]@{ roomId = $Row.roomId; seat = $Row.seat; status = 'ready' }
     $status = $Inventory[$Row.serial]
@@ -1166,6 +1184,58 @@ function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment
     if ($LASTEXITCODE -ne 0) { throw 'Quest app launch failed.' }
 }
 
+function Invoke-QuestFirstLaunch([string]$Apk, $Release) {
+    if ($Serial -cnotmatch '\A[A-Za-z0-9\[][A-Za-z0-9._:%\[\]-]{0,127}\z') { throw 'Use an explicit ADB serial for the Quest 3.' }
+    if (-not (Test-Path -LiteralPath $AdbPath -PathType Leaf)) { throw 'Provide the installed ADB executable.' }
+    $inventory = Get-QuestDeviceInventory
+    $deviceState = $inventory[$Serial]
+    if ($deviceState -cne 'device') {
+        if ($deviceState -cnotin @('unauthorized','offline','ambiguous')) { $deviceState = 'missing or unavailable' }
+        throw "Quest 3 ADB state: $deviceState. Connect the headset and allow USB debugging."
+    }
+    $model = @(& $AdbPath -s $Serial shell getprop ro.product.model 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $model.Count -ne 1 -or $model[0].Trim() -cne 'Quest 3') { throw 'Select an authorized Meta Quest 3.' }
+
+    $package = 'com.vrcommand.quest'
+    $installed = @(& $AdbPath -s $Serial shell pm list packages -u --user current $package 2>$null)
+    if ($LASTEXITCODE -ne 0) { throw 'Could not check if the app is already present.' }
+    if ($installed -ccontains "package:$package") { throw 'The first-launch test requires a headset without an existing VR Command app. Use a new player configuration to test an existing installation.' }
+
+    $stagedApk = New-VerifiedQuestApk $Apk $Release.sha256
+    try {
+        $install = @(& $AdbPath -s $Serial install -R --user current --pkg $package $stagedApk 2>$null)
+        if ($LASTEXITCODE -ne 0 -or $install -cnotcontains 'Success') { throw 'Quest APK installation did not return Success.' }
+    } finally { Remove-Item -LiteralPath $stagedApk -ErrorAction SilentlyContinue }
+    if ((Get-QuestApkStatus $Serial $Release.sha256) -cne 'ready') { throw 'Installed Quest APK could not be verified against the release report.' }
+
+    $config = '/sdcard/Android/data/com.vrcommand.quest/files/vr-connection.json'
+    & $AdbPath -s $Serial shell test ! -e $config | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not confirm the Quest has no existing player configuration. App launch was skipped.' }
+    $launcherIntent = @('-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.LAUNCHER')
+    $resolved = @(& $AdbPath -s $Serial shell pm resolve-activity --brief --user current @launcherIntent -p $package 2>$null)
+    $activities = @($resolved -cmatch '\Acom\.vrcommand\.quest/[A-Za-z0-9._]+\z')
+    if ($LASTEXITCODE -ne 0 -or $activities.Count -ne 1) { throw 'Could not resolve a launcher activity for the installed Quest app.' }
+    $startup = @(& $AdbPath -s $Serial shell am start -W --user current @launcherIntent -n $activities[0] 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $startup -cnotcontains 'Status: ok' -or
+        $startup -cnotcontains "Activity: $($activities[0])") {
+        throw 'Android did not confirm that the Quest launcher activity started.'
+    }
+    $appPid = & $AdbPath -s $Serial shell pidof $package 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]$appPid -cnotmatch '\A[1-9][0-9]{0,9}\z') { throw 'Quest game process was not present after launch.' }
+    Start-Sleep -Seconds 3
+    $logs = @(& $AdbPath -s $Serial logcat -d -t 1000 "--pid=$appPid" -v brief -s Unity AndroidRuntime 2>$null)
+    if ($LASTEXITCODE -ne 0) { throw 'Could not read the launched Quest process logs.' }
+    $remainingPid = & $AdbPath -s $Serial shell pidof $package 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]$remainingPid -cne [string]$appPid -or ($logs -cmatch '^E/AndroidRuntime\s*\([^)]*\): FATAL EXCEPTION')) {
+        throw 'The Quest game process exited, restarted or reported a fatal error during first launch.'
+    }
+    return [ordered]@{
+        phase = 'quest-first-launch'; status = 'process-observed'; model = 'Quest 3'; versionCode = $Release.versionCode
+        apkVerified = $true; apkSha256 = $Release.sha256; processObservationSeconds = 3
+        unityLogLines = @($logs -cmatch '^[VDIWEF]/Unity\s*\(').Count
+    }
+}
+
 if ($PSCmdlet.ParameterSetName -eq 'Venue') {
     $manifest = (Read-DeploymentJson $VenueManifest 16384 'venue manifest').Document
     $directory = [IO.Path]::GetDirectoryName((Resolve-Path -LiteralPath $VenueManifest).ProviderPath)
@@ -1202,6 +1272,18 @@ if ($PSCmdlet.ParameterSetName -eq 'Refresh') {
 }
 
 if ($PSCmdlet.ParameterSetName -eq 'Windows') { Export-WindowsVenueSeats; return }
+
+$projectRoot = Split-Path -Parent $PSScriptRoot
+$apk = if ($ApkPath) { $ApkPath } else { Join-Path $projectRoot 'artifacts/quest/VrCommand.apk' }
+if ($PSCmdlet.ParameterSetName -eq 'Smoke') {
+    if (-not $SmokeTest) { throw 'Specify -SmokeTest to install and check a first launch.' }
+    $release = Read-QuestRelease $ReleaseReport
+    Confirm-LocalQuestApk $apk $release.sha256
+    $deploymentLock = Enter-QuestDeployment
+    try { Invoke-QuestFirstLaunch $apk $release | ConvertTo-Json -Compress }
+    finally { $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose() }
+    return
+}
 
 $alignment = $null
 $alignmentHash = $null
@@ -1296,8 +1378,6 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
     }
 }
 $release = if ($ReleaseReport) { Read-QuestRelease $ReleaseReport }
-$projectRoot = Split-Path -Parent $PSScriptRoot
-$apk = if ($ApkPath) { $ApkPath } else { Join-Path $projectRoot 'artifacts/quest/VrCommand.apk' }
 if ($release) { Confirm-LocalQuestApk $apk $release.sha256 }
 if ($CheckOnly) {
     $report = [ordered]@{
@@ -1334,15 +1414,7 @@ try {
     if ($model -ne 'Quest 3') { throw 'Selected device is not a Meta Quest 3. No app was installed.' }
     if ($ManagementApi) { Confirm-VenueReadback $venue -RequireLiveSource }
     if ($release) {
-        $stagePath = Join-Path ([IO.Path]::GetTempPath()) ('vr-command-' + [Guid]::NewGuid().ToString('N') + '.apk')
-        $source = [IO.File]::OpenRead((Resolve-Path -LiteralPath $apk).ProviderPath)
-        try {
-            $destination = [IO.File]::Open($stagePath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
-            $stagedApk = $stagePath
-            try { $source.CopyTo($destination) }
-            finally { $destination.Dispose() }
-        } finally { $source.Dispose() }
-        Confirm-LocalQuestApk $stagedApk $release.sha256
+        $stagedApk = New-VerifiedQuestApk $apk $release.sha256
         $apk = $stagedApk
     }
     & $AdbPath -s $Serial install -r $apk
