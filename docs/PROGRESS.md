@@ -4,6 +4,7 @@
 
 - 共用桌面測試入口會先查實際 EXE 路徑及目前使用的防火牆設定檔。把相同 Unity 執行檔複製到暫存新路徑後，共用入口在啟動前回報私人網路缺少規則並結束。原 F 槽路徑沿用現有規則，以回送位址完成 5 名背景玩家 40 秒排演。6 項原生檢查及 123 項桌面測試通過，所有測試子程序已結束。 [操作方式](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試) · [同機排演結果](../artifacts/desktop-exercise/20261116-065011-87c615b0/exercise-result.json)
 - Windows 防火牆保持啟用。原生套件另存到新路徑和其他可能監聽的工具在無人值守時先執行唯讀檢查。Quest 3 仍從 USB 提供檔案傳輸介面，ADB 偵錯介面數為零。
+- 功能提交 `843fd22` 已推送。GitHub Actions 因帳務或支出上限未啟動，工作執行步驟數為零。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43771644625/job/132988642161)
 
 ## 2026-11-16 Quest 逐席連線門檻與六批收件診斷
 
