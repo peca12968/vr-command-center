@@ -503,6 +503,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const enemyBatch = page.locator('#venue-enemy-batch');
     const batchRoom = (room, status) => page.locator(`[data-enemy-batch-room="${room}"][data-enemy-batch-state="${status}"]`);
     const batchReplay = (room, status) => batchRoom(room, status).getByRole('button', { name: '檢視敵軍快照' });
+    const originalEnemyReplay = (room, status) => batchRoom(room, status).getByRole('button', { name: '查找原敵軍畫格' });
+    const enemyEvidence = (id, requestId = enemyReceipt.requestId) => `/sessions/${id}/world/venue-enemies/${requestId}`;
     const batch = (await api('/venue/phase')).latestEnemies;
     assert.equal(batch.requestId, enemyReceipt.requestId);
     assert.deepEqual(batch.sessions.map(row => [row.sessionId, row.roomIds, row.appliedAtSequence, row.targetCount]),
@@ -511,6 +513,11 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await batchRoom(1, 'Waiting').waitFor(); await batchRoom(2, 'Waiting').waitFor();
     check(await batchReplay(1, 'Waiting').count() === 0 && await enemyBatch.locator('p').filter({ hasText: '0 / 2 房已確認' }).isVisible(),
       'Latest strategy receipt retains its original targets and waits for game evidence');
+    const pendingEnemy = await api(enemyEvidence(preparing[0]));
+    await api(enemyEvidence(preparing[0]), 'GET', undefined, 'Room2', 403);
+    await api(enemyEvidence(preparing[0], climateReceipt.requestId), 'GET', undefined, 'Master', 404);
+    check(pendingEnemy.worldSequence === null && !Object.hasOwn(pendingEnemy, 'enemyPopulations'),
+      'An enemy batch without its original running frame has no population, and the lookup is Master-scoped');
     const enemyViewport = page.viewportSize();
     await page.setViewportSize({ width: 390, height: 900 });
     check(await enemyBatch.evaluate(panel => panel.scrollWidth <= panel.clientWidth), 'The latest enemy batch fits a narrow console');
@@ -562,6 +569,27 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       && localStatus[0].enemies.targetCount === 2 && localStatus[0].enemies.population.present === 1 && localStatus[0].enemies.population.alive === 1
       && (await localEnemies.innerText()).includes('全場目標 2 名 · 本房在場 1 名、存活 1 名'),
       'A valid partial reinforcement separates the configured target from the recorded and living counts');
+    const originalEnemy = await api(enemyEvidence(preparing[1]));
+    const enemyWatch = `**/api/sessions/${preparing[1]}/world/watch?**`;
+    await page.route(enemyWatch, async route => {
+      const response = await route.fetch();
+      const body = (await response.text()).replace(/event: frame\ndata: (.+)/, (_, raw) => {
+        const value = JSON.parse(raw); value.packet.observedSequence++;
+        return 'event: frame\ndata: ' + JSON.stringify(value);
+      });
+      await route.fulfill({ response, body });
+    }, { times: 1 });
+    await openSetting('enemies', 2, preparing[1], originalEnemyReplay(2, 'Superseded'));
+    await page.locator('#world-message').filter({ hasText: '回應快照的敵軍或指令序號不同' }).waitFor();
+    check(await page.locator('#world-player').isHidden(), 'A later observed revision cannot substitute for the original enemy frame in replay');
+    await page.locator('#tab-operations').click();
+    const oldPatrol = await openSetting('enemies', 2, preparing[1], originalEnemyReplay(2, 'Superseded'));
+    const originalEnemyMessage = `已停在第 ${oldPatrol} 格的敵軍快照。 本房在場 0 名、存活 0 名。`;
+    await page.locator('#world-frame-message').filter({ hasText: originalEnemyMessage }).waitFor();
+    check(oldPatrol === originalEnemy.worldSequence && await page.locator('#world-room').inputValue() === '2'
+      && (await page.locator('#world-enemy-policy').innerText()).endsWith('巡邏 · 自動攻擊開啟'),
+      'After a room changes its policy and population, the old batch opens the original patrol and counts');
+    await page.locator('#tab-operations').click();
     await page.route(`**/api/sessions/${preparing[1]}/world/watch?**`, async route => {
       const original = await route.fetch();
       const body = (await original.text()).replace(/event: frame\ndata: (.+)/, (_, raw) => {
@@ -703,6 +731,12 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       && await page.locator('#venue-enemy-batch-download').isEnabled()
       && await batchRoom(1, 'Ended').filter({ hasText: `原命令 ${batch.sessions[0].appliedAtSequence}` }).isVisible(),
       'Relogin restores the original ended enemy batch even after the room is reused');
+    const originalEndedEnemy = await api(enemyEvidence(ending.id));
+    const reopenedEnemy = await openSetting('enemies', 1, ending.id, originalEnemyReplay(1, 'Ended'));
+    await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${reopenedEnemy} 格的敵軍快照` }).waitFor();
+    check(reopenedEnemy === originalEndedEnemy.worldSequence && await recording.inputValue() === ending.id,
+      'The ended batch opens the original enemy frame after room 1 has a new session');
+    await page.locator('#tab-operations').click();
     await climateRoom(1, 'Ended').waitFor(); await climateRoom(2, 'Ended').waitFor();
     check(await environmentBatch.getByRole('button', { name: '檢視環境快照' }).count() === 0
       && await page.locator('#venue-environment-batch-download').isEnabled()
@@ -1255,7 +1289,7 @@ with zipfile.ZipFile(sys.argv[1]) as original, zipfile.ZipFile(sys.argv[2]) as c
     active.add(combined.id);
     const roomTwo = randomUUID();
     await api(`/sessions/${combined.id}/players`, 'POST', { playerId: roomTwo, roomId: 2, name: '第二房席位', headset: 'Quest3' });
-    const combinedPublish = await prepare(combined.id, 1, true);
+    const combinedPublish = await prepare(combined.id, 1, true, false, 1);
     await run(combined.id, 'Begin');
     const setCombinedEnvironment = async () => api('/venue/phase', 'POST', {
       action: 'SetEnvironment', targets: await climateTargets(), environment: climate
@@ -1267,12 +1301,30 @@ with zipfile.ZipFile(sys.argv[1]) as original, zipfile.ZipFile(sys.argv[2]) as c
     const nextFrame = await api(climateEvidence(combined.id, nextEnvironment.requestId));
     check(skippedFrame.worldSequence === null && nextFrame.worldSequence > 0 && nextFrame.roomIds.join() === '1,2,3,4,5',
       'A later identical environment frame cannot stand in for an earlier command in a linked venue');
+    await api(`/sessions/${combined.id}/commands`, 'POST', { commandId: randomUUID(), action: 'SetEnemies',
+      enemies: { count: 6, behavior: 'Hold', autoAttack: false } });
+    const setCombinedEnemies = async () => api('/venue/phase', 'POST', {
+      action: 'SetEnemies', enemyPolicy: policy,
+      targets: (await api('/venue/phase')).enemies.map(({ sessionId, phaseSinceSequence, enemiesSinceSequence, roomEnemiesSinceSequence }) =>
+        ({ sessionId, phaseSinceSequence, enemiesSinceSequence, roomEnemiesSinceSequence }))
+    }, 'Master', 200, undefined, randomUUID());
+    const skippedEnemy = await setCombinedEnemies();
+    const nextEnemy = await setCombinedEnemies();
+    const combinedEnemies = [1, 1, 2].map((roomId, index) => ({
+      id: randomUUID(), roomId, health: 100, feet: { x: (roomId - 3) * 14 + index, y: 0, z: 3 }
+    }));
+    combinedPublish(await api(`/sessions/${combined.id}`), combinedEnemies);
+    const skippedEnemyFrame = await api(enemyEvidence(combined.id, skippedEnemy.requestId));
+    const nextEnemyFrame = await api(enemyEvidence(combined.id, nextEnemy.requestId));
+    check(skippedEnemyFrame.worldSequence === null && nextEnemyFrame.worldSequence > 0
+      && nextEnemyFrame.enemyPopulations.map(row => `${row.roomId}:${row.present}/${row.alive}`).join() === '1:2/2,2:1/1,3:0/0,4:0/0,5:0/0',
+      'A linked historical lookup keeps the exact revision and each room population in its shared recording');
     const combinedEnd = (await api('/venue/phase')).end;
     const originalBatch = await api('/venue/phase', 'POST', { action: 'End', targets: combinedEnd }, 'Master', 200, undefined, randomUUID());
     active.delete(combined.id);
     const combinedPath = `/sessions/${combined.id}`;
     const finalCombined = await api(combinedPath);
-    combinedPublish(finalCombined);
+    combinedPublish(finalCombined, combinedEnemies);
     await api(combinedPath + '/combat-stream/seal', 'POST', { streamId: finalCombined.combatStream.streamId, finalSequence: 0 }, 'GameServer');
     combinedPublish.seal();
     await login('Master');

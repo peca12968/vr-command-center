@@ -91,16 +91,19 @@ public sealed partial class SessionManager
         return new(batch.Id, batch.RecordedAtUtc, climate.Weather, climate.TimeOfDay, climate.Lightning, targets);
     }
 
-    public (long AppliedAtSequence, EnvironmentSettings Environment) ReadVenueEnvironmentCommand(Guid sessionId, Guid requestId, OperatorIdentity actor)
+    public (long AppliedAtSequence, ControlCommand Command) ReadVenueSettingCommand(Guid sessionId, Guid requestId,
+        ControlAction action, OperatorIdentity actor)
     {
         RequireVenueMaster(actor);
+        if (action is not (ControlAction.SetEnvironment or ControlAction.SetEnemies))
+            throw new ArgumentException("A venue setting action is required.", nameof(action));
         lock (gate)
         {
             var entry = venueTransitions.GetValueOrDefault(requestId)?.SingleOrDefault(value => value.SessionId == sessionId);
             var command = entry?.Read<ControlCommand>();
-            if (entry is null || command is not { Action: ControlAction.SetEnvironment, Environment: { } environment })
-                throw new KeyNotFoundException("No original venue environment command for this session.");
-            return (entry.Sequence, environment);
+            if (entry is null || command is null || command.Action != action)
+                throw new KeyNotFoundException("No original venue setting command for this session.");
+            return (entry.Sequence, command);
         }
     }
 

@@ -83,7 +83,7 @@ const roomPlan = mountIndependentPlan({
 });
 let timer;
 let selectionEpoch = 0, venueClosureEpoch = 0, operationsViewEpoch = 0;
-let venueEnvironmentReview = 0;
+let venueSettingReview = 0;
 let archivedPlan = null;
 let roomEnemyDraft = null, roomEnemyPolicySequences = null;
 
@@ -851,26 +851,38 @@ function settingBatchRoom(kind, batch, session, room) {
   return { status: 'Applied', text,
     target: current.target };
 }
-async function openOriginalVenueEnvironment(batch, session, roomId) {
-  const request = ++venueEnvironmentReview, epoch = state.epoch, view = operationsViewEpoch;
+async function openOriginalVenueSetting(kind, batch, session, roomId) {
+  const request = ++venueSettingReview, epoch = state.epoch, view = operationsViewEpoch;
+  const enemy = kind === 'enemies', key = enemy ? 'latestEnemies' : 'latestEnvironment', label = enemy ? '敵軍' : '環境';
   const current = () => master() && !state.busy && !state.pending && state.epoch === epoch && operationsViewEpoch === view
-    && request === venueEnvironmentReview && state.venue?.latestEnvironment?.requestId === batch.requestId;
+    && request === venueSettingReview && state.venue?.[key]?.requestId === batch.requestId;
   if (!current()) return;
   try {
-    const original = await api(`/sessions/${session.sessionId}/world/venue-environment/${batch.requestId}`);
+    const original = await api(`/sessions/${session.sessionId}/world/venue-${kind}/${batch.requestId}`);
     if (!current()) return;
     const { streamId, worldSequence, appliedAtSequence } = original;
     if (original.sessionId !== session.sessionId || original.requestId !== batch.requestId || appliedAtSequence !== session.appliedAtSequence
       || typeof streamId !== 'string' || !Array.isArray(original.roomIds) || !original.roomIds.includes(roomId))
-      throw new Error('Original environment changed');
-    if (worldSequence === null) { notify('原錄製中找不到套用這筆環境指令的有效執行畫格。', true); return; }
+      throw new Error('Original venue setting changed');
+    if (worldSequence === null) { notify(`原錄製中找不到套用這筆${label}指令的有效執行畫格。`, true); return; }
     if (!Number.isSafeInteger(worldSequence) || worldSequence < 1) throw new Error('Invalid saved frame');
-    const { weather, timeOfDay, lightning } = batch;
+    const { weather, timeOfDay, lightning, behavior, autoAttack } = batch;
+    const witness = { kind, exactObserved: true, setting: enemy ? { appliedAtSequence, behavior, autoAttack }
+      : { appliedAtSequence, weather, timeOfDay, lightning } };
+    if (enemy) {
+      const rows = original.enemyPopulations;
+      const matching = Array.isArray(rows) && rows.length <= 5 ? rows.filter(row => row?.roomId === roomId) : [];
+      const population = matching.length === 1 ? matching[0] : null;
+      if (!Number.isInteger(population?.present) || population.present < 0 || population.present > 100
+        || !Number.isInteger(population.alive) || population.alive < 0 || population.alive > population.present)
+        throw new Error('Invalid original enemy population');
+      witness.population = population;
+    }
     notify('');
     tab('world', { mode: 'replay', sessionId: session.sessionId, roomId, streamId, complete: false,
-      throughSequence: worldSequence, witness: { kind: 'environment', exactObserved: true, setting: { appliedAtSequence, weather, timeOfDay, lightning } } });
+      throughSequence: worldSequence, witness });
   } catch {
-    if (current()) notify('無法讀取這筆指令的原環境畫格。', true);
+    if (current()) notify(`無法讀取這筆指令的原${label}畫格。`, true);
   }
 }
 function renderVenueSettingBatch(locked, kind) {
@@ -915,10 +927,10 @@ function renderVenueSettingBatch(locked, kind) {
         if (original) tab('world', original);
       });
       item.append(button);
-    } else if (!enemy && ['Superseded', 'Ended'].includes(status)) {
-      const button = element('button', '查找原環境畫格', 'quiet small');
+    } else if (['Superseded', 'Ended'].includes(status)) {
+      const button = element('button', enemy ? '查找原敵軍畫格' : '查找原環境畫格', 'quiet small');
       button.type = 'button'; button.disabled = locked;
-      button.addEventListener('click', () => openOriginalVenueEnvironment(batch, session, room));
+      button.addEventListener('click', () => openOriginalVenueSetting(kind, batch, session, room));
       item.append(button);
     }
     return item;

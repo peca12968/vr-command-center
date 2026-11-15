@@ -940,7 +940,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     }
   }
   function matchesWitness(packet, target, header) {
-    const { kind, setting, population, appliedAtSequence, elapsedMilliseconds, roomIds, inherited } = target.witness;
+    const { kind, setting, population, appliedAtSequence, elapsedMilliseconds, roomIds, inherited, exactObserved } = target.witness;
     if (kind === 'pose-interruption') {
       const { observedSequence, playerIds } = target.witness;
       const frame = packet.frame;
@@ -973,9 +973,11 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
       return roomIds.every(room => counts.get(room) === 5);
     }
     if (!Number.isSafeInteger(packet.observedSequence) || packet.observedSequence < setting.appliedAtSequence) return false;
+    if (exactObserved && (packet.observedSequence !== setting.appliedAtSequence || packet.suspended !== false
+      || packet.frame.phase !== 'Running' || !(packet.frame.tick > 0))) return false;
     if (kind === 'environment') return packet.weather === setting.weather && packet.frame.night === (setting.timeOfDay === 'Night')
-      && packet.lightning === setting.lightning && (!target.witness.exactObserved || (packet.observedSequence === setting.appliedAtSequence
-        && packet.suspended === false && packet.frame.phase === 'Running' && packet.frame.tick > 0));
+      && packet.lightning === setting.lightning;
+    if (exactObserved && packet.frame.roomEnemyPolicies?.length) return false;
     const enemies = packet.frame.enemies.filter(enemy => enemy.roomId === target.roomId);
     const local = packet.frame.roomEnemyPolicies?.find(row => row.roomId === target.roomId);
     if (typeof inherited === 'boolean' && inherited !== !local) return false;
@@ -992,6 +994,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
       text += ` 此格追蹤 ${tracked} 席、合成 ${players.length - tracked} 席。`;
     } else if (witness.kind === 'pose-interruption') {
       text += ` 房間 ${target.roomId} · 席位 ${witness.seats.join('、')}。`;
+    } else if (witness.kind === 'enemies' && witness.exactObserved) {
+      text += ` 本房在場 ${witness.population.present} 名、存活 ${witness.population.alive} 名。`;
     }
     return text;
   }
