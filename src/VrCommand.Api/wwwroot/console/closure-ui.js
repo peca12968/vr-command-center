@@ -132,7 +132,7 @@ export function mountClosure(getState, unauthorized, openReview, report) {
     trackedStartButton.disabled = !trackedStart || state.busy;
     panel.classList.toggle('closure-complete', view.complete); panel.classList.toggle('warning', view.warning);
     fieldPanel.hidden = state.actor?.role !== 'Master' || state.session?.state !== 'Ended';
-    fieldButton.disabled = fieldPanel.hidden || !!fieldRequest || !view.complete || !state.session?.startedAtUtc || !state.session?.players?.length;
+    fieldButton.disabled = fieldPanel.hidden || !!fieldRequest || !view.complete || !state.session?.startedAtUtc || !state.statistics?.players?.length;
     renderReview(state, view.complete);
   }
   function renderReview(state, complete) {

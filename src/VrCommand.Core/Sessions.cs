@@ -39,6 +39,9 @@ public record ControlCommand(Guid CommandId, ControlAction Action, EnvironmentSe
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool RequireTrackedStart = false);
 public record CommandReceipt(Guid CommandId, long AppliedAtSequence, bool Duplicate, SessionView Session);
 public record TrackedVrStartEvidence(long AppliedAtSequence, VenueTrackingFrame Frame);
+public sealed record RosterDeparture(Guid PlayerId, Guid AdmissionId, int RoomId, long JoinedAtSequence, long LeftAtSequence);
+public sealed record RosterDepartureEvidence(int Version, Guid SessionId, Guid StreamId, long ThroughSequence,
+    long EndedAtSequence, RosterDeparture[] Players);
 public sealed class MixedRealityNotReadyException(ControlAction action) : InvalidOperationException(action == ControlAction.Resume
     ? "MR resume requires a fresh paused snapshot with tracked Quest 3 poses for living players."
     : "MR start requires fresh tracked Quest 3 poses for the current roster.")
@@ -373,6 +376,41 @@ public sealed partial class SessionManager
             var history = Find(id);
             AccessPolicy.Read(actor ?? OperatorIdentity.Internal, history.View.RoomIds);
             return Statistics(history);
+        }
+    }
+
+    public RosterDepartureEvidence ReadRosterDepartures(Guid id, long throughSequence, OperatorIdentity actor)
+    {
+        if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Roster departures require the master control desk.");
+        lock (gate)
+        {
+            var history = Find(id);
+            AccessPolicy.Validate(actor);
+            var session = history.View;
+            if (session.State != SessionState.Ended || session.Sequence != throughSequence || session.CombatStream is not { Sealed: true } stream)
+                throw new InvalidOperationException("Roster departures require the original sealed session revision.");
+            var end = history.Events[checked((int)history.PhaseSinceSequence - 1)];
+            var absent = Statistics(history).Players.Select(player => player.PlayerId).Except(session.Players.Select(player => player.Id)).ToHashSet();
+            var admissions = new Dictionary<Guid, (Guid Id, int RoomId, long Sequence)>();
+            var departures = new Dictionary<Guid, RosterDeparture>();
+            foreach (var entry in history.Events.Take(checked((int)end.Sequence - 1)))
+            {
+                if (entry.Kind == SessionEventKind.PlayerJoined)
+                {
+                    var player = entry.Read<Player>();
+                    if (!absent.Contains(player.Id)) continue;
+                    admissions[player.Id] = (entry.EventId, player.RoomId, entry.Sequence);
+                    departures.Remove(player.Id);
+                }
+                else if (entry.Kind == SessionEventKind.PlayerLeft)
+                {
+                    var left = entry.Read<PlayerLeft>();
+                    if (admissions.Remove(left.PlayerId, out var admission))
+                        departures[left.PlayerId] = new(left.PlayerId, admission.Id, admission.RoomId, admission.Sequence, entry.Sequence);
+                }
+            }
+            return new(1, id, stream.StreamId, throughSequence, end.Sequence,
+                departures.Values.OrderBy(player => player.RoomId).ThenBy(player => player.PlayerId).ToArray());
         }
     }
 

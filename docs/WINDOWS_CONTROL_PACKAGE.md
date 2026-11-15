@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-16 `VRCommand-ControlServer-0.31.203.zip` 為 53,371,377 bytes，SHA-256 `67b002aaf537ae9ef17f64bddc2024a8879ea73d620cf9767cecca51d32223dd`。解壓核對 568 筆清單。單場驗收 ZIP 可保留原離場紀錄與封存戰績。 [管理包](../artifacts/VRCommand-ControlServer-0.31.203.zip) · [操作說明](EXTERNAL_CLIENTS.md#核對任務中被移出的玩家)
+
 2026-11-16 `VRCommand-ControlServer-0.31.202.zip` 為 53,368,058 bytes，SHA-256 `b0f42cd8ef77683168d49236de98bc61619f9ebb40c22027af1551a7af4e37b3`。解壓核對 568 筆清單。單場驗收 ZIP 可附原 VR 追蹤開場資料，供原生錄製核對。 [管理包](../artifacts/VRCommand-ControlServer-0.31.202.zip) · [操作說明](EXTERNAL_CLIENTS.md#用單場-zip-核對追蹤開場)
 
 2026-11-16 `VRCommand-ControlServer-0.31.201.zip` 為 53,367,469 bytes，SHA-256 `1363f4ee7cffb4fcc805b8082fc636b1092d1a021a1ee8f76c125e8834b4a819`。解壓核對 568 筆清單。單場 VR 追蹤開場通過時會保存原畫格，封存後可從任務收尾直接回看。 [管理包](../artifacts/VRCommand-ControlServer-0.31.201.zip) · [操作說明](SESSION_CLOSURE.md#回看單場-vr-追蹤開場)

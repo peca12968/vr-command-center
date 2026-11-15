@@ -140,8 +140,12 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       'The sealed archive gives its authorized room and Master the exact original roster and pointer, separately from the final roster');
 
     await api(route + '/connection-endpoint', 'PUT', { version: 1, streamId, address: '192.168.50.40', port: 7777 }, 'GameServer');
-    const rejectedExport = await api(route + '/field-evidence.zip?includeTrackedVrStart=true', 'GET', undefined, 'Master', 409);
-    check(rejectedExport.error.includes('matching the final roster'), 'Archived opening review does not bypass the original final field roster requirement');
+    const field = await fieldExport(route);
+    assert.deepEqual(field.members, ['session.json', 'statistics.json', 'endpoint.json', 'tracked-vr-start.json', 'roster-departures.json']);
+    assert.deepEqual(field.departures.players, [{ playerId: viveId, admissionId: vive.admissionId, roomId,
+      joinedAtSequence: view.sequence - 1, leftAtSequence: confirmed.body.appliedAtSequence + 1 }]);
+    check(field.session.players.length === 1 && field.statistics.players.length === 2 && field.departures.endedAtSequence === ended.sequence,
+      'A tracked archive keeps all statistics together with the original removal and the separate final player roster');
 
     const simulation = await prepare('Simulation');
     await rejectedSimulation();
@@ -182,6 +186,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       && await status.isHidden(), 'Simulation keeps its existing start path and does not show tracked game readiness');
     await end(simulation.route);
     await exportTrackedFieldEvidence();
+    await exportTrackedFieldEvidence(true);
 
     async function rejectedSimulation() {
       const result = await api(simulation.route + '/commands', 'POST', { commandId: randomUUID(), action: 'Begin',
@@ -193,7 +198,26 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     for (const route of opened) await end(route);
   }
 
-  async function exportTrackedFieldEvidence() {
+  async function fieldExport(route, file = null) {
+    const url = `${base}/api${route}/field-evidence.zip?includeTrackedVrStart=true`;
+    const response = await fetch(url, { headers: { Authorization: 'Bearer ' + tokens.Master }, signal: AbortSignal.timeout(8000) });
+    assert.ok(response.ok, `Tracked field export ${response.status}: ${response.ok ? '' : await response.text()}`);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (file) assert.deepEqual(require('node:fs').readFileSync(file), bytes);
+    const result = spawnSync('python', ['-c', `import io, json, sys, zipfile
+with zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())) as archive:
+    members = archive.namelist()
+    assert archive.testzip() is None
+    print(json.dumps({'members': members, 'session': json.loads(archive.read('session.json')),
+        'statistics': json.loads(archive.read('statistics.json')), 'start': json.loads(archive.read('tracked-vr-start.json')),
+        'departures': json.loads(archive.read('roster-departures.json')) if 'roster-departures.json' in members else None}, ensure_ascii=True))`],
+      { input: bytes, encoding: 'utf8', timeout: 6000, windowsHide: true });
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(Object.values(tokens).every(token => !result.stdout.includes(token)));
+    return JSON.parse(result.stdout);
+  }
+
+  async function exportTrackedFieldEvidence(removeAll = false) {
     const fixture = await prepare('GameServer');
     const { route, streamId, view } = fixture;
     const { publish, seal } = publisher(fixture);
@@ -201,6 +225,10 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const running = await api(route + '/commands', 'POST', { commandId: randomUUID(), action: 'Begin',
       expectedSequence: view.sequence, requireTrackedStart: true });
     publish(running.session, { tick: 1 });
+    if (removeAll) {
+      for (const player of view.players)
+        await api(route + '/players/' + player.id, 'DELETE', undefined, 'Master', 204, player.admissionId);
+    }
     publish(await end(route), { tick: 1 });
     await api(route + '/combat-stream/seal', 'POST', { streamId, finalSequence: 0 }, 'GameServer');
     seal();
@@ -211,9 +239,6 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const evidenceUrl = `${base}/api${route}/field-evidence.zip?includeTrackedVrStart=true`;
     const forbidden = await fetch(evidenceUrl, { headers: { Authorization: 'Bearer ' + tokens.Room1 } });
     assert.equal(forbidden.status, 403);
-    const direct = await fetch(evidenceUrl, { headers: { Authorization: 'Bearer ' + tokens.Master }, signal: AbortSignal.timeout(8000) });
-    assert.ok(direct.ok, `Tracked field export ${direct.status}: ${direct.ok ? '' : await direct.text()}`);
-    const directBytes = Buffer.from(await direct.arrayBuffer());
     const exportPage = await context.newPage();
     captureErrors(exportPage);
     try {
@@ -228,20 +253,24 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       if (response instanceof Error) throw response;
       assert.ok(response.ok(), `Tracked field export ${response.status()}: ${response.ok() ? '' : await response.text()}`);
       assert.equal(response.headers()['cache-control'], 'no-store');
-      const file = path.join(screenshots, 'tracked-vr-field-evidence.zip');
+      const file = path.join(screenshots, removeAll ? 'tracked-vr-departed-field-evidence.zip' : 'tracked-vr-field-evidence.zip');
       const download = await downloading;
       if (download instanceof Error) throw download;
       await download.saveAs(file);
-      assert.deepEqual(require('node:fs').readFileSync(file), directBytes);
-      const result = spawnSync('python', ['-c', `import json, sys, zipfile
-with zipfile.ZipFile(sys.argv[1]) as archive:
-    assert archive.namelist() == ['session.json', 'statistics.json', 'endpoint.json', 'tracked-vr-start.json']
-    assert archive.testzip() is None
-    print(json.dumps(json.loads(archive.read('tracked-vr-start.json'))))`, file], { encoding: 'utf8', timeout: 6000, windowsHide: true });
-      assert.equal(result.status, 0, result.stderr);
-      assert.deepEqual(JSON.parse(result.stdout), { version: 1, trackedVrStart: saved });
-      check((await api(route)).sequence === final.sequence && Object.values(tokens).every(token => !result.stdout.includes(token)),
-        'Master downloads the exact saved opening pointer with the original private field ZIP and creates no event');
+      const field = await fieldExport(route, file);
+      assert.deepEqual(field.start, { version: 1, trackedVrStart: saved });
+      assert.equal(field.session.players.length, removeAll ? 0 : 2);
+      assert.equal(field.statistics.players.length, 2);
+      assert.equal(field.departures?.players.length ?? 0, removeAll ? 2 : 0);
+      check((await api(route)).sequence === final.sequence, removeAll
+        ? 'Master downloads both removed players and sealed scores even with an empty final roster'
+        : 'Master downloads the exact saved opening pointer with the original private field ZIP and creates no event');
+      if (!removeAll) {
+        const player = view.players[0];
+        await api(route + '/players/' + player.id, 'DELETE', undefined, 'Master', 409, player.admissionId);
+        check((await api(route)).sequence === final.sequence && (await fieldExport(route)).departures === null,
+          'The original End still prevents roster writes from appearing as earlier departures');
+      }
     } finally { await exportPage.close(); }
   }
 };

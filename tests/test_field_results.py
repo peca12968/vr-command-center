@@ -103,7 +103,7 @@ def world_journal(path, world, *, header_changes=None, combat=0, active=True, se
     path.write_bytes(b''.join(raw))
 
 
-def combat_journal(path, launcher, records=(), *, sealed=True, receipt=None):
+def combat_journal(path, launcher, records=(), *, sealed=True, receipt=None, observed=7):
     def frame(payload):
         return struct.pack('<i', len(payload)) + payload + hashlib.sha256(payload).digest()
 
@@ -115,7 +115,7 @@ def combat_journal(path, launcher, records=(), *, sealed=True, receipt=None):
               + bytes([len(origin)]) + origin)
     raw = [frame(header)]
     if records:
-        events = b''.join(struct.pack('<qq16sB16s16s16si', sequence, 7, guid(id_for(900 + sequence)),
+        events = b''.join(struct.pack('<qq16sB16s16s16si', sequence, observed, guid(id_for(900 + sequence)),
                                       kind, guid(player), guid(shot), guid(enemy), damage)
                           for sequence, (kind, player, shot, enemy, damage) in enumerate(records, 1))
         raw.append(frame(struct.pack('<Bi', 2, len(records)) + events))
@@ -4431,6 +4431,90 @@ class FieldResultsTests(unittest.TestCase):
             pack(None)
             self.assertNotIn('worldJournal', run(expected=0))
             run(*required, message='missing the original tracked VR opening evidence')
+
+    def test_single_session_zip_recomputes_departed_scores_without_claiming_delivery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, manifest, _ = venue_fixture(root, 'Independent', remote=True, quest_per_room=1, with_journals=True,
+                                           room_sizes=(1,) * 5, game_server=True)
+            entry = manifest['sessions'][0]
+            session, stats, endpoint = field.management_zip(root / entry['evidenceZip'])
+            owner, = session['players']
+            retained = owner['id']
+            departed = id_for(999)
+            departure = {'playerId': departed, 'admissionId': id_for(998), 'roomId': 1, 'joinedAtSequence': 3, 'leftAtSequence': 8}
+            evidence = {'version': 1, 'sessionId': session['id'], 'streamId': endpoint['streamId'], 'throughSequence': 9,
+                        'endedAtSequence': 9, 'players': [departure]}
+            stats.update(origin='GameServer', players=[*stats['players'], dict(stats['players'][0], playerId=departed, ammoUsed=1)])
+            launcher_path = root / entry['launcherReport']
+            launcher = json.loads(launcher_path.read_bytes())
+            launcher['finalCombatStream']['acceptedSequence'] = 1
+            session['combatStream'] = launcher['finalCombatStream']
+            journal, battle = root / entry['worldJournal'], root / 'opening.journal'
+            bodies = [{'id': pid, 'roomId': 1, 'connected': True, 'health': 100, 'rig': {'kind': 'Tracked'}}
+                      for pid in (retained, departed)]
+
+            def seal_world(late_departure=False):
+                world_journal(journal, launcher['finalWorld'], combat=1, end_sequence=9,
+                              players=lambda _, phase: bodies if phase != 'Ended' or late_departure else bodies[:1])
+                launcher_path.write_text(json.dumps(launcher), encoding='utf-8')
+
+            seal_world()
+            shots = [(field.SHOT_FIRED, departed, id_for(997), None, 0)]
+            combat_journal(battle, launcher, shots)
+            quest, = entry['players']
+            log_path = root / quest['log']
+            log_path.write_text(log_path.read_text(encoding='utf-8').replace('"finalStreamSequence": 0', '"finalStreamSequence": 1'), encoding='utf-8')
+            archive_path = root / 'field.zip'
+
+            def pack(document=evidence):
+                with zipfile.ZipFile(archive_path, 'w') as archive:
+                    for name, record in [('session', session), ('statistics', stats), ('endpoint', endpoint)]:
+                        archive.writestr(name + '.json', json.dumps(record))
+                    if document is not None:
+                        archive.writestr('roster-departures.json', json.dumps(document))
+
+            pack()
+            server_log = root / entry['serverLog']
+            command = [sys.executable, str(SCRIPT), '--topology', 'direct-lan', '--server-ip', manifest['serverIps'][0],
+                       '--launcher-report', str(launcher_path), '--server-log', str(server_log), '--evidence-zip', str(archive_path)]
+            logs = ['--quest-player', quest['address'], str(log_path), str(quest['logcatPid'])]
+            journals = ['--world-journal', str(journal), '--combat-journal', str(battle)]
+
+            def run(args, expected=1, message=None):
+                result = subprocess.run(command + args, capture_output=True, encoding='utf-8', timeout=10)
+                self.assertEqual(expected, result.returncode, result.stderr)
+                if message:
+                    self.assertIn(message, result.stderr)
+                self.assertNotIn(departed, result.stdout + result.stderr)
+                return json.loads(result.stdout) if expected == 0 else None
+
+            verified = run(logs + journals + ['--verify-player-sources'], expected=0)
+            self.assertEqual({'scoresVerified': 1, 'endedAtSequence': 9}, verified['rosterDepartures'])
+            self.assertEqual((1, 1, 2), (verified['players'], verified['serverAcknowledgements'], verified['combatJournal']['players']))
+            run(logs + journals[:2], message='original closed combat and world journals')
+            pack(None)
+            run(logs + journals, message='Player count differs')
+            pack(dict(evidence, players=[dict(departure, roomId=2)]))
+            run(logs + journals, message='different room')
+            pack()
+            combat_journal(battle, launcher, shots, observed=8)
+            run(logs + journals, message='outside the departed admission')
+            combat_journal(battle, launcher, shots)
+            seal_world(late_departure=True)
+            run(logs + journals, message='connected departed player outside the original admission')
+
+            # The historical server still records a LAN peer, but an empty terminal roster has no delivery witnesses.
+            session['players'] = []
+            removed = dict(departure, playerId=retained, admissionId=owner['admissionId'], joinedAtSequence=2, leftAtSequence=7)
+            pack(dict(evidence, players=[departure, removed]))
+            server_log.write_text(''.join(line + '\n' for line in server_log.read_text(encoding='utf-8').splitlines()
+                                          if not line.startswith('VR_SERVER_DEBRIEF_ACK')), encoding='utf-8')
+            world_journal(journal, launcher['finalWorld'], combat=1, end_sequence=9,
+                          players=lambda _, phase: [bodies[1]] if phase != 'Ended' else [])
+            launcher_path.write_text(json.dumps(launcher), encoding='utf-8')
+            verified = run(journals, expected=0)
+            self.assertEqual((0, 0, 2), (verified['players'], verified['serverAcknowledgements'], verified['rosterDepartures']['scoresVerified']))
 
     def test_original_world_journal_matches_the_sealed_evidence(self):
         data = fixture()

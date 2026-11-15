@@ -5,7 +5,7 @@ using VrCommand.Core;
 namespace VrCommand.Api;
 
 internal sealed record FieldEvidence(SessionView Session, SessionStatistics Statistics, ConnectionEndpoint Endpoint,
-    WorldTrackedVrStart? TrackedVrStart = null)
+    WorldTrackedVrStart? TrackedVrStart = null, RosterDepartureEvidence? RosterDepartures = null)
 {
     private static readonly DateTimeOffset ArchiveTime = new(1980, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
@@ -26,6 +26,8 @@ internal sealed record FieldEvidence(SessionView Session, SessionStatistics Stat
             Write("endpoint.json", Endpoint);
             if (TrackedVrStart is not null)
                 Write("tracked-vr-start.json", new { version = 1, trackedVrStart = TrackedVrStart });
+            if (RosterDepartures is not null)
+                Write("roster-departures.json", RosterDepartures);
 
             void Write<T>(string name, T value)
             {
@@ -91,8 +93,11 @@ public sealed partial class WorldRecordings
                 || !world.Header.roomIds.SequenceEqual(session.RoomIds))
                 throw new InvalidOperationException("The sealed world does not match this session's combat source.");
 
-            var (evidence, problem) = BuildFieldEvidence(session, stream, actor);
+            var (evidence, problem) = BuildFieldEvidence(session, stream, actor, allowDepartures: true);
             if (evidence is null) throw new InvalidOperationException(problem);
+            if (evidence.RosterDepartures is { } departures && (Frame(id, world.AcceptedSequence, actor) is not { Packet: var packet }
+                || packet.observedSequence < departures.EndedAtSequence))
+                throw new InvalidOperationException("The original world must observe the End after the recorded roster departures.");
             if (!includeTrackedVrStart) return evidence;
             var start = ReadWorldTrackedVrStart(session, world, actor)
                 ?? throw new InvalidOperationException("No verified tracked VR opening frame for this sealed session.");
@@ -122,18 +127,25 @@ public sealed partial class WorldRecordings
         }
     }
 
-    private (FieldEvidence? Evidence, string? Problem) BuildFieldEvidence(SessionView session, CombatStreamView stream, OperatorIdentity actor)
+    private (FieldEvidence? Evidence, string? Problem) BuildFieldEvidence(SessionView session, CombatStreamView stream, OperatorIdentity actor,
+        bool allowDepartures = false)
     {
         if (session.State != SessionState.Ended || session.StartedAtUtc is null || session.EndedAtUtc is null)
             return (null, "Start and end the mission before exporting field evidence.");
         var endpoint = EndpointRow(session);
         if (endpoint is null) return (null, "The game source did not publish connection settings.");
         var statistics = manager.Statistics(session.Id, actor);
+        var roster = session.Players.Select(player => (player.Id, player.RoomId)).ToHashSet();
+        var ledger = statistics.Players.Select(player => (player.PlayerId, player.RoomId)).ToHashSet();
         if (statistics.PendingTelemetry || statistics.ThroughSequence != session.Sequence
             || (statistics.Origin is { } origin ? origin != stream.Origin : stream.AcceptedSequence != 0)
-            || session.Players.Length == 0 || !session.Players.Select(p => (p.Id, p.RoomId)).ToHashSet()
-                .SetEquals(statistics.Players.Select(p => (p.PlayerId, p.RoomId))))
+            || ledger.Count == 0 || !roster.IsSubsetOf(ledger))
             return (null, "Field evidence requires sealed statistics matching the final roster.");
-        return (new(session, statistics, endpoint), null);
+        if (roster.SetEquals(ledger)) return (new(session, statistics, endpoint), null);
+        if (!allowDepartures) return (null, "Field evidence requires sealed statistics matching the final roster.");
+        var departures = manager.ReadRosterDepartures(session.Id, session.Sequence, actor);
+        return ledger.Except(roster).ToHashSet().SetEquals(departures.Players.Select(player => (player.PlayerId, player.RoomId)))
+            ? (new(session, statistics, endpoint, RosterDepartures: departures), null)
+            : (null, "Field evidence requires original roster departures recorded before End.");
     }
 }
