@@ -5,6 +5,7 @@
 - 管理包 0.31.201 會把採信的世界序號、來源及擷取偏移記入單場 `Begin` 事件。雙封存後可從「回看本場追蹤開場」開啟原畫格，按當時的名冊核對每席。0.31.200 既有開場仍可讀取原命令回條及一般錄製。 [收尾操作](SESSION_CLOSURE.md#回看單場-vr-追蹤開場)
 - 原建置和解壓包各通過 16 項開場及回放專測。涵蓋較晚準備畫格、玩家移除、房間重用、仿冒姿態及房控範圍。另通過 1,115 項領域檢查，含 SQLite 重開與舊事件相容、117 項 Node 及 7 項封裝檢查。管理包解壓核對 568 筆清單。測試使用背景瀏覽器與合成畫格。Windows 列出 Quest 3，ADB 仍未能列出裝置，實機及跨機待驗收。 [解壓包驗證](../artifacts/console-tracked-vr-replay-package-e1a42d6a/checks.json)
 - 完整 Chrome 背景回歸通過 1,228 項，含單場追蹤回看、兩種五房錄製、逐格、封存匯出及房控。 [完整回歸](../artifacts/console-tracked-vr-replay-regression-d1b77c1c/checks.json)
+- 功能提交 `8786479` 已推送。GitHub Actions 因帳務或支出上限未啟動，工作執行步驟數為零。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43759831757/job/132951923135)
 
 ## 2026-11-16 單場 VR 開場再核對追蹤
 
