@@ -99,9 +99,9 @@ public sealed partial class WorldRecordings
             }
             if (command.Action == ControlAction.Begin && command.RequireTrackedStart)
             {
-                var snapshot = Readiness(id, actor);
-                var readyToStart = snapshot.SessionSequence == current.Sequence && snapshot.TrackedVrStartReady == true;
-                return manager.Execute(id, command, actor, readyVrSequence: readyToStart ? current.Sequence : null);
+                var snapshot = ReadReadinessSnapshot(id, actor, includeBeginFrame: true);
+                var readyToStart = snapshot.Report.SessionSequence == current.Sequence && snapshot.Report.TrackedVrStartReady == true;
+                return manager.Execute(id, command, actor, trackedVrStartFrame: readyToStart ? snapshot.BeginFrame : null);
             }
             if (!SessionManager.RequiresMrReadiness(current, command.Action))
                 return manager.Execute(id, command, actor);

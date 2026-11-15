@@ -20,8 +20,9 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     return { route, streamId, questId, viveId, join, view: await api(route) };
   }
   async function end(route) {
-    await api(route + '/commands', 'POST', { commandId: randomUUID(), action: 'End' });
+    const receipt = await api(route + '/commands', 'POST', { commandId: randomUUID(), action: 'End' });
     opened.delete(route);
+    return receipt.session;
   }
   const page = await context.newPage();
   captureErrors(page);
@@ -38,7 +39,16 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const { route, streamId, questId, viveId, join, view } = await prepare('GameServer');
     const began = Date.now() - 5000;
     let sequence = 0;
-    function publish(snapshot, { missing = false, simulated = false } = {}) {
+    const header = { sessionId: view.id, streamId, origin: 'GameServer', roomIds: [roomId],
+      captureStartedAtUtc: new Date(began).toISOString().replace('Z', '0000+00:00') };
+    function send(message) {
+      const result = spawnSync('python', [path.join(root, 'scripts/world_test_socket.py')], { encoding: 'utf8', timeout: 6000, windowsHide: true,
+        input: JSON.stringify({ port: Number(new URL(base).port), route: `/api${route}/world/publish`, token: tokens.GameServer,
+          messages: [{ type: 'header', payload: header }, message] }) });
+      assert.equal(result.status, 0, 'Tracked VR fixture publication: ' + result.stderr);
+      return JSON.parse(result.stdout);
+    }
+    function publish(snapshot, { missing = false, simulated = false, tick = 0 } = {}) {
       const players = snapshot.players.map(({ id, seat }) => {
         const head = { x: -28 + (seat - 2) * 1.5, y: 1.65, z: -3 };
         const connected = !missing || id !== viveId;
@@ -46,16 +56,11 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         return { id, roomId, head, muzzle: head, forward: { x: 0, y: 0, z: 1 }, connected,
           health: 100, magazine: 30, reserve: 90, rig: kind === 'None' ? { kind } : { kind, left: head, right: head } };
       });
-      const header = { sessionId: view.id, streamId, origin: 'GameServer', roomIds: [roomId],
-        captureStartedAtUtc: new Date(began).toISOString().replace('Z', '0000+00:00') };
       const packet = { sequence: ++sequence, observedSequence: snapshot.sequence, elapsedMilliseconds: sequence === 1 ? 0 : Date.now() - began,
         throughCombatSequence: 0, weather: 'Clear', events: [],
-        frame: { phase: 'Preparing', tick: 0, night: false, throughSequence: 0, players } };
-      const result = spawnSync('python', [path.join(root, 'scripts/world_test_socket.py')], { encoding: 'utf8', timeout: 6000, windowsHide: true,
-        input: JSON.stringify({ port: Number(new URL(base).port), route: `/api${route}/world/publish`, token: tokens.GameServer,
-          messages: [{ type: 'header', payload: header }, { type: 'frame', payload: packet }] }) });
-      assert.equal(result.status, 0, 'Tracked VR fixture publication: ' + result.stderr);
-      assert.equal(JSON.parse(result.stdout).acceptedSequence, sequence);
+        frame: { phase: snapshot.state, tick, night: false, throughSequence: 0, players } };
+      assert.equal(send({ type: 'frame', payload: packet }).acceptedSequence, sequence);
+      return packet;
     }
     const attempt = (snapshot, updates = {}, role = 'Room1', expected = 409) => api(route + '/commands', 'POST',
       { commandId: randomUUID(), action: 'Begin', expectedSequence: snapshot.sequence, requireTrackedStart: true, ...updates }, role, expected);
@@ -100,17 +105,67 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     publish(replaced);
     await status.filter({ hasText: '2 / 2 席追蹤就緒。開始時會再核對' }).waitFor();
     await status.screenshot({ path: path.join(screenshots, 'tracked-vr-start-ready.png') });
-    publish(replaced);
+    const accepted = publish(replaced);
     const confirmed = await command(route);
     assert.equal(confirmed.status, 200);
     const retry = await attempt(replaced, confirmed.intent, 'Room1', 200);
     await attempt(replaced, { ...confirmed.intent, requireTrackedStart: false });
     check(confirmed.body.session.state === 'Running' && retry.duplicate && retry.appliedAtSequence === confirmed.body.appliedAtSequence
       && retry.session.sequence === replaced.sequence + 1, 'Two tracked admissions start exactly once and the same command can be retried');
-    await end(route);
+
+    // A later Preparing frame and a later roster removal must not replace the original accepted evidence.
+    publish(replaced);
+    const vive = replaced.players.find(player => player.id === viveId);
+    await api(route + '/players/' + viveId, 'DELETE', undefined, 'Master', 204, vive.admissionId);
+    publish(await api(route), { tick: 1 });
+    const ended = await end(route);
+    publish(ended, { tick: 1 });
+    const closure = route + '/world?includeDebriefReceipts=true';
+    await api(route + '/combat-stream/seal', 'POST', { streamId, finalSequence: 0 }, 'GameServer');
+    check((await api(closure)).trackedVrStart === undefined, 'The closure withholds its start pointer until the original world also seals');
+    assert.equal(send({ type: 'seal', finalSequence: sequence }).complete, true);
+    const saved = await api(closure, 'GET', undefined, 'Room1');
+    assert.equal(saved.trackedVrStart?.worldSequence, accepted.sequence);
+    assert.equal(saved.trackedVrStart?.elapsedMilliseconds, accepted.elapsedMilliseconds);
+    assert.equal(saved.trackedVrStart?.appliedAtSequence, confirmed.body.appliedAtSequence);
+    assert.deepEqual(saved.trackedVrStart?.players.map(owner => owner.playerId).sort(), [questId, viveId].sort());
+    assert.deepEqual(saved.debriefReceipts.players.map(owner => owner.playerId), [questId]);
+    await api(closure, 'GET', undefined, 'Room2', 403);
+    check((await api(closure)).trackedVrStart?.streamId === streamId && (await api(route + '/world')).trackedVrStart === undefined,
+      'The sealed archive gives its authorized room and Master the exact original roster and pointer, separately from the final roster');
 
     const simulation = await prepare('Simulation');
     await rejectedSimulation();
+    await page.locator('#include-ended').check();
+    await page.locator('#session-select').selectOption(view.id);
+    const replay = page.locator('#open-tracked-vr-start');
+    await replay.waitFor();
+    const watch = `**/api/sessions/${view.id}/world/watch?**`;
+    await page.route(watch, async route => {
+      const response = await route.fetch();
+      const body = (await response.text()).replace(/event: frame\ndata: (.+)/, (_, raw) => {
+        const value = JSON.parse(raw);
+        value.packet.frame.players[0].rig.kind = 'Simulated';
+        return 'event: frame\ndata: ' + JSON.stringify(value);
+      });
+      await route.fulfill({ response, body });
+    }, { times: 1 });
+    await replay.click();
+    await page.locator('#world-message').filter({ hasText: '回應快照的本場追蹤開場或指令序號不同' }).waitFor();
+    check(await page.locator('#world-player').isHidden(), 'A substituted opening pose cannot be displayed as the original tracked frame');
+    await page.locator('#tab-operations').click(); await replay.click();
+    const original = page.locator(`#world-canvas[data-sequence="${accepted.sequence}"]`);
+    await original.waitFor();
+    check(await page.locator('#world-room').inputValue() === '1' && await page.locator('#world-camera').inputValue() === 'top',
+      'After room reuse the room desk opens the original Preparing frame and its original top view');
+    await page.locator('#world-frame-next').click();
+    await page.locator(`#world-canvas[data-sequence="${accepted.sequence + 1}"]`).waitFor();
+    await page.locator('#world-begin-original').click();
+    await original.waitFor();
+    check(await page.locator('#world-begin-original').isDisabled(), 'The archived opening supports adjacent-frame inspection and return to its exact pointer');
+    await page.locator('#world-player').screenshot({ path: path.join(screenshots, 'tracked-vr-start-replay.png') });
+
+    await page.locator('#tab-operations').click();
     await page.locator('#refresh').click(); await page.locator('#session-select').selectOption(simulation.view.id);
     await page.getByRole('button', { name: '開始任務' }).waitFor();
     const normal = await command(simulation.route);

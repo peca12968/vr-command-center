@@ -173,6 +173,45 @@ internal static class VenuePhaseChecks
             check(legacy.Duplicate && legacy.RequireFullTracking && manager.ReadVenueTrackingBegin(legacy.Sessions.Single().SessionId, master) is null,
                 "Existing guarded Begin events retain their policy without inventing a witness frame");
         }
+        var trackedVrData = Path.Combine(directory, "tracked-vr-start");
+        var vrFrame = new VenueTrackingFrame(Guid.NewGuid(), 4, 300);
+        Guid vrSession;
+        ControlCommand vrBegin;
+        long vrApplied;
+        using (var store = new SqliteSessionEventStore(trackedVrData))
+        {
+            var manager = new SessionManager(store);
+            vrSession = manager.Create(SessionMode.Independent, [2], mission, master).Id;
+            manager.OpenStream(vrSession, new(vrFrame.StreamId, CombatOrigin.GameServer),
+                new OperatorIdentity("tracked-vr-source", OperatorRole.GameServer));
+            manager.Join(vrSession, Guid.NewGuid(), "Tracked Quest", 2, HeadsetKind.Quest3, room2);
+            vrBegin = new(Guid.NewGuid(), ControlAction.Begin, ExpectedSequence: manager.Get(vrSession).Sequence, RequireTrackedStart: true);
+            Reject<TrackedVrStartException>(() => manager.Execute(vrSession, vrBegin, room2),
+                "No new tracked VR start is accepted without its frame");
+            Reject<TrackedVrStartException>(() => manager.Execute(vrSession, vrBegin, room2,
+                trackedVrStartFrame: vrFrame with { StreamId = Guid.NewGuid() }), "A different stream cannot witness tracked VR start");
+            vrApplied = manager.Execute(vrSession, vrBegin, room2, trackedVrStartFrame: vrFrame).AppliedAtSequence;
+        }
+        using (var store = new SqliteSessionEventStore(trackedVrData))
+        {
+            var manager = new SessionManager(store);
+            var retry = manager.Execute(vrSession, vrBegin, room2);
+            check(retry.Duplicate && retry.AppliedAtSequence == vrApplied && manager.ReadTrackedVrStart(vrSession, room2) == new TrackedVrStartEvidence(vrApplied, vrFrame),
+                "The exact single-session tracked Begin frame and its retry survive reopening SQLite");
+            Reject<AccessDeniedException>(() => manager.ReadTrackedVrStart(vrSession, room2 with { RoomId = 1 }),
+                "A different room cannot read the tracked opening witness");
+            using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = store.DatabasePath, Pooling = false }.ToString());
+            connection.Open();
+            using var removeWitness = connection.CreateCommand();
+            removeWitness.CommandText = "UPDATE session_events SET envelope=json_remove(envelope, '$.trackedVrStartFrame') WHERE json_type(envelope, '$.trackedVrStartFrame')='object'";
+            check(removeWitness.ExecuteNonQuery() == 1, "The fixture can reproduce an original tracked VR start from before frame pointers were saved");
+        }
+        using (var store = new SqliteSessionEventStore(trackedVrData))
+        {
+            var manager = new SessionManager(store);
+            check(manager.Execute(vrSession, vrBegin, room2).Duplicate && manager.ReadTrackedVrStart(vrSession, room2) is null,
+                "Legacy tracked VR starts reopen and preserve command retry without inventing a frame");
+        }
         var participationData = Path.Combine(directory, "venue-participation");
         var participationKey = Guid.NewGuid();
         VenuePhaseFence[] participationTargets;

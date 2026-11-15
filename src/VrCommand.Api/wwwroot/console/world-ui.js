@@ -20,9 +20,9 @@ const CLIP_LOOP_DELAY = 500;
 const RECORDING_PAGE_SIZE = 30;
 const recordingId = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const hasRecordedPose = player => player.connected && (player.rig.kind === 'Simulated' || player.rig.kind === 'Tracked');
-const isBeginWitness = witness => witness?.kind === 'tracking-begin' || witness?.kind === 'participation-begin';
+const isBeginWitness = witness => ['tracking-begin', 'participation-begin', 'tracked-vr-start'].includes(witness?.kind);
 const witnessLabels = { enemies: '敵軍', environment: '環境', 'tracking-begin': '追蹤開場', 'participation-begin': '有效姿態開場',
-  'pose-interruption': '姿態中斷' };
+  'pose-interruption': '姿態中斷', 'tracked-vr-start': '本場追蹤開場' };
 
 export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips, download) {
   let active = false, scene, controller, epoch = 0, listEpoch = 0, listController, info, frame, geometry = '', mode = '', connected = false, received = 0;
@@ -571,7 +571,9 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     const openingIdle = idle && opening && !$('world-recording').disabled;
     $('world-begin-review').hidden = !opening;
     $('world-begin-original').disabled = !openingIdle || frame.packet.sequence === opening.throughSequence;
-    $('world-begin-running').disabled = !openingIdle || throughFrame <= opening.throughSequence;
+    const runningShortcut = $('world-begin-running');
+    runningShortcut.hidden = opening?.witness.kind === 'tracked-vr-start';
+    runningShortcut.disabled = runningShortcut.hidden || !openingIdle || throughFrame <= opening.throughSequence;
     const extend = $('world-frame-extend');
     extend.hidden = !canExtendSaved();
     extend.disabled = extend.hidden || !idle;
@@ -954,6 +956,16 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     }
     if (isBeginWitness(target.witness)) {
       const frame = packet.frame;
+      if (kind === 'tracked-vr-start') {
+        if (header.origin !== 'GameServer' || header.calibration !== 'uncalibrated-vr'
+          || packet.observedSequence !== appliedAtSequence - 1 || packet.elapsedMilliseconds !== elapsedMilliseconds
+          || packet.suspended !== false || frame?.phase !== 'Preparing' || frame.tick !== 0 || !Array.isArray(frame.players)) return false;
+        const roster = target.witness.players;
+        const connected = frame.players.filter(player => player?.connected === true);
+        return connected.length === roster.length && roster.every(owner => connected.filter(player => player.id === owner.playerId
+          && player.roomId === owner.roomId && player.rig?.kind === 'Tracked' && Number.isInteger(player.health)
+          && player.health > 0 && player.health <= 100).length === 1);
+      }
       const mr = header.calibration === 'quest-room-mr-v1';
       if (kind === 'participation-begin' && (mr ? header.origin !== 'GameServer' : header.calibration !== 'uncalibrated-vr')) return false;
       const allowSimulated = kind === 'participation-begin' && !mr;

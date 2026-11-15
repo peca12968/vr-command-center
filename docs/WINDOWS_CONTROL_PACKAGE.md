@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-16 `VRCommand-ControlServer-0.31.201.zip` 為 53,367,469 bytes，SHA-256 `1363f4ee7cffb4fcc805b8082fc636b1092d1a021a1ee8f76c125e8834b4a819`。解壓核對 568 筆清單。單場 VR 追蹤開場通過時會保存原畫格，封存後可從任務收尾直接回看。 [管理包](../artifacts/VRCommand-ControlServer-0.31.201.zip) · [操作說明](SESSION_CLOSURE.md#回看單場-vr-追蹤開場)
+
 2026-11-16 `VRCommand-ControlServer-0.31.200.zip` 為 53,362,701 bytes，SHA-256 `86c963b87287ee1c10a1e03c088f7c5f9667516b16cad5466a24c426fe6e0615`。解壓核對 568 筆清單。個別 `GameServer` VR 場次可在開始時重新核對原名冊與有效追蹤。 [管理包](../artifacts/VRCommand-ControlServer-0.31.200.zip) · [操作說明](PLAYER_READINESS.md#單場-vr-追蹤開場)
 
 2026-11-16 `VRCommand-ControlServer-0.31.199.zip` 為 53,360,013 bytes，SHA-256 `a959c7d8e1ba67c88143ef62578a5457ca92e31e06f8cfab8d3ec8d0ba1b14a9`。解壓核對 568 筆清單。單席 Quest 3 部署可驗證原入場、票券、公告端點、近期遊戲畫格及 MR 原鎖定校正檔。 [管理包](../artifacts/VRCommand-ControlServer-0.31.199.zip) · [操作說明](QUEST3.md#部署前核對單席連線檔)

@@ -38,6 +38,7 @@ public record ControlCommand(Guid CommandId, ControlAction Action, EnvironmentSe
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? ExpectedSettingSequence = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool RequireTrackedStart = false);
 public record CommandReceipt(Guid CommandId, long AppliedAtSequence, bool Duplicate, SessionView Session);
+public record TrackedVrStartEvidence(long AppliedAtSequence, VenueTrackingFrame Frame);
 public sealed class MixedRealityNotReadyException(ControlAction action) : InvalidOperationException(action == ControlAction.Resume
     ? "MR resume requires a fresh paused snapshot with tracked Quest 3 poses for living players."
     : "MR start requires fresh tracked Quest 3 poses for the current roster.")
@@ -283,7 +284,7 @@ public sealed partial class SessionManager
     }
 
     public CommandReceipt Execute(Guid id, ControlCommand command, OperatorIdentity? actor = null, long? readyMrSequence = null,
-        long? readyVrSequence = null)
+        long? readyVrSequence = null, VenueTrackingFrame? trackedVrStartFrame = null)
     {
         ArgumentNullException.ThrowIfNull(command);
         SessionProjection.ValidateCommand(command);
@@ -325,9 +326,10 @@ public sealed partial class SessionManager
             if (command.Action == ControlAction.Resume && VrPauseRoom(history) is not null
                 && readyVrSequence != history.View.Sequence)
                 throw new VrParticipationResumeException();
-            if (command.RequireTrackedStart && (readyVrSequence != history.View.Sequence || !UsesTrackedVrStart(history.View)))
+            if (command.RequireTrackedStart && !MatchesTrackedVrStartFrame(history.View, trackedVrStartFrame))
                 throw new TrackedVrStartException();
-            var entry = SessionEvent.Create(id, history.View.Sequence + 1, SessionEventKind.ControlApplied, command, actor);
+            var entry = SessionEvent.Create(id, history.View.Sequence + 1, SessionEventKind.ControlApplied, command, actor,
+                trackedVrStartFrame: command.RequireTrackedStart ? trackedVrStartFrame : null);
             var updated = Commit(history, entry);
             return new(command.CommandId, entry.Sequence, false, updated);
         }
@@ -339,6 +341,24 @@ public sealed partial class SessionManager
 
     public static bool UsesTrackedVrStart(SessionView session) => session.Environment.Mode == ExperienceMode.VR
         && session.State == SessionState.Preparing && session.CombatStream?.Origin == CombatOrigin.GameServer;
+
+    internal static bool MatchesTrackedVrStartFrame(SessionView session, VenueTrackingFrame? frame) => UsesTrackedVrStart(session)
+        && frame is { WorldSequence: > 0, ElapsedMilliseconds: >= 0 } && frame.StreamId == session.CombatStream!.StreamId;
+
+    public TrackedVrStartEvidence? ReadTrackedVrStart(Guid id, OperatorIdentity actor)
+    {
+        lock (gate)
+        {
+            var history = Find(id);
+            AccessPolicy.Manage(actor, history.View.Mode, history.View.RoomIds);
+            var entry = FindBeginEvent(history);
+            return entry?.TrackedVrStartFrame is { } frame ? new(entry.Sequence, frame) : null;
+        }
+    }
+
+    private static SessionEvent? FindBeginEvent(History history) => history.View.StartedAtUtc is { } started
+        ? history.Events.FirstOrDefault(entry => entry.RecordedAtUtc == started && entry.Kind == SessionEventKind.ControlApplied
+            && entry.Read<ControlCommand>().Action == ControlAction.Begin) : null;
 
     private static int? VrPauseRoom(History history) =>
         history.View.State == SessionState.Paused && history.View.Environment.Mode == ExperienceMode.VR

@@ -159,10 +159,7 @@ public sealed partial class SessionManager
         RequireVenueMaster(actor);
         lock (gate)
         {
-            var history = Find(id);
-            if (history.View.StartedAtUtc is not { } started) return (null, null);
-            var entry = history.Events.FirstOrDefault(entry => entry.RecordedAtUtc == started
-                && entry.Kind == SessionEventKind.ControlApplied && entry.Read<ControlCommand>().Action == ControlAction.Begin);
+            var entry = FindBeginEvent(Find(id));
             if (entry?.Venue is not { } venue) return (null, null);
             var requestId = entry.Read<ControlCommand>().CommandId;
             return (venue.TrackingFrame is { } tracking ? new(requestId, entry.Sequence, tracking) : null,

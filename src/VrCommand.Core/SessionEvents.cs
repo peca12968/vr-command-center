@@ -19,18 +19,19 @@ public record VenueTransition(long PhaseSinceSequence, int TargetCount,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? RoomEnemiesSinceSequence = null);
 public record SessionEvent(int SchemaVersion, Guid EventId, Guid SessionId, long Sequence,
     DateTimeOffset RecordedAtUtc, SessionEventKind Kind, JsonElement Payload, OperatorIdentity? Actor = null,
-    Guid? RequestId = null, [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTransition? Venue = null)
+    Guid? RequestId = null, [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTransition? Venue = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTrackingFrame? TrackedVrStartFrame = null)
 {
     public T Read<T>() => Payload.Deserialize<T>(JsonFormat.Options)
         ?? throw new InvalidDataException("Missing event payload.");
     internal static SessionEvent Create<T>(Guid id, long sequence, SessionEventKind kind, T payload, OperatorIdentity actor,
-        Guid? requestId = null, VenueTransition? venue = null)
+        Guid? requestId = null, VenueTransition? venue = null, VenueTrackingFrame? trackedVrStartFrame = null)
     {
         var eventId = Guid.NewGuid();
         var data = kind == SessionEventKind.PlayerJoined && payload is Player player
             ? JsonSerializer.SerializeToElement(player with { AdmissionId = eventId }, JsonFormat.Options)
             : JsonSerializer.SerializeToElement(payload, JsonFormat.Options);
-        return new(7, eventId, id, sequence, DateTimeOffset.UtcNow, kind, data, actor, requestId, venue);
+        return new(7, eventId, id, sequence, DateTimeOffset.UtcNow, kind, data, actor, requestId, venue, trackedVrStartFrame);
     }
 }
 
@@ -109,6 +110,10 @@ internal static class SessionProjection
             throw new InvalidDataException("Legacy events cannot assert an authenticated actor.");
         var actor = entry.Actor ?? OperatorIdentity.Internal;
         AccessPolicy.Validate(actor);
+        if (entry.TrackedVrStartFrame is { } startFrame && (entry.SchemaVersion < 7 || current is null
+            || entry.Kind != SessionEventKind.ControlApplied || !entry.Read<ControlCommand>().RequireTrackedStart
+            || !SessionManager.MatchesTrackedVrStartFrame(current, startFrame)))
+            throw new InvalidDataException("Invalid tracked VR start frame in event history.");
         if (entry.Venue is { } venue && (entry.SchemaVersion < 7 || actor.Role != OperatorRole.Master
             || entry.Kind != SessionEventKind.ControlApplied || venue.TargetCount is < 1 or > SessionManager.RoomCount
             || venue.PhaseSinceSequence < 1 || venue.PhaseSinceSequence >= entry.Sequence

@@ -76,8 +76,12 @@ public sealed partial class WorldRecordings
                 .OrderBy(player => player.RoomId).ThenBy(player => player.Seat)
                 .Select(player => new DebriefReceiptPlayer(player.Id, player.AdmissionId, player.RoomId, player.Name,
                     acknowledged.Contains(player.AdmissionId))).ToArray();
-            return world with { DebriefReceipts = new(session.CombatStream!.StreamId, session.Sequence,
-                session.CombatStream.AcceptedSequence, world.AcceptedSequence, players) };
+            return world with
+            {
+                DebriefReceipts = new(session.CombatStream!.StreamId, session.Sequence,
+                    session.CombatStream.AcceptedSequence, world.AcceptedSequence, players),
+                TrackedVrStart = ReadWorldTrackedVrStart(session, world, actor)
+            };
         }
     }
 

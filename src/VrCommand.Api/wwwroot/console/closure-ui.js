@@ -48,10 +48,30 @@ export function debriefReceiptPlayers(session, actor, world) {
   return receipts.players;
 }
 
+function trackedStartTarget(session, actor, world) {
+  const start = world.trackedVrStart;
+  const roomId = session.roomIds.length === 1 ? session.roomIds[0] : null;
+  if (actor.role !== 'Master' && !(actor.role === 'RoomController' && roomId === actor.roomId)) return null;
+  if (!start || start.sessionId !== session.id || start.streamId !== session.combatStream.streamId
+    || session.environment?.mode !== 'VR' || world.header.origin !== 'GameServer'
+    || !sequence(start.appliedAtSequence) || start.appliedAtSequence < 2 || start.appliedAtSequence >= session.sequence
+    || !sequence(start.worldSequence) || start.worldSequence < 1 || start.worldSequence >= world.acceptedSequence
+    || !sequence(start.elapsedMilliseconds) || !sequence(world.durationMilliseconds) || start.elapsedMilliseconds > world.durationMilliseconds
+    || !Array.isArray(start.players) || start.players.length < 1 || start.players.length > session.roomIds.length * 5
+    || !start.players.every(player => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(player?.playerId)
+      && session.roomIds.includes(player.roomId)) || new Set(start.players.map(player => player.playerId)).size !== start.players.length)
+    return null;
+  return { mode: 'replay', sessionId: session.id, streamId: start.streamId, origin: 'GameServer', roomId, complete: false,
+    throughSequence: start.worldSequence, witness: { kind: 'tracked-vr-start', appliedAtSequence: start.appliedAtSequence,
+      elapsedMilliseconds: start.elapsedMilliseconds, players: start.players, roomIds: session.roomIds,
+      archiveComplete: true, archiveThroughSequence: world.acceptedSequence } };
+}
+
 export function mountClosure(getState, unauthorized, openReview, report) {
   const panel = document.getElementById('closure-status'), combat = document.getElementById('closure-combat'), worldLabel = document.getElementById('closure-world'), summary = document.getElementById('closure-summary');
   const retained = document.getElementById('closure-retained');
   const replayButton = document.getElementById('open-closure-replay');
+  const trackedStartButton = document.getElementById('open-tracked-vr-start');
   const receiptsPanel = document.getElementById('debrief-receipts'), receiptsLabel = document.getElementById('debrief-receipt-count');
   const receiptsList = document.getElementById('debrief-receipt-players');
   const fieldPanel = document.getElementById('field-evidence'), fieldButton = document.getElementById('download-field-evidence');
@@ -60,7 +80,7 @@ export function mountClosure(getState, unauthorized, openReview, report) {
   const reviewButton = document.getElementById('open-player-review'), damageButton = document.getElementById('open-player-damage');
   let active = false, generation = 0, identity = '', controller = null, attempted = -Infinity, world = null, result = 'Waiting', refreshFailed = false;
   let fieldRequest = null;
-  let replayTarget = null, reviewTarget = null, reviewOptions = '', receiptRows = '';
+  let replayTarget = null, trackedStart = null, reviewTarget = null, reviewOptions = '', receiptRows = '';
   const context = () => {
     const state = getState(), session = state.session;
     return state.actor && state.key && !state.pending && session?.id === state.selected && sequence(session.sequence)
@@ -107,6 +127,9 @@ export function mountClosure(getState, unauthorized, openReview, report) {
     replayButton.hidden = !replayTarget;
     replayButton.disabled = !replayTarget || state.busy;
     replayButton.textContent = view.worldComplete ? '回放原場次' : '回放已保存片段';
+    trackedStart = view.complete ? trackedStartTarget(session, actor, world) : null;
+    trackedStartButton.hidden = !trackedStart;
+    trackedStartButton.disabled = !trackedStart || state.busy;
     panel.classList.toggle('closure-complete', view.complete); panel.classList.toggle('warning', view.warning);
     fieldPanel.hidden = state.actor?.role !== 'Master' || state.session?.state !== 'Ended';
     fieldButton.disabled = fieldPanel.hidden || !!fieldRequest || !view.complete || !state.session?.startedAtUtc || !state.session?.players?.length;
@@ -138,6 +161,7 @@ export function mountClosure(getState, unauthorized, openReview, report) {
   }
   reviewPlayer.addEventListener('change', render);
   replayButton.addEventListener('click', () => { render(); if (!replayButton.disabled) openReview(replayTarget); });
+  trackedStartButton.addEventListener('click', () => { render(); if (!trackedStartButton.disabled) openReview(trackedStart); });
   reviewButton.addEventListener('click', () => { render(); if (reviewTarget) openReview(reviewTarget); });
   damageButton.addEventListener('click', () => { render(); if (!damageButton.disabled) openReview({ ...reviewTarget, latestDamage: true }); });
   function reset() { clear(); identity = ''; refreshFailed = false; render(); }

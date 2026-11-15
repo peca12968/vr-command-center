@@ -27,6 +27,8 @@ public record WorldRecordingInfo(WorldRecordingHeader Header, long AcceptedSeque
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DebriefReceiptView? DebriefReceipts { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public WorldTrackedVrStart? TrackedVrStart { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? ObserverRoomId { get; init; }
 }
 public record WorldFrameView(WorldRecordingPacket Packet, PlayerStatistics[] Statistics)

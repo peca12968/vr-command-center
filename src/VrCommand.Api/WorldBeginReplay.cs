@@ -4,9 +4,35 @@ namespace VrCommand.Api;
 
 internal sealed record WorldBeginReplay(Guid SessionId, Guid StreamId, Guid BeginRequestId, long AppliedAtSequence,
     long BeginFrame, long ThroughFrame, WorldFrameView? Frame);
+public sealed record TrackedVrStartPlayer(Guid PlayerId, int RoomId);
+public sealed record WorldTrackedVrStart(Guid SessionId, Guid StreamId, long AppliedAtSequence,
+    long WorldSequence, long ElapsedMilliseconds, TrackedVrStartPlayer[] Players);
 
 public sealed partial class WorldRecordings
 {
+    private WorldTrackedVrStart? ReadWorldTrackedVrStart(SessionView session, WorldRecordingInfo world, OperatorIdentity actor)
+    {
+        if (session.Environment.Mode != ExperienceMode.VR || world.Header.origin != "GameServer"
+            || (actor.Role != OperatorRole.Master && session.Mode != SessionMode.Independent)
+            || manager.ReadTrackedVrStart(session.Id, actor) is not { } start)
+            return null;
+        var anchor = start.Frame;
+        if (anchor.StreamId.ToString("D") != world.Header.streamId || anchor.WorldSequence >= world.AcceptedSequence
+            || Frame(session.Id, anchor.WorldSequence, actor) is not { Packet: var packet }
+            || packet.elapsedMilliseconds != anchor.ElapsedMilliseconds || packet.observedSequence != start.AppliedAtSequence - 1
+            || packet.suspended || packet.frame.phase != "Preparing" || packet.frame.tick != 0)
+            return null;
+
+        var roster = manager.Observed(session.Id, packet.observedSequence, actor).Players;
+        var connected = packet.frame.players.Where(player => player.connected).ToDictionary(player => player.id);
+        if (roster.Length == 0 || connected.Count != roster.Length || roster.Any(player =>
+            !connected.TryGetValue(player.Id.ToString("D"), out var body) || body.roomId != player.RoomId
+            || body.health <= 0 || body.rig.kind != "Tracked")) return null;
+
+        return new(session.Id, anchor.StreamId, start.AppliedAtSequence, anchor.WorldSequence, anchor.ElapsedMilliseconds,
+            roster.Select(player => new TrackedVrStartPlayer(player.Id, player.RoomId)).ToArray());
+    }
+
     internal WorldBeginReplay ReadWorldBeginReplay(Guid id, long throughFrame, OperatorIdentity actor, CancellationToken cancellation)
     {
         var (tracking, participation) = manager.ReadVenueBeginEvidence(id, actor);

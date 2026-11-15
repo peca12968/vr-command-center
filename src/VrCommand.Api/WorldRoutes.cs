@@ -32,6 +32,7 @@ public static class WorldRoutes
                 WorldRecordings.RequireObserverRoom(info, room, actor);
                 if (info.DebriefReceipts is { } receipts)
                     info = info with { DebriefReceipts = receipts with { Players = receipts.Players.Where(player => player.RoomId == room).ToArray() } };
+                if (info.Header.roomIds.Length > 1) info = info with { TrackedVrStart = null };
             }
             return Results.Json(WorldRecordings.ObservationInfo(info, observerRoomId), WorldJson.Options);
         });
