@@ -74,8 +74,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     return api(`/sessions/${id}/players`, 'POST', { playerId: randomUUID(), roomId: room, name: `Seat ${room}/${seat}`,
       headset: room === 1 ? 'ViveXr' : 'Quest3' });
   }
-  async function publisher(session) {
-    const mr = session.environment.mode === 'MR', origin = mr ? 'GameServer' : 'Simulation', streamId = randomUUID();
+  async function publisher(session, trackedVr = false) {
+    const mr = session.environment.mode === 'MR', origin = mr || trackedVr ? 'GameServer' : 'Simulation', streamId = randomUUID();
     const route = `/sessions/${session.id}`;
     await api(route + '/combat-stream', 'POST', { streamId, origin }, 'GameServer');
     const started = Date.now();
@@ -300,12 +300,14 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       for (const room of rooms)
         for (let seat = 1; seat <= (room === 5 ? 4 : 5); seat++) await admit(forRoom(room).id, room, seat);
       const sources = [];
-      for (const session of sessions) sources.push(await publisher(session));
+      for (const session of sessions) sources.push(await publisher(session, mode === 'Linked'));
       await login('Master');
       check(!await option.isChecked(), `${mode} defaults to normal Begin`);
       await option.check();
+      const origins = rooms.map(room => mode === 'Linked' || [2, 4].includes(room) ? 'GameServer' : 'Simulation');
       await publishUntil(sources, false, async () => (await status(1).getAttribute('data-begin-state')) === 'WaitingFullTracking'
-        && (await status(5).getAttribute('data-begin-state')) === 'WaitingFullTracking');
+        && (await status(5).getAttribute('data-begin-state')) === 'WaitingFullTracking'
+        && (await Promise.all(rooms.map((room, index) => status(room).filter({ hasText: `錄製來源 ${origins[index]}` }).isVisible()))).every(Boolean));
       check((await status(1).innerText()).includes('名冊 5/5 席 · 追蹤 4/5 席')
         && (await status(5).innerText()).includes('名冊 4/5 席 · 追蹤 4/5 席') && await start.isDisabled()
         && (await page.locator('#venue-begin-evidence').innerText()).includes('仍有開場條件待確認'),
@@ -314,6 +316,11 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         && await page.locator('[data-begin-seat-room] td[data-begin-seat]').count() === 25,
       `${mode} the tracked-only policy identifies exactly which simulated and vacant seats need attention`);
       await page.locator('#venue-phase').screenshot({ path: path.join(screenshots, `full-tracking-${mode.toLowerCase()}-waiting.png`) });
+      if (mode === 'Linked') {
+        await status(1).filter({ hasText: '快照已過期' }).waitFor();
+        check(!(await status(1).innerText()).includes('錄製來源') && await start.isDisabled(),
+          'The preparing source label expires with the original readiness sample');
+      }
       const targets = await getFences();
       for (const source of sources) source.publish(source.snapshot, false);
       const rejected = await api('/venue/phase', 'POST', { action: 'Begin', targets, requireFullTracking: true }, 'Master', 409, undefined, randomUUID());

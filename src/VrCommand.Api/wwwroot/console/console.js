@@ -918,8 +918,8 @@ function renderVenueBegin(targets, waiting, policy) {
   const signature = JSON.stringify([rows, locked]);
   if (list.dataset.rows === signature) return;
   list.dataset.rows = signature;
-  list.replaceChildren(...rows.map(({ roomId, sessionId, state: status, text }) => {
-    const item = element('li', `房間 ${roomId} · ${text}`);
+  list.replaceChildren(...rows.map(({ roomId, sessionId, state: status, text, origin }) => {
+    const item = element('li', `房間 ${roomId} · ${text}` + (origin ? ` · 錄製來源 ${origin}` : ''));
     item.dataset.beginRoom = roomId;
     item.dataset.beginState = status;
     if (sessionId) {

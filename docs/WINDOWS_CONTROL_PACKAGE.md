@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-16 `VRCommand-ControlServer-0.31.196.zip` 為 53,352,935 bytes，SHA-256 `1be5639c6440cce924da04f9cfa96c555449a3349961d2d369a32eb0d29f8b57`。解壓核對 568 筆清單。全館開場清單可查看各房原錄製來源，快照過期後會撤下來源標示。 [管理包](../artifacts/VRCommand-ControlServer-0.31.196.zip) · [操作說明](PLAYER_READINESS.md#五房追蹤驗收開場)
+
 2026-11-13 `VRCommand-ControlServer-0.31.195.zip` 為 53,352,827 bytes，SHA-256 `e96d4ddae0080938dabbe5c20f5c2214f8b036fb92542fb3f9db7c6acb67faf6`。解壓核對 568 筆清單。主控可直接下載原批次已完成房間的戰績 CSV。 [管理包](../artifacts/VRCommand-ControlServer-0.31.195.zip) · [分房戰績](REPORTS.md#在全館收尾比較分房戰績)
 
 2026-11-13 `VRCommand-ControlServer-0.31.194.zip` 為 53,348,658 bytes，SHA-256 `d3e5a88d8a14d03f7b7260714de9a68e5fd3bb2dca31359e14c9fa4dcb2365d5`。解壓核對 568 筆清單。全館收尾可先查看已就緒的分房戰績。 [管理包](../artifacts/VRCommand-ControlServer-0.31.194.zip) · [分房戰績](REPORTS.md#在全館收尾比較分房戰績)

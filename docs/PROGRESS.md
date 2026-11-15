@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-16 五房開場顯示各房錄製來源
+
+- 控制台 0.31.196 在開場清單逐房顯示 `GameServer` 或 `Simulation`。來源須與同一準備場次、名冊版本及有效快照相符。快照逾期時撤下來源。主控可在同一畫面確認 VR／MR 混合獨立場的不同來源及所缺席位。 [操作說明](PLAYER_READINESS.md#五房追蹤驗收開場)
+- Windows 管理包解壓核對 568 筆清單。使用實際管理 API 與測試姿態，原建置及解壓包在 Chrome 背景模式各通過 92 項瀏覽器檢查，另通過 23 項 Node 與 7 項 Python 檢查。驗證合併與獨立五房、來源逾期、25 席開場、原回放和封存。首輪獨立 Chromium 執行檔載入 V8 快照失敗，在已安裝的 Chrome 重跑成功。實體頭盔及跨機仍待驗收。 [解壓包瀏覽器紀錄](../artifacts/console-venue-origins-package-f3333913/checks.json)
+
 ## 2026-11-16 單房 Quest 開場核對原追蹤席位
 
 - `deploy-quest.ps1 -ClientConfig ... -VerifyPlayerTracking` 可從原連線檔核對單席入場身分及同一張 GameServer 準備中畫格。完整回條包含房號、席次、世界與管理序號。只讀既有管理 API，回條省略票券及金鑰。 [單房操作](QUEST3.md#單房實機追蹤驗收)

@@ -398,8 +398,8 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
       ? { sessionId: session.id, sequence: recovery.sequence, linked: session.mode === 'Linked' } : null;
   }
   function venueBegin(target, roomId, policy = 'normal') {
-    let seats = null;
-    const waiting = (state, text) => ({ state, text, ready: false, seats });
+    let seats = null, origin = null;
+    const waiting = (state, text) => ({ state, text, ready: false, seats, origin });
     if (failed) return waiting('Unavailable', '無法確認，正在重試');
     const { rooms, sessions } = getState();
     const room = rooms.find(row => row.id === roomId && row.sessionId === target.sessionId);
@@ -413,6 +413,8 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     }
     const source = sourceAt(row, performance.now() - started);
     if (source !== 'Fresh') return waiting(source, labels[source]);
+    if (session.sequence === row.sessionSequence && ['Simulation', 'GameServer'].includes(session.combatStream?.origin))
+      origin = session.combatStream.origin;
     const mr = session.environment.mode === 'MR';
     const empty = '本房未編列席位';
     const requireTracking = policy === 'tracking';
@@ -425,7 +427,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
           `名冊 ${row.registered}/${room.capacity} 席 · ${requireTracking ? '追蹤' : '有效姿態'} ${ready}/${room.capacity} 席`);
     }
     if (row.venueBeginReady === true)
-      return { state: 'Ready', text: row.registered ? `${row.registered} 席${mr || requireTracking ? '追蹤' : '姿態'}就緒` : empty, ready: true, seats };
+      return { state: 'Ready', text: row.registered ? `${row.registered} 席${mr || requireTracking ? '追蹤' : '姿態'}就緒` : empty, ready: true, seats, origin };
     if (details?.state === 'WaitingRevision') return waiting('WaitingRevision', '等待遊戲端同步最新設定與名冊');
     if (details?.state === 'WaitingProfile') return waiting('WaitingProfile', '等待支援 Quest 3 MR 的遊戲來源');
     if (details?.state === 'WaitingPlayers' && Array.isArray(details.waitingSeats) && details.waitingSeats.length <= row.registered
