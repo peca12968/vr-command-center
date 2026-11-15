@@ -1800,6 +1800,145 @@ else:
         self.assertEqual([{'roomId': 5, 'seat': 5, 'status': 'ready', 'versionCode': 61}], report['devices'])
         self.assertFalse(any(self.root.glob('fixture-*')))
 
+    def test_combined_quest_tracking_binds_recovered_deployments_to_one_sample(self):
+        calls = []
+        sample_time = '2026-11-10T00:00:00Z'
+        capture_time = '2026-11-09T23:59:59.950Z'
+        topology = 'Independent'
+        snapshots = {}
+        running_frame = None
+
+        class Handler(BaseHTTPRequestHandler):
+            def reply(self, body):
+                calls.append((self.command, self.path))
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(body).encode())
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers['Content-Length']))
+                if self.path == '/api/venue/tracked-readiness':
+                    self.reply({'version': 1, 'topology': topology, 'sampledAtUtc': sample_time,
+                                'maxSourceAgeMilliseconds': 1500, 'sessions': list(snapshots.values())})
+                else:
+                    self.reply({'topology': topology, 'allMatched': True, 'seats': [
+                        {'roomId': room, 'seat': seat, 'status': 'matched', 'headset': 'Quest3'}
+                        for room in range(1, 6) for seat in range(5)]})
+
+            def do_GET(self):
+                session = self.path.split('/')[3]
+                snapshot = snapshots[session]
+                frame = {'phase': 'Running', 'tick': 1} if session == running_frame else {'phase': 'Preparing', 'tick': 0}
+                self.reply({'packet': {'sequence': snapshot['worldSequence'], 'observedSequence': snapshot['observedSequence'],
+                                       'suspended': False, 'frame': frame}})
+
+            def log_message(self, *args):
+                pass
+
+        mapping, document = self.device_map()
+        mapped = sorted(document['seats'], key=lambda row: (row['roomId'], row['seat']))
+        report_list = self.root / 'deployment reports.json'
+        early_path = self.root / 'early deployment.json'
+        later_path = self.root / 'later deployment.json'
+        first_names = [early_path.name, later_path.name]
+
+        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                for topology in ('Independent', 'Linked'):
+                    with self.subTest(topology=topology):
+                        files, _ = self.vr_bundle(topology)
+                        bundle = self.write_bundle(files)
+                        venue_digest = hashlib.sha256(bundle.read_bytes()).hexdigest()
+                        snapshots.clear()
+                        devices = []
+                        for index, row in enumerate(mapped):
+                            room, seat = row['roomId'], row['seat']
+                            session = str(self.session_ids[room-1 if topology == 'Independent' else 0])
+                            port = 7776 + room if topology == 'Independent' else 7777
+                            owner = {'roomId': room, 'seat': seat, 'sessionId': session,
+                                     'playerId': str(self.players[index]), 'admissionId': str(self.admissions[index])}
+                            snapshot = snapshots.setdefault(session, {'version': 1, 'sessionId': session, 'worldSequence': 20 + room,
+                                'sessionSequence': 12, 'observedSequence': 12, 'sourceState': 'Fresh', 'origin': 'GameServer',
+                                'sampledAtUtc': sample_time, 'capturedAtUtc': capture_time, 'sourceAgeMilliseconds': 50, 'players': []})
+                            snapshot['players'].append(dict(owner, seat=seat-1, canParticipate=True, state='Participating', rigKind='Tracked'))
+                            devices.append(dict(owner, status='launch-requested', versionCode=76, port=port,
+                                                filesVerified=True, apkVerified=True))
+
+                        def deployment(seats, rows, number, complete):
+                            salt = f'{number:032x}'
+                            assignments = '\n'.join(f"{row['roomId']}/{row['seat']}={row['serial']}" for row in seats)
+                            def fingerprint(value):
+                                return hashlib.sha256(f'{salt}\n{value}'.encode()).hexdigest()
+                            return {'phase': 'deployment', 'topology': topology, 'managementVerified': True,
+                                    'expectedVersionCode': 76, 'expectedApkSha256': 'a' * 64, 'apkVerificationVersion': 1,
+                                    'complete': complete, 'devices': rows, 'retry': {'version': 1, 'salt': salt,
+                                    'venueSha256': venue_digest, 'mapSha256': fingerprint(assignments),
+                                    'devices': [fingerprint(row['serial'].upper()) for row in seats]}}
+
+                        pending = [dict(roomId=row['roomId'], seat=row['seat'], status='not-attempted', versionCode=76)
+                                   for row in devices[12:]]
+                        early = deployment(mapped, devices[:12] + pending, 1, False)
+                        later = deployment(mapped[12:], devices[12:], 2, True)
+                        early_path.write_text(json.dumps(early), encoding='utf-8')
+                        later_path.write_text(json.dumps(later), encoding='utf-8')
+                        report_list.write_text(json.dumps({'version': 1, 'reports': first_names}), encoding='utf-8')
+                        command = ['pwsh', '-NoProfile', '-NonInteractive', '-File', str(ROOT/'scripts/deploy-quest.ps1'),
+                                   '-VenueBundle', str(bundle), '-DeviceMap', str(mapping), '-VerifyTrackedSeats',
+                                   '-DeploymentReportsFile', str(report_list), '-ManagementApi', f'http://127.0.0.1:{server.server_port}',
+                                   '-AdbPath', str(self.root/'absent-adb.exe')]
+
+                        def sample():
+                            calls.clear()
+                            return subprocess.run(command, capture_output=True, encoding='utf-8', timeout=20,
+                                                  env={**os.environ, 'VR_COMMAND_MASTER_KEY': 'mock-combined-tracking-key'})
+
+                        observed = sample()
+                        self.assertEqual(0, observed.returncode, observed.stderr)
+                        report = json.loads(observed.stdout)
+                        self.assertEqual((2, True, 25, venue_digest), (report['evidenceVersion'], report['complete'],
+                                         len(report['seats']), report['venueSha256']))
+                        self.assertNotIn('deploymentSha256', report)
+                        expected = [hashlib.sha256(path.read_bytes()).hexdigest() for path in (early_path, later_path)]
+                        self.assertEqual([expected[0]]*12 + [expected[1]]*13, [row['deploymentSha256'] for row in report['seats']])
+                        self.assertEqual(['tracked-ready']*25, [row['status'] for row in report['seats']])
+                        self.assertEqual([('POST','/api/vr-deployment/venue-check'), ('POST','/api/venue/tracked-readiness')], calls[:2])
+                        self.assertCountEqual([('GET', f"/api/sessions/{session}/world/frames/{snapshot['worldSequence']}")
+                                               for session, snapshot in snapshots.items()], calls[2:])
+                        self.assertEqual(datetime.fromisoformat(sample_time), datetime.fromisoformat(report['sampledAtUtc']))
+
+                        if topology == 'Independent':
+                            running_frame = devices[12]['sessionId']
+                            late = sample()
+                            self.assertEqual(1, late.returncode, late.stderr)
+                            self.assertEqual(['tracked-ready']*10 + ['source-outside-preparing']*5 + ['tracked-ready']*10,
+                                             [row['status'] for row in json.loads(late.stdout)['seats']])
+                            self.assertEqual(7, len(calls))
+                            running_frame = None
+
+                        broken = snapshots[devices[12]['sessionId']]
+                        player = next(row for row in broken['players'] if row['playerId'] == devices[12]['playerId'])
+                        player['rigKind'] = 'Simulated'
+                        waiting = sample()
+                        self.assertEqual(1, waiting.returncode, waiting.stderr)
+                        self.assertEqual('not-tracked', json.loads(waiting.stdout)['seats'][12]['status'])
+                        self.assertEqual(2, len(calls))
+                        player['rigKind'] = 'Tracked'
+
+                        for changed, expected_error in (
+                            (deployment(mapped[13:], devices[13:], 2, True), 'cover every selected seat'),
+                            (deployment(mapped[11:], devices[11:], 2, True), 'repeat a successfully launched seat'),
+                            (dict(later, expectedApkSha256='b'*64), 'same verified APK'),
+                        ):
+                            later_path.write_text(json.dumps(changed), encoding='utf-8')
+                            self.assert_rejected(sample(), expected_error)
+                            self.assertFalse(calls)
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
+
     def test_partial_mr_deployment_preserves_original_pins_on_selected_devices(self):
         files, configs = self.bundle('Linked')
         mapping, document = self.device_map()

@@ -3360,6 +3360,45 @@ class FieldResultsTests(unittest.TestCase):
                 prepared.write_text(json.dumps(prepared_manifest), encoding='utf-8')
                 self.assertEqual(verified['questReadiness'], field.verify_venue(prepared)['questReadiness'])
 
+                # A deployment interrupted after its first successful seats can share one
+                # original sample with a new batch that covered the remaining seats.
+                first_deployment = root / manifest['questDeployments']['reports'][0]
+                interrupted = json.loads(first_deployment.read_bytes())
+                interrupted['complete'] = False
+                interrupted['devices'].extend({'roomId': row['roomId'], 'seat': row['seat'], 'status': 'not-attempted'}
+                                              for row in devices[2:])
+                interrupted['retry']['devices'] = [f'{index:064x}' for index in range(25)]
+                first_deployment.write_text(json.dumps(interrupted), encoding='utf-8')
+                combined_path = root / 'combined-readiness.json'
+                combined = {key: value for key, value in report.items() if key not in ('deploymentSha256', 'seats')}
+                combined['evidenceVersion'] = 2
+                combined['seats'] = []
+                for ready_name, deploy_name in zip(manifest['questReadinessReports'], manifest['questDeployments']['reports'], strict=True):
+                    current = json.loads((root / ready_name).read_bytes())
+                    digest = hashlib.sha256((root / deploy_name).read_bytes()).hexdigest()
+                    combined['seats'].extend(dict(row, deploymentSha256=digest) for row in current['seats'])
+                combined_path.write_text(json.dumps(combined), encoding='utf-8')
+                path.write_text(json.dumps(dict(manifest, questReadinessReports=[combined_path.name])), encoding='utf-8')
+                expected = {'reportsVerified': 1, 'seatsVerified': 25, 'sessionsVerified': len(manifest['sessions']),
+                            'deploymentReportsMatched': 2}
+                self.assertEqual(expected, field.verify_venue(path)['questReadiness'])
+
+                for change, message in (
+                    ({'deploymentSha256': 'd'*64}, 'requires its exact deployment report'),
+                    ({'deploymentSha256': combined['seats'][0]['deploymentSha256']}, 'does not match its original deployed session'),
+                    ({'worldSequence': 3}, 'different frames for one session in the same sample'),
+                ):
+                    broken = deepcopy(combined)
+                    # The third seat shares the session of the first seat in either topology.
+                    broken['seats'][2].update(change)
+                    combined_path.write_text(json.dumps(broken), encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, message):
+                        field.verify_venue(path)
+                combined_path.write_text(json.dumps(combined), encoding='utf-8')
+                path.write_text(json.dumps(dict(manifest, questReadinessReports=[combined_path.name, report_path.name])), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'one original sample with per-seat deployment references'):
+                    field.verify_venue(path)
+
     def test_prepare_mixed_venue_keeps_original_quest_and_windows_evidence(self):
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:

@@ -2452,25 +2452,39 @@ def single_session_quest_readiness(reports, session):
 def read_quest_readiness_reports(paths, mode, attempts, deployed, evidence_path):
     require(type(paths) is list and 1 <= len(paths) <= 25, 'Provide 1 to 25 original Quest readiness reports')
     sessions, used, verified = {}, set(), set()
+    combined = False
     for path in paths:
         report = read_quest_json(evidence_path(path))
-        digest = report.get('deploymentSha256')
-        require(type(digest) is str and digest not in used, 'Quest readiness repeats an original deployment')
-        original = attempts.get(digest)
-        require(original is not None and original['complete'] and original['proof'] is not None
-                and report.get('venueSha256') == original['proof']['venueSha256'],
-                'Quest readiness requires the exact completed deployment report and original venue ZIP digest')
-        require(integer(report.get('evidenceVersion'), 1, 1) and report.get('topology') == mode
+        combined = integer(report.get('evidenceVersion'), 1, 2) == 2
+        require(report.get('topology') == mode
                 and report.get('phase') == 'tracked-readiness' and report.get('complete') is True
                 and report.get('managementVerified') is True,
                 'Quest readiness report lacks a completed tracked sample for this topology')
+        if combined:
+            require(len(paths) == 1 and 'deploymentSha256' not in report,
+                    'A combined Quest tracking check requires one original sample with per-seat deployment references')
+        else:
+            digest = report.get('deploymentSha256')
+            require(type(digest) is str and digest not in used, 'Quest readiness repeats an original deployment')
+            original = attempts.get(digest)
+            require(original is not None and original['complete'] and original['proof'] is not None
+                    and report.get('venueSha256') == original['proof']['venueSha256'],
+                    'Quest readiness requires the exact completed deployment report and original venue ZIP digest')
         sampled = quest_readiness_time(report.get('sampledAtUtc'))
         rows = report.get('seats')
-        require(type(rows) is list and len(rows) == len(original['confirmed']),
+        require(type(rows) is list and len(rows) == len(deployed if combined else original['confirmed']),
                 'Quest readiness report must cover the original deployment seats exactly')
-        current_frames = {}
+        current_frames, seats_by_deployment = {}, {}
         for row in rows:
             require(type(row) is dict, 'Invalid Quest readiness seat')
+            if combined:
+                digest = row.get('deploymentSha256')
+                original = attempts.get(digest) if type(digest) is str else None
+                require(original is not None and original['proof'] is not None
+                        and report.get('venueSha256') == original['proof']['venueSha256'],
+                        'Combined Quest readiness seat requires its exact deployment report and original venue ZIP digest')
+            else:
+                require('deploymentSha256' not in row, 'A per-seat deployment reference requires combined Quest readiness')
             seat = integer(row.get('roomId'), 1, 5), integer(row.get('seat'), 1, 5)
             admission = original['confirmed'].get(seat)
             require(admission is not None and admission == deployed.get(seat) and seat not in verified
@@ -2483,9 +2497,17 @@ def read_quest_readiness_reports(paths, mode, attempts, deployed, evidence_path)
             sessions.setdefault(admission[0], []).append({'roomId': seat[0], 'playerId': admission[1],
                 'worldSequence': world, 'observedSequence': observed, 'capturedAtUtc': captured, 'sampledAtUtc': sampled})
             verified.add(seat)
-        used.add(digest)
+            seats_by_deployment.setdefault(digest, set()).add(seat)
+        if combined:
+            require(len(seats_by_deployment) >= 2 and all(seats == attempts[digest]['confirmed'].keys()
+                    for digest, seats in seats_by_deployment.items()),
+                    'Combined Quest readiness must cover all successful seats of each original deployment exactly')
+        used.update(seats_by_deployment)
     require(verified == deployed.keys(), 'Quest readiness reports must cover every original deployed Quest seat')
-    return sessions, {'reportsVerified': len(used), 'seatsVerified': len(verified), 'sessionsVerified': len(sessions)}
+    summary = {'reportsVerified': len(paths), 'seatsVerified': len(verified), 'sessionsVerified': len(sessions)}
+    if combined:
+        summary['deploymentReportsMatched'] = len(used)
+    return sessions, summary
 
 
 def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_reports=(), capture_device_map=None,

@@ -582,6 +582,29 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 
 要做戰後核對，請在按「開始任務」前保存退出碼為 0 的完整 JSON。這份回條另含 `venueSha256`，每席保留原場次、世界序號、已套用的管理序號及畫格擷取時間。選用 `-DeploymentReport` 時，工具會用原 GameServer 的世界序號重讀每個場次的同一張保存畫格。同場多人共用該次讀取。畫格須在準備中、遊戲 tick 為 0，並且套用了取樣時的管理序號。一般即時追蹤查詢可用於任務進行中。 [在封存回放核對開場畫格](EXTERNAL_CLIENTS.md#核對-quest-開場追蹤回條)
 
+##### 同一輪核對分批部署的追蹤
+
+若原部署中斷後改用獨立的部分對照表補部署，可用 `-DeploymentReportsFile` 讀取兩批原報告。使用同一份原部署 ZIP，與一份包含所有要核對席位的裝置對照表。各原報告的已啟動席位須互不重複，合起來須涵蓋指定席位，且使用同一 APK。沿用累計重試而已取得一份完整報告的場館，可繼續使用單一 `-DeploymentReport`。
+
+在私人資料夾保存 `deployment-reports.json`，路徑相對於清單所在位置。
+
+```json
+{
+  "version": 1,
+  "reports": ["quest-deploy-first.json", "quest-deploy-remaining.json"]
+}
+```
+
+```powershell
+pwsh -NoProfile -NonInteractive -File .\scripts\deploy-quest.ps1 `
+    -VenueBundle .\vr-venue-connections.zip -DeviceMap .\device-map.json `
+    -ManagementApi http://127.0.0.1:5081 -VerifyTrackedSeats `
+    -DeploymentReportsFile .\deployment-reports.json -WaitForTrackedSeconds 30 `
+    > .\quest-tracked-readiness.json
+```
+
+每輪取樣會同時核對指定席位，全部就緒後逐場重讀原準備畫格。新版回條的 `evidenceVersion` 為 2，每席保留自己原部署報告的 SHA-256。戰後將這一份追蹤回條和它引用的各份部署原檔一併提交。 [封存操作](EXTERNAL_CLIENTS.md#核對-quest-開場追蹤回條)
+
 ##### 等候指定席位同時追蹤就緒
 
 加入 `-WaitForTrackedSeconds` 可在原部署包核對完成後，等待 1 至 120 秒。每次重新取得同一個五房取樣，並逐席核對原入場名額及 1.5 秒的畫格期限。只有同一輪所有指定席位就緒才會結束等待並回傳退出碼 0。

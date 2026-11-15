@@ -27,6 +27,7 @@ param(
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$RetryIncomplete,
     [Parameter(ParameterSetName='Bundle')][switch]$VerifyTrackedSeats,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$DeploymentReport,
+    [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$DeploymentReportsFile,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,120)][int]$WaitForTrackedSeconds,
     [Parameter(ParameterSetName='Bundle')][switch]$AllHeadsets,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Refresh')][Parameter(ParameterSetName='Venue')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Windows')][Parameter(Mandatory, ParameterSetName='PlayerTracking')][ValidateNotNullOrEmpty()][string]$ManagementApi,
@@ -714,7 +715,7 @@ function New-TrackedSeatReport($Venue, [object[]]$Map, $Batch, [switch]$IncludeA
         $result = [ordered]@{ roomId = $row.roomId; seat = $row.seat; status = Get-TrackedSeatStatus $batch $snapshot $connection.Ticket ([bool]$connection.Alignment);
             sourceState = $snapshot.sourceState; worldSequence = $snapshot.worldSequence }
         if ($IncludeAllHeadsets) { $result.registeredHeadset = $headset }
-        if ($DeploymentReport) {
+        if ($DeploymentReport -or $DeploymentReportsFile) {
             $result.sessionId = $connection.Ticket.SessionId.ToString('D')
             $result.observedSequence = $snapshot.observedSequence
             $result.capturedAtUtc = $snapshot.capturedAtUtc
@@ -741,7 +742,7 @@ function Confirm-PreparingReadinessFrames($Target, $Report, [int]$RequestMillise
     else { $cancellation.Cancel() }
     try {
         $client.DefaultRequestHeaders.Add('Authorization', $Target.Headers.Authorization)
-        foreach ($session in ($Report.seats | Group-Object sessionId)) {
+        foreach ($session in ($Report.seats | Group-Object { $_.sessionId })) {
             $seat = $session.Group[0]
             $url = [Uri]::new($Target.Origin, "/api/sessions/$($seat.sessionId)/world/frames/$($seat.worldSequence)")
             $status = 'source-frame-unverified'
@@ -808,7 +809,7 @@ function Read-TrackedSeatReport($Target, $Venue, [object[]]$Map, [int]$RequestMi
     $timer = [Diagnostics.Stopwatch]::StartNew()
     $batch = Read-VenueTrackedReadiness $Target $Venue $RequestMilliseconds
     $report = New-TrackedSeatReport $Venue $Map $batch -IncludeAllHeadsets:$IncludeAllHeadsets
-    if ($DeploymentReport -and $report.complete) {
+    if (($DeploymentReport -or $DeploymentReportsFile) -and $report.complete) {
         $remaining = [int][Math]::Floor($RequestMilliseconds - $timer.Elapsed.TotalMilliseconds)
         Confirm-PreparingReadinessFrames $Target $report $remaining
     }
@@ -1004,29 +1005,92 @@ function Test-QuestOpenXRProof($Proof) {
         $Proof.nonce -cmatch '\A[0-9a-f]{32}\z' -and $Proof.nonce -cne ('0' * 32))
 }
 
-function Read-QuestTrackedDeployment($Venue, [object[]]$Map, [string]$Path) {
+function Read-QuestTrackedDeployment($Venue, [object[]]$Map, [string]$Path, [switch]$AllowSuccessfulPrefix) {
     $original = Read-DeploymentJson $Path 32768 'original deployment report'
     $report = $original.Document
-    if ($report.complete -isnot [bool] -or -not $report.complete -or
+    if ($AllowSuccessfulPrefix) {
+        $reported = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        if ($report.devices -isnot [array] -or $report.devices.Count -lt 1 -or $report.devices.Count -gt 25) {
+            throw 'Use original deployment reports with valid mapped seats.'
+        }
+        foreach ($entry in $report.devices) {
+            if (-not (Test-JsonInteger $entry.roomId) -or $entry.roomId -notin 1..5 -or
+                -not (Test-JsonInteger $entry.seat) -or $entry.seat -notin 1..5 -or
+                -not $reported.Add("$($entry.roomId)/$($entry.seat)")) {
+                throw 'Use original deployment reports with valid mapped seats.'
+            }
+        }
+        $Map = @($Map | Where-Object { $reported.Contains("$($_.roomId)/$($_.seat)") })
+    }
+    if ($report.complete -isnot [bool] -or (-not $AllowSuccessfulPrefix -and -not $report.complete) -or
         -not (Test-JsonInteger $report.expectedVersionCode) -or $report.expectedVersionCode -lt 1 -or
         $report.expectedVersionCode -gt [int]::MaxValue -or
         $report.expectedApkSha256 -isnot [string] -or $report.expectedApkSha256 -cnotmatch '\A[0-9a-f]{64}\z' -or
         -not (Test-JsonInteger $report.apkVerificationVersion) -or $report.apkVerificationVersion -ne 1 -or
         -not (Test-QuestDeploymentMap $Venue $Map $report)) {
+        if ($AllowSuccessfulPrefix) { throw 'Use release-verified deployment reports for this original ZIP and device map.' }
         throw 'Use a complete release-verified deployment report for this original ZIP and device map.'
     }
+    if (($report.PSObject.Properties['requireOpenXR'] -and $report.requireOpenXR -isnot [bool]) -or
+        ($report.requireOpenXR -and $report.expectedVersionCode -lt 74)) {
+        throw 'Invalid OpenXR requirement in the original Quest deployment.'
+    }
+    $launched = [Collections.Generic.List[string]]::new()
+    $unlaunched = $false
     for ($index = 0; $index -lt $Map.Count; $index++) {
         $entry = $report.devices[$index]
         $row = $Map[$index]
-        $ticket = $Venue.Connections["$($row.roomId)/$($row.seat)"].Ticket
+        $seatKey = "$($row.roomId)/$($row.seat)"
         if (-not (Test-QuestDeploymentRow $entry $row $report.retry.devices[$index] $report.expectedVersionCode) -or
-            'launch-requested' -cne $entry.status -or $entry.filesVerified -isnot [bool] -or -not $entry.filesVerified -or
+            $entry.status -isnot [string]) {
+            throw 'The deployment report does not match the original completed seat admissions.'
+        }
+        if ($AllowSuccessfulPrefix -and $entry.status -cne 'launch-requested') {
+            $unlaunched = $true
+            continue
+        }
+        $ticket = $Venue.Connections[$seatKey].Ticket
+        if ($unlaunched -or 'launch-requested' -cne $entry.status -or $entry.filesVerified -isnot [bool] -or -not $entry.filesVerified -or
             ($report.requireOpenXR -eq $true -and -not (Test-QuestOpenXRProof $entry.openXR)) -or
             -not (Test-JsonInteger $entry.port) -or -not (Test-QuestDeployedAdmission $entry $ticket)) {
             throw 'The deployment report does not match the original completed seat admissions.'
         }
+        $launched.Add($seatKey)
     }
-    return Get-QuestSha256 $original.Bytes
+    if (-not $launched.Count -or $report.complete -ne ($launched.Count -eq $Map.Count)) {
+        throw 'The deployment report has no valid successful launch prefix.'
+    }
+    return @{ Sha256 = Get-QuestSha256 $original.Bytes; Seats = $launched
+        ApkSha256 = $report.expectedApkSha256; VersionCode = $report.expectedVersionCode }
+}
+
+function Read-QuestTrackedDeployments($Venue, [object[]]$Map, [string]$Path) {
+    $list = (Read-DeploymentJson $Path 32768 'deployment report list').Document
+    if (-not (Test-JsonInteger $list.version) -or $list.version -ne 1 -or $list.reports -isnot [array] -or
+        $list.reports.Count -lt 2 -or $list.reports.Count -gt 25 -or
+        @($list.PSObject.Properties.Name | Where-Object { $_ -cnotin @('version','reports') }).Count) {
+        throw 'Use a version 1 deployment report list with 2 to 25 original Quest reports.'
+    }
+    $directory = Split-Path -Parent (Resolve-Path -LiteralPath $Path).ProviderPath
+    $bindings = @{}
+    $digests = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $release = $null
+    foreach ($name in $list.reports) {
+        if ($name -isnot [string] -or [string]::IsNullOrWhiteSpace($name)) { throw 'Use valid paths to original Quest deployment reports.' }
+        $reportPath = if ([IO.Path]::IsPathRooted($name)) { $name } else { Join-Path $directory $name }
+        $deployment = Read-QuestTrackedDeployment $Venue $Map $reportPath -AllowSuccessfulPrefix
+        if (-not $digests.Add($deployment.Sha256)) { throw 'The deployment report list repeats an original report.' }
+        if ($release -and ($release.ApkSha256 -cne $deployment.ApkSha256 -or $release.VersionCode -ne $deployment.VersionCode)) {
+            throw 'Combined Quest tracking requires the same verified APK for every deployment.'
+        }
+        $release = $deployment
+        foreach ($seat in $deployment.Seats) {
+            if ($bindings.ContainsKey($seat)) { throw 'Quest deployment reports repeat a successfully launched seat.' }
+            $bindings.Add($seat, $deployment.Sha256)
+        }
+    }
+    if ($bindings.Count -ne $Map.Count) { throw 'Quest deployments must cover every selected seat before a combined tracking sample.' }
+    return $bindings
 }
 
 function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, [string]$ExpectedHash) {
@@ -1566,8 +1630,9 @@ if ($ApkPath -and (-not $ReleaseReport -or $DeviceMap)) {
 }
 if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
     if ($WaitForTrackedSeconds -and -not $VerifyTrackedSeats) { throw 'Use -WaitForTrackedSeconds only with -VerifyTrackedSeats.' }
-    if ($DeploymentReport -and (-not $VerifyTrackedSeats -or -not $DeviceMap)) {
-        throw 'Use -DeploymentReport only with -VerifyTrackedSeats and the original -DeviceMap.'
+    if ($DeploymentReport -and $DeploymentReportsFile) { throw 'Specify either -DeploymentReport or -DeploymentReportsFile.' }
+    if (($DeploymentReport -or $DeploymentReportsFile) -and (-not $VerifyTrackedSeats -or -not $DeviceMap)) {
+        throw 'Use deployment reports only with -VerifyTrackedSeats and the original -DeviceMap.'
     }
     if ($RetryIncomplete -and (-not $DeployMappedSeats -or -not $DeviceMap)) {
         throw 'Use -RetryIncomplete with -DeployMappedSeats and the original -DeviceMap.'
@@ -1582,13 +1647,21 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
         }
         $map = @(if ($DeviceMap) { Read-QuestDeviceMap $DeviceMap -Partial:$AllowPartialMap }
             else { foreach ($room in 1..5) { foreach ($seat in 1..5) { @{ roomId = $room; seat = $seat } } } })
-        $venue = Read-VenueBundle $VenueBundle 0 0 -Fingerprint:([bool]$DeploymentReport)
-        if ($DeploymentReport) { $deploymentSha256 = Read-QuestTrackedDeployment $venue $map $DeploymentReport }
+        $venue = Read-VenueBundle $VenueBundle 0 0 -Fingerprint:($DeploymentReport -or $DeploymentReportsFile)
+        if ($DeploymentReport) { $deployment = Read-QuestTrackedDeployment $venue $map $DeploymentReport }
+        if ($DeploymentReportsFile) { $bindings = Read-QuestTrackedDeployments $venue $map $DeploymentReportsFile }
         $result = Confirm-TrackedSeats $venue $map -IncludeAllHeadsets:$AllHeadsets
         if ($DeploymentReport) {
             $result.evidenceVersion = 1
             $result.venueSha256 = $venue.BundleSha256
-            $result.deploymentSha256 = $deploymentSha256
+            $result.deploymentSha256 = $deployment.Sha256
+        }
+        if ($DeploymentReportsFile) {
+            $result.evidenceVersion = 2
+            $result.venueSha256 = $venue.BundleSha256
+            foreach ($row in $result.seats) {
+                $row.deploymentSha256 = $bindings["$($row.roomId)/$($row.seat)"]
+            }
         }
         $result | ConvertTo-Json -Depth 4 -Compress
         if (-not $result.complete) { exit 1 }
