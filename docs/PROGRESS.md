@@ -4,6 +4,7 @@
 
 - 管理包 0.31.205 讓主控直接查看離場玩家的封存戰績，從同一列開啟原房間及原玩家的個人回放。明細要求原批次、世界和戰鬥封存。換頁、換批次或登出會清除明細。 [收尾操作](SESSION_CLOSURE.md) · [管理包](WINDOWS_CONTROL_PACKAGE.md)
 - 解壓核對 568 筆清單。通過 153 項五房瀏覽器、825 項 HTTP、1,115 項領域和 7 項封裝檢查。兩種模式皆以同機管理 API 寫入測試射擊，核對離場玩家耗彈為 1 且個人回放可搜尋並開啟原畫格。另核對房控拒絕、封存前拒絕、非原場次拒絕、錯串流拒絕及關閉後的延遲回應。首個測試畫格因彈匣未隨射擊扣減而遭驗證器拒絕，修正測試彈匣後才通過。Windows 列出 Quest 3，現有 ADB 仍列出零台。 [解壓包驗證](../artifacts/console-venue-departed-review-package-cfdd0c66/checks.json) · [管理台畫面](../artifacts/console-venue-departed-review-package-cfdd0c66/venue-departed-players.png)
+- 解壓包完整背景瀏覽器回歸通過 1,242 項，另通過 117 項 Node 檢查。功能提交 `20619af` 已推送。GitHub Actions 因帳務或支出上限未啟動，工作執行步驟數為零。 [完整回歸](../artifacts/console-venue-departed-review-regression-22fc6764/checks.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43765162078/job/132968495947)
 
 ## 2026-11-16 五房批次驗收保留離場玩家戰績
 
