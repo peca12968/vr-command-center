@@ -27,7 +27,7 @@ param(
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$DeploymentReport,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,120)][int]$WaitForTrackedSeconds,
     [Parameter(ParameterSetName='Bundle')][switch]$AllHeadsets,
-    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Venue')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Windows')][Parameter(Mandatory, ParameterSetName='PlayerTracking')][ValidateNotNullOrEmpty()][string]$ManagementApi,
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Refresh')][Parameter(ParameterSetName='Venue')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Windows')][Parameter(Mandatory, ParameterSetName='PlayerTracking')][ValidateNotNullOrEmpty()][string]$ManagementApi,
     [Parameter(Mandatory, ParameterSetName='Windows')][ValidateNotNullOrEmpty()][string]$WindowsSeatMap,
     [Parameter(Mandatory, ParameterSetName='Windows')][ValidateNotNullOrEmpty()][string]$WindowsOutputDirectory
 )
@@ -599,6 +599,13 @@ function Read-ManagementJson($Target, [Uri]$Url, [int]$RequestMilliseconds, [str
     }
     try { return @{ Document = ConvertFrom-Json -InputObject $raw; Elapsed = $timer.Elapsed.TotalMilliseconds } }
     catch { return @{ Status = 'readiness-invalid' } }
+}
+
+function New-QuestPlayerReadback($Target, $ConnectionFile, $Ticket, $Alignment) {
+    $body = @{ connectionFile = [Convert]::ToBase64String($ConnectionFile.Bytes) }
+    if ($Alignment) { $body.alignmentFile = [Convert]::ToBase64String($Alignment.Bytes) }
+    return @{ Target = $Target; Body = $body | ConvertTo-Json -Compress; Ticket = $Ticket
+        Address = $ConnectionFile.Document.address; Port = $ConnectionFile.Document.port }
 }
 
 function Confirm-QuestPlayerReadback($LiveSeat) {
@@ -1191,14 +1198,14 @@ function Publish-QuestFile([string]$TargetSerial, [string]$Local, [string]$Stagi
     try {
         & $AdbPath -s $TargetSerial push $Local $Staging | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "$Description could not be copied." }
+        if (-not $ExpectedHash) { Confirm-QuestFileHash $TargetSerial $Staging $stagedHash $Description }
+        if ($BeforeActivation) { & $BeforeActivation }
         if ($ExpectedHash) {
             $command = 'current=$(sha256sum ''{0}'') && staged=$(sha256sum ''{1}'') && [ "${{current%% *}}" = ''{2}'' ] && [ "${{staged%% *}}" = ''{3}'' ] && mv -f ''{1}'' ''{0}''' `
                 -f $Destination, $Staging, $ExpectedHash, $stagedHash
             & $AdbPath -s $TargetSerial shell $command *> $null
             if ($LASTEXITCODE -ne 0) { throw 'Could not confirm ticket replacement. Check the selected device and read its current configuration before retrying.' }
         } else {
-            Confirm-QuestFileHash $TargetSerial $Staging $stagedHash $Description
-            if ($BeforeActivation) { & $BeforeActivation }
             if ($null -ne $ConnectionDeployment) { $ConnectionDeployment.Step = 'activate-connection' }
             & $AdbPath -s $TargetSerial shell mv $Staging $Destination | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "$Description could not be activated." }
@@ -1217,7 +1224,8 @@ function Publish-QuestFile([string]$TargetSerial, [string]$Local, [string]$Stagi
     }
 }
 
-function Update-QuestPlayerTicket($Fresh, $Ticket) {
+function Update-QuestPlayerTicket($ConnectionFile, $Ticket, $Target) {
+    $fresh = $ConnectionFile.Document
     if ($Serial -cnotmatch '\A[A-Za-z0-9\[][A-Za-z0-9._:%\[\]-]{0,127}\z') { throw 'Use an explicit ADB serial for the Quest 3.' }
     if (-not (Test-Path -LiteralPath $AdbPath -PathType Leaf)) { throw 'Provide the installed ADB executable.' }
     if ([Guid]::Empty -in @($Ticket.SessionId, $Ticket.PlayerId, $Ticket.AdmissionId)) { throw 'Use a player file for an original admission.' }
@@ -1226,6 +1234,8 @@ function Update-QuestPlayerTicket($Fresh, $Ticket) {
 
     $remote = '/sdcard/Android/data/com.vrcommand.quest/files'
     $destination = "$remote/vr-connection.json"
+    $liveSeat = $null
+    $alignmentPath = $null
     $local = [IO.Path]::GetTempFileName()
     try {
         & $AdbPath -s $Serial pull $destination $local *> $null
@@ -1245,16 +1255,36 @@ function Update-QuestPlayerTicket($Fresh, $Ticket) {
         $sameTicket = $Fresh.joinTicket -ceq $current.joinTicket
         if ($Ticket.ExpiresAtUtc -lt $installed.ExpiresAtUtc) { throw 'Use a ticket with the same or a later expiry for this admission.' }
         if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'The replacement ticket expired before refresh.' }
+        if ($Target) {
+            $alignment = $null
+            if ($Ticket.AlignmentHash) {
+                $alignmentPath = "$remote/vr-room-alignment-$($Ticket.AlignmentHash).json"
+                $alignmentCopy = [IO.Path]::GetTempFileName()
+                try {
+                    & $AdbPath -s $Serial pull $alignmentPath $alignmentCopy *> $null
+                    if ($LASTEXITCODE -ne 0) { throw 'Could not read the original locked MR alignment on the selected Quest.' }
+                    $alignment = Read-RoomAlignment $alignmentCopy $Ticket.RoomId
+                    if ($alignment.Hash -cne $Ticket.AlignmentHash) { throw 'The installed MR alignment does not match the locked hash.' }
+                } finally { Remove-Item -LiteralPath $alignmentCopy }
+            }
+            $liveSeat = New-QuestPlayerReadback $Target $ConnectionFile $Ticket $alignment
+            Confirm-QuestPlayerReadback $liveSeat
+        }
         if (-not $sameTicket) {
             $expectedHash = (Get-FileHash -LiteralPath $local -Algorithm SHA256).Hash.ToLowerInvariant()
             $current.joinTicket = $Fresh.joinTicket
             [IO.File]::WriteAllText($local, ($current | ConvertTo-Json -Depth 4 -Compress))
             $staging = "$remote/vr-connection-$([Guid]::NewGuid().ToString('N')).tmp"
-            Publish-QuestFile $Serial $local $staging $destination 'Player ticket file' $expectedHash
+            Publish-QuestFile $Serial $local $staging $destination 'Player ticket file' $expectedHash -BeforeActivation {
+                if ($liveSeat) { Confirm-QuestPlayerReadback $liveSeat }
+                if ($alignmentPath) { Confirm-QuestFileHash $Serial $alignmentPath $Ticket.AlignmentHash 'Original locked MR alignment' }
+            }
         }
     } finally { Remove-Item -LiteralPath $local }
-    [ordered]@{ roomId = $Ticket.RoomId; seat = $Ticket.Seat + 1; expiresAtUtc = $Ticket.ExpiresAtUtc.ToString('o')
-        status = if ($sameTicket) { 'ticket-file-current' } else { 'ticket-file-refreshed' } } | ConvertTo-Json -Compress
+    $report = [ordered]@{ roomId = $Ticket.RoomId; seat = $Ticket.Seat + 1; expiresAtUtc = $Ticket.ExpiresAtUtc.ToString('o')
+        status = if ($sameTicket) { 'ticket-file-current' } else { 'ticket-file-refreshed' } }
+    if ($liveSeat) { $report.managementVerified = $true }
+    $report | ConvertTo-Json -Compress
 }
 
 function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment, [switch]$UsePassthrough, [switch]$RequestMixedReality,
@@ -1396,10 +1426,11 @@ if ($PSCmdlet.ParameterSetName -eq 'CapturePlan') {
 
 if ($PSCmdlet.ParameterSetName -eq 'Refresh') {
     if (-not $RefreshPlayerTicket) { throw 'Specify -RefreshPlayerTicket for the live ticket update.' }
-    $fresh = (Read-DeploymentJson $ClientConfig 4096 'new player connection').Document
-    $ticket = Read-PlayerConfig $fresh
+    $freshFile = Read-DeploymentJson $ClientConfig $(if ($ManagementApi) { 2048 } else { 4096 }) 'new player connection'
+    $ticket = Read-PlayerConfig $freshFile.Document
+    $target = if ($ManagementApi) { Get-ManagementTarget $ManagementApi }
     $deploymentLock = Enter-QuestDeployment
-    try { Update-QuestPlayerTicket $fresh $ticket }
+    try { Update-QuestPlayerTicket $freshFile $ticket $target }
     finally { $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose() }
     return
 }
@@ -1522,10 +1553,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
         }
     }
     if ($ManagementApi) {
-        $body = @{ connectionFile = [Convert]::ToBase64String($connectionFile.Bytes) }
-        if ($isMixedReality) { $body.alignmentFile = [Convert]::ToBase64String($alignment.Bytes) }
-        $liveSeat = @{ Target = Get-ManagementTarget $ManagementApi; Body = $body | ConvertTo-Json -Compress
-            Ticket = $ticket; Address = $config.address; Port = $config.port }
+        $liveSeat = New-QuestPlayerReadback (Get-ManagementTarget $ManagementApi) $connectionFile $ticket $(if ($isMixedReality) { $alignment })
         Confirm-QuestPlayerReadback $liveSeat
     }
 }

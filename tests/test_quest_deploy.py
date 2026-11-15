@@ -1,6 +1,6 @@
 import asyncio
 import base64
-from contextlib import redirect_stderr
+from contextlib import contextmanager, redirect_stderr
 import copy
 from datetime import datetime
 import hashlib
@@ -56,6 +56,10 @@ switch ($args[2]) {
         if ($env:QUEST_TEST_FAIL -eq 'refresh-source-changed') {
             [IO.File]::AppendAllText((Join-Path $remote 'vr-connection.json'), "`n")
         }
+        if ($env:QUEST_TEST_FAIL -eq 'refresh-alignment-changed') {
+            $originalConfig = Get-Content -Raw -LiteralPath (Join-Path $remote 'vr-connection.json') | ConvertFrom-Json
+            [IO.File]::AppendAllText((Join-Path $remote "vr-room-alignment-$($originalConfig.roomAlignmentSha256).json"), "`n")
+        }
         if ($env:QUEST_TEST_FAIL -eq 'refresh-stage-changed') { [IO.File]::AppendAllText($staging, "`n") }
         if (($env:QUEST_TEST_FAIL -eq 'config-stage-changed' -and $args[4].Contains('/vr-connection-')) -or
             ($env:QUEST_TEST_FAIL -eq 'alignment-stage-changed' -and $args[4].Contains('/vr-room-alignment-'))) {
@@ -64,8 +68,10 @@ switch ($args[2]) {
         exit 0
     }
     'pull' {
-        if ($args[3] -cne '/sdcard/Android/data/com.vrcommand.quest/files/vr-connection.json') { exit 97 }
-        Copy-Item -LiteralPath (Join-Path $remote 'vr-connection.json') -Destination $args[4]
+        if ($args[3] -cnotmatch '\A/sdcard/Android/data/com\.vrcommand\.quest/files/(vr-connection\.json|vr-room-alignment-[0-9a-f]{64}\.json)\z') { exit 97 }
+        $path = Join-Path $remote $Matches[1]
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { exit 1 }
+        Copy-Item -LiteralPath $path -Destination $args[4]
         exit 0
     }
     'shell' {
@@ -222,15 +228,12 @@ class QuestDeployTests(unittest.TestCase):
         apk.parent.mkdir(parents=True)
         apk.write_bytes(b'mock APK')
 
-    def test_single_deploy_verifies_original_files_and_rechecks_before_activation(self):
-        session, player, admission = (uuid.uuid4() for _ in range(3))
-        ticket = make_ticket(5, 1, self.expiry, session, player, admission)
-        config = dict(self.player, joinTicket=ticket)
+    @contextmanager
+    def live_quest_check(self, config):
         requests = []
         state = {'reject': None}
         key = 'test-master-single-seat'
         expires = datetime.fromtimestamp(self.expiry).astimezone().isoformat()
-        path = f'/api/sessions/{session}/rooms/5/players/{player}/quest-deployment-check'
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
@@ -250,75 +253,83 @@ class QuestDeployTests(unittest.TestCase):
             def log_message(self, *args):
                 pass
 
-        self.provision_apk()
         with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
-            flags = ('-ManagementApi', f'http://127.0.0.1:{server.server_port}', '-Serial', 'fixture')
-            active = self.remote / 'vr-connection.json'
             try:
-                for mode in ('VR', 'MR'):
-                    with self.subTest(mode=mode):
-                        self.commands.unlink(missing_ok=True)
-                        active.write_bytes(b'previous connection')
-                        selected = dict(config)
-                        options = ()
-                        expected_body = {}
-                        if mode == 'MR':
-                            alignment = self.plan.read_bytes()
-                            selected['roomAlignmentSha256'] = hashlib.sha256(alignment).hexdigest()
-                            expected_body['alignmentFile'] = base64.b64encode(alignment).decode()
-                            options = ('-MixedReality', '-AlignmentFile', str(self.plan))
-                        original = b'\xef\xbb\xbf' + json.dumps(selected).encode() + b'\r\n'
-                        self.config.write_bytes(original)
-                        expected_body['connectionFile'] = base64.b64encode(original).decode()
-                        original_request = (path, f'Bearer {key}', str(admission), expected_body)
-
-                        requests.clear()
-                        state['reject'] = None
-                        checked = self.run_script(*flags, *options, '-CheckOnly', management_key=key)
-                        self.assertEqual(0, checked.returncode, checked.stderr)
-                        self.assertTrue(json.loads(checked.stdout)['managementVerified'])
-                        self.assertEqual([original_request], requests)
-                        self.assertFalse(self.commands.exists())
-
-                        requests.clear()
-                        state['reject'] = 1
-                        denied = self.run_script(*flags, *options, management_key=key)
-                        self.assert_rejected(denied, 'session or admission changed')
-                        self.assertEqual([original_request], requests)
-                        self.assertFalse(self.commands.exists())
-
-                        requests.clear()
-                        state['reject'] = 3
-                        changed = self.run_script(*flags, *options, management_key=key)
-                        self.assert_rejected(changed, 'session or admission changed')
-                        self.assertEqual([original_request] * 3, requests)
-                        commands = self.commands.read_text(encoding='utf-8')
-                        self.assertIn(' install ', commands)
-                        self.assertNotIn(' force-stop ', commands)
-                        self.assertNotIn(' monkey ', commands)
-                        self.assertEqual(b'previous connection', active.read_bytes())
-                        self.assertFalse(list(self.remote.glob('*.tmp')))
-
-                        requests.clear()
-                        state['reject'] = None
-                        self.commands.unlink()
-                        deployed = self.run_script(*flags, *options, management_key=key)
-                        self.assertEqual(0, deployed.returncode, deployed.stderr)
-                        self.assertEqual([original_request] * 3, requests)
-                        commands = self.commands.read_text(encoding='utf-8')
-                        self.assertIn(' force-stop ', commands)
-                        self.assertIn(' monkey ', commands)
-                        saved = json.loads(active.read_bytes())
-                        self.assertEqual(ticket, saved['joinTicket'])
-                        self.assertEqual(mode == 'MR', saved.get('requestMixedReality', False))
-                        for result in (checked, denied, changed, deployed):
-                            self.assertNotIn(key, result.stdout + result.stderr)
-                            self.assertNotIn(ticket, result.stdout + result.stderr)
+                yield f'http://127.0.0.1:{server.server_port}', key, requests, state
             finally:
                 server.shutdown()
                 thread.join()
+
+    def test_single_deploy_verifies_original_files_and_rechecks_before_activation(self):
+        session, player, admission = (uuid.uuid4() for _ in range(3))
+        ticket = make_ticket(5, 1, self.expiry, session, player, admission)
+        config = dict(self.player, joinTicket=ticket)
+        path = f'/api/sessions/{session}/rooms/5/players/{player}/quest-deployment-check'
+        self.provision_apk()
+        with self.live_quest_check(config) as (url, key, requests, state):
+            flags = ('-ManagementApi', url, '-Serial', 'fixture')
+            active = self.remote / 'vr-connection.json'
+            for mode in ('VR', 'MR'):
+                with self.subTest(mode=mode):
+                    self.commands.unlink(missing_ok=True)
+                    active.write_bytes(b'previous connection')
+                    selected = dict(config)
+                    options = ()
+                    expected_body = {}
+                    if mode == 'MR':
+                        alignment = self.plan.read_bytes()
+                        selected['roomAlignmentSha256'] = hashlib.sha256(alignment).hexdigest()
+                        expected_body['alignmentFile'] = base64.b64encode(alignment).decode()
+                        options = ('-MixedReality', '-AlignmentFile', str(self.plan))
+                    original = b'\xef\xbb\xbf' + json.dumps(selected).encode() + b'\r\n'
+                    self.config.write_bytes(original)
+                    expected_body['connectionFile'] = base64.b64encode(original).decode()
+                    original_request = (path, f'Bearer {key}', str(admission), expected_body)
+
+                    requests.clear()
+                    state['reject'] = None
+                    checked = self.run_script(*flags, *options, '-CheckOnly', management_key=key)
+                    self.assertEqual(0, checked.returncode, checked.stderr)
+                    self.assertTrue(json.loads(checked.stdout)['managementVerified'])
+                    self.assertEqual([original_request], requests)
+                    self.assertFalse(self.commands.exists())
+
+                    requests.clear()
+                    state['reject'] = 1
+                    denied = self.run_script(*flags, *options, management_key=key)
+                    self.assert_rejected(denied, 'session or admission changed')
+                    self.assertEqual([original_request], requests)
+                    self.assertFalse(self.commands.exists())
+
+                    requests.clear()
+                    state['reject'] = 3
+                    changed = self.run_script(*flags, *options, management_key=key)
+                    self.assert_rejected(changed, 'session or admission changed')
+                    self.assertEqual([original_request] * 3, requests)
+                    commands = self.commands.read_text(encoding='utf-8')
+                    self.assertIn(' install ', commands)
+                    self.assertNotIn(' force-stop ', commands)
+                    self.assertNotIn(' monkey ', commands)
+                    self.assertEqual(b'previous connection', active.read_bytes())
+                    self.assertFalse(list(self.remote.glob('*.tmp')))
+
+                    requests.clear()
+                    state['reject'] = None
+                    self.commands.unlink()
+                    deployed = self.run_script(*flags, *options, management_key=key)
+                    self.assertEqual(0, deployed.returncode, deployed.stderr)
+                    self.assertEqual([original_request] * 3, requests)
+                    commands = self.commands.read_text(encoding='utf-8')
+                    self.assertIn(' force-stop ', commands)
+                    self.assertIn(' monkey ', commands)
+                    saved = json.loads(active.read_bytes())
+                    self.assertEqual(ticket, saved['joinTicket'])
+                    self.assertEqual(mode == 'MR', saved.get('requestMixedReality', False))
+                    for result in (checked, denied, changed, deployed):
+                        self.assertNotIn(key, result.stdout + result.stderr)
+                        self.assertNotIn(ticket, result.stdout + result.stderr)
 
     def test_single_seat_checks_local_release_and_installed_apk_before_activation(self):
         apk = self.root / 'selected release.apk'
@@ -471,14 +482,17 @@ class QuestDeployTests(unittest.TestCase):
         alignment.write_bytes(self.plan.read_bytes())
         return current, installed, fresh, identities, alignment
 
-    def run_refresh(self, failure=''):
+    def run_refresh(self, failure='', *, management_api=None, management_key=None):
         shell = shutil.which('sh')
         if shell is None and os.name == 'nt':
             git = Path(shutil.which('git')).resolve()
             shell = str(git.parent.parent/'bin/sh.exe')
         env = {**os.environ, 'QUEST_TEST_ROOT': str(self.root), 'QUEST_TEST_FAIL': failure, 'QUEST_TEST_SH': shell}
+        if management_api is not None:
+            env['VR_COMMAND_MASTER_KEY'] = management_key
+        management = ['-ManagementApi', management_api] if management_api is not None else []
         return subprocess.run(['pwsh', '-NoProfile', '-NonInteractive', '-File', str(self.script), '-RefreshPlayerTicket',
-                               '-ClientConfig', str(self.config), '-AdbPath', str(self.adb), '-Serial', 'fixture'],
+                               '-ClientConfig', str(self.config), '-AdbPath', str(self.adb), '-Serial', 'fixture', *management],
                               env=env, capture_output=True, encoding='utf-8', timeout=20)
 
     def test_ticket_refresh_updates_only_original_ticket_and_is_idempotent(self):
@@ -533,6 +547,70 @@ class QuestDeployTests(unittest.TestCase):
                 self.assert_rejected(result, 'Could not confirm ticket replacement')
                 self.assertEqual(original + (b'\n' if fault=='refresh-source-changed' else b''), current.read_bytes())
                 self.assertFalse(list(self.remote.glob('*.tmp')))
+
+    def test_ticket_refresh_live_verifies_original_bytes_through_publish(self):
+        with self.live_quest_check(self.player) as (url, key, requests, state):
+            options = {'management_api': url, 'management_key': key}
+            for mode in ('VR', 'MR'):
+                with self.subTest(mode=mode):
+                    current, installed, fresh, identities, alignment = self.ticket_refresh(self.expiry-300, mode=mode)
+                    original = current.read_bytes()
+                    alignment_bytes = alignment.read_bytes()
+                    session, player, admission = identities
+                    path = f'/api/sessions/{session}/rooms/5/players/{player}/quest-deployment-check'
+                    original_file = b'\xef\xbb\xbf' + json.dumps(fresh).encode() + b'\r\n'
+                    self.config.write_bytes(original_file)
+                    body = {'connectionFile': base64.b64encode(original_file).decode()}
+                    if mode == 'MR':
+                        body['alignmentFile'] = base64.b64encode(alignment_bytes).decode()
+                    expected = (path, f'Bearer {key}', str(admission), body)
+
+                    requests.clear()
+                    state['reject'] = 2
+                    self.commands.unlink(missing_ok=True)
+                    rejected = self.run_refresh(**options)
+                    self.assert_rejected(rejected, 'session or admission changed')
+                    self.assertEqual([expected] * 2, requests)
+                    self.assertEqual(original, current.read_bytes())
+                    commands = self.commands.read_text(encoding='utf-8')
+                    self.assertIn(' push ', commands)
+                    self.assertNotIn('current=$(sha256sum', commands)
+                    self.assertFalse(list(self.remote.glob('*.tmp')))
+
+                    state['reject'] = None
+                    if mode == 'MR':
+                        requests.clear()
+                        changed = self.run_refresh('refresh-alignment-changed', **options)
+                        self.assert_rejected(changed, 'Original locked MR alignment could not be verified')
+                        self.assertEqual([expected] * 2, requests)
+                        self.assertEqual(original, current.read_bytes())
+                        self.assertFalse(list(self.remote.glob('*.tmp')))
+                        alignment.write_bytes(alignment_bytes)
+
+                    requests.clear()
+                    self.commands.unlink()
+                    refreshed = self.run_refresh(**options)
+                    self.assertEqual(0, refreshed.returncode, refreshed.stderr)
+                    report = json.loads(refreshed.stdout)
+                    self.assertEqual('ticket-file-refreshed', report['status'])
+                    self.assertIs(report['managementVerified'], True)
+                    self.assertEqual([expected] * 2, requests)
+                    self.assertEqual(dict(installed, joinTicket=fresh['joinTicket']), json.loads(current.read_bytes()))
+                    self.assertEqual(alignment_bytes, alignment.read_bytes())
+                    commands = self.commands.read_text(encoding='utf-8')
+                    self.assertEqual(mode == 'MR', f' pull /sdcard/Android/data/com.vrcommand.quest/files/{alignment.name}' in commands)
+                    for operation in (' install ', ' force-stop ', ' monkey '):
+                        self.assertNotIn(operation, commands)
+                    for private in (key, fresh['joinTicket'], installed['joinTicket']):
+                        self.assertNotIn(private, refreshed.stdout + refreshed.stderr + commands)
+
+                    requests.clear()
+                    self.commands.unlink()
+                    repeated = self.run_refresh(**options)
+                    self.assertEqual(0, repeated.returncode, repeated.stderr)
+                    self.assertEqual('ticket-file-current', json.loads(repeated.stdout)['status'])
+                    self.assertEqual([expected], requests)
+                    self.assertNotIn(' push ', self.commands.read_text(encoding='utf-8'))
 
     def test_preflight_is_offline_and_does_not_print_ticket(self):
         result = self.run_mr('-CheckOnly')
