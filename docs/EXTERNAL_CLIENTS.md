@@ -830,7 +830,9 @@ Quest 批次已設定 `questLinkCriteria` 時，`issues[].questLinkMetrics` 會�
 
 啟用 `-RecordLinkMetrics` 的 Quest 開發版玩家在任務執行中實際送出約每秒一筆遊戲內探測，沿用伺服器依原連線及入場核准的回覆限制。客戶端記錄 30 筆結案採樣，區分回覆、0.9 秒逾時及中斷。探測最長從首次執行中狀態起等候 240 秒。摘要用回覆樣本算 p95，另用各採樣窗的 Unity 更新次數及時間算每秒更新數。顯示幀率與網卡頻寬仍依現場量測。 [Quest 部署](QUEST3.md#記錄-quest-遊戲內連線量測)
 
-在原五房驗收清單頂層加入 `"requireQuestLinkMetrics": true`，或在產生清單時加 `--require-quest-link-metrics`。單場驗收也可在原 `--quest-player` 指令加同一旗標。工具逐席從原 logcat 合併報告片段，核對 PID、原連線及伺服器確認的最終戰績。量測片段須位於該條連線建立與最終戰績之間。缺少、重複或順序錯誤的片段會使該席量測驗收失敗。若玩家在採樣後重連，保留本場封存戰績，另安排從同一條連線完成採樣及收尾的驗收。
+在原五房驗收清單頂層加入 `"requireQuestLinkMetrics": true`，或在產生清單時加 `--require-quest-link-metrics`。單場驗收也可在原 `--quest-player` 指令加同一旗標。工具逐席從原 logcat 合併報告片段，核對 PID、原連線及伺服器確認的最終戰績。量測片段須位於該條連線建立與最終戰績之間。缺少、重複或順序錯誤的片段會使該席量測驗收失敗。
+
+Quest 0.50.11 起，原程序重連後會在新連線第一次進入執行中時重新採樣，並保留各條連線的報告。若驗收需要量測，從最後一次成功重連起留足時間完成 30 筆，再由主控結束任務。驗收取伺服器確認最終戰績的那條連線。 [Quest 重連操作](QUEST_RECONNECT.md)
 
 五房結果在 `questLinkMetricsVerified` 列出通過數量，並在各場 `questLinkMetrics` 顯示房號、席位、回覆／逾時／中斷與效能摘要。Windows 席位可同時沿用下方量測格式。原 logcat 已保留量測片段，無需把頭盔日誌重新編排成量測檔。 [Android 日誌格式](https://developer.android.com/tools/logcat)
 

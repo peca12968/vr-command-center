@@ -35,6 +35,7 @@ namespace VrCommand.Unity
         private readonly VenueBootstrap owner;
         private readonly bool server;
         private readonly string output;
+        private readonly LinkProbeConnection client;
         private readonly LinkEchoRateGate replies = new LinkEchoRateGate();
         private readonly List<Sample> samples = new List<Sample>(SampleLimit);
         private double deadline;
@@ -42,12 +43,11 @@ namespace VrCommand.Unity
         private Sample pending;
         private double sentAt, windowStarted = double.NaN;
         private int firstFrame;
-        private ulong connection;
-        private bool connected, finished;
 
         private VenueLinkDiagnostics(VenueBootstrap owner, bool server, string output)
         {
             this.owner = owner; this.server = server; this.output = output;
+            if (!server) client = new LinkProbeConnection(output == null);
             deadline = !server && output == null ? double.PositiveInfinity : Time.realtimeSinceStartupAsDouble + LifetimeSeconds;
         }
 
@@ -79,7 +79,7 @@ namespace VrCommand.Unity
 
         internal void Attach()
         {
-            if (finished) return;
+            if (client?.Closed == true) return;
             var current = owner.networkManager.CustomMessagingManager;
             if (current == null || current == messaging) return;
             messaging = current;
@@ -99,7 +99,7 @@ namespace VrCommand.Unity
         private void HandleReply(ulong sender, FastBufferReader reader)
         {
             if (sender != NetworkManager.ServerClientId || pending == null || !TrySequence(reader, out var sequence)
-                || sequence != pending.sequence) return;
+                || !client.IsPendingReply(sequence)) return;
             var elapsed = Time.realtimeSinceStartupAsDouble - sentAt;
             if (elapsed >= ReplySeconds) return;
             pending.roundTripMilliseconds = elapsed * 1000;
@@ -121,24 +121,34 @@ namespace VrCommand.Unity
             messaging.SendNamedMessage(name, target, writer, NetworkDelivery.Unreliable);
         }
 
+        internal void Connected(ulong clientId)
+        {
+            if (client?.TryBegin(clientId) != true) return;
+            samples.Clear();
+            windowStarted = double.NaN;
+            if (output == null) deadline = double.PositiveInfinity;
+        }
+
         internal void Disconnected(ulong clientId)
         {
-            if (server) replies.Forget(clientId);
-            else if (connected && connection == clientId) Finish("Disconnected");
+            if (server) { replies.Forget(clientId); return; }
+            if (client.Id != clientId) return;
+            Finish("Disconnected");
+            client.Disconnect();
         }
 
         internal void Update()
         {
-            if (server || finished) return;
+            if (server || client.Closed) return;
             var now = Time.realtimeSinceStartupAsDouble;
-            if (now >= deadline) { Finish("Deadline"); return; }
+            if (!client.Reported && now >= deadline) { Finish("Deadline"); return; }
             var network = owner.networkManager;
-            if (!network.IsConnectedClient || messaging == null) return;
-            if (!connected) { connected = true; connection = network.LocalClientId; }
+            if (!network.IsConnectedClient || messaging == null || !client.Id.HasValue) return;
 
             var scene = owner.sceneAuthority;
             var state = scene != null && scene.IsSpawned ? scene.Presentation.Value : default;
             if (state.phase == 3) { Finish("Ended"); return; }
+            if (client.Reported) return;
             if (state.phase != 1)
             {
                 if (pending != null) Record("Interrupted");
@@ -147,7 +157,7 @@ namespace VrCommand.Unity
             }
             if (double.IsPositiveInfinity(deadline)) deadline = now + LifetimeSeconds;
             if (pending != null && now - sentAt >= ReplySeconds) Record("Timeout");
-            if (finished || pending != null) return;
+            if (client.Reported || pending != null) return;
             if (double.IsNaN(windowStarted))
             { windowStarted = now; firstFrame = Time.frameCount; return; }
             if (now - windowStarted < SampleInterval) return;
@@ -156,21 +166,22 @@ namespace VrCommand.Unity
                 playerLoopFrames = Time.frameCount - firstFrame, windowSeconds = now - windowStarted };
             sentAt = windowStarted = now;
             firstFrame = Time.frameCount;
-            Send(Request, NetworkManager.ServerClientId, pending.sequence);
+            Send(Request, NetworkManager.ServerClientId, client.BeginRequest());
         }
 
         private void Record(string result)
         {
             pending.result = result;
             samples.Add(pending); pending = null;
+            client.ClearRequest();
             if (samples.Count == SampleLimit) Finish("Limit");
         }
 
         internal void Finish(string reason)
         {
-            if (server || finished) return;
-            finished = true;
+            if (server || !client.TryFinish(reason == "Ended" || reason == "Shutdown")) return;
             if (pending != null) { pending.result = "Interrupted"; samples.Add(pending); pending = null; }
+            var connection = client.Id.GetValueOrDefault();
             var report = new Report { processId = CurrentProcessId(), connection = connection,
                 complete = reason == "Limit", batchMode = Application.isBatchMode, reason = reason, samples = samples.ToArray(),
                 graphicsDeviceActive = SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null };
@@ -208,6 +219,47 @@ namespace VrCommand.Unity
             return System.Diagnostics.Process.GetCurrentProcess().Id;
 #endif
         }
+    }
+
+    internal sealed class LinkProbeConnection
+    {
+        private readonly bool repeatOnReconnect;
+        private uint lastRequest, pendingRequest;
+        internal ulong? Id { get; private set; }
+        internal bool Reported { get; private set; }
+        internal bool Closed { get; private set; }
+
+        internal LinkProbeConnection(bool repeatOnReconnect) => this.repeatOnReconnect = repeatOnReconnect;
+
+        internal bool TryBegin(ulong id)
+        {
+            if (Closed || Id.HasValue || id == NetworkManager.ServerClientId) return false;
+            Id = id;
+            Reported = false;
+            return true;
+        }
+
+        internal bool TryFinish(bool terminal)
+        {
+            Closed |= terminal || !repeatOnReconnect;
+            if (Reported || (repeatOnReconnect && !Id.HasValue)) return false;
+            Reported = true;
+            ClearRequest();
+            return true;
+        }
+
+        internal void Disconnect() => Id = null;
+
+        // Report ordinals restart on a new connection. Echo tokens stay unique across reconnects.
+        internal uint BeginRequest()
+        {
+            if (++lastRequest == 0) ++lastRequest;
+            return pendingRequest = lastRequest;
+        }
+
+        internal bool IsPendingReply(uint request) => request != 0 && request == pendingRequest;
+
+        internal void ClearRequest() => pendingRequest = 0;
     }
 
     internal sealed class LinkEchoRateGate

@@ -46,9 +46,9 @@ def quest_logcat(log, port=7777, pid=7342):
             + ''.join(logcat_line(line, pid) for line in log.splitlines()))
 
 
-def insert_quest_link_metrics(log, pid, connection, *, process_id=None, report_connection=None, frame_pid=None, drop=False):
+def insert_quest_link_metrics(log, pid, connection, *, process_id=None, report_connection=None, frame_pid=None, drop=False, reply_offset=0):
     samples = [{'sequence': i + 1, 'tick': 20 * (i + 1), 'playerLoopFrames': 72,
-                'windowSeconds': 1, 'roundTripMilliseconds': 20 + i if i < 28 else 0,
+                'windowSeconds': 1, 'roundTripMilliseconds': 20 + reply_offset + i if i < 28 else 0,
                 'result': 'Reply' if i < 28 else 'Timeout' if i == 28 else 'Interrupted'} for i in range(30)]
     data = json.dumps({'version': 1, 'processId': pid if process_id is None else process_id,
                        'connection': int(connection if report_connection is None else report_connection), 'complete': True,
@@ -5008,6 +5008,24 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertEqual(2, report['serverAcknowledgements'])
                 self.assertEqual('quest-logcat-tracked' if quest else 'windows-openxr-mock-tracked', report['playerSources'][1]['source'])
                 self.assertNotIn('192.168', json.dumps(report))
+
+    def test_quest_link_metrics_use_reconnected_seat_final_acknowledged_link(self):
+        data = self.reconnect_history_fixture()
+        data[3]['players'][1]['headset'] = 'Quest3'
+        address, log = data[7].pop()
+        pid = 7342
+        old_link = insert_quest_link_metrics(quest_logcat(log.split('\n', 1)[1], pid=pid), pid, '8')
+        final_link = insert_quest_link_metrics(old_link, pid, '2', reply_offset=10)
+
+        report = field.verify(*data, quest_player_logs=[(address, final_link, pid)], verify_reconnect_history=True,
+                              require_quest_link_metrics=True)
+        self.assertEqual((1, 2, 30, 56), tuple(report['questLinkMetrics'][0][key]
+                         for key in ('roomId', 'seat', 'attempts', 'p95RoundTripMs')))
+        self.assertEqual(1, report['reconnectHistory']['retiredConnections'])
+
+        with self.assertRaisesRegex(field.EvidenceError, 'Missing complete Quest link report'):
+            field.verify(*data, quest_player_logs=[(address, old_link, pid)], verify_reconnect_history=True,
+                         require_quest_link_metrics=True)
 
     def test_reconnect_history_rejects_missing_reordered_or_shared_prior_connections(self):
         for case, error in (

@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-16 `VRCommand-Player-0.50.11-1.16-win-x64.zip` 為 84,952,780 bytes，SHA-256 `06f7964eb7e887fc9345df1d47eb0d45933202d6a8e35045cf8d2f9c33bf28bd`。解壓核對 331 筆清單，已和 Quest 0.50.11 核對來源及網路識別。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.11-1.16-win-x64.zip) · [發行報告](../artifacts/venue-release-quest-reconnect-0511.json)
+
 2026-11-16 `VRCommand-Player-0.50.10-1.16-win-x64.zip` 為 84,951,683 bytes，SHA-256 `61fe844eb722a460c2541a079657a1479b78019a0acbffd732da3058dad66915`。解壓核對 331 筆清單，已和 Quest 0.50.10 核對來源及網路識別。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.10-1.16-win-x64.zip) · [發行報告](../artifacts/venue-release-quest-link-0510.json)
 
 2026-11-16 `VRCommand-Player-0.50.9-1.16-win-x64.zip` 為 84,951,664 bytes，SHA-256 `85f50be15883dd8e2680dd82c74d9b781ba84a3751d88e0c0c369c595a849282`。解壓核對 331 筆清單，已和 Quest 0.50.9 核對來源及網路識別。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.9-1.16-win-x64.zip) · [發行報告](../artifacts/venue-release-quest-openxr-0509.json)

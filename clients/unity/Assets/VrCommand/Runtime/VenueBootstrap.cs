@@ -668,7 +668,12 @@ namespace VrCommand.Unity
         private void TransportFailed() { Debug.LogError("VR_TRANSPORT_FAILED"); }
         private void Connected(ulong clientId)
         {
-            if (clientId == networkManager.LocalClientId) { status = "CONNECTED"; Debug.Log("VR_CLIENT_CONNECTED id=" + clientId); }
+            if (clientId == networkManager.LocalClientId)
+            {
+                status = "CONNECTED";
+                Debug.Log("VR_CLIENT_CONNECTED id=" + clientId);
+                linkDiagnostics?.Connected(clientId);
+            }
             if (peerDiagnostics && clientId != NetworkManager.ServerClientId && admitted.ContainsKey(clientId))
                 ObservePeer(clientId);
         }

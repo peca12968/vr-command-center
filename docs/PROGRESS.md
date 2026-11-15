@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-16 Quest 重連後重新量測
+
+- Quest 0.50.11／76 在原程序成功重連後，會為新連線重新採樣 30 筆。回覆識別碼跨連線遞增，避免把舊連線的遲到回覆計入。封存仍以伺服器確認最終戰績的連線為準。 [重連操作](QUEST_RECONNECT.md) · [封存操作](EXTERNAL_CLIENTS.md#quest-遊戲內連線量測)
+- 277 項 Unity EditMode 及 130 項封存回歸通過。合成 logcat 中，新舊兩條連線各有完整量測時以最後一條的 p95 為準。只有舊連線報告時，要求量測的驗收會拒絕。
+- Windows 同機合併與獨立各以 5 個背景玩家運行 40 秒，20 項檢查通過，300 筆原遊戲探測都有回覆。6 場完成戰績及回放封存。 [背景排演](../artifacts/desktop-exercise/20261116-070112-0427cbc0/exercise-result.json)
+- Quest APK 與 Windows 玩家、伺服器包已核對共同來源指紋和原網路物件識別。Windows 兩包各 331 筆、對應 324 筆遊戲檔。Quest APK 確認 ARM64、SDK 32／35、OpenXR、APK v2 簽章及新版重連程式。頭盔 USB 仍只有檔案傳輸介面，ADB 偵錯介面為零。實機重連及跨機驗收待執行。 [發行報告](../artifacts/venue-release-quest-reconnect-0511.json)
+
 ## 2026-11-16 無人值守的 Windows 桌面測試
 
 - 共用桌面測試入口會先查實際 EXE 路徑及目前使用的防火牆設定檔。把相同 Unity 執行檔複製到暫存新路徑後，共用入口在啟動前回報私人網路缺少規則並結束。原 F 槽路徑沿用現有規則，以回送位址完成 5 名背景玩家 40 秒排演。6 項原生檢查及 123 項桌面測試通過，所有測試子程序已結束。 [操作方式](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試) · [同機排演結果](../artifacts/desktop-exercise/20261116-065011-87c615b0/exercise-result.json)

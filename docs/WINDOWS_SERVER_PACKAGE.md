@@ -1,5 +1,7 @@
 # Windows 遊戲伺服器包
 
+2026-11-16 `VRCommand-GameServer-0.50.11-1.24-win-x64.zip` 為 84,985,912 bytes，SHA-256 `3b6f84c96b05daba8b2f72202b7db13bcb0b3217feba4459adf1b5a395f00bbe`。解壓核對 331 筆清單，已和 Quest 0.50.11 核對來源及網路識別。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.11-1.24-win-x64.zip) · [發行報告](../artifacts/venue-release-quest-reconnect-0511.json)
+
 2026-11-16 `VRCommand-GameServer-0.50.10-1.24-win-x64.zip` 為 84,984,809 bytes，SHA-256 `02c29654473635860b2698b674008d58b5f19418b5a33024b1322e59dfe5c089`。解壓核對 331 筆清單，已和 Quest 0.50.10 核對來源及網路識別。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.10-1.24-win-x64.zip) · [發行報告](../artifacts/venue-release-quest-link-0510.json)
 
 2026-11-16 `VRCommand-GameServer-0.50.9-1.24-win-x64.zip` 為 84,984,800 bytes，SHA-256 `10a905084d642c8ebee152a1572cb16ca8ad4a8d30819942a9a3c4d620f74152`。解壓核對 331 筆清單，已和 Quest 0.50.9 核對來源及網路識別。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.9-1.24-win-x64.zip) · [發行報告](../artifacts/venue-release-quest-openxr-0509.json)
