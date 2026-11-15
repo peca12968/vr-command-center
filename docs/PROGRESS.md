@@ -6,6 +6,7 @@
 - 277 項 Unity EditMode 及 130 項封存回歸通過。合成 logcat 中，新舊兩條連線各有完整量測時以最後一條的 p95 為準。只有舊連線報告時，要求量測的驗收會拒絕。
 - Windows 同機合併與獨立各以 5 個背景玩家運行 40 秒，20 項檢查通過，300 筆原遊戲探測都有回覆。6 場完成戰績及回放封存。 [背景排演](../artifacts/desktop-exercise/20261116-070112-0427cbc0/exercise-result.json)
 - Quest APK 與 Windows 玩家、伺服器包已核對共同來源指紋和原網路物件識別。Windows 兩包各 331 筆、對應 324 筆遊戲檔。Quest APK 確認 ARM64、SDK 32／35、OpenXR、APK v2 簽章及新版重連程式。頭盔 USB 仍只有檔案傳輸介面，ADB 偵錯介面為零。實機重連及跨機驗收待執行。 [發行報告](../artifacts/venue-release-quest-reconnect-0511.json)
+- 功能提交 `15a3e1f` 已推送。GitHub Actions 因帳務或支出上限未啟動，工作執行步驟數為零。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43773167995/job/132993387527)
 
 ## 2026-11-16 無人值守的 Windows 桌面測試
 
