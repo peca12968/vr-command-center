@@ -83,6 +83,7 @@ const roomPlan = mountIndependentPlan({
 });
 let timer;
 let selectionEpoch = 0, venueClosureEpoch = 0, operationsViewEpoch = 0;
+let venueEnvironmentReview = 0;
 let archivedPlan = null;
 let roomEnemyDraft = null, roomEnemyPolicySequences = null;
 
@@ -850,6 +851,28 @@ function settingBatchRoom(kind, batch, session, room) {
   return { status: 'Applied', text,
     target: current.target };
 }
+async function openOriginalVenueEnvironment(batch, session, roomId) {
+  const request = ++venueEnvironmentReview, epoch = state.epoch, view = operationsViewEpoch;
+  const current = () => master() && !state.busy && !state.pending && state.epoch === epoch && operationsViewEpoch === view
+    && request === venueEnvironmentReview && state.venue?.latestEnvironment?.requestId === batch.requestId;
+  if (!current()) return;
+  try {
+    const original = await api(`/sessions/${session.sessionId}/world/venue-environment/${batch.requestId}`);
+    if (!current()) return;
+    const { streamId, worldSequence, appliedAtSequence } = original;
+    if (original.sessionId !== session.sessionId || original.requestId !== batch.requestId || appliedAtSequence !== session.appliedAtSequence
+      || typeof streamId !== 'string' || !Array.isArray(original.roomIds) || !original.roomIds.includes(roomId))
+      throw new Error('Original environment changed');
+    if (worldSequence === null) { notify('原錄製中找不到套用這筆環境指令的有效執行畫格。', true); return; }
+    if (!Number.isSafeInteger(worldSequence) || worldSequence < 1) throw new Error('Invalid saved frame');
+    const { weather, timeOfDay, lightning } = batch;
+    notify('');
+    tab('world', { mode: 'replay', sessionId: session.sessionId, roomId, streamId, complete: false,
+      throughSequence: worldSequence, witness: { kind: 'environment', exactObserved: true, setting: { appliedAtSequence, weather, timeOfDay, lightning } } });
+  } catch {
+    if (current()) notify('無法讀取這筆指令的原環境畫格。', true);
+  }
+}
 function renderVenueSettingBatch(locked, kind) {
   const enemy = kind === 'enemies', name = enemy ? 'enemy' : 'environment';
   const id = 'venue-' + name + '-batch', key = enemy ? 'latestEnemies' : 'latestEnvironment';
@@ -891,6 +914,11 @@ function renderVenueSettingBatch(locked, kind) {
         const original = settingBatchRoom(kind, current, latest, room).target;
         if (original) tab('world', original);
       });
+      item.append(button);
+    } else if (!enemy && ['Superseded', 'Ended'].includes(status)) {
+      const button = element('button', '查找原環境畫格', 'quiet small');
+      button.type = 'button'; button.disabled = locked;
+      button.addEventListener('click', () => openOriginalVenueEnvironment(batch, session, room));
       item.append(button);
     }
     return item;

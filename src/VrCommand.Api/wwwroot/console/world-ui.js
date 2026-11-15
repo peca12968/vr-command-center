@@ -974,7 +974,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     }
     if (!Number.isSafeInteger(packet.observedSequence) || packet.observedSequence < setting.appliedAtSequence) return false;
     if (kind === 'environment') return packet.weather === setting.weather && packet.frame.night === (setting.timeOfDay === 'Night')
-      && packet.lightning === setting.lightning;
+      && packet.lightning === setting.lightning && (!target.witness.exactObserved || (packet.observedSequence === setting.appliedAtSequence
+        && packet.suspended === false && packet.frame.phase === 'Running' && packet.frame.tick > 0));
     const enemies = packet.frame.enemies.filter(enemy => enemy.roomId === target.roomId);
     const local = packet.frame.roomEnemyPolicies?.find(row => row.roomId === target.roomId);
     if (typeof inherited === 'boolean' && inherited !== !local) return false;

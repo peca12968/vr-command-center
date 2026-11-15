@@ -91,6 +91,19 @@ public sealed partial class SessionManager
         return new(batch.Id, batch.RecordedAtUtc, climate.Weather, climate.TimeOfDay, climate.Lightning, targets);
     }
 
+    public (long AppliedAtSequence, EnvironmentSettings Environment) ReadVenueEnvironmentCommand(Guid sessionId, Guid requestId, OperatorIdentity actor)
+    {
+        RequireVenueMaster(actor);
+        lock (gate)
+        {
+            var entry = venueTransitions.GetValueOrDefault(requestId)?.SingleOrDefault(value => value.SessionId == sessionId);
+            var command = entry?.Read<ControlCommand>();
+            if (entry is null || command is not { Action: ControlAction.SetEnvironment, Environment: { } environment })
+                throw new KeyNotFoundException("No original venue environment command for this session.");
+            return (entry.Sequence, environment);
+        }
+    }
+
     private VenueEnemyBatch? LatestVenueEnemyBatch()
     {
         if (latestVenueEnemies is not { } batch) return null;

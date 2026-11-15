@@ -23,7 +23,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       snapshot = await api(`/sessions/${id}`);
       const header = { sessionId: id, streamId, origin, roomIds: snapshot.roomIds, reinforcementVersion,
         captureStartedAtUtc: new Date(started).toISOString().replace('Z', '0000+00:00') };
-      let sequence = 0;
+      let sequence = 0, tick = 0;
       const send = message => {
         const result = spawnSync('python', [path.join(root, 'scripts/world_test_socket.py')], { encoding: 'utf8', timeout: 6000, windowsHide: true,
           input: JSON.stringify({ port: Number(new URL(base).port), route: `/api/sessions/${id}/world/publish`, token: tokens.GameServer,
@@ -45,7 +45,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         const visibility = ['Fog', 'Storm'].includes(weather) ? weather : 'Clear';
         const packet = { sequence: ++sequence, observedSequence: current.sequence, elapsedMilliseconds: sequence === 1 ? 0 : Date.now() - started,
           weather, lightning, throughCombatSequence: 0, events: [],
-          frame: { phase: current.state, tick: 0, night: timeOfDay === 'Night', visibility, behavior, autoAttack, throughSequence: 0, players, enemies } };
+          frame: { phase: current.state, tick: current.state === 'Running' ? ++tick : tick,
+            night: timeOfDay === 'Night', visibility, behavior, autoAttack, throughSequence: 0, players, enemies } };
         assert.equal(send({ type: 'frame', payload: packet }).acceptedSequence, sequence);
       };
       publish.seal = () => assert.equal(send({ type: 'seal', finalSequence: sequence }).complete, true);
@@ -277,7 +278,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       await beginRoom(1).getAttribute('data-begin-state') === 'Ready' && await beginRoom(2).getAttribute('data-begin-state') === 'EmptyRoster');
     check(declinedBegin.code === 'venue-begin-not-ready' && declinedBegin.roomIds.join() === '2' && await beginButton.isDisabled(),
       'A missing roster and source in one room blocks the whole Begin batch in both HTTP and Chromium');
-    check(await beginRoomText(1) === '房間 1 · 1 席姿態就緒'
+    check(await beginRoomText(1) === '房間 1 · 1 席姿態就緒 · 錄製來源 Simulation'
       && await beginRoomText(2) === '房間 2 · 名冊尚無玩家' && await page.locator('[data-begin-room]').count() === 2,
       'The master sees only the target rooms and can distinguish a ready VR room from an empty independent roster');
     await beginRoom(1).filter({ hasText: '快照已過期' }).waitFor();
@@ -365,6 +366,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const environmentBatch = page.locator('#venue-environment-batch');
     const climateRoom = (room, state) => environmentBatch.locator(`[data-environment-batch-room="${room}"][data-environment-batch-state="${state}"]`);
     const climateReplay = (room, state) => climateRoom(room, state).getByRole('button', { name: '檢視環境快照' });
+    const originalClimateReplay = (room, state) => climateRoom(room, state).getByRole('button', { name: '查找原環境畫格' });
+    const climateEvidence = (id, requestId = climateReceipt.requestId) => `/sessions/${id}/world/venue-environment/${requestId}`;
     const durableBatch = (await api('/venue/phase')).latestEnvironment;
     check(durableBatch?.requestId === climateReceipt.requestId && durableBatch.weather === 'Storm'
       && durableBatch.timeOfDay === 'Night' && durableBatch.lightning === true
@@ -376,6 +379,10 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await climateRoom(1, 'Waiting').waitFor();
     check(await climateReplay(1, 'Waiting').count() === 0 && await environmentBatch.getByText('0 / 2 房已確認', { exact: false }).isVisible(),
       'Accepted environment commands are visible before any matching native frame without approving a replay');
+    const unobserved = await api(climateEvidence(preparing[0]));
+    await api(climateEvidence(preparing[0]), 'GET', undefined, 'Room2', 403);
+    await api(climateEvidence(preparing[0], randomUUID()), 'GET', undefined, 'Master', 404);
+    check(unobserved.worldSequence === null, 'Original environment lookup is Master-scoped and returns no frame before the game observes the command');
     await publishUntil(first, changedClimate[0], () => climateReplay(1, 'Applied').isVisible());
     check(await climateRoom(2, 'Waiting').isVisible() && await environmentBatch.getByText('1 / 2 房已確認', { exact: false }).isVisible(),
       'The environment batch confirms each room only after its own source applies the command');
@@ -404,6 +411,12 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       && await page.locator('#world-room').inputValue() === '1' && await page.locator('#world-camera').inputValue() === 'top'
       && await page.locator('#world-environment').innerText() === 'Storm · 夜間 · 雷電啟用',
       'The venue weather shortcut pauses on a saved frame at or after its original command, with the exact room and environment');
+    const originalRoomTwo = await api(climateEvidence(preparing[1]));
+    const firstRoomTwo = (await api(`/sessions/${preparing[1]}/world/frames/${originalRoomTwo.worldSequence}`)).packet;
+    const preceding = (await api(`/sessions/${preparing[1]}/world/frames/${originalRoomTwo.worldSequence - 1}`)).packet;
+    check(firstRoomTwo.observedSequence === originalRoomTwo.appliedAtSequence && firstRoomTwo.frame.tick > 0
+      && preceding.observedSequence < originalRoomTwo.appliedAtSequence,
+      'The look-up selects the first active frame at the original environment command sequence');
     await page.locator('#world-viewport').screenshot({ path: path.join(screenshots, 'venue-environment-frame.png') });
     await page.locator('#tab-operations').click();
     const override = await updateRoom2({ ...changedClimate[1].environment, weather: 'Rain', lightning: false });
@@ -421,6 +434,12 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     check(scoped.length === 1 && scoped[0].roomId === 2 && scoped[0].environment.venue === false
       && scoped[0].environment.setting.appliedAtSequence === override.appliedAtSequence && !scoped[0].venueEnvironment,
       'The scoped readiness response confirms the single-room command without leaking another room');
+    const priorRoomTwoFrame = await openSetting('environment', 2, preparing[1], originalClimateReplay(2, 'Superseded'));
+    await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${priorRoomTwoFrame} 格的環境快照` }).waitFor();
+    check(priorRoomTwoFrame === originalRoomTwo.worldSequence && await page.locator('#world-room').inputValue() === '2'
+      && await page.locator('#world-environment').innerText() === 'Storm · 夜間 · 雷電啟用',
+      'After a room switches to rain, the old batch opens its exact storm frame with the original room scope');
+    await page.locator('#tab-operations').click();
     const weatherRoute = `**/api/sessions/${preparing[1]}/world/watch?**`;
     await page.route(weatherRoute, async route => {
       const original = await route.fetch();
@@ -689,6 +708,12 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       && await page.locator('#venue-environment-batch-download').isEnabled()
       && await climateRoom(1, 'Ended').filter({ hasText: `原命令 ${durableBatch.sessions[0].appliedAtSequence}` }).isVisible(),
       'After relogin and room reuse the environment batch still refers only to its original ended sessions');
+    const originalEnded = await api(climateEvidence(ending.id));
+    const reopened = await openSetting('environment', 1, ending.id, originalClimateReplay(1, 'Ended'));
+    await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${reopened} 格的環境快照` }).waitFor();
+    check(reopened === originalEnded.worldSequence && await recording.inputValue() === ending.id,
+      'The ended batch opens its original environment frame even after room 1 is assigned to another session');
+    await page.locator('#tab-operations').click();
     await archive(ending.id).last().getByRole('button', { name: '查看場次' }).click();
     await page.waitForFunction(id => document.getElementById('session-select').value === id, ending.id);
     check(await page.locator('#include-ended').isChecked() && (await api(`/sessions/${replacement.id}`)).state === 'Preparing',
@@ -1231,6 +1256,17 @@ with zipfile.ZipFile(sys.argv[1]) as original, zipfile.ZipFile(sys.argv[2]) as c
     const roomTwo = randomUUID();
     await api(`/sessions/${combined.id}/players`, 'POST', { playerId: roomTwo, roomId: 2, name: '第二房席位', headset: 'Quest3' });
     const combinedPublish = await prepare(combined.id, 1, true);
+    await run(combined.id, 'Begin');
+    const setCombinedEnvironment = async () => api('/venue/phase', 'POST', {
+      action: 'SetEnvironment', targets: await climateTargets(), environment: climate
+    }, 'Master', 200, undefined, randomUUID());
+    const skippedEnvironment = await setCombinedEnvironment();
+    const nextEnvironment = await setCombinedEnvironment();
+    combinedPublish(await api(`/sessions/${combined.id}`));
+    const skippedFrame = await api(climateEvidence(combined.id, skippedEnvironment.requestId));
+    const nextFrame = await api(climateEvidence(combined.id, nextEnvironment.requestId));
+    check(skippedFrame.worldSequence === null && nextFrame.worldSequence > 0 && nextFrame.roomIds.join() === '1,2,3,4,5',
+      'A later identical environment frame cannot stand in for an earlier command in a linked venue');
     const combinedEnd = (await api('/venue/phase')).end;
     const originalBatch = await api('/venue/phase', 'POST', { action: 'End', targets: combinedEnd }, 'Master', 200, undefined, randomUUID());
     active.delete(combined.id);
