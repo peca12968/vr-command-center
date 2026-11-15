@@ -5,6 +5,7 @@
 - 部署工具新增 `-SmokeTest`。可核對原發行 APK、指定 Quest 3、安裝及讀回雜湊，再確認 Android 啟動結果、讀取該程序的日誌並觀察程序存活。已安裝的套件會停止首次安裝流程。場次入場、追蹤及 MR 對位另做實機測試。 [操作方式](QUEST3.md#首次安裝與啟動檢查)
 - Quest 部署與擷取的 58 項本機回歸通過，涵蓋模擬安裝、裝置未授權、讀回雜湊不符、啟動逾時、程序重啟及致命錯誤。第一次平行跑兩份套件因共用部署鎖出現失敗，依序重跑後通過。
 - 原 APK `0.50.7`／72 已核對 SHA-256。Windows 已偵測到實體頭盔，電腦端 ADB 及 Meta VR CLI 起初均無可用裝置。單台頭盔接通偵錯後，執行首次啟動，再部署短效票券驗證場次連線。 [Meta 實機設定](https://developers.meta.com/vr/documentation/android-apps/enable-developer-mode/)
+- 功能提交 `2cd50d0` 已推送。GitHub Actions 顯示帳務或支出上限問題，工作執行步驟數為零。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43745273022)
 
 ## 2026-11-16 六批收件顯示共同執行時段未達標的原因
 
