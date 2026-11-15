@@ -5,6 +5,7 @@
 - `--capture-deployed-seats` 以原未完成的部署報告、ZIP 與完整原裝置對照表核對已啟動席位，保留原 PID 與 OpenXR 記錄。累計部署重試使用 `--after-deployment-report`，核對直接前一份原報告後只收新啟動席位。 [操作方式](QUEST3.md#部署中斷時先擷取已啟動的席位)
 - 66 項部署及 133 項封存測試通過。獨立與合併模式各驗證 12 席先收、13 席補收的 25 席合成資料，累計重試和另批補部署均可核對。引用的舊報告須保持原始位元組，未成功啟動或缺少完整擷取的席位無法通過。 [合併驗收](EXTERNAL_CLIENTS.md#直接使用-quest-批次擷取報告)
 - 背景演練在第 13 席暫存檔核對時注入故障，先啟動擷取已完成的 12 席，再透過原部署重試啟動剩餘 13 席。兩批都就緒後才送出模擬結束記錄。全程共 25 次啟動、25 份原日誌位元組相符，前 12 席的原設定與 OpenXR 啟動資料均保留，82.38 秒完成。此場使用模擬 ADB 與管理服務，沿用既有 0.50.11 APK。實體 Quest 及跨機容量仍待驗收。 [25 席中斷恢復演練](../artifacts/quest-deployment-recovery-fixture-7c51ae7c.json)
+- 功能提交 `60f9297` 已推送。GitHub Actions 因帳務或支出上限未啟動，工作執行步驟數為零。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43775990753/job/133002300112)
 
 ## 2026-11-16 Quest 五房部署的逐席 OpenXR 核對
 
