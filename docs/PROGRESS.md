@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 單場 VR 開場再核對追蹤
+
+- 控制台 0.31.200 連上 `GameServer` VR 來源時顯示「確認追蹤並開始」。管理服務在 Begin 核對原場次與管理序號、同串流最近的準備畫格及原名冊每席的 `Tracked` 姿態。有人斷追蹤、畫格過期或換入場時保留準備狀態。相同命令可原樣重試。 [單場操作](PLAYER_READINESS.md#單場-vr-追蹤開場)
+- Windows 管理包解壓核對 568 筆清單。原建置和解壓包各通過 11 項 VR 開場檢查，另通過解壓包的 50 項 MR 開場與恢復、1,109 項領域、117 項 Node 和 7 項封裝檢查。用背景瀏覽器、管理 API 及測試畫格驗證，實機頭盔和跨機驗收仍待進行。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [解壓包檢查](../artifacts/console-tracked-vr-package-e8ea48cd/checks.json)
+- 完整 Chrome 背景回歸通過 1,223 項，含單場及五房開場、房控權限、場景編輯、觀戰回放和結算匯出。 [完整回歸](../artifacts/console-tracked-vr-start-regression-bf8051fd/checks.json)
+
 ## 2026-11-16 Quest 3 單場戰後核對開場追蹤
 
 - `-VerifyPlayerTracking` 的成功回條包含原入場雜湊。戰後的 `--quest-readiness-report` 將每席回條對回原始 Quest 日誌、已封存的 GameServer 準備畫格及戰績入場。摘要列出核對後的世界序號、管理序號與席位數。 [保存開場回條](QUEST3.md#單房實機追蹤驗收) · [戰後核對](EXTERNAL_CLIENTS.md#核對單場-quest-開場追蹤回條)

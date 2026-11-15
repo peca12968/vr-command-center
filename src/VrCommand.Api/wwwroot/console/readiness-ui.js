@@ -50,6 +50,23 @@ export function readinessView(report, session, elapsed, roomId = null) {
   return { source, rows, text: `${scope}${origin}${rows.filter(row => row.ready).length} / ${rows.length} 姿態有效 · ${labels[source]}` };
 }
 
+export function usesTrackedVrStart(session) {
+  return session?.state === 'Preparing' && session.environment?.mode === 'VR' && session.combatStream?.origin === 'GameServer';
+}
+
+function trackedVrStartStatus(report, session, elapsed, failed) {
+  if (!session.players.length) return '追蹤開場需要先建立玩家名冊。';
+  if (failed || report?.sessionSequence !== session.sequence || report?.origin !== 'GameServer')
+    return '等待核對追蹤開場。';
+  const { source, rows } = readinessView(report, session, elapsed);
+  if (source !== 'Fresh') return `等待有效的追蹤快照 · ${labels[source]}`;
+  if (report.observedSequence !== session.sequence) return '等待遊戲伺服器同步最新場次與名冊。';
+  const count = rows.filter(row => row.ready && row.kind === 'Tracked').length;
+  if (count !== session.players.length) return `${count} / ${rows.length} 席追蹤就緒。請查看名冊中的追蹤狀態。`;
+  return report.trackedVrStartReady === true ? `${count} / ${rows.length} 席追蹤就緒。開始時會再核對最新畫格。`
+    : '等待有效的準備畫格。';
+}
+
 export function mrReadinessView(report, session, elapsed, actor) {
   if (session?.environment?.mode !== 'MR' || !['Preparing', 'Paused', 'Running'].includes(session.state)) return null;
   const resuming = session.state === 'Paused';
@@ -620,6 +637,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
 export function mountReadiness(getState, unauthorized, rosterRoom) {
   let active = false, controller, generation = 0, identity = '', report, started = 0, attempted = -Infinity, failed = false;
   const summary = document.getElementById('readiness-summary');
+  const trackedVrStatus = document.getElementById('tracked-vr-start-status');
   const mrPanel = document.getElementById('mr-start-requirement'), mrStatus = document.getElementById('mr-start-status');
   const mrRooms = document.getElementById('mr-start-rooms');
   const mrTitle = document.getElementById('mr-start-title'), mrHint = document.getElementById('mr-start-hint');
@@ -649,6 +667,8 @@ export function mountReadiness(getState, unauthorized, rosterRoom) {
   }
   function reset() {
     generation++; controller?.abort(); controller = null; identity = ''; report = null; failed = false; attempted = -Infinity; summary.textContent = '等待選取場次。';
+    trackedVrStatus.hidden = true;
+    trackedVrStatus.textContent = '';
     renderMr(null);
     for (const cell of document.querySelectorAll('[data-readiness-player]')) { cell.textContent = '等待本次入場同步'; cell.classList.remove('ready-player'); }
   }
@@ -659,6 +679,11 @@ export function mountReadiness(getState, unauthorized, rosterRoom) {
     const view = readinessView(report, state.session, elapsed, roomId);
     const mr = mrReadinessView(report, state.session, elapsed, state.actor);
     renderMr(failed && mr ? { ...mr, state: 'Unavailable', text: 'MR 就緒狀態未確認，正在重試。', rooms: [] } : mr);
+    const showTrackedStart = usesTrackedVrStart(state.session) && (state.actor.role === 'Master'
+      || state.session.mode === 'Independent' && state.actor.roomId === state.session.roomIds[0]);
+    trackedVrStatus.hidden = !showTrackedStart;
+    const trackedText = showTrackedStart ? trackedVrStartStatus(report, state.session, elapsed, failed) : '';
+    if (trackedVrStatus.textContent !== trackedText) trackedVrStatus.textContent = trackedText;
     const text = failed ? (roomId === null ? '' : `房間 ${roomId} · `) + '參戰狀態未確認，正在重試。' : view.text;
     if (summary.textContent !== text) summary.textContent = text;
     summary.classList.toggle('warning', failed || ['Stale', 'ClockSkew', 'Suspended', 'Unavailable'].includes(view.source));

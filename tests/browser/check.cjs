@@ -183,6 +183,12 @@ async function main() {
       await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), result: 'passed', scope: 'MR start and resume with a real API and synthetic tracked world publisher' }, null, 2));
       console.log(`PASS: ${checks} focused MR lifecycle checks. Screenshots: ${screenshots}`); return;
     }
+    if (process.argv.includes('--tracked-vr-start-only')) {
+      await require('./tracked-vr-start-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
+      check(browserErrors.length === 0, 'Tracked VR start has no uncaught browser or policy errors');
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed', scope: 'real API and Chromium, synthetic tracked frames' }, null, 2));
+      console.log(`PASS: ${checks} focused tracked VR start checks. Screenshots: ${screenshots}`); return;
+    }
     if (process.argv.includes('--mr-pins-only')) {
       await require('./mr-alignment-pins-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
       check(browserErrors.length === 0, 'MR pin checks have no uncaught browser or policy errors');
@@ -591,6 +597,7 @@ async function main() {
     await page.reload();
     check(await page.locator('#login-panel').isVisible(), 'Reload requires authentication again');
     await require('./mr-start-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
+    await require('./tracked-vr-start-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     await require('./mr-alignment-pins-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./mr-deployment-browser.cjs')({ context, api, tokens, base, directory, screenshots, check, captureErrors });
     await require('./vr-connection-check-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });

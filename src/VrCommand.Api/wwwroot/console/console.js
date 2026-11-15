@@ -13,7 +13,7 @@ import { mountOperatorNetwork } from './operator-network-ui.js';
 import { mountReport, mountVenueReport, venueScoreFields } from './report-ui.js';
 import { mountVenueHistory } from './venue-history-ui.js';
 import { mountVenueDebriefSeats } from './venue-debrief-ui.js';
-import { beginSeatLabels, mountReadiness, mountRoomReadiness } from './readiness-ui.js';
+import { beginSeatLabels, mountReadiness, mountRoomReadiness, usesTrackedVrStart } from './readiness-ui.js';
 import { mountConnections, validDestination } from './connection-ui.js';
 import { mountClosure } from './closure-ui.js';
 import { placementHistory } from './placement-history.js';
@@ -142,6 +142,7 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
         else if (code === 'mr-tracking-pause-no-witness') message = '目前未確認本房仍有追蹤中斷。請查看最新追蹤狀態。';
         else if (code === 'vr-participation-pause-no-witness') message = '目前未確認本房仍有姿態中斷。請查看最新參戰狀態。';
         else if (code === 'vr-participation-resume-not-ready') message = '暫停中的席位尚未確認恢復。請查看房卡等待的席位。';
+        else if (code === 'tracked-vr-start-not-ready') message = 'VR 追蹤開場尚未就緒。請確認名冊中的每一席都有最新的追蹤姿態。';
         else if (code === 'mr-alignment-required') message = '請由主控鎖定 MR 校正檔後再配票。';
         else if (code === 'ticket-source-unavailable') message = '原遊戲來源暫未更新，配票已暫停。請查看房卡的連線狀態。';
         else if (code === 'ticket-endpoint-mismatch') message = '整房配票須使用原公告端點。請按「套用場次連線設定」後再下載。';
@@ -763,6 +764,10 @@ function applyPermissions() {
     const action = button.dataset.command, phase = session?.state;
     const allowed = action === 'Begin' ? phase === 'Preparing' && session.players.length > 0 : action === 'Pause' ? phase === 'Running' : action === 'Resume' ? phase === 'Paused' : !!session && !ended;
     button.disabled = locked || !manages() || !allowed;
+    if (action === 'Begin') {
+      const label = usesTrackedVrStart(session) ? '確認追蹤並開始' : '開始任務';
+      if (button.textContent !== label) button.textContent = label;
+    }
   }
   $('pending-command').hidden = !state.pending;
   $('retry-command').disabled = state.busy;
@@ -2122,7 +2127,10 @@ submit('venue-enemies-form', () => venuePhase('SetEnemies', { enemyPolicy: {
 $('download-room-tickets').addEventListener('click', () => downloadRoomTickets(Number($('ticket-room').value)));
 $('download-roster-room-tickets').addEventListener('click', () => downloadRoomTickets(Number($('roster-room').value)));
 $('ticket-room').addEventListener('change', applyPermissions);
-document.querySelectorAll('[data-command]').forEach(button => button.addEventListener('click', () => runSession(() => command(button.dataset.command))));
+document.querySelectorAll('[data-command]').forEach(button => button.addEventListener('click', () => runSession(() => {
+  const action = button.dataset.command;
+  return command(action, action === 'Begin' && usesTrackedVrStart(state.session) ? { requireTrackedStart: true } : {});
+})));
 submit('create-session-form', createSession);
 submit('join-form', joinPlayer, runSession);
 submit('environment-form', () => applyLiveSetting('environment', 'SetEnvironment', environment('live')), runSession);

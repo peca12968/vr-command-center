@@ -35,7 +35,8 @@ public record ControlCommand(Guid CommandId, ControlAction Action, EnvironmentSe
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MrTrackingRoomId = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? VrParticipationRoomId = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomEnemyPolicyChange? RoomEnemyPolicy = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? ExpectedSettingSequence = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? ExpectedSettingSequence = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool RequireTrackedStart = false);
 public record CommandReceipt(Guid CommandId, long AppliedAtSequence, bool Duplicate, SessionView Session);
 public sealed class MixedRealityNotReadyException(ControlAction action) : InvalidOperationException(action == ControlAction.Resume
     ? "MR resume requires a fresh paused snapshot with tracked Quest 3 poses for living players."
@@ -46,6 +47,7 @@ public sealed class MixedRealityNotReadyException(ControlAction action) : Invali
 public sealed class MixedRealityTrackingPauseException() : InvalidOperationException("No current lost MR tracking in the requested room.");
 public sealed class VrParticipationPauseException() : InvalidOperationException("No current unavailable VR pose in the requested room.");
 public sealed class VrParticipationResumeException() : InvalidOperationException("VR resume requires fresh paused poses for the current living roster.");
+public sealed class TrackedVrStartException() : InvalidOperationException("Tracked VR start requires fresh tracked poses from the current GameServer roster.");
 public sealed class RoomEnemyPolicyChangedException() : InvalidOperationException("The selected room enemy policy changed; reload it before editing.");
 public sealed class SessionSettingChangedException() : InvalidOperationException("The selected session setting changed; reload it before editing.");
 
@@ -323,6 +325,8 @@ public sealed partial class SessionManager
             if (command.Action == ControlAction.Resume && VrPauseRoom(history) is not null
                 && readyVrSequence != history.View.Sequence)
                 throw new VrParticipationResumeException();
+            if (command.RequireTrackedStart && (readyVrSequence != history.View.Sequence || !UsesTrackedVrStart(history.View)))
+                throw new TrackedVrStartException();
             var entry = SessionEvent.Create(id, history.View.Sequence + 1, SessionEventKind.ControlApplied, command, actor);
             var updated = Commit(history, entry);
             return new(command.CommandId, entry.Sequence, false, updated);
@@ -332,6 +336,9 @@ public sealed partial class SessionManager
     public static bool RequiresMrReadiness(SessionView session, ControlAction action) =>
         session.Environment.Mode == ExperienceMode.MR && (action, session.State) is
             (ControlAction.Begin, SessionState.Preparing) or (ControlAction.Resume, SessionState.Paused);
+
+    public static bool UsesTrackedVrStart(SessionView session) => session.Environment.Mode == ExperienceMode.VR
+        && session.State == SessionState.Preparing && session.CombatStream?.Origin == CombatOrigin.GameServer;
 
     private static int? VrPauseRoom(History history) =>
         history.View.State == SessionState.Paused && history.View.Environment.Mode == ExperienceMode.VR

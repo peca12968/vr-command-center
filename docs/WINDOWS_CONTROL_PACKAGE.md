@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-16 `VRCommand-ControlServer-0.31.200.zip` 為 53,362,701 bytes，SHA-256 `86c963b87287ee1c10a1e03c088f7c5f9667516b16cad5466a24c426fe6e0615`。解壓核對 568 筆清單。個別 `GameServer` VR 場次可在開始時重新核對原名冊與有效追蹤。 [管理包](../artifacts/VRCommand-ControlServer-0.31.200.zip) · [操作說明](PLAYER_READINESS.md#單場-vr-追蹤開場)
+
 2026-11-16 `VRCommand-ControlServer-0.31.199.zip` 為 53,360,013 bytes，SHA-256 `a959c7d8e1ba67c88143ef62578a5457ca92e31e06f8cfab8d3ec8d0ba1b14a9`。解壓核對 568 筆清單。單席 Quest 3 部署可驗證原入場、票券、公告端點、近期遊戲畫格及 MR 原鎖定校正檔。 [管理包](../artifacts/VRCommand-ControlServer-0.31.199.zip) · [操作說明](QUEST3.md#部署前核對單席連線檔)
 
 2026-11-16 `VRCommand-ControlServer-0.31.198.zip` 為 53,358,273 bytes，SHA-256 `f7edd81e096da16a3b4e6b1b86045f549d92018c8b8de53ddfb8a7ccac8826dc`。解壓核對 568 筆清單。全館敵軍策略的已覆寫與已結束房間可查找原執行畫格與該房當時人數。 [管理包](../artifacts/VRCommand-ControlServer-0.31.198.zip) · [操作說明](LAYOUT.md#核對最近一批敵軍策略)

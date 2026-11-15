@@ -85,6 +85,8 @@ internal static class SessionProjection
         if (command.VrParticipationRoomId is int vrRoom && (command.Action != ControlAction.Pause
             || vrRoom is < 1 or > SessionManager.RoomCount || command.ExpectedSequence is null or < 1 || command.MrTrackingRoomId.HasValue))
             throw new ArgumentException("VR participation pause requires Pause, a room and an expected sequence.");
+        if (command.RequireTrackedStart && (command.Action != ControlAction.Begin || command.ExpectedSequence is null or < 1))
+            throw new ArgumentException("Tracked VR start requires Begin and an expected sequence.");
     }
 
     internal static SessionView Apply(SessionView? current, SessionEvent entry)
@@ -165,6 +167,8 @@ internal static class SessionProjection
                     || current.State != SessionState.Running || current.Environment.Mode != ExperienceMode.VR
                     || !current.RoomIds.Contains(vrRoom) || current.CombatStream is null || command.ExpectedSequence != current.Sequence))
                     throw new InvalidDataException("VR participation pause must retain its original room, mode and revision.");
+                if (command.RequireTrackedStart && (entry.SchemaVersion < 7 || entry.Venue is not null || !SessionManager.UsesTrackedVrStart(current)))
+                    throw new InvalidDataException("Tracked VR start requires its original Preparing GameServer session.");
                 if (command.Action == ControlAction.SetRoomAlignment)
                 {
                     if (entry.SchemaVersion < 7) throw new InvalidDataException("Room alignment pins require event schema 7.");

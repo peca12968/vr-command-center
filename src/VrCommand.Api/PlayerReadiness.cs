@@ -11,7 +11,8 @@ public record SessionReadiness(int Version, Guid SessionId, long SessionSequence
     double? SourceAgeMilliseconds, PlayerReadiness[] Players, string? MrStartState, string? MrResumeState,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? MrTrackingState,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomMrPause? MrPause = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomVrPause? VrPause = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomVrPause? VrPause = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? TrackedVrStartReady = null);
 internal sealed record VenueReadinessRequest(string Topology, VenueReadinessRoom?[] Rooms);
 internal sealed record VenueReadinessRoom(int RoomId, Guid SessionId);
 internal sealed record VenueReadiness(int Version, string Topology, DateTimeOffset SampledAtUtc,
@@ -95,6 +96,12 @@ public sealed partial class WorldRecordings
                 var recovery = Readiness(id, actor);
                 var readyToResume = recovery.SessionSequence == current.Sequence && recovery.VrPause?.ReadyToResume == true;
                 return manager.Execute(id, command, actor, readyVrSequence: readyToResume ? current.Sequence : null);
+            }
+            if (command.Action == ControlAction.Begin && command.RequireTrackedStart)
+            {
+                var snapshot = Readiness(id, actor);
+                var readyToStart = snapshot.SessionSequence == current.Sequence && snapshot.TrackedVrStartReady == true;
+                return manager.Execute(id, command, actor, readyVrSequence: readyToStart ? current.Sequence : null);
             }
             if (!SessionManager.RequiresMrReadiness(current, command.Action))
                 return manager.Execute(id, command, actor);
@@ -303,6 +310,10 @@ public sealed partial class WorldRecordings
             }).ToArray();
             var observedSequence = frame?.Packet.observedSequence ?? 0;
             var confirmed = source == "Fresh" && observedSequence >= phaseSince;
+            var trackedVrStartReady = SessionManager.UsesTrackedVrStart(current) ? (bool?)(confirmed
+                && observedSequence == current.Sequence && frame?.Packet.frame.tick == 0
+                && info?.Header is { origin: "GameServer" } vrHeader && vrHeader.streamId == current.CombatStream!.StreamId.ToString("D")
+                && players.Length > 0 && players.All(player => ReadyToBegin(player, trackedRequired: true))) : null;
             var starting = SessionManager.RequiresMrReadiness(current, ControlAction.Begin);
             var resuming = SessionManager.RequiresMrReadiness(current, ControlAction.Resume);
             var tracking = current.Environment.Mode == ExperienceMode.MR && current.State == SessionState.Running;
@@ -320,7 +331,7 @@ public sealed partial class WorldRecordings
                     ? info.AcceptedSequence : null) : null,
                 vrPauseRoom is { } trigger ? new(trigger, phaseSince, confirmed ? info!.AcceptedSequence : null,
                     confirmed && observedSequence == current.Sequence && (actor.Role == OperatorRole.Master || current.Mode == SessionMode.Independent)
-                        ? players.All(ReadyForVrResume) : null) : null);
+                        ? players.All(ReadyForVrResume) : null) : null, trackedVrStartReady);
             var duration = current.Mission.Definition.DurationSeconds;
             RoomMissionTime? clock = null;
             var suspendedClock = source == "Suspended" && current.State == SessionState.Running
