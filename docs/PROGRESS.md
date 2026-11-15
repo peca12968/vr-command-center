@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 六批收件可定位缺少的玩家原檔
+
+- 收件總表同時列出場次與玩家缺件，涵蓋 Windows 玩家日誌、啟動回條、連線量測、玩家 ZIP 及手動 Quest logcat。Windows 日誌能對上原場次、玩家及入場識別時附房號與席號。 [收件方式](EXTERNAL_CLIENTS.md#一次查看六批待補件)
+- 123 項封存測試通過。既有 Windows 同機資料的副本在兩批合計列出四份缺件，其中兩份對到第 5 房第 1 席。測試副本的入場識別變更後，該席缺件仍列出但無房號及席號。原六批清單的收件皆通過，正式驗收摘要逐位元相符，仍核對 80 筆伺服器戰績確認。 [收件結果](../artifacts/staged-missing-player-files/inspection.json) · [原六批重驗](../artifacts/staged-missing-player-files/original-verification.json)
+- 功能提交 `a6768f5` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、Quest 3、VIVE、MR 場地及廠商設備仍待現場驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43742576602)
+
 ## 2026-11-13 六批收件可一次列出各場次缺檔
 
 - 六批收件檢查會逐批列出已引用但缺少的啟動器報告、場次 ZIP、伺服器日誌、世界及戰鬥日誌。每筆附清單項次，能對上原場次時也附房號。 [收件方式](EXTERNAL_CLIENTS.md#一次查看六批待補件)

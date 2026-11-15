@@ -631,6 +631,8 @@ python scripts/verify-field-results.py --venue-stages .\stages.json --inspect-ve
 
 批次封存清單可讀時，`issues[].missingFiles` 會一次列出該批 `sessions` 引用但找不到的啟動器報告、場次證據 ZIP、伺服器日誌、世界與戰鬥日誌。每筆含從 1 起算的 `sessionEntry`，能對上原封存場次時附 `roomIds`。原場次由清單的識別或既有啟動器回條查找，與項目排列順序無關。補齊後再執行收件檢查及正式驗收。
 
+同一份 `missingFiles` 也列出 `windowsPlayers` 與各場 `players` 引用但缺少的 Windows 玩家日誌、啟動器回條、連線量測、玩家 ZIP 或手動 Quest logcat。玩家項次 `playerEntry` 從 1 起算，若同時有 `sessionEntry`，請在該場的 `players` 查找。Windows 原日誌或 ZIP 仍可讀取，且其場次、玩家與入場識別能對上原名冊時，會附 `roomId` 及從 1 起算的 `seat`。只有檔案項次時，請依原清單查找。
+
 若原批次使用 Windows ZIP 收件資料夾，總表會在該批的 `issues[].windowsInbox` 列出預期及已核對席數、缺少的房號和席號，以及錯批、重複或無法核對的 ZIP 檔名。使用電腦對照表時會附席位的電腦標籤。有連線量測資料時也會保留該次收件的逐席量測摘要。依原批次補齊或移出錯批檔案後，可再執行總表確認。
 
 若批次已設定 `windowsLinkCriteria`，Windows 收件核對完成但量測缺漏或未達門檻，總表會在 `issues[].windowsLinkMetrics` 顯示該批門檻、已核對席數、缺量測的房號與席號，以及已收到的逐席回覆數與 p95 往返時間。`criteriaFailures` 會指出該席未通過的門檻。原始資料可使用散檔、逐席 ZIP 或 Windows 收件資料夾。 [連線量測門檻](#逐席核對-windows-連線量測門檻)
