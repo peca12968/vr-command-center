@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-16 `VRCommand-ControlServer-0.31.205.zip` 為 53,377,195 bytes，SHA-256 `380804a5ececfe59e80f8fb901b097deb832875b0a1213ed4d08db6433ee76b2`。解壓核對 568 筆清單。主控可從全館結束批次查看離場玩家的封存戰績，並開啟原房間的個人回放。 [管理包](../artifacts/VRCommand-ControlServer-0.31.205.zip) · [收尾操作](SESSION_CLOSURE.md)
+
 2026-11-16 `VRCommand-ControlServer-0.31.204.zip` 為 53,371,734 bytes，SHA-256 `6745c43a596b0cad237e016c0753e1004317563f1119b3fb61e2addf58b13714`。解壓核對 568 筆清單。全館批次驗收 ZIP 可保留各場的原離場紀錄與封存戰績。 [管理包](../artifacts/VRCommand-ControlServer-0.31.204.zip) · [操作說明](EXTERNAL_CLIENTS.md#核對五房批次中的離場戰績)
 
 2026-11-16 `VRCommand-ControlServer-0.31.203.zip` 為 53,371,377 bytes，SHA-256 `67b002aaf537ae9ef17f64bddc2024a8879ea73d620cf9767cecca51d32223dd`。解壓核對 568 筆清單。單場驗收 ZIP 可保留原離場紀錄與封存戰績。 [管理包](../artifacts/VRCommand-ControlServer-0.31.203.zip) · [操作說明](EXTERNAL_CLIENTS.md#核對任務中被移出的玩家)

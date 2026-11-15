@@ -24,6 +24,7 @@ const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫�
 const weatherNames = { Clear: '晴朗', Rain: '下雨', Fog: '濃霧', Storm: '暴風雨' };
 const behaviorNames = { Hold: '守備', Patrol: '巡邏', Advance: '推進' };
 const archiveNames = { NoSource: '沒有遊戲來源', Missing: '尚無錄製紀錄', Waiting: '等待封存', SourceMismatch: '來源尚未對上', Sealed: '已封存' };
+const archiveId = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const venueMissionRooms = [1, 2, 3, 4, 5];
 const venueMissionFileLimit = 4096;
 const missionTemplateFormat = 'vr-command-mission-template';
@@ -85,6 +86,7 @@ let timer;
 let selectionEpoch = 0, venueClosureEpoch = 0, operationsViewEpoch = 0;
 let venueSettingReview = 0;
 let archivedPlan = null;
+let departureReview = null;
 let roomEnemyDraft = null, roomEnemyPolicySequences = null;
 
 function notify(message, error = false) {
@@ -1137,6 +1139,68 @@ async function restoreVenuePlan() {
   if (restored && current()) $(linked ? 'launch-mission' : 'launch-review-room').focus();
 }
 
+function venueDepartureScope(batch, session) {
+  const replay = session.replay;
+  if (!archiveId.test(batch.requestId) || !archiveId.test(session.sessionId) || !archiveId.test(replay?.streamId)
+    || session.combat !== 'Sealed' || session.world !== 'Sealed' || session.fieldEvidenceReady !== true
+    || !Number.isSafeInteger(session.rosterDepartureCount) || session.rosterDepartureCount < 1
+    || !Number.isSafeInteger(session.appliedAtSequence) || session.appliedAtSequence < 3
+    || !Number.isSafeInteger(replay.throughSequence) || replay.throughSequence < 1) return null;
+  return JSON.stringify([batch.requestId, session.sessionId, session.roomIds, session.appliedAtSequence,
+    replay.streamId, replay.throughSequence, session.rosterDepartureCount]);
+}
+
+function closeVenueDepartures() {
+  departureReview = null;
+  $('venue-departed-players').hidden = $('venue-departed-table').hidden = true;
+  $('venue-departed-rows').replaceChildren();
+  $('venue-departed-status').textContent = '';
+}
+
+async function openVenueDepartures(batch, session, scope) {
+  if (!master() || state.busy || state.pending) return;
+  closeVenueDepartures();
+  const request = { scope, epoch: state.epoch };
+  departureReview = request;
+  const current = () => departureReview === request && master() && state.epoch === request.epoch;
+  const status = $('venue-departed-status');
+  $('venue-departed-players').hidden = false;
+  $('venue-departed-title').focus();
+  status.textContent = '正在讀取離場玩家的原封存戰績…';
+  try {
+    const body = await api(`/venue/closure/${batch.requestId}/sessions/${session.sessionId}/departed-players`);
+    if (!current()) return;
+    const scores = venueScoreFields.slice(1);
+    if (body?.requestId !== batch.requestId || body.sessionId !== session.sessionId
+      || body.streamId !== session.replay.streamId || body.worldSequence !== session.replay.throughSequence
+      || body.endedAtSequence !== session.appliedAtSequence || !Number.isSafeInteger(body.finalStreamSequence)
+      || body.finalStreamSequence < 0 || !Array.isArray(body.players) || body.players.length !== session.rosterDepartureCount
+      || new Set(body.players.map(player => player?.statistics?.playerId)).size !== body.players.length
+      || !body.players.every(player => {
+        const score = player?.statistics;
+        return score && archiveId.test(score.playerId) && typeof score.name === 'string' && session.roomIds.includes(score.roomId)
+          && Number.isSafeInteger(player.leftAtSequence) && player.leftAtSequence >= 3 && player.leftAtSequence < body.endedAtSequence
+          && scores.every(key => Number.isSafeInteger(score[key]) && score[key] >= 0) && score.shotsHit <= score.ammoUsed
+          && Number.isFinite(score.accuracyPercent) && score.accuracyPercent >= 0 && score.accuracyPercent <= 100
+          && Number.isInteger(score.health) && score.health >= 0 && score.health <= 100;
+      })) throw new Error('Archive mismatch');
+    $('venue-departed-rows').replaceChildren(...body.players.map(({ statistics: player }) => {
+      const replay = element('button', '個人回放', 'quiet small');
+      replay.type = 'button';
+      replay.setAttribute('aria-label', `開啟房間 ${player.roomId} ${player.name} 的個人回放`);
+      replay.addEventListener('click', () => {
+        if (!current() || state.busy || state.pending) return;
+        tab('world', { mode: 'replay', complete: true, sessionId: body.sessionId, streamId: body.streamId,
+          roomId: player.roomId, throughSequence: body.worldSequence, throughCombatSequence: body.finalStreamSequence,
+          playerId: player.playerId, playerName: player.name });
+      });
+      return row([player.roomId, player.name, ...scores.map(key => player[key]), `${player.accuracyPercent}%`, player.health, replay]);
+    }));
+    status.textContent = '';
+    $('venue-departed-table').hidden = false;
+  } catch { if (current()) status.textContent = '暫時無法確認離場玩家戰績，可重新開啟。'; }
+}
+
 function renderVenueClosure(report, loading = false) {
   const panel = $('venue-closure'), batch = report?.batch;
   const signature = master() ? JSON.stringify([venueHistory.selected(), report, loading]) : '';
@@ -1151,8 +1215,9 @@ function renderVenueClosure(report, loading = false) {
   $('venue-closure-table').hidden = true;
   $('venue-score-table').hidden = true;
   $('venue-score-rows').replaceChildren();
-  if (panel.hidden) { venueReport.update(null); venueDebrief.update(null); $('venue-closure-summary').textContent = ''; return; }
+  if (panel.hidden) { closeVenueDepartures(); venueReport.update(null); venueDebrief.update(null); $('venue-closure-summary').textContent = ''; return; }
   if (loading || batch === null) {
+    closeVenueDepartures();
     venueReport.update(null); venueDebrief.update(null);
     $('venue-closure-summary').textContent = loading ? '正在讀取選定的結束批次…' : '目前沒有已結束的全館批次。';
     return;
@@ -1163,10 +1228,12 @@ function renderVenueClosure(report, loading = false) {
       || !Array.isArray(session.roomIds) || !session.roomIds.length || session.roomIds.length > 5
       || !session.roomIds.every(id => Number.isInteger(id) && id >= 1 && id <= 5)
       || !Object.hasOwn(archiveNames, session.combat) || !Object.hasOwn(archiveNames, session.world))) {
+    closeVenueDepartures();
     venueReport.update(null); venueDebrief.update(null);
     $('venue-closure-summary').textContent = '暫時無法確認全館封存狀態。';
     return;
   }
+  if (departureReview && !batch.sessions.some(session => venueDepartureScope(batch, session) === departureReview.scope)) closeVenueDepartures();
   $('venue-closure-summary').textContent = `${new Date(batch.recordedAtUtc).toLocaleString('zh-TW')} · 請等遊戲伺服器完成玩家戰績傳送與收尾。`;
   const sessions = [...batch.sessions].sort((a, b) => a.roomIds[0] - b.roomIds[0]);
   const receipts = venueDebriefRooms(batch, report.debriefReceipts);
@@ -1210,8 +1277,13 @@ function renderVenueClosure(report, loading = false) {
           venue: complete && session.roomIds.length === 1 ? venue : null });
       });
       actions.append(open);
-      if (Number.isSafeInteger(session.rosterDepartureCount) && session.rosterDepartureCount > 0)
-        actions.append(element('span', `含 ${session.rosterDepartureCount} 名離場玩家的戰績`, 'hint'));
+      const departureScope = venueDepartureScope(batch, session);
+      if (departureScope) {
+        const departures = element('button', `查看離場玩家戰績（${session.rosterDepartureCount}）`, 'quiet small');
+        departures.type = 'button';
+        departures.addEventListener('click', () => void openVenueDepartures(batch, session, departureScope));
+        actions.append(departures);
+      }
       const { trackingBegin, participationBegin } = session;
       const begin = trackingBegin && participationBegin ? null : trackingBegin ?? participationBegin;
       const participation = begin === participationBegin;
@@ -2044,7 +2116,7 @@ for (const id of ['prop-asset', 'prop-x', 'prop-y', 'prop-z', 'prop-yaw']) $(id)
 });
 
 function tab(name, worldTarget = null) {
-  if (name !== 'operations') { operationsViewEpoch++; clearVenueMissionFile(); }
+  if (name !== 'operations') { operationsViewEpoch++; clearVenueMissionFile(); closeVenueDepartures(); }
   if (name !== 'missions') { placement.clearTrial(); clearMissionTemplate(); clearPropCopies(); propMove.reset(); }
   finishPropGesture();
   for (const candidate of ['operations', 'missions', 'replay', 'world']) { const active = candidate === name; $(candidate + '-view').hidden = !active; $('tab-' + candidate).classList.toggle('active', active); $('tab-' + candidate).setAttribute('aria-pressed', String(active)); }
@@ -2063,6 +2135,7 @@ function tab(name, worldTarget = null) {
   operatorNetwork.active(name === 'operations');
 }
 function submit(id, action, execute = run) { $(id).addEventListener('submit', event => { event.preventDefault(); execute(action); }); }
+$('venue-departed-close').addEventListener('click', closeVenueDepartures);
 $('login-form').addEventListener('submit', login);
 $('logout').addEventListener('click', () => {
   const pendingMission = state.pending?.kind === 'mission-create' || state.pending?.kind === 'mission-revise';

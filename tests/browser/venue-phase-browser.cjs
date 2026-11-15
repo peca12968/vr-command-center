@@ -31,22 +31,22 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         if (result.status !== 0) throw new Error('Venue fixture publication failed: ' + (result.stderr || result.error?.message));
         return JSON.parse(result.stdout);
       };
-      publish = (current, enemies = []) => {
+      publish = (current, enemies = [], { events = [], throughCombatSequence = 0, magazines = new Map() } = {}) => {
         const players = current.players.map(player => {
           const head = { x: (player.roomId - 3) * 14 + player.seat, y: 1.65, z: -3 };
           const rotation = { x: 0, y: 0, z: 0, w: 1 };
           const rig = connected ? { kind: 'Simulated', headRotation: rotation, rightRotation: rotation, leftRotation: rotation,
             right: head, left: head } : { kind: 'None' };
           return { id: player.id, roomId: player.roomId, head, muzzle: head,
-            connected, forward: { x: 0, y: 0, z: 1 }, health: 100, magazine: 30, reserve: 90, rig };
+            connected, forward: { x: 0, y: 0, z: 1 }, health: 100, magazine: magazines.get(player.id) ?? 30, reserve: 90, rig };
         });
         const { weather, timeOfDay, lightning } = current.environment;
         const { behavior, autoAttack } = current.enemies;
         const visibility = ['Fog', 'Storm'].includes(weather) ? weather : 'Clear';
         const packet = { sequence: ++sequence, observedSequence: current.sequence, elapsedMilliseconds: sequence === 1 ? 0 : Date.now() - started,
-          weather, lightning, throughCombatSequence: 0, events: [],
+          weather, lightning, throughCombatSequence, events,
           frame: { phase: current.state, tick: current.state === 'Running' ? ++tick : tick,
-            night: timeOfDay === 'Night', visibility, behavior, autoAttack, throughSequence: 0, players, enemies } };
+            night: timeOfDay === 'Night', visibility, behavior, autoAttack, throughSequence: throughCombatSequence, players, enemies } };
         assert.equal(send({ type: 'frame', payload: packet }).acceptedSequence, sequence);
       };
       publish.seal = () => assert.equal(send({ type: 'seal', finalSequence: sequence }).complete, true);
@@ -1384,16 +1384,26 @@ with zipfile.ZipFile(sys.argv[1]) as original, zipfile.ZipFile(sys.argv[2]) as c
       }
       const first = sources[0];
       const departed = first.running.players.find(player => player.roomId === 1);
+      const eventId = randomUUID(), shotId = randomUUID();
+      await api(first.sessionPath + '/combat-stream/reports', 'POST', { streamId: first.running.combatStream.streamId,
+        streamSequence: 1, observedSequence: first.running.sequence,
+        report: { reportId: eventId, shotId, kind: 'ShotFired', origin: 'Simulation', playerId: departed.id } }, 'GameServer');
+      first.publish(await api(first.sessionPath), [], { throughCombatSequence: 1, magazines: new Map([[departed.id, 29]]), events: [{ eventId, shotId, kind: 'ShotFired',
+        playerId: departed.id, sequence: 1, tick: 2, hasRay: true, origin: { x: -28 + departed.seat, y: 1.65, z: -3 },
+        direction: { x: 0, y: 0, z: 1 }, hit: 'Miss', distance: 20 }] });
       await api(first.sessionPath + '/players/' + departed.id, 'DELETE', undefined, 'Master', 204, departed.admissionId);
       const targets = (await api('/venue/phase')).end;
       const batch = await api('/venue/phase', 'POST', { action: 'End', targets }, 'Master', 200, undefined, randomUUID());
+      const departurePath = `/venue/closure/${batch.requestId}/sessions/${first.running.id}/departed-players`;
+      await api(departurePath, 'GET', undefined, 'Master', 409);
       await api(fieldPath(batch.requestId), 'GET', undefined, 'Master', 409);
       for (const { sessionPath, publish, running } of sources) {
         active.delete(running.id);
         const terminal = await api(sessionPath);
         const { streamId } = terminal.combatStream;
-        publish(terminal);
-        await api(sessionPath + '/combat-stream/seal', 'POST', { streamId, finalSequence: 0 }, 'GameServer');
+        const finalSequence = sessionPath === first.sessionPath ? 1 : 0;
+        publish(terminal, [], { throughCombatSequence: finalSequence });
+        await api(sessionPath + '/combat-stream/seal', 'POST', { streamId, finalSequence }, 'GameServer');
         publish.seal();
         await api(sessionPath + '/connection-endpoint', 'PUT', { version: 1, streamId, address: '192.168.50.40',
           port: 7776 + terminal.roomIds[0] }, 'GameServer');
@@ -1446,10 +1456,65 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
       assert.equal(target['statistics.json'].players.length, roster.length + 1);
       assert.ok(target['statistics.json'].players.some(row => row.playerId === departed.id));
       assert.ok(!JSON.stringify(receipts).includes(departed.admissionId));
+      await api(departurePath, 'GET', undefined, 'Room1', 403);
+      await api(`/venue/closure/${batch.requestId}/sessions/${combined.id}/departed-players`, 'GET', undefined, 'Master', 404);
+      const review = await api(departurePath);
+      assert.deepEqual(review, { requestId: batch.requestId, sessionId: first.running.id, streamId: evidence.streamId,
+        worldSequence: saved.sessions[0].replay.throughSequence, finalStreamSequence: 1, endedAtSequence: evidence.endedAtSequence,
+        players: [{ leftAtSequence: evidence.players[0].leftAtSequence,
+          statistics: target['statistics.json'].players.find(row => row.playerId === departed.id) }] });
       await login('Master');
-      await archive(first.running.id).last().filter({ hasText: '含 1 名離場玩家的戰績' }).waitFor();
+      const openDeparture = archive(first.running.id).last().getByRole('button', { name: '查看離場玩家戰績（1）' });
+      await openDeparture.waitFor();
       await fieldReceiptsButton.waitFor({ state: 'visible' });
       check(await fieldReceiptsButton.isEnabled(), `The ${mode} console lists the departed player's score and enables the archive after the four remaining seats acknowledge`);
+      const departureTable = page.locator('#venue-departed-table');
+      if (mode === 'Linked') {
+        const requestUrl = '**/api' + departurePath;
+        const substituted = async route => {
+          const response = await route.fetch();
+          await route.fulfill({ response, json: { ...await response.json(), streamId: randomUUID() } });
+        };
+        await page.route(requestUrl, substituted);
+        try {
+          await openDeparture.click();
+          await page.locator('#venue-departed-status').filter({ hasText: '暫時無法確認離場玩家戰績' }).waitFor();
+          check(await departureTable.isHidden(), 'The departed player view rejects a different stream without showing scores or replay links');
+        } finally { await page.unroute(requestUrl, substituted); }
+        let release;
+        const gate = new Promise(resolve => { release = resolve; });
+        const held = async route => {
+          const response = await route.fetch();
+          await gate;
+          await route.fulfill({ response });
+        };
+        await page.route(requestUrl, held);
+        try {
+          const delivered = page.waitForResponse(base + '/api' + departurePath).catch(error => error);
+          await openDeparture.click();
+          await page.locator('#venue-departed-close').click();
+          release();
+          const response = await delivered;
+          if (response instanceof Error) throw response;
+          assert.ok(response.ok());
+          await response.finished();
+          check(await page.locator('#venue-departed-players').isHidden() && await departureTable.locator('tbody tr').count() === 0,
+            'A completed older departure response cannot reopen its closed view');
+        } finally { release(); await page.unroute(requestUrl, held); }
+      }
+      await openDeparture.click();
+      await departureTable.waitFor();
+      const departureCells = await departureTable.locator('tbody td').allTextContents();
+      assert.deepEqual(departureCells, ['1', departed.name, '1', '0', '0', '0', '0', '0%', '100', '個人回放']);
+      if (mode === 'Linked') await page.locator('#venue-departed-players').screenshot({ path: path.join(screenshots, 'venue-departed-players.png') });
+      await departureTable.getByRole('button', { name: `開啟房間 1 ${departed.name} 的個人回放` }).click();
+      await page.locator('#world-review-player-name').filter({ hasText: departed.name }).waitFor();
+      check(await recording.inputValue() === first.running.id && await page.locator('#world-room').inputValue() === '1'
+        && await page.locator('#venue-departed-players').isHidden(), `The ${mode} archived scores open the departed player in the original room and recording`);
+      const savedShot = page.locator('#world-event-search-results button[data-frame-sequence="3"]');
+      await savedShot.click();
+      await page.locator('#world-events tr').first().filter({ hasText: departed.name }).waitFor();
+      check(await savedShot.count() === 1, `The ${mode} personal replay finds the departed player's original saved shot`);
     }
   } finally {
     await page.unroute(route); await page.close();

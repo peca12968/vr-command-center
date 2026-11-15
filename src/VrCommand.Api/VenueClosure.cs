@@ -17,6 +17,9 @@ internal sealed record VenueClosureSession(Guid SessionId, long AppliedAtSequenc
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueParticipationBegin? ParticipationBegin,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? RosterDepartureCount = null);
 internal sealed record VenueClosureBatch(Guid RequestId, DateTimeOffset RecordedAtUtc, VenueClosureSession[] Sessions);
+internal sealed record VenueDepartedPlayer(long LeftAtSequence, PlayerStatistics Statistics);
+internal sealed record VenueDepartedPlayers(Guid RequestId, Guid SessionId, Guid StreamId, long WorldSequence,
+    long FinalStreamSequence, long EndedAtSequence, VenueDepartedPlayer[] Players);
 internal sealed record VenueClosureResponse(VenueClosureBatch? Batch,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueBattleScores? Scores,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueDebriefSummary? DebriefReceipts,
@@ -198,6 +201,23 @@ public sealed partial class WorldRecordings
             .OrderBy(session => session.Row.RoomIds[0]).ToArray();
         return (new(batch.RequestId, batch.RecordedAtUtc, sessions.Select(session => session.Row).ToArray()),
             sessions.Select(session => session.Evidence).ToArray());
+    }
+
+    internal VenueDepartedPlayers ReadVenueDepartedPlayers(Guid batchId, Guid sessionId, OperatorIdentity actor)
+    {
+        lock (gate)
+        {
+            var original = manager.ReadVenueEnd(batchId, actor).Sessions.SingleOrDefault(item => item.SessionId == sessionId)
+                ?? throw new KeyNotFoundException("Session does not belong to the original End batch.");
+            var (row, evidence) = ReadVenueClosureSession(original, actor);
+            if (row.Replay is null || evidence?.Session.CombatStream is not { Sealed: true } stream)
+                throw new InvalidOperationException("Departed player review requires the original sealed field evidence.");
+            var scores = evidence.Statistics.Players.ToDictionary(player => player.PlayerId);
+            var players = evidence.RosterDepartures?.Players.Select(player => new VenueDepartedPlayer(player.LeftAtSequence,
+                scores[player.PlayerId])).ToArray() ?? [];
+            return new(batchId, sessionId, stream.StreamId, row.Replay.ThroughSequence, stream.AcceptedSequence,
+                original.AppliedAtSequence, players);
+        }
     }
 
     private (VenueClosureSession Row, FieldEvidence? Evidence) ReadVenueClosureSession(VenuePhaseApplied applied, OperatorIdentity actor)
