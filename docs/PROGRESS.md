@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 六批收件顯示共同執行時段未達標的原因
+
+- 收件總表可列出共同執行時間門檻、實際最長共同時段及各房間組合的時段。若有達標時段但原席位的封存射擊未齊，會標出射擊席位最多的達標時段內待補的房號與席號。 [收件方式](EXTERNAL_CLIENTS.md#統一核對追蹤及遊戲射擊)
+- 123 項封存測試通過。以原六批 Windows 同機資料的清單副本驗證，將門檻提高到 900,000 毫秒後，六批都被正式驗收拒絕，收件報告保留 8,250 至 8,623 毫秒的實際共同時段。受控測試在 25 席中定位到第 5 房第 5 席缺少封存射擊。原六批正式摘要逐位元相符，仍核對 80 筆戰績確認。 [時段診斷](../artifacts/staged-roster-diagnostics/inspection.json) · [缺席位診斷](../artifacts/staged-roster-diagnostics/missing-fire-fixture-inspection.json)
+- 功能提交 `02d0a3d` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、Quest 3、VIVE、MR 場地及廠商設備仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43743162539)
+
 ## 2026-11-16 六批收件可定位缺少的玩家原檔
 
 - 收件總表同時列出場次與玩家缺件，涵蓋 Windows 玩家日誌、啟動回條、連線量測、玩家 ZIP 及手動 Quest logcat。Windows 日誌能對上原場次、玩家及入場識別時附房號與席號。 [收件方式](EXTERNAL_CLIENTS.md#一次查看六批待補件)

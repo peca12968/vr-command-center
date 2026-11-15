@@ -659,6 +659,8 @@ python scripts/verify-field-results.py --venue-stages .\stages.json --inspect-ve
 
 兩項同時啟用時，同一段共同執行區間須包含全體原席位的有效追蹤，以及每席至少一筆已封存的遊戲射擊。批次清單可省略這兩項，總清單仍會照樣核對。摘要逐批列出 `concurrentRoster.rigKind`、`playersWithConfirmedFire` 及實際採用的 `minimumMilliseconds`。若原始證據未通過，錯誤會指出 `venueManifests` 陣列中從 1 開始計算的項次。
 
+在 `--inspect-venue-stages` 的收件報告中，`issues[].concurrentRoster` 會列出共同時段不足的門檻、原錄製可確認的最長共同毫秒數，以及各場次房間組合各自的最長連續時段。若時段達標但沒有一段包含所有席位的封存射擊，`missingFireSeats` 會列出在射擊席位最多的合格時段內仍待補的房號與席號。席數相同時採較長的時段。請依這些資料安排重測，再重跑正式驗收。
+
 ##### 六批使用各自的 Windows 啟動回條
 
 在 `stages.json` 加入 `"requireVerifiedVenueStart": true`，並在六份批次清單各自引用原 `verifiedVenueStart`。驗收會逐批核對原預檢、就緒及結束報告，並拒絕重複使用同一個啟動批次 ID。缺少回條時，錯誤會指出總清單中的項次。摘要會顯示各批已核對的回條及原啟動 ID。 [保存及引用回條](#核對-windows-五房啟動回條)
