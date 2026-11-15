@@ -108,7 +108,7 @@ namespace VrCommand.Unity
             NativePoseTrace.Install(gameObject,configuration.role);
             NativeWorldJournalTrace.Install(gameObject,configuration.role);
             NativeReplicationProbe.Install(this,configuration.role);
-            linkDiagnostics = VenueLinkDiagnostics.Create(this, configuration.role);
+            linkDiagnostics = VenueLinkDiagnostics.Create(this, configuration);
             var transport = (UnityTransport)networkManager.NetworkConfig.NetworkTransport;
             VenueTransportProfile.Apply(transport,configuration.IsServer);
             transport.SetConnectionData(configuration.address, configuration.port, configuration.IsServer ? configuration.ServerListenAddress : null);

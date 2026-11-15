@@ -1,6 +1,8 @@
 # Quest 3 接入與工具鏈
 
-2026-11-16 Quest 開發 APK `0.50.9`／74 為 61,038,434 bytes，SHA-256 `53d965a70d8ffbdad95f01a955386909ec995a4156d762f9110294c66d905c8f`。通過 ARM64、SDK 32／35、OpenXR 程式庫、APK v2 簽章及同版 Windows 來源核對。新增首次啟動的 OpenXR 顯示與輸入檢查，實體部署待 USB 偵錯接通。 [APK](../artifacts/quest/VrCommand.apk) · [發行報告](../artifacts/venue-release-quest-openxr-0509.json)
+2026-11-16 Quest 開發 APK `0.50.10`／75 為 61,044,634 bytes，SHA-256 `968807e29dc82d362476bdd3712c00340281c720c2c9e207fbed2c6e510cdf73`。通過 ARM64、SDK 32／35、OpenXR 程式庫、APK v2 簽章及同版 Windows 來源核對。可選擇將遊戲內連線量測保存於原 logcat。 [APK](../artifacts/quest/VrCommand.apk) · [發行報告](../artifacts/venue-release-quest-link-0510.json)
+
+2026-11-16 Quest 開發 APK `0.50.9`／74 為 61,038,434 bytes，SHA-256 `53d965a70d8ffbdad95f01a955386909ec995a4156d762f9110294c66d905c8f`。通過 ARM64、SDK 32／35、OpenXR 程式庫、APK v2 簽章及同版 Windows 來源核對。新增首次啟動的 OpenXR 顯示與輸入檢查。 [APK 封存](../artifacts/history/unity-0509-before-quest-link-7650a819/quest/VrCommand.apk) · [發行報告](../artifacts/venue-release-quest-openxr-0509.json)
 
 2026-11-16 Quest 開發 APK `0.50.8`／73 為 61,039,210 bytes，SHA-256 `04a84cdb6739891c8ff8fd5da7874e6239e15140f27fa0960553d89d3ee3d9e9`。通過 ARM64、SDK 32／35、OpenXR 程式庫、APK v2 簽章及同版 Windows 來源核對。 [APK 封存](../artifacts/history/unity-0508-before-quest-openxr-c4ccb59a/quest/VrCommand.apk) · [發行報告](../artifacts/venue-release-tracked-vr-0508.json)
 
@@ -47,7 +49,7 @@ pwsh -NoProfile -NonInteractive -File .\scripts\check-quest-usb.ps1
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -SmokeTest -Serial '<ADB 序號>' `
-  -ReleaseReport .\artifacts\venue-release-quest-openxr-0509.json
+  -ReleaseReport .\artifacts\venue-release-quest-link-0510.json
 ```
 
 工具核對指定 Quest 3，在目前 Android 使用者下安裝 APK，並讀回裝置上的 APK 雜湊。沒有既有玩家設定時，工具等待 Android 確認啟動，接著讀取該程序的 Unity 與 AndroidRuntime 日誌，並在三秒後重查原程序。成功輸出 JSON 的 `status` 為 `process-observed`。`unityLogLines` 是查到的 Unity 日誌列數，允許為零。預設遇到既有安裝會停止。
@@ -686,6 +688,17 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connect
 玩家在準備中完成 A、B、C 三點量測，再回到頭盔提示的起點。主控可在「MR 開場檢查」查看各房就緒人數與等候席位。遊戲伺服器會核對票券房間、所選校正房間與鎖定的校正檔雜湊。全名冊的有效追蹤快照對上目前場次序號後，即可按開始。場中可調整天氣、時段及閃電。 [參戰快照](PLAYER_READINESS.md#mr-開場條件)
 
 場次暫停時，頭盔需要重新對位的玩家可完成量測。請在「MR 繼續檢查」確認存活席位已就緒，再按繼續。 [暫停後繼續](PLAYER_READINESS.md#暫停後繼續)
+
+## 記錄 Quest 遊戲內連線量測
+
+使用 Quest 開發 APK 0.50.10／75，部署時加 `-RecordLinkMetrics`，並提供對應的 `-ReleaseReport`。以單席為例：
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\room-01-seat-01.json `
+  -Serial '<ADB 序號>' -ReleaseReport .\artifacts\venue-release-quest-link-0510.json -RecordLinkMetrics
+```
+
+五房部署也可在原 `-VenueBundle`、`-DeviceMap`、`-DeployMappedSeats` 指令加上同一選項。讓任務執行到採樣 30 次結案，再保存原玩家程序的 logcat。量測在第一次看到執行中狀態才開始，留出五房準備與追蹤核對時間。票券更新會保留已安裝的量測設定。 [收集日誌](#收集-quest-場館驗收日誌) · [併入場館驗收](EXTERNAL_CLIENTS.md#quest-遊戲內連線量測)
 
 ## 收集 Quest 場館驗收日誌
 

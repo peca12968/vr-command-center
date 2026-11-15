@@ -224,6 +224,8 @@ def prepare(args, output):
         manifest['minimumConcurrentMilliseconds'] = minimum
     if windows_link_criteria is not None:
         manifest['windowsLinkCriteria'] = windows_link_criteria
+    if args.require_quest_link_metrics:
+        manifest['requireQuestLinkMetrics'] = True
     release = windows_seats = None
     if args.venue_release_report is not None:
         release_path = args.venue_release_report.resolve(strict=True)
@@ -306,6 +308,7 @@ def main():
     parser.add_argument('--windows-station-addresses', type=Path)
     parser.add_argument('--windows-minimum-replies', type=int, help='Minimum replies per Windows seat (1 to 30)')
     parser.add_argument('--windows-maximum-p95-ms', type=int, help='Maximum p95 round trip in milliseconds per Windows seat (0 to 900)')
+    parser.add_argument('--require-quest-link-metrics', action='store_true', help='Require the in-game link report for each Quest log')
     parser.add_argument('--venue-network-plan', type=Path, help='Original whole-venue network plan with all seat IPv4 assignments')
     parser.add_argument('--verify-reconnect-history', action='store_true', help='Check original reconnect histories at inbox intake and final verification')
     parser.add_argument('--reconnect-source-plan', type=Path, help='Ordered IPv4 changes for seats in the original End batch')

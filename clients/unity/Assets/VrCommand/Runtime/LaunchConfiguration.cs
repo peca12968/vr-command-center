@@ -26,6 +26,7 @@ namespace VrCommand.Unity
         public string roomAlignmentSha256 = "";
         public bool questPassthrough;
         public bool requestMixedReality;
+        public bool recordQuestLinkMetrics;
         [NonSerialized] internal RoomFloorPlan AlignmentPlan;
 
         public bool IsServer => role == "Server" || role == "Host";

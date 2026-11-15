@@ -389,6 +389,27 @@ class QuestDeployTests(unittest.TestCase):
         self.assertEqual(self.player, json.loads((self.remote/'vr-connection.json').read_bytes()))
         self.assertEqual(expected, hashlib.sha256(apk.read_bytes()).hexdigest())
 
+    def test_single_seat_quest_link_measurement_requires_current_package_and_writes_opt_in(self):
+        apk = self.root / 'link build.apk'
+        apk.write_bytes(b'quest link fixture APK')
+        expected = hashlib.sha256(apk.read_bytes()).hexdigest()
+        release = self.root / 'release.json'
+        report = {'verified': True, 'scope': 'offline-package-consistency', 'quest': {
+            'applicationId': 'com.vrcommand.quest', 'architecture': 'arm64-v8a', 'signatureV2': True,
+            'versionCode': 74, 'sha256': expected}}
+        self.write(release, report)
+        self.assert_rejected(self.run_script('-RecordLinkMetrics'), 'Use -RecordLinkMetrics with -ReleaseReport')
+        flags = ('-RecordLinkMetrics', '-ApkPath', str(apk), '-ReleaseReport', str(release), '-Serial', 'fixture')
+        self.assert_rejected(self.run_script(*flags), 'version code 75 or later')
+        self.assertFalse(self.commands.exists())
+        report['quest']['versionCode'] = 75
+        self.write(release, report)
+        original = self.config.read_bytes()
+        result = self.run_script(*flags, release_hash=expected)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(dict(self.player, recordQuestLinkMetrics=True), json.loads((self.remote/'vr-connection.json').read_bytes()))
+        self.assertEqual(original, self.config.read_bytes())
+
     def run_smoke(self, serial='fixture', failure='', *, resume=False, require_openxr=False, version_code=72):
         apk = self.root / 'sample.apk'
         apk.write_bytes(b'first-launch test APK')
@@ -546,6 +567,9 @@ class QuestDeployTests(unittest.TestCase):
         for mode in ('MR', 'VR'):
             with self.subTest(mode=mode):
                 current, installed, fresh, _, alignment = self.ticket_refresh(self.expiry-300, mode=mode)
+                if mode == 'VR':
+                    installed['recordQuestLinkMetrics'] = True
+                    self.write(current, installed)
                 self.commands.unlink(missing_ok=True)
                 result = self.run_refresh()
                 self.assertEqual(0, result.returncode, result.stderr)

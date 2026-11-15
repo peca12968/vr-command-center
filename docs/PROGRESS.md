@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-16 Quest 遊戲內連線量測與封存核對
+
+- Quest 0.50.10／75 部署可加 `-RecordLinkMetrics`，在第一次收到 `Running` 後使用原遊戲連線取得 30 筆回覆、逾時或中斷。量測保存於原 logcat。單場及五房可要求逐席核對原程序、最終戰績的連線及完整片段，並輸出 p95 與 Unity 每秒更新數。 [部署操作](QUEST3.md#記錄-quest-遊戲內連線量測) · [封存操作](EXTERNAL_CLIENTS.md#quest-遊戲內連線量測)
+- 通過 273 項 Unity EditMode、128 項封存驗收與 64 項 Quest 部署測試。封存夾具在獨立與合併各核對 5 個 Quest 席，拒絕錯 PID、錯連線和缺片；單場命令回傳相同一席摘要。首輪夾具少宣告每房 2 席，補齊原席數後通過。Windows 玩家與伺服器原包各 331 筆，配對 324 筆遊戲檔；APK ARM64、SDK 32／35、OpenXR 程式庫、v2 簽章與新版量測片段均核對。 [發行報告](../artifacts/venue-release-quest-link-0510.json) · [0.50.9 原件](../artifacts/history/unity-0509-before-quest-link-7650a819/)
+- 0.50.10 的 Windows 原生排演使用既有防火牆規則路徑及回送介面。獨立與合併各 5 個背景玩家執行 40 秒，通過 20 項，完成 6 場雙封存與回放。兩種模式各送出並收到 150 筆原遊戲探測，無逾時，原程序已收尾。 [同機排演結果](../artifacts/desktop-exercise/20261116-062844-b5f5ff8d/exercise-result.json)
+- 建置後的 Windows 仍辨識 Quest 3 檔案傳輸介面，ADB 介面數為零。實體頭盔延遲、顯示幀率、跨機 25 席與廠商硬體待現地驗收。 [唯讀 USB 診斷](../artifacts/quest-usb-host-after-0510-f65d582d.json)
+
 ## 2026-11-16 Quest 首次啟動核對 OpenXR 顯示與輸入
 
 - `deploy-quest.ps1 -SmokeTest -RequireOpenXR` 透過 Android Launcher Intent 傳入當次識別碼。腳本須從相同程序及相同識別碼的 Unity 日誌看到 OpenXR 載入、顯示與輸入子系統執行，才會回傳 `openxr-ready`。模擬部署驗證了舊版本、舊識別碼、其他 PID、衝突證據及缺少輸入的拒絕路徑。 [驗收操作](QUEST3.md#核對首次啟動的-openxr-子系統)

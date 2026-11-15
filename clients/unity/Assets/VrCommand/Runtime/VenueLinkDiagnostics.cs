@@ -37,7 +37,7 @@ namespace VrCommand.Unity
         private readonly string output;
         private readonly LinkEchoRateGate replies = new LinkEchoRateGate();
         private readonly List<Sample> samples = new List<Sample>(SampleLimit);
-        private readonly double deadline;
+        private double deadline;
         private CustomMessagingManager messaging;
         private Sample pending;
         private double sentAt, windowStarted = double.NaN;
@@ -48,13 +48,15 @@ namespace VrCommand.Unity
         private VenueLinkDiagnostics(VenueBootstrap owner, bool server, string output)
         {
             this.owner = owner; this.server = server; this.output = output;
-            deadline = Time.realtimeSinceStartupAsDouble + LifetimeSeconds;
+            deadline = !server && output == null ? double.PositiveInfinity : Time.realtimeSinceStartupAsDouble + LifetimeSeconds;
         }
 
-        internal static VenueLinkDiagnostics Create(VenueBootstrap owner, string role)
+        internal static VenueLinkDiagnostics Create(VenueBootstrap owner, LaunchConfiguration configuration)
         {
-            if (role == "Server" || role == "Host") return new VenueLinkDiagnostics(owner, true, null);
-#if UNITY_STANDALONE_WIN && DEVELOPMENT_BUILD
+            if (configuration.IsServer) return new VenueLinkDiagnostics(owner, true, null);
+#if UNITY_ANDROID && !UNITY_EDITOR && DEVELOPMENT_BUILD
+            if (configuration.recordQuestLinkMetrics) return new VenueLinkDiagnostics(owner, false, null);
+#elif UNITY_STANDALONE_WIN && DEVELOPMENT_BUILD
             var args = Environment.GetCommandLineArgs();
             var index = Array.IndexOf(args, "--vr-link-metrics");
             if (index < 0) return null;
@@ -143,6 +145,7 @@ namespace VrCommand.Unity
                 windowStarted = double.NaN;
                 return;
             }
+            if (double.IsPositiveInfinity(deadline)) deadline = now + LifetimeSeconds;
             if (pending != null && now - sentAt >= ReplySeconds) Record("Timeout");
             if (finished || pending != null) return;
             if (double.IsNaN(windowStarted))
@@ -168,9 +171,24 @@ namespace VrCommand.Unity
             if (server || finished) return;
             finished = true;
             if (pending != null) { pending.result = "Interrupted"; samples.Add(pending); pending = null; }
-            var report = new Report { processId = System.Diagnostics.Process.GetCurrentProcess().Id, connection = connection,
+            var report = new Report { processId = CurrentProcessId(), connection = connection,
                 complete = reason == "Limit", batchMode = Application.isBatchMode, reason = reason, samples = samples.ToArray(),
                 graphicsDeviceActive = SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null };
+#if UNITY_ANDROID && !UNITY_EDITOR && DEVELOPMENT_BUILD
+            if (output == null)
+            {
+                const int chunkSize = 480;
+                var json = JsonUtility.ToJson(report);
+                var count = (json.Length + chunkSize - 1) / chunkSize;
+                for (var index = 0; index < count; index++)
+                {
+                    var offset = index * chunkSize;
+                    var chunk = json.Substring(offset, Math.Min(chunkSize, json.Length - offset));
+                    Debug.Log($"VR_QUEST_LINK_METRICS id={connection} part={index + 1}/{count} {chunk}");
+                }
+                return;
+            }
+#endif
             var temporary = output + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
@@ -179,6 +197,16 @@ namespace VrCommand.Unity
             }
             catch (Exception error) when (error is IOException || error is UnauthorizedAccessException)
             { Debug.LogWarning("VR_LINK_METRICS_WRITE_FAILED"); }
+        }
+
+        private static int CurrentProcessId()
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR && DEVELOPMENT_BUILD
+            using var process = new AndroidJavaClass("android.os.Process");
+            return process.CallStatic<int>("myPid");
+#else
+            return System.Diagnostics.Process.GetCurrentProcess().Id;
+#endif
         }
     }
 

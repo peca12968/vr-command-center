@@ -549,6 +549,72 @@ def preflight_fixture(root, label, *, server, peer, port, exchange=None):
 
 
 class FieldResultsTests(unittest.TestCase):
+    def test_quest_link_metrics_verify_original_pid_connection_and_seat_in_both_modes(self):
+        def insert_link_metrics(log, pid, connection, *, process_id=None, report_connection=None, frame_pid=None, drop=False):
+            samples = [{'sequence': i + 1, 'tick': 20 * (i + 1), 'playerLoopFrames': 72,
+                        'windowSeconds': 1, 'roundTripMilliseconds': 20 + i if i < 28 else 0,
+                        'result': 'Reply' if i < 28 else 'Timeout' if i == 28 else 'Interrupted'} for i in range(30)]
+            data = json.dumps({'version': 1, 'processId': pid if process_id is None else process_id,
+                               'connection': int(connection if report_connection is None else report_connection), 'complete': True,
+                               'batchMode': False, 'graphicsDeviceActive': True, 'reason': 'Limit', 'samples': samples}, separators=(',', ':'))
+            chunks = [data[i:i + 480] for i in range(0, len(data), 480)]
+            lines = ''.join(logcat_line(f'VR_QUEST_LINK_METRICS id={connection} part={index}/{len(chunks)} {chunk}', frame_pid or pid)
+                            for index, chunk in enumerate(chunks, 1) if not drop or index != 2)
+            marker = logcat_line(f'VR_CLIENT_CONNECTED id={connection}', pid)
+            self.assertIn(marker, log)
+            return log.replace(marker, marker + lines, 1)
+
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, _ = venue_fixture(root, mode, remote=True, quest_per_room=1, room_sizes=(2,) * 5)
+                manifest['expectedPlayersPerRoom'] = 2
+                manifest['requireQuestLinkMetrics'] = True
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                original_logs = []
+                for session in manifest['sessions']:
+                    port = json.loads((root / session['launcherReport']).read_bytes())['udpBinding']['port']
+                    for player in session['players']:
+                        if 'logcatPid' not in player:
+                            continue
+                        source = root / player['log']
+                        log, pid = source.read_text(encoding='utf-8'), player['logcatPid']
+                        connection, _ = field.quest_client_result(log, pid, port)
+                        source.write_text(insert_link_metrics(log, pid, connection), encoding='utf-8')
+                        original_logs.append((source, log, pid, connection))
+                result = field.verify_venue(path)
+                self.assertEqual(5, result['questLinkMetricsVerified'])
+                rows = [row for session in result['sessions'] for row in session['questLinkMetrics']]
+                self.assertEqual([(room, 2) for room in range(1, 6)], [(r['roomId'], r['seat']) for r in rows])
+                self.assertTrue(all((row['replies'], row['timeouts'], row['interrupted'], row['p95RoundTripMs'], row['playerLoopFramesPerSecond'])
+                                    == (28, 1, 1, 46, 72) for row in rows))
+                self.assertFalse(result['networkCapacityAccepted'])
+
+                if mode == 'Independent':
+                    session = manifest['sessions'][0]
+                    windows, quest = session['players']
+                    command = [sys.executable, str(SCRIPT), '--topology', 'direct-lan', '--server-ip', manifest['serverIps'][0],
+                               '--launcher-report', str(root / session['launcherReport']), '--server-log', str(root / session['serverLog']),
+                               '--evidence-zip', str(root / session['evidenceZip']), '--player', windows['address'], str(root / windows['log']),
+                               '--quest-player', quest['address'], str(root / quest['log']), str(quest['logcatPid']), '--require-quest-link-metrics']
+                    cli = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', timeout=12)
+                    self.assertEqual(0, cli.returncode, cli.stderr)
+                    self.assertEqual(rows[:1], json.loads(cli.stdout)['questLinkMetrics'])
+
+                source, log, pid, connection = original_logs[0]
+                for changes, reason in [({'process_id': pid + 1}, 'original graphical client process'),
+                                        ({'report_connection': 1}, 'original graphical client process'),
+                                        ({'frame_pid': pid + 1}, 'Missing complete Quest link report'),
+                                        ({'drop': True}, 'missing, reordered or repeated fragments')]:
+                    with self.subTest(changes=changes):
+                        source.write_text(insert_link_metrics(log, pid, connection, **changes), encoding='utf-8')
+                        with self.assertRaisesRegex(field.EvidenceError, f'room 1 seat 2: .*{reason}'):
+                            field.verify_venue(path)
+                source.write_text(log, encoding='utf-8')
+                manifest['requireQuestLinkMetrics'] = False
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                self.assertNotIn('questLinkMetricsVerified', field.verify_venue(path))
+
     def staged_batch(self, root, mode, count, id_offset, minutes_after, *, remote=False, tracked_fire=False,
                      missing_shot=False, runtime='Test OpenXR Runtime', windows_inbox=False, windows_links=False):
         root.mkdir()

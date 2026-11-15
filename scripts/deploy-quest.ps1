@@ -12,6 +12,7 @@ param(
     [Parameter(ParameterSetName='Player')][switch]$Passthrough,
     [Parameter(ParameterSetName='Player')][switch]$MixedReality,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][switch]$CheckOnly,
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][switch]$RecordLinkMetrics,
     [Parameter(Mandatory, ParameterSetName='Venue')][string]$VenueManifest,
     [Parameter(Mandatory, ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='CapturePlan')][Parameter(Mandatory, ParameterSetName='Windows')][string]$VenueBundle,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,5)][int]$RoomId,
@@ -100,7 +101,7 @@ function Test-JsonInteger($Value) { return $Value -is [int] -or $Value -is [long
 
 function Read-PlayerConfig($Config, [switch]$Installed) {
     $fields = @('role','address','port','joinTicket','roomAlignmentSha256')
-    if ($Installed) { $fields += 'questPassthrough','requestMixedReality' }
+    if ($Installed) { $fields += 'questPassthrough','requestMixedReality','recordQuestLinkMetrics' }
     $unknown = @($Config.PSObject.Properties.Name | Where-Object { $_ -cnotin $fields })
     if ($Config.role -isnot [string] -or $Config.role -cne 'Client' -or $Config.joinTicket -isnot [string] -or
         $Config.address -isnot [string] -or $Config.address -notmatch '\A[^\s]+\z' -or
@@ -114,7 +115,7 @@ function Read-PlayerConfig($Config, [switch]$Installed) {
         $ticket.AlignmentHash = $hash
     }
     if ($Installed) {
-        foreach ($flag in 'questPassthrough','requestMixedReality') {
+        foreach ($flag in 'questPassthrough','requestMixedReality','recordQuestLinkMetrics') {
             if ($null -ne $Config.PSObject.Properties[$flag] -and $Config.$flag -isnot [bool]) {
                 throw 'Installed Quest flags must be boolean.'
             }
@@ -883,6 +884,7 @@ function Read-QuestRelease([string]$Path) {
         $quest.sha256 -isnot [string] -or $quest.sha256 -cnotmatch '\A[0-9a-f]{64}\z') {
         throw 'Use the successful offline venue release report for the original Quest APK.'
     }
+    if ($RecordLinkMetrics -and $quest.versionCode -lt 75) { throw 'Quest link metrics require an APK with version code 75 or later.' }
     return $quest
 }
 
@@ -1314,6 +1316,7 @@ function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment
     $Deployment.Step = 'stage-connection'
     if ($UsePassthrough -or $RequestMixedReality) { $Config | Add-Member -NotePropertyName 'questPassthrough' -NotePropertyValue $true }
     if ($RequestMixedReality) { $Config | Add-Member -NotePropertyName 'requestMixedReality' -NotePropertyValue $true }
+    if ($RecordLinkMetrics) { $Config | Add-Member -NotePropertyName 'recordQuestLinkMetrics' -NotePropertyValue $true }
     $stagedConfig = [IO.Path]::GetTempFileName()
     try {
         $Deployment.Step = 'check-expiry-before-staging'
@@ -1497,6 +1500,9 @@ if ($PSCmdlet.ParameterSetName -eq 'Smoke') {
 $alignment = $null
 $alignmentHash = $null
 $liveSeat = $null
+if ($RecordLinkMetrics -and (-not $ReleaseReport -or $CheckOnly -or $VerifyTrackedSeats -or ($DeviceMap -and -not $DeployMappedSeats))) {
+    throw 'Use -RecordLinkMetrics with -ReleaseReport when launching a Quest player; a device map also needs -DeployMappedSeats.'
+}
 if ($ApkPath -and (-not $ReleaseReport -or $DeviceMap)) {
     throw 'Use -ApkPath only for a single-seat install with -ReleaseReport.'
 }
