@@ -410,6 +410,31 @@ class QuestDeployTests(unittest.TestCase):
         self.assertEqual(dict(self.player, recordQuestLinkMetrics=True), json.loads((self.remote/'vr-connection.json').read_bytes()))
         self.assertEqual(original, self.config.read_bytes())
 
+    def test_player_deployment_observes_openxr_after_verifying_the_active_config(self):
+        apk = self.root / 'openxr.apk'
+        apk.write_bytes(b'XR player deployment APK')
+        digest = hashlib.sha256(apk.read_bytes()).hexdigest()
+        release = self.root / 'release.json'
+        self.write(release, {'verified': True, 'scope': 'offline-package-consistency', 'quest': {
+            'applicationId': 'com.vrcommand.quest', 'architecture': 'arm64-v8a', 'signatureV2': True,
+            'versionCode': 76, 'sha256': digest}})
+        self.assert_rejected(self.run_script('-RequireOpenXR'), 'Use -RequireOpenXR with -ReleaseReport')
+        flags = ('-RequireOpenXR', '-ApkPath', str(apk), '-ReleaseReport', str(release), '-Serial', 'fixture')
+        self.assert_rejected(self.run_script(*flags, '-CheckOnly'), 'Use -RequireOpenXR with -ReleaseReport')
+        self.assertFalse(self.commands.exists())
+        result = self.run_script(*flags, release_hash=digest)
+        self.assertEqual(0, result.returncode, result.stderr)
+        receipt = json.loads(result.stdout)
+        nonce = (self.root / 'openxr-probe').read_text()
+        self.assertEqual(('openxr-ready', True, True), tuple(receipt[key] for key in ('status', 'apkVerified', 'filesVerified')))
+        self.assertEqual({'processId': 4242, 'nonce': nonce}, receipt['openXR'])
+        commands = self.commands.read_text(encoding='utf-8')
+        self.assertLess(commands.index(' resolve-activity '), commands.index(' force-stop '))
+        self.assertLess(commands.rindex('shell sha256sum /sdcard/Android/data/com.vrcommand.quest/files/vr-connection.json'),
+                        commands.index(' am start -W '))
+        self.assertNotIn('shell monkey', commands)
+        self.assertEqual(self.player, json.loads((self.remote / 'vr-connection.json').read_bytes()))
+
     def run_smoke(self, serial='fixture', failure='', *, resume=False, require_openxr=False, version_code=72):
         apk = self.root / 'sample.apk'
         apk.write_bytes(b'first-launch test APK')
@@ -1301,15 +1326,15 @@ else:
         return self.run_bundle(files, '-DeviceMap', str(mapping), *version, '-AdbPath',
                                str(ROOT / 'tests/fixtures/mock-quest-fleet.ps1'), *flags, environment=env)
 
-    def release_report(self):
+    def release_report(self, version_code=64):
         apk = self.root / 'original-development.apk'
         apk.write_bytes(b'installed APK byte fixture')
         document = {'verified': True, 'scope': 'offline-package-consistency',
                     'quest': {'applicationId': 'com.vrcommand.quest', 'architecture': 'arm64-v8a', 'signatureV2': True,
-                              'versionCode': 64, 'sha256': hashlib.sha256(apk.read_bytes()).hexdigest()}}
+                              'versionCode': version_code, 'sha256': hashlib.sha256(apk.read_bytes()).hexdigest()}}
         report = self.root / 'release.json'
         report.write_text(json.dumps(document), encoding='utf-8')
-        return report, document, {'VR_QUEST_FLEET_APK': str(apk), 'VR_QUEST_FLEET_VERSION_CODE': '64'}
+        return report, document, {'VR_QUEST_FLEET_APK': str(apk), 'VR_QUEST_FLEET_VERSION_CODE': str(version_code)}
 
     def assert_rejected(self, result, message):
         self.assertNotEqual(0, result.returncode)
@@ -2083,6 +2108,90 @@ else:
         for fault, status, step in cases:
             with self.subTest(fault=fault):
                 self.assert_mapped_deployment_stops(fault, status, step, partial=True)
+
+    def test_mapped_deployment_keeps_openxr_proof_on_retry_and_stops_at_failed_subsystem(self):
+        files, _ = self.bundle('Linked')
+        bundle = self.write_bundle(files)
+        mapping, document = self.device_map()
+        document['seats'] = [row for row in document['seats'] if row['seat'] == 1 and row['roomId'] in (1, 3, 5)]
+        mapping.write_text(json.dumps(document), encoding='utf-8')
+        release, _, release_env = self.release_report(76)
+        session = str(self.session_ids[0])
+
+        class Handler(BaseHTTPRequestHandler):
+            def reply(self, body):
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(body).encode())
+
+            def do_POST(self):
+                payload = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                response = {'topology': 'Linked', 'allMatched': True, 'seats': [
+                    {'roomId': room, 'seat': seat, 'status': 'matched'} for room in range(1, 6) for seat in range(5)]}
+                if payload.get('requireLiveSource'):
+                    response['liveSourceVerified'] = True
+                self.reply(response)
+
+            def do_GET(self):
+                self.reply({'version': 1, 'sessionId': session, 'sessionEnded': False, 'address': '192.168.1.10', 'port': 7777})
+
+            def log_message(self, *args):
+                pass
+
+        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                command = ['pwsh', '-NoProfile', '-NonInteractive', '-File', str(ROOT / 'scripts/deploy-quest.ps1'),
+                           '-VenueBundle', str(bundle), '-DeviceMap', str(mapping), '-AllowPartialMap',
+                           '-AdbPath', str(ROOT / 'tests/fixtures/mock-quest-fleet.ps1'), '-ReleaseReport', str(release),
+                           '-DeployMappedSeats', '-ManagementApi', f'http://127.0.0.1:{server.server_port}']
+
+                def invoke(*flags, fault=None):
+                    environment = {**os.environ, **release_env, 'VR_QUEST_FLEET_FIXTURE': str(self.root),
+                                   'VR_COMMAND_MASTER_KEY': 'PRIVATE_MASTER_CANARY',
+                                   'VR_QUEST_FLEET_FAULTS': json.dumps({'fixture-11': fault})}
+                    return subprocess.run([*command, *flags], capture_output=True, encoding='utf-8', timeout=30, env=environment)
+
+                first = invoke('-RequireOpenXR', fault='config-stage-changed')
+                self.assertEqual(1, first.returncode, first.stderr)
+                initial = json.loads(first.stdout)
+                self.assertIs(initial['requireOpenXR'], True)
+                self.assertEqual(['launch-requested', 'file-verification-failed', 'not-attempted'],
+                                 [row['status'] for row in initial['devices']])
+                nonce = (self.root / 'fixture-01/openxr-probe').read_text()
+                self.assertEqual({'processId': 4301, 'nonce': nonce}, initial['devices'][0]['openXR'])
+                previous = self.root / 'first-openxr.json'
+                previous.write_text(first.stdout, encoding='utf-8')
+                adb_log = self.root / 'adb.log'
+                adb_log.unlink()
+                self.assert_rejected(invoke('-RetryIncomplete', str(previous)), 'original OpenXR requirement')
+                self.assertFalse(adb_log.exists())
+
+                failed = invoke('-RequireOpenXR', '-RetryIncomplete', str(previous), fault='xr-not-ready')
+                self.assertEqual(1, failed.returncode, failed.stderr)
+                result = json.loads(failed.stdout)
+                self.assertEqual(initial['devices'][0], result['devices'][0])
+                affected = result['devices'][1]
+                self.assertEqual(('deployment-failed', 'observe-openxr', True),
+                                 (affected['status'], affected['failedStep'], affected['filesVerified']))
+                self.assertIn('loader=1, display=1, input=0', affected['openXRFailure'])
+                self.assertNotIn('openXR', affected)
+                self.assertEqual('not-attempted', result['devices'][2]['status'])
+                calls = adb_log.read_text(encoding='utf-8')
+                self.assertNotIn('fixture-01 shell', calls)
+                self.assertNotIn('fixture-21 shell am', calls)
+                self.assertEqual(1, calls.count(' am start -W '))
+                failed_report = self.root / 'failed-openxr.json'
+                failed_report.write_text(failed.stdout, encoding='utf-8')
+                adb_log.unlink()
+                self.assert_rejected(invoke('-RequireOpenXR', '-RetryIncomplete', str(failed_report)),
+                                     'Confirm the previous launch outcome')
+                self.assertFalse(adb_log.exists())
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
 
     def test_mapped_deployment_retries_only_original_unfinished_seats(self):
         files, _ = self.bundle('Independent')

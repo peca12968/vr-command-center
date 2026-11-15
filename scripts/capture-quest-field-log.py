@@ -56,21 +56,23 @@ def report_ready(pid, **seat):
     print(json.dumps({'stage': 'capture-ready', 'logcatPid': pid, **seat}), file=sys.stderr, flush=True)
 
 
-async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready):
+async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready, openxr=None):
     startup_deadline = min(deadline, time.monotonic() + STARTUP_SECONDS)
     next_pid_check = time.monotonic() + PID_CHECK_SECONDS
-    started = final_seen = False
+    started = ready = final_seen = False
+    xr_ready = openxr is None
     size = 0
     while True:
         now = time.monotonic()
         field.require(now < deadline, 'Capture timed out before the final disconnect')
         field.require(started or now < startup_deadline, 'Original Quest startup is unavailable')
+        field.require(xr_ready or now < startup_deadline, 'Original Quest OpenXR launch marker is unavailable')
         if now >= next_pid_check:
             current = await asyncio.to_thread(quest_pid, adb, min(5, deadline - now))
             field.require(current == pid, 'The original Quest process changed')
             next_pid_check = time.monotonic() + PID_CHECK_SECONDS
             continue
-        read_deadline = min(deadline, next_pid_check, deadline if started else startup_deadline)
+        read_deadline = min(deadline, next_pid_check, deadline if ready else startup_deadline)
         try:
             line = await asyncio.wait_for(child.stdout.readline(), read_deadline - now)
         except TimeoutError:
@@ -83,14 +85,17 @@ async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready
         if entry is None:
             continue
         process, message = entry.groups()
+        if openxr is not None and field.quest_openxr_marker(process, message, openxr):
+            field.require(not xr_ready, 'Original Quest OpenXR launch marker is repeated')
+            xr_ready = True
         if message.startswith('VR_NETWORK_STARTED '):
             field.require(process == str(pid) and not started and field.client_startup_on_port(message, port),
                           'Quest startup differs from the original process or game port')
             started = True
-            on_ready(pid)
         elif message.startswith(field.PLAYER_MARKERS):
             field.require(process == str(pid) and started, 'Player marker is outside the original Quest startup or process')
             if message.startswith('VR_CLIENT_DEBRIEF_FINAL '):
+                field.require(ready, 'Original Quest OpenXR launch marker is unavailable')
                 final_seen = True
             if final_seen and message == 'VR_CLIENT_DISCONNECTED':
                 log.seek(0)
@@ -106,6 +111,9 @@ async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready
                 field.require(current == pid, 'The original Quest process changed')
                 return {'version': 1, 'complete': True, 'logcatPid': pid, 'port': port, 'roomId': admission['roomId'], 'bytes': size,
                         'sha256': hashlib.sha256(captured).hexdigest(), 'scope': 'quest-logcat-only'}
+        if started and xr_ready and not ready:
+            ready = True
+            on_ready(pid)
 
 
 def check_device_identity(adb, expected, timeout):
@@ -122,7 +130,7 @@ def check_device_identity(adb, expected, timeout):
                   'Quest device identity differs from the original deployment')
 
 
-async def capture(adb, port, admission, output, seconds, on_ready=report_ready, *, device_identity=None):
+async def capture(adb, port, admission, output, seconds, on_ready=report_ready, *, device_identity=None, openxr=None):
     partial = output.with_name(output.name + '.partial')
     field.require(not os.path.lexists(output) and not os.path.lexists(partial), 'Choose a new capture output path')
     deadline = time.monotonic() + seconds
@@ -131,12 +139,13 @@ async def capture(adb, port, admission, output, seconds, on_ready=report_ready, 
     remaining = deadline - time.monotonic() if device_identity is not None else seconds
     field.require(remaining > 0, 'Capture timed out before checking the Quest process')
     pid = await asyncio.to_thread(quest_pid, adb, min(5, remaining))
+    field.require(openxr is None or pid == openxr[0], 'Quest process differs from the original OpenXR launch')
     with partial.open('x+b') as log:
         child = await asyncio.create_subprocess_exec(*adb, 'logcat', '-b', 'main', f'--pid={pid}',
                                                     '-v', 'threadtime', '-s', 'Unity:I',
                                                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
         try:
-            report = await read_capture(child, adb, pid, port, admission, log, deadline, on_ready)
+            report = await read_capture(child, adb, pid, port, admission, log, deadline, on_ready, openxr)
         finally:
             if child.returncode is None:
                 try:
@@ -200,6 +209,9 @@ def bind_deployment(plan, path):
                   and type(devices) is list and len(devices) == len(seats),
                   'Provide the completed Quest deployment report for the original mapped seats')
     version_code = field.integer(report.get('expectedVersionCode'), 1, 2**31 - 1)
+    require_openxr = report.get('requireOpenXR', False)
+    field.require(type(require_openxr) is bool and (not require_openxr or version_code >= 74),
+                  'Invalid Quest OpenXR deployment option for the original release')
     apk_digest = report.get('expectedApkSha256')
     field.require(type(apk_digest) is str and re.fullmatch(r'[0-9a-f]{64}', apk_digest), 'Quest deployment report lacks a verified release APK')
     proof, _ = field.quest_deployment_retry_proof(report, len(seats))
@@ -208,15 +220,20 @@ def bind_deployment(plan, path):
     device_map = {(row['roomId'], row['seat']): row['serial'] for row in seats}
     field.require(field.quest_deployment_map_fingerprint(proof['salt'], device_map) == proof['mapSha256'],
                   'Quest deployment report does not match the original device map')
-    for seat, device in zip(seats, devices, strict=True):
+    bound_seats = []
+    for seat, device, fingerprint in zip(seats, devices, proof['devices'], strict=True):
         field.require(type(device) is dict and device.get('status') == 'launch-requested'
                       and device.get('apkVerified') is device.get('filesVerified') is True
                       and field.integer(device.get('versionCode'), 1) == version_code
                       and all(type(device.get(key)) is type(seat[key]) and device[key] == seat[key]
                               for key in ('roomId', 'seat', 'port', 'sessionId', 'playerId', 'admissionId')),
                       'Quest deployment report differs from an original admitted seat')
+        opening = field.quest_openxr_proof(device, require_openxr)
+        bound_seats.append({**seat, 'deviceIdentity': (proof['salt'], fingerprint), 'openXR': opening})
+    field.require(not require_openxr or len({row['openXR'][1] for row in bound_seats}) == len(bound_seats),
+                  'Quest OpenXR launch nonce was reused between seats')
     return {**plan, 'deploymentSha256': hashlib.sha256(raw).hexdigest(),
-            'seats': [{**row, 'deviceIdentity': (proof['salt'], digest)} for row, digest in zip(seats, proof['devices'], strict=True)]}
+            'seats': bound_seats}
 
 
 async def capture_venue(adb, plan, directory, seconds):
@@ -240,7 +257,7 @@ async def capture_venue(adb, plan, directory, seconds):
 
         try:
             report = await capture([*adb, '-s', row['serial']], source['port'], admission, log, seconds, on_ready,
-                                   device_identity=row.get('deviceIdentity'))
+                                   device_identity=row.get('deviceIdentity'), openxr=row.get('openXR'))
         except (field.EvidenceError, OSError, UnicodeError, ValueError, TimeoutError, RecursionError) as error:
             failed = True
             reason = str(error) if isinstance(error, field.EvidenceError) else 'Check ADB and the capture directory'

@@ -19,6 +19,8 @@ $serial = $args[1]
 if ($args[0] -cne '-s' -or $serial -cnotmatch '\Afixture-(0[1-9]|1[0-9]|2[0-5])\z') { exit 99 }
 $fault = $faults[$serial]
 $device = Join-Path $root $serial
+$gamePid = 4300 + [int]$serial.Substring(8)
+$openxrProbe = Join-Path $device 'openxr-probe'
 $versionCode = if ($env:VR_QUEST_FLEET_VERSION_CODE) { [int]$env:VR_QUEST_FLEET_VERSION_CODE } else { 61 }
 if ($args[2] -ceq 'push') {
     $null = [IO.Directory]::CreateDirectory($device)
@@ -28,6 +30,13 @@ if ($args[2] -ceq 'push') {
         ($fault -ceq 'alignment-stage-changed' -and $args[4].Contains('/vr-room-alignment-'))) {
         [IO.File]::AppendAllText($file, "`n")
     }
+    exit 0
+}
+if ($args[2] -ceq 'logcat') {
+    if (($args[3..11] -join ' ') -cne "-d -t 1000 --pid=$gamePid -v brief -s Unity AndroidRuntime") { exit 98 }
+    $nonce = [IO.File]::ReadAllText($openxrProbe)
+    $inputRunning = if ($fault -ceq 'xr-not-ready') { 0 } else { 1 }
+    "I/Unity  ($gamePid): VR_QUEST_OPENXR nonce=$nonce loader=1 display=1 input=$inputRunning"
     exit 0
 }
 if ($args[2] -cne 'shell') { exit 98 }
@@ -51,6 +60,11 @@ switch -CaseSensitive ($args[3]) {
         exit 0
     }
     'pm' {
+        if (($args[4..13] -join ' ') -ceq 'resolve-activity --brief --user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p com.vrcommand.quest') {
+            if ($fault -ceq 'missing-activity') { 'No activity found'; exit 0 }
+            'com.vrcommand.quest/com.unity3d.player.UnityPlayerActivity'
+            exit 0
+        }
         if (($args[4..7] -join ' ') -ceq 'path --user current com.vrcommand.quest') {
             if ($fault -ceq 'apk-path-malformed') { 'package:/data/app/base.apk;UNEXPECTED-COMMAND'; exit 0 }
             'package:/data/app/~~VRGameHash==/com.vrcommand.quest-XR_Package+=/base.apk'
@@ -104,7 +118,23 @@ switch -CaseSensitive ($args[3]) {
         Remove-Item -LiteralPath (Join-Path $device ($args[5].Split('/')[-1])) -ErrorAction SilentlyContinue
         exit 0
     }
-    'am' { if ($fault -ceq 'force-stop') { exit 1 }; exit 0 }
+    'pidof' {
+        if ($args[4] -cne 'com.vrcommand.quest' -or -not (Test-Path -LiteralPath $openxrProbe)) { exit 1 }
+        $gamePid
+        exit 0
+    }
+    'am' {
+        if ($fault -ceq 'force-stop') { exit 1 }
+        if ($args[4] -ceq 'start') {
+            $activity = 'com.vrcommand.quest/com.unity3d.player.UnityPlayerActivity'
+            $expected = "-W --user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n $activity --es com.vrcommand.quest.OPENXR_PROBE"
+            if (($args[5..15] -join ' ') -cne $expected -or $args[16] -cnotmatch '\A[a-f0-9]{32}\z') { exit 98 }
+            [IO.File]::WriteAllText($openxrProbe, $args[16])
+            'Status: ok'
+            "Activity: $activity"
+        }
+        exit 0
+    }
     'mkdir' { if ($fault -ceq 'directory') { exit 1 }; exit 0 }
     'monkey' {
         if ($fault -ceq 'launch') { exit 1 }

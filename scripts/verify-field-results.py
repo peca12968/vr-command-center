@@ -423,6 +423,41 @@ def quest_client_result(log, pid, port, *, connections=None):
     return client_result('\n'.join(markers), connections=connections)
 
 
+def quest_openxr_proof(row, required):
+    if not required:
+        require('openXR' not in row, 'Quest launch proof requires the original OpenXR deployment option')
+        return None
+    proof = row.get('openXR')
+    require(type(proof) is dict and set(proof) == {'processId', 'nonce'} and type(proof['nonce']) is str
+            and re.fullmatch(r'[0-9a-f]{32}', proof['nonce']) and proof['nonce'] != '0' * 32,
+            'Quest deployment lacks a valid original OpenXR launch proof')
+    return integer(proof['processId'], 1, 2**31 - 1), proof['nonce']
+
+
+def quest_openxr_marker(process, message, proof):
+    pid, nonce = proof
+    prefix = f'VR_QUEST_OPENXR nonce={nonce} '
+    if process != str(pid) or not message.startswith(prefix):
+        return False
+    require(message == prefix + 'loader=1 display=1 input=1', 'Original Quest OpenXR launch did not report all subsystems ready')
+    return True
+
+
+def verify_quest_openxr_log(log, pid, proof):
+    require(pid == proof[0], 'Quest logcat PID differs from the original OpenXR launch')
+    observed = False
+    for line in log.splitlines():
+        entry = LOGCAT_UNITY.fullmatch(line)
+        if entry is None or entry[1] != str(pid):
+            continue
+        if quest_openxr_marker(*entry.groups(), proof):
+            require(not observed, 'Quest logcat lacks one matching original OpenXR launch marker')
+            observed = True
+        if entry[2].startswith('VR_CLIENT_DEBRIEF_FINAL '):
+            require(observed, 'Original Quest OpenXR launch marker must precede the final result')
+    require(observed, 'Quest logcat lacks one matching original OpenXR launch marker')
+
+
 def quest_link_metrics(log, pid, connection, criteria=None):
     chunk_pattern = re.compile(r'VR_QUEST_LINK_METRICS id=(0|[1-9][0-9]{0,19}) part=([1-9][0-9]?)/([1-9][0-9]?) ([ -~]{1,480})')
     active, total, chunks = False, None, []
@@ -1225,7 +1260,7 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                    quest_deployments=None, require_distinct_remote_roster=False, control_batches=(),
                    observed_quest_addresses=None, quest_readiness=(), planned_seat_addresses=None, reconnect_sources=None,
                    tracked_vr_start=None, roster_departures=None, topology_witness=None, require_quest_link_metrics=False,
-                   quest_link_criteria=None, quest_link_issues=None):
+                   quest_link_criteria=None, quest_link_issues=None, quest_openxr_launches=None):
     integer(size, 0 if roster_departures is not None else 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(not verify_player_sources or world_journal is not None, 'Player source verification requires the original closed world journal')
@@ -1334,6 +1369,12 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
         if pid is not None and quest_deployments is not None:
             require(quest_deployments.pop((room, seat), None) == (session_id, player_id, owner['admissionId'], port),
                     f'Quest deployment does not match the original admission and endpoint for room {room} seat {seat}')
+            proof = quest_openxr_launches.get((room, seat)) if quest_openxr_launches is not None else None
+            if proof is not None:
+                try:
+                    verify_quest_openxr_log(log, pid, proof)
+                except EvidenceError as error:
+                    raise EvidenceError(f'Quest OpenXR launch for room {room} seat {seat}: {error}') from error
         planned = reconnect_sources.get((room, seat)) if reconnect_sources is not None else None
         if planned is None:
             require(observed[0] == expected_ip, 'UDP peer differs from the declared source or is reused')
@@ -2321,6 +2362,7 @@ def quest_deployment_leaves(attempts):
         if parent_digest in attempts:
             parent = attempts[parent_digest]
             require(not parent['complete'] and parent['proof'] == attempt['proof'] and parent['seats'] == attempt['seats']
+                    and parent['require_openxr'] == attempt['require_openxr']
                     and attempt['launched'][:len(parent['launched'])] == parent['launched'],
                     'Quest deployment retry changes its original proof, seats or completed prefix')
 
@@ -2459,6 +2501,9 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
                 'Quest deployment report lacks verified deployment or uses another topology')
         require(report.get('expectedApkSha256') == apk_digest and integer(report.get('expectedVersionCode'), 1) == version,
                 'Quest deployment report differs from the original release APK')
+        require_openxr = report.get('requireOpenXR', False)
+        require(type(require_openxr) is bool and (not require_openxr or version >= 74),
+                'Invalid Quest OpenXR deployment option for the original release')
         devices = report.get('devices')
         require(type(devices) is list and 1 <= len(devices) <= 25
                 and all(type(row) is dict and type(row.get('status')) is str for row in devices),
@@ -2467,7 +2512,7 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
         require(report.get('complete') is (len(launched) == len(devices))
                 and devices[:len(launched)] == launched, 'Quest deployment report lacks a consistent successful prefix')
         proof, previous = quest_deployment_retry_proof(report, len(devices))
-        seats, confirmed = {}, {}
+        seats, confirmed, openxr = {}, {}, {}
         for row in devices:
             room, seat = integer(row.get('roomId'), 1, 5), integer(row.get('seat'), 1, 5)
             require((room, seat) not in seats, 'Quest deployment report repeats a device seat')
@@ -2479,8 +2524,11 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
                     'Quest deployment lacks verified APK and configuration')
             confirmed[room, seat] = (identity(row['sessionId']), identity(row['playerId']), identity(row['admissionId']),
                                      integer(row.get('port'), 1024, 65535))
+            proof_row = quest_openxr_proof(row, require_openxr)
+            if proof_row is not None:
+                openxr[room, seat] = proof_row
         attempts[report_hash] = dict(proof=proof, previous=previous, complete=report['complete'], seats=tuple(seats),
-                                     launched=launched, confirmed=confirmed)
+                                     launched=launched, confirmed=confirmed, openxr=openxr, require_openxr=require_openxr)
 
     matched_maps = set()
     for deployment_digest, seats in capture_reports:
@@ -2498,13 +2546,18 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
             original = deployment['confirmed'].get((row['roomId'], row['seat']))
             require(original is not None and original[0] == row['sessionId'] and original[3] == row['port'],
                     'Quest capture seat does not match its referenced deployment')
+            proof = deployment['openxr'].get((row['roomId'], row['seat']))
+            require(proof is None or not row.get('complete') or row.get('logcatPid') == proof[0],
+                    'Quest capture PID differs from the referenced OpenXR launch')
     leaves, linked = quest_deployment_leaves(attempts)
-    deployed = {}
+    deployed, openxr = {}, {}
     for attempt in leaves:
         confirmed = attempt['confirmed']
         require(confirmed, 'Quest deployment report lacks a consistent successful prefix')
         require(deployed.keys().isdisjoint(confirmed), 'Quest deployment repeats a successful seat')
         deployed.update(confirmed)
+        openxr.update(attempt['openxr'])
+    require(len({nonce for _, nonce in openxr.values()}) == len(openxr), 'Quest OpenXR launch nonce was reused between seats')
     summary = {'versionCode': version, 'apkSha256': apk_digest, 'reportsVerified': len(reports), 'seatsVerified': len(deployed)}
     if matched_maps:
         summary['deviceMapsMatched'] = len(matched_maps)
@@ -2512,13 +2565,14 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
         summary['retryReportsLinked'] = linked
     readiness = (read_quest_readiness_reports(readiness_reports, mode, attempts, deployed, evidence_path)
                  if readiness_reports is not None else ({}, None))
-    return deployed, summary, readiness
+    return deployed, summary, readiness, openxr
 
 
 def read_venue_quest_evidence(manifest, mode, expected, evidence_path, release, *, venue_network=None, inspect_logs=False):
     captures, endpoints, summary, references = {}, {}, {}, []
     device_map = deployments = deployment_summary = None
     readiness = {}, None
+    openxr = {}
     if 'questCaptures' in manifest:
         require(manifest['topology'] == 'direct-lan', 'Quest capture batches require direct LAN evidence')
         captures_spec = manifest['questCaptures']
@@ -2532,12 +2586,12 @@ def read_venue_quest_evidence(manifest, mode, expected, evidence_path, release, 
                 'Quest readiness requires a list of reports and the original Quest deployment evidence')
     if 'questDeployments' in manifest:
         require(manifest['topology'] == 'direct-lan', 'Quest deployment evidence requires direct LAN evidence')
-        deployments, deployment_summary, readiness = read_quest_deployments(
+        deployments, deployment_summary, readiness, openxr = read_quest_deployments(
             manifest['questDeployments'], mode, evidence_path, release, capture_reports=references,
             capture_device_map=device_map, readiness_reports=manifest.get('questReadinessReports'))
         if references:
             summary['questCaptureDeploymentReportsMatched'] = len(references)
-    return captures, endpoints, summary, deployments, deployment_summary, readiness
+    return captures, endpoints, summary, deployments, deployment_summary, readiness, openxr
 
 
 def require_quest_capture_endpoint(binding, planned_binding):
@@ -3131,8 +3185,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     windows_by_session = venue_windows_logs(manifest['windowsPlayers'], expected, evidence_path, players_per_room) if explicit_windows else {}
 
     capture_supplied = 'questCaptures' in manifest
-    captures, capture_endpoints, capture_summary, quest_deployments, deployment_summary, readiness = (
-        ({}, {}, {}, None, None, ({}, None)) if inspect_windows else
+    captures, capture_endpoints, capture_summary, quest_deployments, deployment_summary, readiness, quest_openxr = (
+        ({}, {}, {}, None, None, ({}, None), {}) if inspect_windows else
         read_venue_quest_evidence(manifest, mode, expected, evidence_path, release,
                                   venue_network=venue_network, inspect_logs=inspect_quest_logs))
     quest_readiness, readiness_summary = readiness
@@ -3356,7 +3410,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
                                          roster_departures=departures, tracked_vr_start=documents.get('tracked-vr-start.json'),
                                          topology_witness=historical_ips if final_counts is not None else None,
                                          require_quest_link_metrics=require_quest_link_metrics, quest_link_criteria=quest_link_criteria,
-                                         quest_link_issues=quest_link_issues)
+                                         quest_link_issues=quest_link_issues, quest_openxr_launches=quest_openxr)
         for paths in source_paths or ():
             hashes = original_pairs.get(paths)
             if hashes is not None:
@@ -3405,6 +3459,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     require(recorded_at in end_times and not expected, 'Closure time or session set differs from the terminal evidence')
     require(not admission_ids.intersection(departed_admissions), 'A departed admission is also used in the final venue roster')
     require(not quest_deployments, 'Quest deployment reports include seats without original Quest logcat evidence')
+    if quest_openxr:
+        deployment_summary['openXRSeatsVerified'] = len(quest_openxr)
     require(not quest_readiness, 'Quest readiness refers to a session outside the original closure')
     require(not require_quest_link_metrics or quest_players > 0, 'Quest link verification requires original Quest logs')
     incomplete_links = 'Windows link evidence must cover every Windows seat in the venue'

@@ -457,6 +457,35 @@ if settings.get('keepRunning', True):
         self.assertEqual(raw, self.output.read_bytes())
         self.assertEqual('2', (self.root / 'serial-count').read_text())
 
+    def test_bound_capture_requires_original_openxr_process_and_marker_before_ready(self):
+        port, expected = capture_tool.read_connection(self.original)
+        nonce = 'a1' * 16
+        marker = f'VR_QUEST_OPENXR nonce={nonce} loader=1 display=1 input=1'
+        original = quest_logcat(self.player_log)
+        ready = []
+
+        def capture():
+            return asyncio.run(capture_tool.capture(self.adb, port, expected, self.output, 4, ready.append,
+                                                   openxr=(7342, nonce)))
+
+        self.prepare((logcat_line(marker) + original).encode(), initialPid='7450')
+        with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'process differs from the original OpenXR launch'):
+            capture()
+        self.assertFalse(self.partial.exists())
+        self.assertFalse((self.root / 'logcat-child').exists())
+
+        self.prepare((logcat_line(marker, pid=7450) + original).encode())
+        with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'OpenXR launch marker is unavailable'):
+            capture()
+        self.assertFalse(ready)
+        self.partial.unlink()
+        first, tail = original.split(logcat_line('VR_CLIENT_CONNECTED id=2'), 1)
+        raw = (first + logcat_line(marker) + logcat_line('VR_CLIENT_CONNECTED id=2') + tail).encode()
+        self.prepare(raw)
+        self.assertTrue(capture()['complete'])
+        self.assertEqual([7342], ready)
+        self.assertEqual(raw, self.output.read_bytes())
+
     def test_live_capture_preserves_bytes_and_existing_verifier_accepts_original_reconnect(self):
         earlier = 'VR_CLIENT_CONNECTED id=8\nVR_CLIENT_DISCONNECTED\n'
         startup, rest = self.records[6].split('\n', 1)
@@ -3621,6 +3650,54 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertEqual(25, result['serverAcknowledgements'])
                 self.assertFalse(result['physicalHostsVerified'])
                 self.assertNotIn(rows[0]['admissionId'], json.dumps(result))
+
+    def test_quest_openxr_proof_matches_each_of_25_original_seats_in_both_modes(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest = quest_capture_venue_fixture(root, mode, quest_per_room=5, batches=1)
+                deployment = self.quest_deployment_evidence(root, manifest, 5)
+                deployment.update(requireOpenXR=True, expectedVersionCode=76, retry={
+                    'version': 1, 'venueSha256': '1' * 64, 'mapSha256': '2' * 64, 'salt': '3' * 32,
+                    'devices': [f'{index:064x}' for index in range(1, 26)]})
+                release_path = root / 'release.json'
+                release = json.loads(release_path.read_bytes())
+                release['quest']['versionCode'] = 76
+                release_path.write_text(json.dumps(release), encoding='utf-8')
+                capture_path = root / manifest['questCaptures']['reports'][0]
+                report = json.loads(capture_path.read_bytes())
+                captures = {(row['roomId'], row['seat']): row for row in report['seats']}
+                originals = []
+                for index, row in enumerate(deployment['devices'], 1):
+                    captured = captures[row['roomId'], row['seat']]
+                    nonce, pid = f'{index:032x}', captured['logcatPid']
+                    row.update(versionCode=76, openXR={'processId': pid, 'nonce': nonce})
+                    marker = logcat_line(f'VR_QUEST_OPENXR nonce={nonce} loader=1 display=1 input=1', pid).encode()
+                    source = capture_path.with_name(captured['log'])
+                    raw = source.read_bytes()
+                    source.write_bytes(marker + raw)
+                    captured.update(bytes=len(marker + raw), sha256=hashlib.sha256(marker + raw).hexdigest())
+                    originals.append((captured, source, marker, raw))
+                deployment_path = root / 'deployment.json'
+                deployment_path.write_text(json.dumps(deployment), encoding='utf-8')
+                report['deploymentSha256'] = hashlib.sha256(deployment_path.read_bytes()).hexdigest()
+                capture_path.write_text(json.dumps(report), encoding='utf-8')
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                accepted = field.verify_venue(path)
+                self.assertEqual(25, accepted['questDeployment']['openXRSeatsVerified'])
+                self.assertEqual(25, accepted['serverAcknowledgements'])
+                self.assertFalse(accepted['physicalHostsVerified'])
+
+                captured, source, marker, raw = originals[0]
+                for changed, reason in ((raw, 'marker must precede the final result'),
+                                        (raw + marker, 'marker must precede the final result'),
+                                        (marker.replace(b'input=1', b'input=0') + raw, 'all subsystems ready'),
+                                        (marker + marker + raw, 'lacks one matching original OpenXR launch marker')):
+                    source.write_bytes(changed)
+                    captured.update(bytes=len(changed), sha256=hashlib.sha256(changed).hexdigest())
+                    capture_path.write_text(json.dumps(report), encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, reason):
+                        field.verify_venue(path)
 
     def test_quest_capture_matches_exact_referenced_deployment(self):
         for mode in ('Independent', 'Linked'):

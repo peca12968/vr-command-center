@@ -37,7 +37,7 @@ def session_files(result, folder, session_id):
 
 def check_quest_inputs(manifest, expected, evidence_path, release, sources, server_ips, windows_seats, venue_network,
                        reconnect_sources):
-    captures, endpoints, _, deployments, _, _ = field.read_venue_quest_evidence(
+    captures, endpoints, _, deployments, _, _, openxr = field.read_venue_quest_evidence(
         manifest, manifest['mode'], expected, evidence_path, release, venue_network=venue_network)
     for source in sources.values():
         if source['rooms'] in endpoints:
@@ -50,6 +50,8 @@ def check_quest_inputs(manifest, expected, evidence_path, release, sources, serv
             owner = source['players'].get(seat)
             field.require(owner is not None and owner.get('headset') == 'Quest3', 'Quest capture does not match a Quest 3 seat in the original roster')
             _, log, _, _ = field.quest_capture_log(address, path, pid, seat, size, digest)
+            if seat in openxr:
+                field.verify_quest_openxr_log(log, pid, openxr[seat])
             planned = reconnect_sources.get(seat) if reconnect_sources is not None else None
             history = [] if planned is not None else None
             connection, result = field.quest_client_result(log, pid, port, connections=history)

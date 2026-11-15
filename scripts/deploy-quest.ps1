@@ -5,7 +5,7 @@ param(
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Refresh')][Parameter(ParameterSetName='Smoke')][string]$AdbPath = 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe',
     [Parameter(Mandatory, ParameterSetName='Smoke')][switch]$SmokeTest,
     [Parameter(ParameterSetName='Smoke')][switch]$ResumeSmokeTest,
-    [Parameter(ParameterSetName='Smoke')][switch]$RequireOpenXR,
+    [Parameter(ParameterSetName='Smoke')][Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][switch]$RequireOpenXR,
     [Parameter(Mandatory, ParameterSetName='Refresh')][switch]$RefreshPlayerTicket,
     [Parameter(Mandatory, ParameterSetName='PlayerTracking')][switch]$VerifyPlayerTracking,
     [Parameter(ParameterSetName='Player')][string]$AlignmentFile,
@@ -885,6 +885,7 @@ function Read-QuestRelease([string]$Path) {
         throw 'Use the successful offline venue release report for the original Quest APK.'
     }
     if ($RecordLinkMetrics -and $quest.versionCode -lt 75) { throw 'Quest link metrics require an APK with version code 75 or later.' }
+    if ($RequireOpenXR -and $quest.versionCode -lt 74) { throw 'The OpenXR check requires a Quest APK with version code 74 or later.' }
     return $quest
 }
 
@@ -997,6 +998,12 @@ function Test-QuestDeployedAdmission($Entry, $Ticket) {
         $Ticket.AdmissionId.ToString('D') -ceq $Entry.admissionId -and $Ticket.Config.port -eq $Entry.port)
 }
 
+function Test-QuestOpenXRProof($Proof) {
+    return ($Proof -and (Test-JsonInteger $Proof.processId) -and $Proof.processId -ge 1 -and
+        $Proof.processId -le [int]::MaxValue -and $Proof.nonce -is [string] -and
+        $Proof.nonce -cmatch '\A[0-9a-f]{32}\z' -and $Proof.nonce -cne ('0' * 32))
+}
+
 function Read-QuestTrackedDeployment($Venue, [object[]]$Map, [string]$Path) {
     $original = Read-DeploymentJson $Path 32768 'original deployment report'
     $report = $original.Document
@@ -1014,6 +1021,7 @@ function Read-QuestTrackedDeployment($Venue, [object[]]$Map, [string]$Path) {
         $ticket = $Venue.Connections["$($row.roomId)/$($row.seat)"].Ticket
         if (-not (Test-QuestDeploymentRow $entry $row $report.retry.devices[$index] $report.expectedVersionCode) -or
             'launch-requested' -cne $entry.status -or $entry.filesVerified -isnot [bool] -or -not $entry.filesVerified -or
+            ($report.requireOpenXR -eq $true -and -not (Test-QuestOpenXRProof $entry.openXR)) -or
             -not (Test-JsonInteger $entry.port) -or -not (Test-QuestDeployedAdmission $entry $ticket)) {
             throw 'The deployment report does not match the original completed seat admissions.'
         }
@@ -1029,12 +1037,16 @@ function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, [s
         [string]$previous.expectedApkSha256 -cne $ExpectedHash -or -not (Test-QuestDeploymentMap $Venue $Map $previous)) {
         throw 'Use an incomplete deployment report for this original ZIP, device map and APK requirement.'
     }
+    if (($previous.PSObject.Properties['requireOpenXR'] -and $previous.requireOpenXR -isnot [bool]) -or
+        [bool]$previous.requireOpenXR -ne [bool]$RequireOpenXR) {
+        throw 'Retry with the original OpenXR requirement.'
+    }
     $completed = [Collections.Generic.List[object]]::new()
     $statuses = @('not-attempted','device-identity-unavailable','device-identity-changed','apk-unverified',
         'apk-hash-mismatch','ticket-expired','venue-check-failed','seat-headset-mismatch','file-verification-failed','deployment-failed')
-    $fileSteps = @('prepare-device','stage-alignment','stage-connection','check-expiry-before-staging',
+    $fileSteps = @('resolve-launcher','prepare-device','stage-alignment','stage-connection','check-expiry-before-staging',
         'check-expiry-before-stop','stop-game','activate-connection','verify-active-connection',
-        'clean-local-connection','check-expiry-before-launch','launch-game')
+        'clean-local-connection','check-expiry-before-launch','launch-game','observe-openxr')
     for ($index = 0; $index -lt $Map.Count; $index++) {
         $entry = $previous.devices[$index]
         $row = $Map[$index]
@@ -1044,6 +1056,7 @@ function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, [s
         if ($entry.status -ceq 'launch-requested') {
             $ticket = $Venue.Connections["$($row.roomId)/$($row.seat)"].Ticket
             if ($completed.Count -ne $index -or $entry.filesVerified -isnot [bool] -or -not $entry.filesVerified -or
+                ($RequireOpenXR -and -not (Test-QuestOpenXRProof $entry.openXR)) -or
                 ($ExpectedHash -and ($previous.apkVerificationVersion -ne 1 -or -not (Test-QuestDeployedAdmission $entry $ticket)))) {
                 throw 'Deployment report has inconsistent completed seats.'
             }
@@ -1054,6 +1067,9 @@ function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, [s
                 $seatResult.sessionId = $entry.sessionId; $seatResult.playerId = $entry.playerId
                 $seatResult.admissionId = $entry.admissionId; $seatResult.port = $entry.port
             }
+            if ($RequireOpenXR) {
+                $seatResult.openXR = [ordered]@{ processId = [int]$entry.openXR.processId; nonce = $entry.openXR.nonce }
+            }
             $completed.Add($seatResult)
         } elseif ($entry.status -cnotin $statuses) {
             throw 'Deployment report has an unknown seat status.'
@@ -1061,7 +1077,9 @@ function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, [s
         if ($entry.status -cin @('file-verification-failed','deployment-failed') -and $entry.failedStep -cnotin $fileSteps) {
             throw 'Deployment report is missing the original failure step.'
         }
-        if ($entry.failedStep -ceq 'launch-game') { throw 'Confirm the previous launch outcome on the affected headset before retrying that seat manually.' }
+        if ($entry.failedStep -cin @('launch-game','observe-openxr')) {
+            throw 'Confirm the previous launch outcome on the affected headset before retrying that seat manually.'
+        }
     }
     if ($completed.Count -eq $Map.Count) { throw 'This deployment report has no seats left to retry.' }
     return @{ Proof = $proof; Completed = $completed.ToArray(); PreviousSha256 = Get-QuestSha256 $original.Bytes }
@@ -1116,6 +1134,7 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, [str
 
     $report.phase = 'deployment'
     if ($ExpectedHash) { $report.apkVerificationVersion = 1 }
+    if ($RequireOpenXR) { $report.requireOpenXR = $true }
     if ($Retry) {
         $report.retry = $Retry.Proof
         $report.previousDeploymentSha256 = $Retry.PreviousSha256
@@ -1161,6 +1180,7 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, [str
                 -RequestMixedReality:($null -ne $connection.Alignment) -Deployment $deployment -LiveVenue $Venue
             $device.filesVerified = $true
             $device.status = 'launch-requested'
+            if ($RequireOpenXR) { $device.openXR = $deployment.OpenXR }
             if ($ExpectedHash) {
                 $device.sessionId = $connection.Ticket.SessionId.ToString('D')
                 $device.playerId = $connection.Ticket.PlayerId.ToString('D')
@@ -1172,6 +1192,11 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, [str
                 elseif ($_.Exception -is [IO.InvalidDataException]) { 'file-verification-failed' }
                 else { 'deployment-failed' }
             $device.failedStep = $deployment.Step
+            if ($deployment.Step -ceq 'observe-openxr') {
+                $device.filesVerified = $true
+                $device.openXRFailure = if ($_.Exception -is [InvalidOperationException]) { $_.Exception.Message }
+                    else { 'Could not verify the launched Quest process.' }
+            }
             return $report
         }
     }
@@ -1297,6 +1322,11 @@ function Update-QuestPlayerTicket($ConnectionFile, $Ticket, $Target) {
 
 function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment, [switch]$UsePassthrough, [switch]$RequestMixedReality,
     [hashtable]$Deployment = @{}, $LiveVenue, $LiveSeat) {
+    if ($RequireOpenXR) {
+        $Deployment.Step = 'resolve-launcher'
+        $activity = Get-QuestLauncherActivity $TargetSerial
+        $nonce = [Guid]::NewGuid().ToString('N')
+    }
     $Deployment.Step = 'prepare-device'
     $remoteDirectory = '/sdcard/Android/data/com.vrcommand.quest/files'
     & $AdbPath -s $TargetSerial shell mkdir -p $remoteDirectory | Out-Null
@@ -1346,8 +1376,15 @@ function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment
     $Deployment.Step = 'check-expiry-before-launch'
     if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired before launch. Download a fresh connection file.' }
     $Deployment.Step = 'launch-game'
-    & $AdbPath -s $TargetSerial shell monkey -p com.vrcommand.quest -c android.intent.category.LAUNCHER 1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Quest app launch failed.' }
+    if ($RequireOpenXR) {
+        Start-QuestCheckedActivity $TargetSerial $activity $nonce
+        $Deployment.Step = 'observe-openxr'
+        $observation = Read-QuestLaunchedProcess $TargetSerial $nonce
+        $Deployment.OpenXR = [ordered]@{ processId = $observation.processId; nonce = $nonce }
+    } else {
+        & $AdbPath -s $TargetSerial shell monkey -p com.vrcommand.quest -c android.intent.category.LAUNCHER 1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Quest app launch failed.' }
+    }
 }
 
 function Invoke-QuestFirstLaunch([string]$Apk, $Release) {
@@ -1381,59 +1418,78 @@ function Invoke-QuestFirstLaunch([string]$Apk, $Release) {
     $config = '/sdcard/Android/data/com.vrcommand.quest/files/vr-connection.json'
     & $AdbPath -s $Serial shell test ! -e $config | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not confirm the Quest has no existing player configuration. App launch was skipped.' }
-    $launcherIntent = @('-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.LAUNCHER')
-    $resolved = @(& $AdbPath -s $Serial shell pm resolve-activity --brief --user current @launcherIntent -p $package 2>$null)
+    $activity = Get-QuestLauncherActivity $Serial
+    $nonce = if ($RequireOpenXR) { [Guid]::NewGuid().ToString('N') }
+    Start-QuestCheckedActivity $Serial $activity $nonce -Restart:$ResumeSmokeTest
+    $observation = Read-QuestLaunchedProcess $Serial $nonce
+    $report = [ordered]@{
+        phase = 'quest-first-launch'; status = 'process-observed'; model = 'Quest 3'; versionCode = $Release.versionCode
+        apkVerified = $true; apkSha256 = $Release.sha256; installedThisRun = -not $ResumeSmokeTest; processObservationSeconds = 3
+        unityLogLines = $observation.unityLogLines
+    }
+    if ($RequireOpenXR) {
+        $report.status = 'openxr-ready'
+        $report.processObservationSeconds = $observation.observationSeconds
+        $report['openXR'] = [ordered]@{ loader = 'OpenXR'; displayRunning = $true; inputRunning = $true }
+    }
+    return $report
+}
+
+function Get-QuestLauncherActivity([string]$TargetSerial) {
+    $resolved = @(& $AdbPath -s $TargetSerial shell pm resolve-activity --brief --user current `
+        -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p com.vrcommand.quest 2>$null)
     $activities = @($resolved -cmatch '\Acom\.vrcommand\.quest/[A-Za-z0-9._]+\z')
     if ($LASTEXITCODE -ne 0 -or $activities.Count -ne 1) { throw 'Could not resolve a launcher activity for the installed Quest app.' }
+    return $activities[0]
+}
+
+function Start-QuestCheckedActivity([string]$TargetSerial, [string]$Activity, [string]$Nonce, [switch]$Restart) {
     $launchOptions = @('-W')
-    if ($ResumeSmokeTest) { $launchOptions += '-S' }
+    if ($Restart) { $launchOptions += '-S' }
     $extras = @()
-    if ($RequireOpenXR) {
-        $nonce = [Guid]::NewGuid().ToString('N')
-        $extras = @('--es', 'com.vrcommand.quest.OPENXR_PROBE', $nonce)
-    }
-    $startup = @(& $AdbPath -s $Serial shell am start @launchOptions --user current @launcherIntent -n $activities[0] @extras 2>$null)
+    if ($Nonce) { $extras = @('--es', 'com.vrcommand.quest.OPENXR_PROBE', $Nonce) }
+    $startup = @(& $AdbPath -s $TargetSerial shell am start @launchOptions --user current `
+        -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n $Activity @extras 2>$null)
     if ($LASTEXITCODE -ne 0 -or $startup -cnotcontains 'Status: ok' -or
-        $startup -cnotcontains "Activity: $($activities[0])") {
+        $startup -cnotcontains "Activity: $Activity") {
         throw 'Android did not confirm that the Quest launcher activity started.'
     }
-    $appPid = & $AdbPath -s $Serial shell pidof $package 2>$null
-    if ($LASTEXITCODE -ne 0 -or [string]$appPid -cnotmatch '\A[1-9][0-9]{0,9}\z') { throw 'Quest game process was not present after launch.' }
+}
+
+function Read-QuestLaunchedProcess([string]$TargetSerial, [string]$Nonce) {
+    $appPid = & $AdbPath -s $TargetSerial shell pidof com.vrcommand.quest 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]$appPid -cnotmatch '\A[1-9][0-9]{0,9}\z' -or [long]$appPid -gt [int]::MaxValue) {
+        throw [InvalidOperationException]::new('Quest game process was not present after launch.')
+    }
     $clock = [Diagnostics.Stopwatch]::StartNew()
     Start-Sleep -Seconds 3
     do {
-        $logs = @(& $AdbPath -s $Serial logcat -d -t 1000 "--pid=$appPid" -v brief -s Unity AndroidRuntime 2>$null)
-        if ($LASTEXITCODE -ne 0) { throw 'Could not read the launched Quest process logs.' }
-        $remainingPid = & $AdbPath -s $Serial shell pidof $package 2>$null
+        $logs = @(& $AdbPath -s $TargetSerial logcat -d -t 1000 "--pid=$appPid" -v brief -s Unity AndroidRuntime 2>$null)
+        if ($LASTEXITCODE -ne 0) { throw [InvalidOperationException]::new('Could not read the launched Quest process logs.') }
+        $remainingPid = & $AdbPath -s $TargetSerial shell pidof com.vrcommand.quest 2>$null
         if ($LASTEXITCODE -ne 0 -or [string]$remainingPid -cne [string]$appPid -or ($logs -cmatch '^E/AndroidRuntime\s*\([^)]*\): FATAL EXCEPTION')) {
-            throw 'The Quest game process exited, restarted or reported a fatal error during first launch.'
+            throw [InvalidOperationException]::new('The Quest game process exited, restarted or reported a fatal error during launch.')
         }
-        if (-not $RequireOpenXR) { break }
+        if (-not $Nonce) { break }
         $prefix = "\AI/Unity\s*\(\s*$appPid\s*\): VR_QUEST_OPENXR nonce=$nonce "
         $probe = @($logs -cmatch $prefix)
         if ($probe.Count -gt 0) {
             if ($probe.Count -ne 1 -or $probe[0] -cnotmatch ($prefix + 'loader=([01]) display=([01]) input=([01])\z')) {
-                throw 'The current Quest launch produced conflicting or invalid OpenXR evidence.'
+                throw [InvalidOperationException]::new('The current Quest launch produced conflicting or invalid OpenXR evidence.')
             }
             if ($Matches[1] -ne '1' -or $Matches[2] -ne '1' -or $Matches[3] -ne '1') {
-                throw "Quest OpenXR did not become ready (loader=$($Matches[1]), display=$($Matches[2]), input=$($Matches[3]))."
+                throw [InvalidOperationException]::new("Quest OpenXR did not become ready (loader=$($Matches[1]), display=$($Matches[2]), input=$($Matches[3])).")
             }
             break
         }
-        if ($clock.Elapsed.TotalSeconds -ge 20) { throw 'No OpenXR evidence was observed for the current Quest launch.' }
+        if ($clock.Elapsed.TotalSeconds -ge 20) { throw [InvalidOperationException]::new('No OpenXR evidence was observed for the current Quest launch.') }
         Start-Sleep -Milliseconds 500
     } while ($true)
-    $report = [ordered]@{
-        phase = 'quest-first-launch'; status = 'process-observed'; model = 'Quest 3'; versionCode = $Release.versionCode
-        apkVerified = $true; apkSha256 = $Release.sha256; installedThisRun = -not $ResumeSmokeTest; processObservationSeconds = 3
+    return @{
+        processId = [int]$appPid
+        observationSeconds = [Math]::Round($clock.Elapsed.TotalSeconds, 2)
         unityLogLines = @($logs -cmatch '^[VDIWEF]/Unity\s*\(').Count
     }
-    if ($RequireOpenXR) {
-        $report.status = 'openxr-ready'
-        $report.processObservationSeconds = [Math]::Round($clock.Elapsed.TotalSeconds, 2)
-        $report['openXR'] = [ordered]@{ loader = 'OpenXR'; displayRunning = $true; inputRunning = $true }
-    }
-    return $report
 }
 
 if ($PSCmdlet.ParameterSetName -eq 'Venue') {
@@ -1489,7 +1545,6 @@ $apk = if ($ApkPath) { $ApkPath } else { Join-Path $projectRoot 'artifacts/quest
 if ($PSCmdlet.ParameterSetName -eq 'Smoke') {
     if (-not $SmokeTest) { throw 'Specify -SmokeTest to install and check a first launch.' }
     $release = Read-QuestRelease $ReleaseReport
-    if ($RequireOpenXR -and $release.versionCode -lt 74) { throw 'The OpenXR smoke check requires a Quest APK with version code 74 or later.' }
     Confirm-LocalQuestApk $apk $release.sha256
     $deploymentLock = Enter-QuestDeployment
     try { Invoke-QuestFirstLaunch $apk $release | ConvertTo-Json -Compress }
@@ -1502,6 +1557,9 @@ $alignmentHash = $null
 $liveSeat = $null
 if ($RecordLinkMetrics -and (-not $ReleaseReport -or $CheckOnly -or $VerifyTrackedSeats -or ($DeviceMap -and -not $DeployMappedSeats))) {
     throw 'Use -RecordLinkMetrics with -ReleaseReport when launching a Quest player; a device map also needs -DeployMappedSeats.'
+}
+if ($RequireOpenXR -and (-not $ReleaseReport -or $CheckOnly -or $VerifyTrackedSeats -or ($DeviceMap -and -not $DeployMappedSeats))) {
+    throw 'Use -RequireOpenXR with -ReleaseReport when launching a Quest player; a device map also needs -DeployMappedSeats.'
 }
 if ($ApkPath -and (-not $ReleaseReport -or $DeviceMap)) {
     throw 'Use -ApkPath only for a single-seat install with -ReleaseReport.'
@@ -1628,6 +1686,7 @@ if (-not $Serial) {
 }
 $deploymentLock = Enter-QuestDeployment
 $stagedApk = $null
+$deployment = @{}
 try {
     $model = & $AdbPath -s $Serial shell getprop ro.product.model
     if ($LASTEXITCODE -ne 0) { throw 'Could not identify the selected Android device. On Windows, check USB and ADB with scripts/check-quest-usb.ps1.' }
@@ -1639,16 +1698,20 @@ try {
         $apk = $stagedApk
     }
     if ($liveSeat) { Confirm-QuestPlayerReadback $liveSeat }
-    & $AdbPath -s $Serial install -r $apk
+    if ($RequireOpenXR) { & $AdbPath -s $Serial install -r $apk *> $null }
+    else { & $AdbPath -s $Serial install -r $apk }
     if ($LASTEXITCODE -ne 0) { throw 'APK installation failed.' }
     if ($release -and (Get-QuestApkStatus $Serial $release.sha256) -cne 'ready') {
         throw 'Installed Quest APK could not be verified against the release report.'
     }
     if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') { Confirm-VenueReadback $venue -RequireLiveSource }
     Set-QuestConnection $Serial $config $ticket $alignment -UsePassthrough:$Passthrough -RequestMixedReality:$isMixedReality `
-        -LiveVenue $(if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') { $venue }) -LiveSeat $liveSeat
+        -LiveVenue $(if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') { $venue }) -LiveSeat $liveSeat -Deployment $deployment
 } finally {
     $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose()
     if ($stagedApk) { Remove-Item -LiteralPath $stagedApk -ErrorAction SilentlyContinue }
 }
-Write-Host 'Quest client installed and launched. Ticket expiry and server admission still apply.'
+if ($RequireOpenXR) {
+    [ordered]@{ status = 'openxr-ready'; roomId = $ticket.RoomId; seat = $ticket.Seat + 1;
+        apkVerified = $true; filesVerified = $true; openXR = $deployment.OpenXR } | ConvertTo-Json -Compress
+} else { Write-Host 'Quest client installed and launched. Ticket expiry and server admission still apply.' }

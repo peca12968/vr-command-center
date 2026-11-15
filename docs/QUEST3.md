@@ -508,6 +508,22 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 
 整批回報以 `filesVerified: true` 標示已完成檔案核對並送出啟動的席位。遊戲是否完成入場及追蹤，請用同一部署 ZIP 再核對。 [追蹤操作](#核對頭盔追蹤席位) · [Android 檔案傳輸](https://developer.android.com/tools/adb) · [Android 校驗工具](https://android.googlesource.com/platform/external/toybox/%2B/40d21c59f76a9388b0ebb5c4c706732c2d034a67/toys/lsb/md5sum.c)
 
+#### 部署時核對每席 OpenXR
+
+單席及五房部署可加 `-RequireOpenXR`，並以 `-ReleaseReport` 指定同一 APK 的原發行報告。支援版號 0.50.9／74 起。下例使用目前的 0.50.11／76。
+
+```powershell
+pwsh -NoProfile -NonInteractive -File .\scripts\deploy-quest.ps1 `
+    -VenueBundle .\vr-venue-connections.zip -DeviceMap .\device-map.json `
+    -ReleaseReport .\artifacts\venue-release-quest-reconnect-0511.json `
+    -DeployMappedSeats -ManagementApi http://127.0.0.1:5081 -RequireOpenXR `
+    > .\quest-deployment.json
+```
+
+工具會先核對並發布原席位設定，再啟動該席，並在原程序日誌中核對本次啟動的 OpenXR loader、顯示和輸入子系統。五房報告按房號、席位逐筆保存原 PID 與啟動識別值。若該席的程序重啟或子系統未就緒，報告標示 `failedStep: "observe-openxr"`，後續席位維持 `not-attempted`。此時該席設定可能已切換、遊戲可能已啟動，須先確認該席現況再手動部署。對較早的部署失敗續跑時，沿用原 `-RequireOpenXR` 選項及報告，已確認的席位會保留原啟動資料。入場與頭手追蹤可接續用主控及追蹤回條核對。
+
+使用 `capture-quest-field-log.py --deployment-report` 指定同一份完整報告。啟用 OpenXR 核對的席位會等到原 PID 的啟動記錄與 OpenXR 記錄都出現，再回報可開始擷取。遊戲程序若已重新啟動，須以當次部署與擷取資料重新核對。 [批次擷取](#一次擷取五房-quest-日誌) · [戰後驗收](EXTERNAL_CLIENTS.md#核對封存席位的-quest-發行-apk)
+
 #### 從原部署報告重試未完成席位
 
 正式部署請將 JSON 輸出保存到新的私人檔案。排除故障後，提供最近一次 `phase: "deployment"` 且 `complete: false` 的原始報告，搭配原部署 ZIP、原裝置清單與相同 APK 核對條件。部分清單沿用 `-AllowPartialMap`。下例使用原發行報告核對 APK。若首次使用 `-ExpectedVersionCode`，重試沿用相同版本代碼。
