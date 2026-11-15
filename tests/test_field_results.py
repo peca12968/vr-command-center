@@ -2914,6 +2914,98 @@ class FieldResultsTests(unittest.TestCase):
         report_path.write_text(json.dumps(report), encoding='utf-8')
         return report_path, report, moved
 
+    def test_venue_departures_keep_scores_and_exact_final_room_counts(self):
+        irregular = (0, 1, 1, 2, 1)
+        for mode, room_sizes in (('Independent', irregular), ('Linked', irregular), ('Linked', (0,) * 5)):
+            with self.subTest(mode=mode, seats=room_sizes), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                counts = {str(room): size for room, size in enumerate(room_sizes, 1)}
+                remaining = sum(room_sizes)
+                path, manifest, closure = venue_fixture(root, mode, remote=True, with_journals=True,
+                                                        room_sizes=room_sizes, game_server=True)
+                first = manifest['sessions'][0]
+                evidence_path, launcher_path = root / first['evidenceZip'], root / first['launcherReport']
+                session, _, _ = field.management_zip(evidence_path)
+                departed = {'playerId': id_for(999), 'admissionId': id_for(998), 'roomId': 1,
+                            'joinedAtSequence': 3, 'leftAtSequence': 7}
+                launcher = json.loads(launcher_path.read_bytes())
+                bodies = [{'id': player['id'], 'roomId': player['roomId'], 'connected': True, 'health': 100,
+                           'rig': {'kind': 'Tracked'}} for player in session['players']]
+                removed_body = {'id': departed['playerId'], 'roomId': 1, 'connected': True, 'health': 100, 'rig': {'kind': 'Tracked'}}
+                world_journal(root / first['worldJournal'], launcher['finalWorld'], preparing_sequence=5, running_sequence=6,
+                              players=lambda _, phase: bodies if phase == 'Ended' else [*bodies, removed_body])
+                launcher_path.write_text(json.dumps(launcher), encoding='utf-8')
+                with (root / first['serverLog']).open('a', encoding='utf-8') as log:
+                    log.write('VR_SERVER_ADMISSION_APPROVED id=999\nVR_SERVER_PEER id=999 endpoint=192.168.5.99:5999\n')
+                terminal, _, work = self.terminal_venue_fixture(root, manifest, closure)
+                session, stats, endpoint = field.management_zip(evidence_path)
+                stats['players'].append({name: 0 for name in field.COMBAT} | {'playerId': departed['playerId'], 'roomId': 1,
+                                                                            'health': 100, 'accuracyPercent': 0})
+                document = {'version': 1, 'sessionId': session['id'], 'streamId': endpoint['streamId'], 'throughSequence': 9,
+                            'endedAtSequence': 8, 'players': [departed]}
+
+                def write_evidence(departures):
+                    with zipfile.ZipFile(evidence_path, 'w') as archive:
+                        for name, record in [('session', session), ('statistics', stats), ('endpoint', endpoint),
+                                             ('roster-departures', departures)]:
+                            archive.writestr(name + '.json', json.dumps(record))
+
+                def verify(draft):
+                    path.write_text(json.dumps(draft), encoding='utf-8')
+                    return field.verify_venue(path)
+
+                write_evidence(document)
+                closure['sessions'][0]['rosterDepartureCount'] = 1
+                (root / manifest['closure']).write_text(json.dumps({'batch': closure}), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'expectedFinalPlayersByRoom'):
+                    verify(manifest)
+                manifest['expectedFinalPlayersByRoom'] = counts
+                verified = verify(manifest)
+                self.assertEqual(room_sizes, tuple(room['players'] for room in verified['rooms']))
+                self.assertEqual((remaining, remaining, 1),
+                                 (verified['players'], verified['serverAcknowledgements'], verified['departedScoresVerified']))
+                self.assertEqual({'scoresVerified': 1, 'endedAtSequence': 8}, verified['sessions'][0]['rosterDepartures'])
+                self.assertFalse(verified['networkCapacityAccepted'])
+                with self.assertRaisesRegex(field.EvidenceError, 'fixed full roster'):
+                    field.verify_venue_batch(path, staged=True)
+                if remaining:
+                    with self.assertRaisesRegex(field.EvidenceError, 'expected seats'):
+                        verify(dict(manifest, expectedFinalPlayersByRoom=counts | {'1': 1, '2': 0}))
+                else:
+                    self.assertEqual(0, verified['distinctAddressesOutsideDeclaredServer'])
+                write_evidence(dict(document, endedAtSequence=9))
+                with self.assertRaisesRegex(field.EvidenceError, 'original End revision'):
+                    verify(manifest)
+                write_evidence(document)
+                incomplete = deepcopy(manifest)
+                del incomplete['sessions'][0]['combatJournal']
+                with self.assertRaisesRegex(field.EvidenceError, 'combat.*journal'):
+                    verify(incomplete)
+                packed = self.pack_venue(root, manifest)
+                logs = packed.pop('windowsPlayers')
+                if logs:
+                    packed['windowsPlayers'] = logs
+                else:
+                    packed['sessions'][0]['players'] = []
+                self.assertEqual(verified, verify(packed))
+
+                output = root / 'prepared.json'
+                command = [sys.executable, str(SCRIPT.with_name('prepare-venue-field-manifest.py')),
+                           '--venue-bundle', str(root / packed['venueBundle']), '--launcher-report', str(terminal),
+                           '--server-work-root', str(work), '--topology', 'direct-lan', '--server-ip', manifest['serverIps'][0],
+                           '--output', str(output)]
+                missing = subprocess.run(command, capture_output=True, encoding='utf-8', timeout=10)
+                self.assertEqual(1, missing.returncode, missing.stderr)
+                self.assertIn('--final-players-by-room', missing.stderr)
+                prepared = subprocess.run([*command, '--final-players-by-room', *map(str, room_sizes)],
+                                          capture_output=True, encoding='utf-8', timeout=10)
+                self.assertEqual(0, prepared.returncode, prepared.stderr)
+                draft = json.loads(output.read_bytes())
+                self.assertEqual(counts, draft['expectedFinalPlayersByRoom'])
+                if logs:
+                    draft['windowsPlayers'] = logs
+                self.assertEqual(verified, verify(draft))
+
     def test_venue_accepts_one_original_batch_launcher_report(self):
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:

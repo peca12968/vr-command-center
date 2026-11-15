@@ -1210,6 +1210,8 @@ function renderVenueClosure(report, loading = false) {
           venue: complete && session.roomIds.length === 1 ? venue : null });
       });
       actions.append(open);
+      if (Number.isSafeInteger(session.rosterDepartureCount) && session.rosterDepartureCount > 0)
+        actions.append(element('span', `含 ${session.rosterDepartureCount} 名離場玩家的戰績`, 'hint'));
       const { trackingBegin, participationBegin } = session;
       const begin = trackingBegin && participationBegin ? null : trackingBegin ?? participationBegin;
       const participation = begin === participationBegin;

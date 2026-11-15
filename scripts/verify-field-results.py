@@ -1164,7 +1164,7 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                    guarded_begin=None, concurrency=None, verify_reconnect_history=False, reconnect_window=None,
                    quest_deployments=None, require_distinct_remote_roster=False, control_batches=(),
                    observed_quest_addresses=None, quest_readiness=(), planned_seat_addresses=None, reconnect_sources=None,
-                   tracked_vr_start=None, roster_departures=None):
+                   tracked_vr_start=None, roster_departures=None, topology_witness=None):
     integer(size, 0 if roster_departures is not None else 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(not verify_player_sources or world_journal is not None, 'Player source verification requires the original closed world journal')
@@ -1307,6 +1307,8 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                 'Direct LAN needs private addresses and a peer outside the declared server addresses')
     else:
         require(not topology_ips - server_ips, 'A peer is outside the declared same-host addresses')
+    if topology_witness is not None:
+        topology_witness.update(topology_ips)
     preflight = verify_udp_preflight(udp_preflight, binding, opening_peer_ips)[0] if udp_preflight else None
     source_preflight = verify_udp_source_preflights(udp_source_preflights, binding, opening_peer_ips) if udp_source_preflights is not None else None
     sealed_fires = {} if concurrency is not None and concurrency.require_fire else None
@@ -1374,6 +1376,19 @@ def management_zip_records(data):
 def management_zip(path):
     with path.open('rb') as source:
         return management_zip_records(limited_read(source))
+
+
+def venue_session_evidence(data, *, final_counts=None):
+    records, documents = unpack_management_zip(data, allow_session_evidence=final_counts is not None)
+    return (*records, documents)
+
+
+def venue_roster_departures(closure, documents):
+    departures = documents.get('roster-departures.json')
+    players = [] if departures is None else departures.get('players')
+    require(type(players) is list and integer(closure.get('rosterDepartureCount', 0)) == len(players),
+            'Venue roster departures differ from the original closure')
+    return departures
 
 
 def venue_bundle(path, mode):
@@ -1554,7 +1569,7 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
     files = sorted(path for path in directory.iterdir() if path.suffix.lower() == '.zip' and path.is_file())
     require(len(files) <= 50, 'Windows evidence inbox contains more than 50 ZIPs')
     batches, roster_seats = {}, {}
-    for _, launcher, session, statistics, endpoint, server_log in inputs:
+    for _, launcher, session, statistics, endpoint, server_log, documents in inputs:
         session_id = identity(session['id'])
         original = expected.get(session_id)
         require_terminal_launcher(launcher)
@@ -1574,8 +1589,15 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
         peers, acknowledgements, approved, released = server_connections(server_log, port, verify_history=verify_history,
                                                                           allow_timeout=True)
         size = len(session['roomIds']) * players_per_room
-        owners, ledger = roster(session['players'], 'id', size), roster(statistics['players'], 'playerId', size)
-        require(owners.keys() == ledger.keys(), 'Final roster and statistics disagree')
+        owners = roster(session['players'], 'id', size)
+        departures = venue_roster_departures(original, documents)
+        ledger = roster(statistics['players'], 'playerId', size if departures is None else len(statistics['players']))
+        if departures is None:
+            require(owners.keys() == ledger.keys(), 'Final roster and statistics disagree')
+        else:
+            _, end = roster_departure_boundary(departures, session_id, boundary['streamId'], boundary['throughSequence'],
+                                                original['roomIds'], owners, ledger)
+            require(end == original['appliedAtSequence'], 'Roster departures differ from the original End revision')
         for player_id, owner in owners.items():
             room, seat = integer(owner['roomId'], 1, 5), integer(owner['seat'], 0, 4) + 1
             require(room in original['roomIds'] and (room, seat) not in roster_seats, 'Windows inbox roster repeats or misplaces a seat')
@@ -2746,9 +2768,19 @@ def inspect_stage_evidence(manifest, entries, expected, base, archives):
         raise MissingStageEvidence(missing)
 
 
+def venue_final_room_counts(manifest):
+    if 'expectedFinalPlayersByRoom' not in manifest:
+        return None
+    counts = manifest['expectedFinalPlayersByRoom']
+    require('expectedPlayersPerRoom' not in manifest and type(counts) is dict and set(counts) == {str(room) for room in QUEST_ROOMS},
+            'Supply the five final room counts instead of expectedPlayersPerRoom')
+    return {int(room): integer(count, 0, 5) for room, count in counts.items()}
+
+
 def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_logs=False, inspect_udp=False,
                        inspect_missing=False,
-                       staged_roster=None, staged_link_criteria=None, expected_stage=None, inspect_roster_minimum=None):
+                       staged_roster=None, staged_link_criteria=None, expected_stage=None, inspect_roster_minimum=None,
+                       staged=False):
     manifest_path = manifest_path.resolve(strict=True)
     with manifest_path.open('rb') as stream:
         raw_manifest = limited_read(stream)
@@ -2759,7 +2791,16 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
         local = link_criteria or staged_link_criteria
         link_criteria = {'minimumReplies': max(local['minimumReplies'], staged_link_criteria['minimumReplies']),
                          'maximumP95RoundTripMs': min(local['maximumP95RoundTripMs'], staged_link_criteria['maximumP95RoundTripMs'])}
+    final_counts = venue_final_room_counts(manifest)
     players_per_room = integer(manifest.get('expectedPlayersPerRoom', 5), 1, 5)
+    if final_counts is not None:
+        uniform = len(set(final_counts.values())) == 1 and next(iter(final_counts.values())) > 0
+        require(not staged,
+                'Staged capacity verification requires the fixed full roster of each stage')
+        require(uniform or not ({'venueNetworkPlan', 'windowsEvidenceDirectory'} & manifest.keys()),
+                'Uneven or empty final rooms require per-player logs and cannot use a uniform terminal seat inventory')
+        if uniform:
+            players_per_room = next(iter(final_counts.values()))
     topology, mode = manifest['topology'], manifest['mode']
     require(topology in ('same-host', 'direct-lan') and mode in ('Independent', 'Linked'), 'Invalid venue topology or mode')
     if expected_stage is not None:
@@ -2810,6 +2851,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     entries = manifest['sessions']
     rows = closure['sessions']
     expected_rooms, expected = venue_closure_sessions(mode, rows)
+    require(final_counts is not None or not any(row.get('rosterDepartureCount') for row in rows),
+            'Venue closure contains departures; specify expectedFinalPlayersByRoom for this archive audit')
     require(type(entries) is list and len(entries) == len(rows),
             'Venue must contain the original five independent sessions or one linked session')
     if inspect_missing:
@@ -2997,15 +3040,17 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
             original = expected.get(launch_id)
             require(original is not None, 'Launcher report belongs to a different or repeated venue session')
             name = 'linked.zip' if mode == 'Linked' else f"room-{original['roomIds'][0]:02}.zip"
-            session, statistics, endpoint = management_zip_records(archives[name])
+            session, statistics, endpoint, documents = venue_session_evidence(archives[name], final_counts=final_counts)
             require(session['id'] == launch_id, 'Venue ZIP member differs from its original launcher session')
         else:
-            session, statistics, endpoint = management_zip(evidence_path(entry['evidenceZip'], kind='sessionEvidenceZip'))
+            with evidence_path(entry['evidenceZip'], kind='sessionEvidenceZip').open('rb') as source:
+                session, statistics, endpoint, documents = venue_session_evidence(limited_read(source), final_counts=final_counts)
         if venue_launcher is not None:
             require_venue_launcher_source(session, venue_launcher['launchId'], launch_id, expected[launch_id])
         if venue_network is not None:
             check_venue_network_session(venue_network, session, endpoint, launcher['udpBinding'])
-        return entry, launcher, session, statistics, endpoint, content(evidence_path(entry['serverLog'], kind='serverLog'))
+        server_log = content(evidence_path(entry['serverLog'], kind='serverLog'))
+        return entry, launcher, session, statistics, endpoint, server_log, documents
 
     inputs = (load_session(entry) for entry in entries)
     station_summary = {}
@@ -3045,7 +3090,9 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     stream_ids, bindings, player_ids, admission_ids, end_times, exchanges = set(), set(), set(), set(), set(), set()
     start_times = set()
     begin_request = None
-    for entry, launcher, session, statistics, endpoint, server_log in inputs:
+    historical_ips = set()
+    departed_admissions = set()
+    for entry, launcher, session, statistics, endpoint, server_log, documents in inputs:
         alignments = None
         if check_alignments:
             header = launcher['finalWorld']['header']
@@ -3062,6 +3109,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
         row = expected.pop(identity(session['id']), None)
         require(row is not None and session['mode'] == mode and session['roomIds'] == row['roomIds'],
                 'Session evidence differs from the original closure')
+        departures = venue_roster_departures(row, documents)
         require(row['combat'] == row['world'] == 'Sealed'
                 and row['missionName'] == session['mission']['definition']['name']
                 and row['replay']['streamId'] == launcher['streamId']
@@ -3113,7 +3161,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
         if windows_supplied:
             require(all('logcatPid' in player for player in players), 'Use windowsPlayers or per-session Windows logs, not both')
         size = len(players) + len(captured) + len(logs)
-        require(size == len(row['roomIds']) * players_per_room,
+        room_counts = {room: final_counts[room] if final_counts is not None else players_per_room for room in row['roomIds']}
+        require(size == sum(room_counts.values()),
                 'Session player log count differs from the expected seats per room')
         quest_logs = []
         for player in players:
@@ -3192,12 +3241,17 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
                                          require_distinct_remote_roster=require_distinct_remote_roster,
                                          control_batches=controls.get(session['id'], ()), observed_quest_addresses=observed_quest_addresses,
                                          quest_readiness=quest_readiness.pop(session['id'], ()),
-                                         planned_seat_addresses=planned_seat_addresses, reconnect_sources=reconnect_sources)
+                                         planned_seat_addresses=planned_seat_addresses, reconnect_sources=reconnect_sources,
+                                         roster_departures=departures, tracked_vr_start=documents.get('tracked-vr-start.json'),
+                                         topology_witness=historical_ips if final_counts is not None else None)
         for paths in source_paths or ():
             hashes = original_pairs.get(paths)
             if hashes is not None:
                 require(udp_pair_hashes(paths) == hashes, 'UDP report bytes differ from the original venue preflight')
-        require(set(sources) == set(row['roomIds']) and all(len(peers) == players_per_room for peers in sources.values()),
+        for room, count in room_counts.items():
+            if count == 0:
+                sources.setdefault(room, [])
+        require(set(sources) == set(room_counts) and all(len(peers) == room_counts[room] for room, peers in sources.items()),
                 'Verified player count differs from the expected seats in an original room')
         if debrief_receipts is not None:
             verify_venue_debrief_session(debrief_receipts.pop(session['id'], None), session, stream, report)
@@ -3215,6 +3269,10 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
             require(player_id not in player_ids and admission not in admission_ids, 'Player or admission is reused across rooms')
             player_ids.add(player_id)
             admission_ids.add(admission)
+        if departures is not None:
+            admissions = {player['admissionId'] for player in departures['players']}
+            require(not departed_admissions.intersection(admissions), 'A departed admission is reused across venue sessions')
+            departed_admissions.update(admissions)
         rooms.update(sources)
         summaries.append({'roomIds': row['roomIds'], 'serverAcknowledgements': report['serverAcknowledgements'],
                           'worldSequence': report['worldSequence'], 'combatSequence': report['combatSequence'],
@@ -3222,6 +3280,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
                           **({'udpSourcePreflight': report['udpSourcePreflight']} if source_preflights else {}),
                           **({'worldJournal': report['worldJournal']} if journals else {}),
                           **({'combatJournal': report['combatJournal']} if combat_journals else {}),
+                          **({'rosterDepartures': report['rosterDepartures']} if departures is not None else {}),
                           **({'playerSources': report['playerSources']} if verify_player_sources else {}),
                           **({'reconnectHistory': report['reconnectHistory']} if verify_reconnect_history else {}),
                           **({'windowsLinkMetrics': sorted(link_rows, key=lambda row: (row['roomId'], row['seat']))} if link_rows else {}),
@@ -3230,6 +3289,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
                           **({'roomAlignments': report['roomAlignments']} if alignments is not None else {})})
 
     require(recorded_at in end_times and not expected, 'Closure time or session set differs from the terminal evidence')
+    require(not admission_ids.intersection(departed_admissions), 'A departed admission is also used in the final venue roster')
     require(not quest_deployments, 'Quest deployment reports include seats without original Quest logcat evidence')
     require(not quest_readiness, 'Quest readiness refers to a session outside the original closure')
     incomplete_links = 'Windows link evidence must cover every Windows seat in the venue'
@@ -3254,7 +3314,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     if require_distinct_remote_roster:
         require(len(remote) == len(player_ids),
                 'Distinct remote roster requires one unique observed IPv4 outside the declared server addresses for every seat')
-    require(topology != 'direct-lan' or remote, 'Direct LAN needs a peer outside the declared server addresses')
+    require(topology != 'direct-lan' or remote or (not player_ids and historical_ips - server_ips),
+            'Direct LAN needs a peer outside the declared server addresses')
     begin_summary = {}
     if begin_kind is not None:
         counts = ('trackedPlayers', 'simulatedPlayers', 'participants') if verify_participation_begin else ('trackedPlayers',)
@@ -3275,6 +3336,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
                 'A planned reconnect source seat has no verified connection history')
     report = {'version': 1, 'consistent': True, 'declaredTopology': topology, 'mode': mode, 'players': len(player_ids),
             **({'expectedPlayersPerRoom': players_per_room} if 'expectedPlayersPerRoom' in manifest else {}),
+            **({'expectedFinalPlayersByRoom': final_counts, 'departedScoresVerified': len(departed_admissions)} if final_counts is not None else {}),
             'rooms': [{'roomId': room, 'players': len(rooms[room]),
                        'playersOutsideDeclaredServer': sum(address in remote for address in rooms[room])} for room in all_rooms],
             'sessions': sorted(summaries, key=lambda item: item['roomIds']),
@@ -3407,7 +3469,7 @@ def verify_venue_stages(plan_path, *, inspect=False):
             report, batch = verify_venue_batch(path, inspect_quest_logs=inspect, inspect_udp=inspect,
                                                inspect_missing=inspect, inspect_roster_minimum=minimum if inspect else None,
                                                staged_roster=staged_roster, staged_link_criteria=link_criteria,
-                                               expected_stage=expected_stage)
+                                               expected_stage=expected_stage, staged=True)
             key = (report['mode'], report['players'])
             require(key in stage_keys, 'Staged venue evidence must cover each mode and seat count exactly once')
             require(report['declaredTopology'] == topology, 'Venue batch topology differs from the staged plan')

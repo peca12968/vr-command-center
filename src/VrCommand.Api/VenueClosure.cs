@@ -14,7 +14,8 @@ internal sealed record VenueClosureSession(Guid SessionId, long AppliedAtSequenc
     VenueArchiveState Combat, VenueArchiveState World, bool FieldEvidenceReady,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueReplay? Replay,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTrackingBegin? TrackingBegin,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueParticipationBegin? ParticipationBegin);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueParticipationBegin? ParticipationBegin,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? RosterDepartureCount = null);
 internal sealed record VenueClosureBatch(Guid RequestId, DateTimeOffset RecordedAtUtc, VenueClosureSession[] Sessions);
 internal sealed record VenueClosureResponse(VenueClosureBatch? Batch,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueBattleScores? Scores,
@@ -210,11 +211,11 @@ public sealed partial class WorldRecordings
         {
             combat = stream.Sealed ? VenueArchiveState.Sealed : VenueArchiveState.Waiting;
             (world, replay) = VenueWorldArchive(session, stream, actor);
-            if (world == VenueArchiveState.Sealed) evidence = BuildFieldEvidence(session, stream, actor).Evidence;
+            if (world == VenueArchiveState.Sealed) evidence = BuildFieldEvidence(session, stream, replay!.ThroughSequence, actor, applied.AppliedAtSequence).Evidence;
         }
         var (tracking, participation) = manager.ReadVenueBeginEvidence(session.Id, actor);
         return (new(session.Id, applied.AppliedAtSequence, session.RoomIds, session.Mission.Definition.Name,
-            combat, world, evidence is not null, replay, tracking, participation), evidence);
+            combat, world, evidence is not null, replay, tracking, participation, evidence?.RosterDepartures?.Players.Length), evidence);
     }
 
     private (VenueArchiveState State, VenueReplay? Replay) VenueWorldArchive(SessionView session, CombatStreamView stream, OperatorIdentity actor)

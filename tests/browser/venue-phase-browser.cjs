@@ -1365,6 +1365,92 @@ with zipfile.ZipFile(sys.argv[1]) as original, zipfile.ZipFile(sys.argv[2]) as c
     await page.locator('#world-review-player-scope').waitFor();
     check(await recording.inputValue() === combined.id && await page.locator('#world-room').inputValue() === '2',
       'The group opens the original scoped replay for the selected seat');
+
+    for (const mode of ['Independent', 'Linked']) {
+      const rooms = [1, 2, 3, 4, 5];
+      const groups = mode === 'Independent' ? rooms.map(room => [room]) : [rooms];
+      const sources = [];
+      for (const roomIds of groups) {
+        const session = await api('/sessions', 'POST', { missionId: mission.id, mode, roomIds }, 'Master', 201);
+        const sessionPath = `/sessions/${session.id}`;
+        active.add(session.id);
+        for (const roomId of roomIds.slice(1)) {
+          await api(sessionPath + '/players', 'POST', { playerId: randomUUID(), roomId, name: 'Remaining seat', headset: 'Quest3' });
+        }
+        const publish = await start(session.id, roomIds[0], true);
+        const running = await api(sessionPath);
+        publish(running);
+        sources.push({ sessionPath, publish, running });
+      }
+      const first = sources[0];
+      const departed = first.running.players.find(player => player.roomId === 1);
+      await api(first.sessionPath + '/players/' + departed.id, 'DELETE', undefined, 'Master', 204, departed.admissionId);
+      const targets = (await api('/venue/phase')).end;
+      const batch = await api('/venue/phase', 'POST', { action: 'End', targets }, 'Master', 200, undefined, randomUUID());
+      await api(fieldPath(batch.requestId), 'GET', undefined, 'Master', 409);
+      for (const { sessionPath, publish, running } of sources) {
+        active.delete(running.id);
+        const terminal = await api(sessionPath);
+        const { streamId } = terminal.combatStream;
+        publish(terminal);
+        await api(sessionPath + '/combat-stream/seal', 'POST', { streamId, finalSequence: 0 }, 'GameServer');
+        publish.seal();
+        await api(sessionPath + '/connection-endpoint', 'PUT', { version: 1, streamId, address: '192.168.50.40',
+          port: 7776 + terminal.roomIds[0] }, 'GameServer');
+      }
+      const closurePath = `/venue/closure/${batch.requestId}`;
+      const saved = (await api(closurePath)).batch;
+      check(saved.sessions.every(session => session.fieldEvidenceReady)
+        && saved.sessions[0].rosterDepartureCount === 1
+        && saved.sessions.slice(1).every(session => !Object.hasOwn(session, 'rosterDepartureCount')),
+      `The ${mode} closure enables the private archive after sealing and reports each departure only once`);
+      await api(fieldReceiptsPath(batch.requestId), 'GET', undefined, 'Master', 409);
+      for (const { sessionPath } of sources) {
+        const original = (await api(sessionPath + '/world?includeDebriefReceipts=true')).debriefReceipts;
+        if (original?.players.length) {
+          assert.ok(original.players.every(row => row.roomId !== 1 && row.playerId !== departed.id));
+          const { streamId, throughSequence, finalStreamSequence, worldSequence } = original;
+          const players = original.players.map(({ playerId, admissionId, roomId }) => ({ playerId, admissionId, roomId }));
+          await api(sessionPath + '/debrief-receipts', 'POST', { streamId, throughSequence, finalStreamSequence, worldSequence, players }, 'GameServer', 204);
+        }
+      }
+      const response = await fetch(base + '/api' + fieldReceiptsPath(batch.requestId), auth);
+      assert.ok(response.ok, `Departure archive ${response.status}: ${response.ok ? '' : await response.text()}`);
+      assert.equal(response.headers.get('Cache-Control'), 'no-store');
+      const file = path.join(screenshots, `venue-${mode.toLowerCase()}-departed-field.zip`);
+      await fs.writeFile(file, Buffer.from(await response.arrayBuffer()));
+      const result = spawnSync('python', ['-c', `import io, json, sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    assert archive.testzip() is None
+    docs = {}
+    for member in archive.namelist():
+        if not member.endswith('.zip'):
+            continue
+        with zipfile.ZipFile(io.BytesIO(archive.read(member))) as nested:
+            assert nested.testzip() is None
+            docs[member] = {name: json.loads(nested.read(name)) for name in nested.namelist()}
+    print(json.dumps([docs, json.loads(archive.read('debrief-receipts.json'))], ensure_ascii=True))`, file],
+      { encoding: 'utf8', windowsHide: true, timeout: 6000 });
+      assert.equal(result.status, 0, result.stderr);
+      const [docs, receipts] = JSON.parse(result.stdout);
+      const target = docs[mode === 'Independent' ? 'room-01.zip' : 'linked.zip'];
+      const roster = target['session.json'].players;
+      const evidence = target['roster-departures.json'];
+      assert.deepEqual(Object.keys(docs).sort(), mode === 'Independent' ? rooms.map(room => `room-0${room}.zip`) : ['linked.zip']);
+      assert.deepEqual(evidence.players.map(({ playerId, admissionId, roomId }) => ({ playerId, admissionId, roomId })),
+        [{ playerId: departed.id, admissionId: departed.admissionId, roomId: 1 }]);
+      assert.equal(evidence.endedAtSequence, saved.sessions[0].appliedAtSequence);
+      assert.ok(evidence.players[0].joinedAtSequence < evidence.players[0].leftAtSequence
+        && evidence.players[0].leftAtSequence < evidence.endedAtSequence);
+      assert.equal(roster.length, mode === 'Independent' ? 0 : 4);
+      assert.equal(target['statistics.json'].players.length, roster.length + 1);
+      assert.ok(target['statistics.json'].players.some(row => row.playerId === departed.id));
+      assert.ok(!JSON.stringify(receipts).includes(departed.admissionId));
+      await login('Master');
+      await archive(first.running.id).last().filter({ hasText: '含 1 名離場玩家的戰績' }).waitFor();
+      await fieldReceiptsButton.waitFor({ state: 'visible' });
+      check(await fieldReceiptsButton.isEnabled(), `The ${mode} console lists the departed player's score and enables the archive after the four remaining seats acknowledge`);
+    }
   } finally {
     await page.unroute(route); await page.close();
     for (const id of active) await end(id);

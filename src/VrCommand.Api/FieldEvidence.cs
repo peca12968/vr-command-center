@@ -93,11 +93,8 @@ public sealed partial class WorldRecordings
                 || !world.Header.roomIds.SequenceEqual(session.RoomIds))
                 throw new InvalidOperationException("The sealed world does not match this session's combat source.");
 
-            var (evidence, problem) = BuildFieldEvidence(session, stream, actor, allowDepartures: true);
+            var (evidence, problem) = BuildFieldEvidence(session, stream, world.AcceptedSequence, actor);
             if (evidence is null) throw new InvalidOperationException(problem);
-            if (evidence.RosterDepartures is { } departures && (Frame(id, world.AcceptedSequence, actor) is not { Packet: var packet }
-                || packet.observedSequence < departures.EndedAtSequence))
-                throw new InvalidOperationException("The original world must observe the End after the recorded roster departures.");
             if (!includeTrackedVrStart) return evidence;
             var start = ReadWorldTrackedVrStart(session, world, actor)
                 ?? throw new InvalidOperationException("No verified tracked VR opening frame for this sealed session.");
@@ -127,8 +124,8 @@ public sealed partial class WorldRecordings
         }
     }
 
-    private (FieldEvidence? Evidence, string? Problem) BuildFieldEvidence(SessionView session, CombatStreamView stream, OperatorIdentity actor,
-        bool allowDepartures = false)
+    private (FieldEvidence? Evidence, string? Problem) BuildFieldEvidence(SessionView session, CombatStreamView stream,
+        long sealedWorldSequence, OperatorIdentity actor, long? batchEndSequence = null)
     {
         if (session.State != SessionState.Ended || session.StartedAtUtc is null || session.EndedAtUtc is null)
             return (null, "Start and end the mission before exporting field evidence.");
@@ -142,10 +139,13 @@ public sealed partial class WorldRecordings
             || ledger.Count == 0 || !roster.IsSubsetOf(ledger))
             return (null, "Field evidence requires sealed statistics matching the final roster.");
         if (roster.SetEquals(ledger)) return (new(session, statistics, endpoint), null);
-        if (!allowDepartures) return (null, "Field evidence requires sealed statistics matching the final roster.");
         var departures = manager.ReadRosterDepartures(session.Id, session.Sequence, actor);
-        return ledger.Except(roster).ToHashSet().SetEquals(departures.Players.Select(player => (player.PlayerId, player.RoomId)))
-            ? (new(session, statistics, endpoint, RosterDepartures: departures), null)
-            : (null, "Field evidence requires original roster departures recorded before End.");
+        if (!ledger.Except(roster).ToHashSet().SetEquals(departures.Players.Select(player => (player.PlayerId, player.RoomId))))
+            return (null, "Field evidence requires original roster departures recorded before End.");
+        if (batchEndSequence is long end && end != departures.EndedAtSequence
+            || Frame(session.Id, sealedWorldSequence, actor) is not { Packet: var packet }
+            || packet.observedSequence < departures.EndedAtSequence)
+            return (null, "The original world must observe the End after the recorded roster departures.");
+        return (new(session, statistics, endpoint, RosterDepartures: departures), null);
     }
 }

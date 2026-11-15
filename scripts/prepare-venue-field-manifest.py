@@ -87,6 +87,14 @@ def check_quest_inputs(manifest, expected, evidence_path, release, sources, serv
 
 
 def prepare(args, output):
+    final_counts = dict(zip(field.QUEST_ROOMS, args.final_players_by_room)) if args.final_players_by_room is not None else None
+    players_per_room = args.players_per_room
+    if final_counts is not None:
+        uniform = len(set(final_counts.values())) == 1 and next(iter(final_counts.values())) > 0
+        field.require(uniform or not (args.venue_network_plan or args.windows_inbox),
+                      'Uneven or empty final rooms require per-player logs and cannot use a uniform terminal seat inventory')
+        if uniform:
+            players_per_room = next(iter(final_counts.values()))
     windows_link_criteria = None
     if args.windows_minimum_replies is not None or args.windows_maximum_p95_ms is not None:
         field.require(args.windows_minimum_replies is not None and args.windows_maximum_p95_ms is not None,
@@ -103,6 +111,8 @@ def prepare(args, output):
     closure, archives, receipt_bytes = field.venue_bundle(bundle, mode)
     closure_id = field.identity(closure['requestId'])
     groups, expected = field.venue_closure_sessions(mode, closure['sessions'])
+    field.require(final_counts is not None or not any(row.get('rosterDepartureCount') for row in expected.values()),
+                  'Venue closure contains departures; provide --final-players-by-room for this archive audit')
     receipts = field.read_venue_debrief_receipts(receipt_bytes, closure_id, len(expected))[0] if receipt_bytes is not None else None
     launch, results = field.read_terminal_venue_launcher(terminal, mode, expected,
                                                         include_instance=args.verified_start_receipt is not None)
@@ -124,7 +134,7 @@ def prepare(args, output):
     alignment_path = evidence_path(args.room_alignment_bundle.resolve()) if args.room_alignment_bundle is not None else None
     alignment_bundle = field.read_venue_alignment_bundle(alignment_path, mode, expected) if alignment_path is not None else None
     network_path = evidence_path(args.venue_network_plan.resolve()) if args.venue_network_plan is not None else None
-    venue_network = field.read_venue_network_plan(network_path, mode, args.players_per_room) if network_path is not None else None
+    venue_network = field.read_venue_network_plan(network_path, mode, players_per_room) if network_path is not None else None
     field.check_network_server_inventory(venue_network, args.topology, addresses)
     reconnect_path = evidence_path(args.reconnect_source_plan.resolve()) if args.reconnect_source_plan is not None else None
     reconnect_sources = (field.read_reconnect_source_plan(reconnect_path, closure_id, venue_network['seats'], args.topology, addresses)[0]
@@ -135,7 +145,8 @@ def prepare(args, output):
         rooms = row['roomIds']
         stem = 'linked' if mode == 'Linked' else f'room-{rooms[0]:02}'
         result = results[session_id]
-        session, statistics, endpoint = field.management_zip_records(archives[stem + '.zip'])
+        session, statistics, endpoint, documents = field.venue_session_evidence(archives[stem + '.zip'], final_counts=final_counts)
+        departures = field.venue_roster_departures(row, documents)
         field.require_venue_launcher_source(session, launch['launchId'], session_id, row)
         stream, world, combat = result['streamId'], result['finalWorld'], result['finalCombatStream']
         boundary = field.sealed_result_boundary(session, statistics, world, combat, stream)
@@ -164,12 +175,17 @@ def prepare(args, output):
         files = session_files(result, work_root / stem if work_root is not None else None, session_id)
         peers, acknowledged, approved, released = field.server_connections(
             field.content(files['serverLog']), port, verify_history=reconnect_sources is not None, allow_timeout=True)
-        count = args.players_per_room * len(rooms)
+        room_counts = {room: final_counts[room] if final_counts is not None else players_per_room for room in rooms}
+        count = sum(room_counts.values())
         owners = field.roster(session['players'], 'id', count)
-        ledger = field.roster(statistics['players'], 'playerId', count)
+        ledger = field.roster(statistics['players'], 'playerId', count if departures is None else len(statistics['players']))
+        departed = None
+        if departures is not None:
+            departed, end = field.roster_departure_boundary(departures, session_id, stream, boundary['throughSequence'], rooms, owners, ledger)
+            field.require(end == applied_end, 'Roster departures differ from the original End revision')
         seats = {(field.integer(player['roomId'], 1, 5), field.integer(player['seat'], 0, 4)) for player in owners.values()}
-        field.require(owners.keys() == ledger.keys() and len(seats) == count
-                      and all(sum(seat[0] == room for seat in seats) == args.players_per_room for room in rooms),
+        field.require((departed is not None or owners.keys() == ledger.keys()) and len(seats) == count
+                      and all(sum(seat[0] == room for seat in seats) == room_counts[room] for room in rooms),
                       f'Original roster differs from the declared stage for {stem}')
         if receipts is not None:
             field.verify_venue_debrief_session(receipts.get(session_id), session, stream,
@@ -180,10 +196,14 @@ def prepare(args, output):
             quest_sources[session_id] = {'rooms': tuple(rooms), 'binding': (address, port), 'boundary': boundary, 'ledger': ledger,
                                          'players': {(player['roomId'], player['seat'] + 1): player for player in owners.values()},
                                          'peers': peers, 'acknowledged': acknowledged, 'approved': approved, 'released': released}
-        field.verify_world_journal(files['worldJournal'], world, boundary['finalStreamSequence'], boundary['throughSequence'], applied_end)
+        tracked_start = documents.get('tracked-vr-start.json')
+        guarded_begin = field.tracked_vr_start_boundary(tracked_start, session, world, applied_end) if tracked_start is not None else None
+        field.verify_world_journal(files['worldJournal'], world, boundary['finalStreamSequence'], boundary['throughSequence'], applied_end,
+                                   guarded_begin=guarded_begin, departed=departed)
         field.verify_combat_journal(files['combatJournal'], session_id, stream, boundary['origin'],
-                                    boundary['finalStreamSequence'], applied_end, ledger)
-        entries.append({'sessionId': session_id, **{key: ref(path) for key, path in files.items()}})
+                                    boundary['finalStreamSequence'], applied_end, ledger, departed=departed)
+        entries.append({'sessionId': session_id, **{key: ref(path) for key, path in files.items()},
+                        **({'players': []} if count == 0 else {})})
         seen_paths.update(files.values())
 
     manifest = {'version': 1, 'mode': mode, 'topology': args.topology, 'serverIps': args.server_ip,
@@ -196,7 +216,9 @@ def prepare(args, output):
         manifest['verifyReconnectHistory'] = True
     if reconnect_path is not None:
         manifest['reconnectSourcePlan'] = ref(reconnect_path)
-    if args.players_per_room != 5:
+    if final_counts is not None:
+        manifest['expectedFinalPlayersByRoom'] = final_counts
+    elif args.players_per_room != 5:
         manifest['expectedPlayersPerRoom'] = args.players_per_room
     if minimum is not None:
         manifest['minimumConcurrentMilliseconds'] = minimum
@@ -273,7 +295,10 @@ def main():
     parser.add_argument('--topology', choices=('same-host', 'direct-lan'), required=True)
     parser.add_argument('--server-ip', action='append', required=True, help='Repeat for every assigned server IPv4')
     parser.add_argument('--server-work-root', type=Path, help='Moved batch workspace with the original room-01 through room-05 or linked folders')
-    parser.add_argument('--players-per-room', type=int, choices=range(1, 6), default=5)
+    seats = parser.add_mutually_exclusive_group()
+    seats.add_argument('--players-per-room', type=int, choices=range(1, 6), default=5)
+    seats.add_argument('--final-players-by-room', type=int, choices=range(6), nargs=5, metavar='COUNT',
+                       help='Original terminal counts in room order 1 through 5 for a departure audit')
     parser.add_argument('--minimum-concurrent-ms', type=int, help='Minimum continuous concurrent roster in milliseconds (1000 to 900000)')
     parser.add_argument('--venue-release-report', type=Path)
     parser.add_argument('--windows-inbox', type=Path)

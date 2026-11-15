@@ -405,7 +405,15 @@ python scripts/verify-field-results.py --topology direct-lan `
 
 管理包 0.31.203 起，單場「下載場館驗收資料 ZIP」會附上 `roster-departures.json`，記錄結束前由管理端移出且戰績仍在封存統計中的玩家。用 `--evidence-zip` 傳入原 ZIP，並加上該場的 `--combat-journal .\room-01.journal` 及 `--world-journal .\room-01.worldlog`。兩份日誌須已封存。工具重算所有封存戰績，核對離場玩家原入場、移除時的管理序號及有效姿態。如果全體皆已離場，仍可核對日誌和戰績。
 
-摘要的 `rosterDepartures.scoresVerified` 是已核對分數的離場玩家數。`serverAcknowledgements` 仍逐一核對結束名冊的原戰績確認。`--verify-player-sources` 的玩家日誌證據也以結束名冊為範圍。全館固定席位驗收仍要求原名冊完整。
+摘要的 `rosterDepartures.scoresVerified` 是已核對分數的離場玩家數。`serverAcknowledgements` 逐一核對結束名冊的原戰績確認。`--verify-player-sources` 的玩家日誌證據也以結束名冊為範圍。
+
+#### 核對五房批次中的離場戰績
+
+管理包 0.31.204 起，五房各自運作或全館連線的批次 ZIP 會在有離場紀錄的場次子 ZIP 附上 `roster-departures.json`。在全館「結束批次」選取原批次並下載驗收 ZIP。含回條的版本仍按任務結束時的名冊核對送達。
+
+使用 `prepare-venue-field-manifest.py` 整理原始檔案時，加上 `--final-players-by-room 0 1 1 2 1`，依第 1 至第 5 房填實際結束名冊人數，每房可填 0 到 5。手動建立清單時，相同範例寫成 `"expectedFinalPlayersByRoom": {"1":0,"2":1,"3":1,"4":2,"5":1}`。每個場次附上原伺服器日誌及該場雙封存的 `combatJournal` 和 `worldJournal`。各房人數不一或有空房時，使用結束名冊的逐位玩家日誌填寫來源。
+
+執行 `python scripts/verify-field-results.py --venue-manifest .\venue.json` 後，`departedScoresVerified` 列出全批次核對完成的離場戰績數，`sessions[].rosterDepartures` 列出各原場次的核對結果。`players` 和 `serverAcknowledgements` 計算結束名冊與其回條。5／10／25 人階段驗收沿用每階段的固定席位要求。
 
 #### 用單場 ZIP 核對追蹤開場
 
