@@ -377,7 +377,7 @@ Windows 啟動器 1.21 的 `--venue-check` 預覽也會記錄各場已登記的�
 
 離線核對工具使用已完成的一場 Windows 伺服器任務。啟動器 1.7 可勾選「記錄本次玩家連線來源（場館驗收）」，CLI 可加 `--peer-diagnostics on`。將公告及本機綁定都設為這台電腦實際使用的 IPv4，選擇名冊固定的場次。結束後等待原啟動器寫出 `sealed-stopped` 報告，並等玩家寫完戰績與斷線日誌。 [伺服器操作](WINDOWS_SERVER_PACKAGE.md#跨機來源診斷)
 
-將伺服器 `--report`、該次工作目錄的 `server.log`、各玩家的原始 Unity 日誌放在私人資料夾。控制台 0.31.14 起，全館主控可在「任務收尾」選擇「下載場館驗收資料 ZIP」。伺服器確認任務曾開始、雙封存、端點公告，以及最終名冊與統計涵蓋同一組玩家和房間。解壓後會得到下表三個檔案。每份包含場館資料，應與同場日誌私下保管。
+將伺服器 `--report`、該次工作目錄的 `server.log`、各玩家的原始 Unity 日誌放在私人資料夾。全館主控可在「任務收尾」選擇「下載場館驗收資料 ZIP」。伺服器確認任務曾開始、雙封存、端點公告，以及最終名冊與統計涵蓋同一組玩家和房間。新版工具可直接讀取原 ZIP。每份包含場館資料，應與同場日誌私下保管。
 
 需要分開保存時，可從同一管理實例以全館主控身分讀取以下三個 GET 回應。連線票券和金鑰應留在各自的私人位置。
 
@@ -393,11 +393,17 @@ Windows 啟動器 1.21 的 `--venue-check` 預覽也會記錄各場已登記的�
 python scripts/verify-field-results.py --topology direct-lan `
   --server-ip 192.168.1.10 --server-ip 127.0.0.1 `
   --launcher-report .\server-final.json --server-log .\server.log `
-  --session .\session.json --statistics .\statistics.json --endpoint .\endpoint.json `
+  --evidence-zip .\management-field.zip `
   --player 192.168.1.10 '.\player 1.log' --player 192.168.1.20 '.\player 2.log'
 ```
 
+也可改用表中的三份原檔，依序傳給 `--session`、`--statistics` 和 `--endpoint`。
+
 每場最多 25 位玩家。檢查器逐位比對結束名冊的入場 ID、房間、個人戰績、三種封存序號，以及最終連線的 UDP 來源與伺服器確認。玩家曾重連時使用收到戰績的最後一條連線。名冊異動造成最終統計包含已離場玩家時，這套固定名冊驗收會拒絕。文字日誌、JSON 與 ZIP 每份最多 16 MiB。成功輸出可另存 JSON，摘要只含計數、房間、序號及範圍。失敗以退出碼 1 表示，診斷文字省略原始位址、票券和檔案路徑。
+
+#### 用單場 ZIP 核對追蹤開場
+
+管理包 0.31.202 的場次若有已保存的單場 VR 追蹤開場，從該場「任務收尾」下載的驗收 ZIP 會包含 `tracked-vr-start.json`。用 `--evidence-zip` 讀取整包，加上 `--world-journal .\room-01.worldlog` 及 `--require-tracked-vr-start`，確認回條存在並核對原始封存。工具會比對原串流、開場管理序號前一版、擷取偏移與原追蹤名冊，接著查找套用開始後首個有效執行畫格。結果在 `worldJournal.trackedVrStart` 列出兩個世界畫格、管理序號與追蹤席位數。 [開場與回看操作](SESSION_CLOSURE.md#回看單場-vr-追蹤開場)
 
 ### 核對原程序的重連歷程
 

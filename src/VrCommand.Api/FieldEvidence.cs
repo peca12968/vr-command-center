@@ -4,7 +4,8 @@ using VrCommand.Core;
 
 namespace VrCommand.Api;
 
-internal sealed record FieldEvidence(SessionView Session, SessionStatistics Statistics, ConnectionEndpoint Endpoint)
+internal sealed record FieldEvidence(SessionView Session, SessionStatistics Statistics, ConnectionEndpoint Endpoint,
+    WorldTrackedVrStart? TrackedVrStart = null)
 {
     private static readonly DateTimeOffset ArchiveTime = new(1980, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
@@ -23,6 +24,8 @@ internal sealed record FieldEvidence(SessionView Session, SessionStatistics Stat
             Write("session.json", Session);
             Write("statistics.json", Statistics);
             Write("endpoint.json", Endpoint);
+            if (TrackedVrStart is not null)
+                Write("tracked-vr-start.json", new { version = 1, trackedVrStart = TrackedVrStart });
 
             void Write<T>(string name, T value)
             {
@@ -69,7 +72,7 @@ internal sealed class VenueFieldEvidenceNotReadyException(int[] roomIds, bool wa
 
 public sealed partial class WorldRecordings
 {
-    internal FieldEvidence ReadFieldEvidence(Guid id, OperatorIdentity actor)
+    internal FieldEvidence ReadFieldEvidence(Guid id, OperatorIdentity actor, bool includeTrackedVrStart = false)
     {
         AccessPolicy.Validate(actor);
         if (actor.Role != OperatorRole.Master)
@@ -89,7 +92,11 @@ public sealed partial class WorldRecordings
                 throw new InvalidOperationException("The sealed world does not match this session's combat source.");
 
             var (evidence, problem) = BuildFieldEvidence(session, stream, actor);
-            return evidence ?? throw new InvalidOperationException(problem);
+            if (evidence is null) throw new InvalidOperationException(problem);
+            if (!includeTrackedVrStart) return evidence;
+            var start = ReadWorldTrackedVrStart(session, world, actor)
+                ?? throw new InvalidOperationException("No verified tracked VR opening frame for this sealed session.");
+            return evidence with { TrackedVrStart = start };
         }
     }
 

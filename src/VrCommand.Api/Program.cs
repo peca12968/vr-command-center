@@ -427,10 +427,10 @@ app.MapPost("/api/venue/phase", (VenuePhaseRequest request, WorldRecordings worl
 });
 app.MapGet("/api/sessions/{id:guid}/statistics", (Guid id, SessionManager manager, HttpContext context) =>
     manager.Statistics(id, Actor(context)));
-app.MapGet("/api/sessions/{id:guid}/field-evidence.zip", (Guid id, WorldRecordings worlds, HttpContext context) =>
+app.MapGet("/api/sessions/{id:guid}/field-evidence.zip", (Guid id, bool? includeTrackedVrStart, WorldRecordings worlds, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";
-    var evidence = worlds.ReadFieldEvidence(id, Actor(context));
+    var evidence = worlds.ReadFieldEvidence(id, Actor(context), includeTrackedVrStart == true);
     return Results.File(evidence.Encode(), "application/zip", $"vr-command-field-v1-{id:D}.zip");
 });
 app.MapGet("/api/sessions/{id:guid}/report.csv", (Guid id, SessionManager manager, HttpContext context) =>

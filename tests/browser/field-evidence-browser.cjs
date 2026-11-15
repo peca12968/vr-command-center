@@ -36,6 +36,8 @@ module.exports = async function fieldEvidence({ context, api, tokens, directory,
   await api(endpoint(id), 'GET', undefined, 'GameServer', 403);
   assert.equal((await fetch(base + '/api' + endpoint(id))).status, 401);
   check(true, 'Field evidence download requires the Master role even in the controller’s own room');
+  await api(endpoint(id) + '?includeTrackedVrStart=true', 'GET', undefined, 'Master', 409);
+  check(true, 'Explicit tracked opening export rejects a Simulation archive without an original tracked pointer');
   const response = await fetch(base + '/api' + endpoint(id), { headers: { Authorization: 'Bearer ' + tokens.Master } });
   check(response.ok && response.headers.get('content-type') === 'application/zip'
     && response.headers.get('cache-control') === 'no-store'

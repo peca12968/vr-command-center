@@ -806,9 +806,10 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
     expected = world['header']
     quest_mr = expected.get('calibration') == 'quest-room-mr-v1'
     begin_kind, begin = guarded_begin if guarded_begin is not None else (None, None)
-    tracked_only = begin_kind == 'trackingBegin' or quest_mr
+    single_tracked_start = begin_kind == 'trackedVrStart'
+    tracked_only = begin_kind in ('trackingBegin', 'trackedVrStart') or quest_mr
     allowed_rigs = ('Tracked',) if tracked_only else ('Tracked', 'Simulated')
-    roster_label = 'tracked' if begin_kind == 'trackingBegin' else 'participating'
+    roster_label = 'tracked' if begin_kind in ('trackingBegin', 'trackedVrStart') else 'participating'
     begin_roster = None
     controls = {batch['appliedAtSequence']: batch for batch in control_batches}
     control_frames = {}
@@ -873,9 +874,11 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
                 and integer(packet['observedSequence'], 1) == begin['appliedAtSequence'] - 1
                 and packet['suspended'] is False and frame['phase'] == 'Preparing' and integer(frame['tick'], 0, 0) == 0,
                 'Guarded Begin frame differs from the original Preparing boundary')
-        rows = roster(frame['players'], 'id', len(players))
-        require(set(rows) == set(players) and all(row['connected'] is True and row['rig']['kind'] in allowed_rigs
-                    and integer(row['health'], 1, 100) and integer(row['roomId'], 1, 5) == players[pid]['roomId']
+        opening_players = begin['openingPlayers'] if single_tracked_start else players
+        bodies = [body for body in frame['players'] if body['connected'] is True] if single_tracked_start else frame['players']
+        rows = roster(bodies, 'id', len(opening_players))
+        require(set(rows) == set(opening_players) and all(row['connected'] is True and row['rig']['kind'] in allowed_rigs
+                    and integer(row['health'], 1, 100) and integer(row['roomId'], 1, 5) == opening_players[pid]['roomId']
                     for pid, row in rows.items()), f'Guarded Begin frame does not contain the original {roster_label} roster')
         tracked = sum(row['rig']['kind'] == 'Tracked' for row in rows.values())
         begin_roster = {'trackedPlayers': tracked}
@@ -938,9 +941,10 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
     if begin is not None:
         first = journal['firstApplied']
         require(begin_roster is not None and first is not None
-                and first['worldSequence'] > begin['frame']['worldSequence'] and first['observedSequence'] < applied_end,
+                and first['worldSequence'] > begin['frame']['worldSequence'] and first['observedSequence'] < (applied_end or through),
                 'World journal lacks the guarded Begin witness or its subsequent application')
-        result[begin_kind] = {'requestId': begin['requestId'], 'appliedAtSequence': begin['appliedAtSequence'],
+        result[begin_kind] = {**({} if single_tracked_start else {'requestId': begin['requestId']}),
+                              'appliedAtSequence': begin['appliedAtSequence'],
                               'preparingFrame': begin['frame']['worldSequence'],
                               'firstRunningFrame': first['worldSequence'], **begin_roster}
     return result
@@ -1075,9 +1079,32 @@ def verify_player_terminal_result(result, owner, stats, boundary):
     return room
 
 
+def tracked_vr_start_boundary(evidence, session, world, through):
+    require(type(evidence) is dict and set(evidence) == {'version', 'trackedVrStart'} and integer(evidence['version'], 1, 1),
+            'Unsupported tracked VR opening evidence')
+    start = evidence['trackedVrStart']
+    header = world['header']
+    require(type(start) is dict and set(start) == {'sessionId', 'streamId', 'appliedAtSequence', 'worldSequence', 'elapsedMilliseconds', 'players'}
+            and start['sessionId'] == session['id'] and start['streamId'] == header['streamId']
+            and header['origin'] == 'GameServer' and header.get('calibration') == 'uncalibrated-vr'
+            and session.get('environment', {}).get('mode') == 'VR',
+            'Tracked VR opening evidence must reference the original VR GameServer recording')
+    rooms = session['roomIds']
+    rows = start['players']
+    require(type(rows) is list and 1 <= len(rows) <= 5 * len(rooms), 'Invalid tracked VR opening roster')
+    require(all(type(row) is dict and set(row) == {'playerId', 'roomId'} and integer(row['roomId'], 1, 5) in rooms
+                for row in rows) and all(sum(row['roomId'] == room for row in rows) <= 5 for room in rooms),
+            'Tracked VR opening roster must match the original room scope')
+    opening = roster(rows, 'playerId', len(rows))
+    return ('trackedVrStart', {'appliedAtSequence': integer(start['appliedAtSequence'], 2, through - 1),
+                              'frame': {'worldSequence': integer(start['worldSequence'], 1, world['acceptedSequence'] - 1),
+                                        'elapsedMilliseconds': integer(start['elapsedMilliseconds'], 0, world['durationMilliseconds'])},
+                              'openingPlayers': opening})
+
+
 def verify(topology, server_ips, launcher, session, statistics, endpoint, server_log, player_logs, *, quest_player_logs=(),
            world_journal=None, combat_journal=None, room_alignments=None, udp_preflight=None, udp_source_preflights=None,
-           verify_player_sources=False, verify_reconnect_history=False, quest_readiness_reports=()):
+           verify_player_sources=False, verify_reconnect_history=False, quest_readiness_reports=(), tracked_vr_start=None):
     quest_readiness = ()
     if quest_readiness_reports:
         require(world_journal is not None and len(quest_readiness_reports) == len(quest_player_logs),
@@ -1087,7 +1114,8 @@ def verify(topology, server_ips, launcher, session, statistics, endpoint, server
                                len(player_logs) + len(quest_player_logs), player_logs, quest_player_logs=quest_player_logs,
                                world_journal=world_journal, combat_journal=combat_journal, room_alignments=room_alignments, udp_preflight=udp_preflight,
                                udp_source_preflights=udp_source_preflights, verify_player_sources=verify_player_sources,
-                               verify_reconnect_history=verify_reconnect_history, quest_readiness=quest_readiness)
+                               verify_reconnect_history=verify_reconnect_history, quest_readiness=quest_readiness,
+                               tracked_vr_start=tracked_vr_start)
     return report
 
 
@@ -1096,7 +1124,8 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                    udp_preflight=None, udp_source_preflights=None, verify_player_sources=False, quest_capture_logs=(),
                    guarded_begin=None, concurrency=None, verify_reconnect_history=False, reconnect_window=None,
                    quest_deployments=None, require_distinct_remote_roster=False, control_batches=(),
-                   observed_quest_addresses=None, quest_readiness=(), planned_seat_addresses=None, reconnect_sources=None):
+                   observed_quest_addresses=None, quest_readiness=(), planned_seat_addresses=None, reconnect_sources=None,
+                   tracked_vr_start=None):
     integer(size, 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(not verify_player_sources or world_journal is not None, 'Player source verification requires the original closed world journal')
@@ -1128,6 +1157,9 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
     boundary = sealed_result_boundary(session, statistics, world, combat, stream_id)
     origin = boundary['origin']
     world_sequence, through, combat_sequence = (boundary[key] for key in ('worldSequence', 'throughSequence', 'finalStreamSequence'))
+    if tracked_vr_start is not None:
+        require(world_journal is not None and guarded_begin is None, 'Tracked VR opening evidence requires the original closed world journal')
+        guarded_begin = tracked_vr_start_boundary(tracked_vr_start, session, world, through)
     players = roster(session['players'], 'id', size)
     ledger = roster(statistics['players'], 'playerId', size)
     require(set(players) == set(ledger), 'Final roster and statistics disagree')
@@ -1268,11 +1300,25 @@ def evidence_zip_entry(archive, name):
         return limited_read(entry)
 
 
-def management_zip_records(data):
+def unpack_management_zip(data, *, allow_tracked_start=False):
     names = ('session.json', 'statistics.json', 'endpoint.json')
+    opening = 'tracked-vr-start.json'
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        require(sorted(archive.namelist()) == sorted(names), 'Management ZIP must contain exactly the three original JSON records')
-        return [read_json(evidence_zip_entry(archive, name)) for name in names]
+        members = archive.namelist()
+        tracked_start = allow_tracked_start and opening in members
+        expected = (*names, opening) if tracked_start else names
+        require(sorted(members) == sorted(expected), 'Management ZIP must contain exactly the original JSON records'
+                if allow_tracked_start else 'Management ZIP must contain exactly the three original JSON records')
+        require(not tracked_start or sum(info.file_size for info in archive.infolist()) <= MAX_FILE_BYTES,
+                'Management ZIP exceeds the expanded size limit')
+        values = [read_json(evidence_zip_entry(archive, name)) for name in names]
+        evidence = read_json(evidence_zip_entry(archive, opening)) if tracked_start else None
+        require(not tracked_start or type(evidence) is dict, 'Invalid tracked VR opening evidence')
+        return values, evidence
+
+
+def management_zip_records(data):
+    return unpack_management_zip(data)[0]
 
 
 def management_zip(path):
@@ -3432,19 +3478,25 @@ def main():
                         help='Repeat for each locked MR room in a single session')
     for name in ('launcher-report', 'session', 'statistics', 'endpoint', 'server-log'):
         parser.add_argument('--' + name, type=Path)
+    parser.add_argument('--evidence-zip', type=Path, help='Original single-session ZIP from the management console')
+    parser.add_argument('--require-tracked-vr-start', action='store_true', help='Require the saved tracked VR opening in the original ZIP and world journal')
     parser.add_argument('--player', action='append', nargs=2, metavar=('EXPECTED_IPV4', 'LOG'))
     parser.add_argument('--quest-player', action='append', nargs=3, metavar=('EXPECTED_IPV4', 'LOGCAT', 'PID'))
     parser.add_argument('--quest-readiness-report', action='append', type=Path,
                         help='Original single-player -VerifyPlayerTracking report; repeat once per Quest log')
     args = parser.parse_args()
-    json_paths = [args.launcher_report, args.session, args.statistics, args.endpoint]
-    single_args = [args.topology, args.server_ip, *json_paths, args.server_log, args.player or args.quest_player]
+    record_paths = [args.session, args.statistics, args.endpoint]
+    single_args = [args.topology, args.server_ip, args.launcher_report, args.server_log, args.player or args.quest_player]
     batch = args.venue_manifest or args.venue_stages
     extra_single_args = [args.world_journal, args.combat_journal, args.room_alignment, args.udp_preflight,
                          args.udp_source_preflight, args.verify_player_sources, args.verify_reconnect_history,
-                         args.quest_readiness_report]
+                         args.quest_readiness_report, args.evidence_zip, args.require_tracked_vr_start, *record_paths]
     if (batch and any(single_args + extra_single_args)) or (not batch and not all(single_args)):
         parser.error('Provide --venue-manifest or --venue-stages alone, or all single-session options.')
+    if not batch and (args.evidence_zip and any(record_paths) or not args.evidence_zip and not all(record_paths)):
+        parser.error('Use --evidence-zip or all three of --session, --statistics and --endpoint.')
+    if args.require_tracked_vr_start and (args.evidence_zip is None or args.world_journal is None):
+        parser.error('--require-tracked-vr-start requires --evidence-zip and --world-journal.')
     if args.inspect_windows_inbox and not args.venue_manifest:
         parser.error('--inspect-windows-inbox requires --venue-manifest.')
     if args.inspect_venue_stages and not args.venue_stages:
@@ -3462,7 +3514,8 @@ def main():
             windows = args.player or []
             quest = args.quest_player or []
             integer(len(windows) + len(quest), 1, 25)
-            inputs = [*json_paths, args.server_log, *(Path(row[1]) for row in chain(windows, quest))]
+            inputs = [args.launcher_report, args.server_log, *(Path(row[1]) for row in chain(windows, quest))]
+            inputs.extend([args.evidence_zip] if args.evidence_zip else record_paths)
             if args.world_journal is not None:
                 inputs.append(args.world_journal)
             if args.combat_journal is not None:
@@ -3489,13 +3542,22 @@ def main():
             for address, path, pid in quest:
                 require(re.fullmatch(r'[1-9][0-9]{0,9}', pid), 'Provide the original Quest process ID')
                 quest_players.append((ipv4(address), content(Path(path)), integer(int(pid), 1, 2**31 - 1)))
+            tracked_start = None
+            if args.evidence_zip:
+                with args.evidence_zip.open('rb') as source:
+                    records, tracked_start = unpack_management_zip(limited_read(source), allow_tracked_start=True)
+            else:
+                records = [read_json(content(path)) for path in record_paths]
+            require(not args.require_tracked_vr_start or tracked_start is not None,
+                    'Management ZIP is missing the original tracked VR opening evidence')
             report = verify(args.topology, {ipv4(address) for address in args.server_ip},
-                            *(read_json(content(path)) for path in json_paths), content(args.server_log), players,
+                            read_json(content(args.launcher_report)), *records, content(args.server_log), players,
                             quest_player_logs=quest_players, world_journal=args.world_journal, combat_journal=args.combat_journal,
                             room_alignments=alignments,
                             udp_preflight=args.udp_preflight, udp_source_preflights=args.udp_source_preflight,
                             verify_player_sources=args.verify_player_sources, verify_reconnect_history=args.verify_reconnect_history,
-                            quest_readiness_reports=[read_quest_json(path) for path in args.quest_readiness_report or ()])
+                            quest_readiness_reports=[read_quest_json(path) for path in args.quest_readiness_report or ()],
+                            tracked_vr_start=tracked_start)
     except EvidenceError as error:
         parser.exit(1, f'Field evidence rejected. {error}.\n')
     except (OSError, UnicodeError, ArithmeticError, AttributeError, KeyError, TypeError, ValueError, RecursionError,

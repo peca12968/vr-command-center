@@ -4351,6 +4351,87 @@ class FieldResultsTests(unittest.TestCase):
                     self.assertIn(message, result.stderr)
                     self.assertNotIn(directory, result.stderr)
 
+    def test_single_session_evidence_zip_verifies_saved_tracked_vr_opening(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, manifest, _ = venue_fixture(root, 'Independent', remote=True, quest_per_room=1, with_journals=True,
+                                           room_sizes=(1,) * 5, game_server=True)
+            entry = manifest['sessions'][0]
+            values = field.management_zip(root / entry['evidenceZip'])
+            session = values[0]
+            owner, = session['players']
+            launcher_path = root / entry['launcherReport']
+            launcher = json.loads(launcher_path.read_bytes())
+            journal = root / entry['worldJournal']
+            departed = id_for(999)
+            bodies = [{'id': player, 'roomId': 1, 'connected': True, 'health': 100, 'rig': {'kind': 'Tracked'}}
+                      for player in (owner['id'], departed)]
+
+            def journal_with(rig='Tracked', running_sequence=8):
+                opening = [bodies[0], dict(bodies[1], rig={'kind': rig})]
+                world_journal(journal, launcher['finalWorld'], running_sequence=running_sequence, end_sequence=9,
+                              players=lambda number, _: opening if number == 1 else bodies[:1])
+                launcher_path.write_text(json.dumps(launcher), encoding='utf-8')
+
+            journal_with()
+            evidence = {'version': 1, 'trackedVrStart': {'sessionId': session['id'], 'streamId': launcher['streamId'],
+                'appliedAtSequence': 8, 'worldSequence': 1, 'elapsedMilliseconds': 100,
+                'players': [{'playerId': body['id'], 'roomId': body['roomId']} for body in bodies]}}
+            evidence_zip = root / 'original.zip'
+
+            def pack(value=evidence, extra=None):
+                with zipfile.ZipFile(evidence_zip, 'w') as archive:
+                    for name, record in zip(('session.json', 'statistics.json', 'endpoint.json'), values):
+                        archive.writestr(name, json.dumps(record))
+                    if value is not None:
+                        archive.writestr('tracked-vr-start.json', json.dumps(value))
+                    if extra:
+                        archive.writestr(extra, '{}')
+
+            pack()
+            quest, = entry['players']
+            command = [sys.executable, str(SCRIPT), '--topology', 'direct-lan', '--server-ip', manifest['serverIps'][0],
+                       '--launcher-report', str(launcher_path), '--server-log', str(root / entry['serverLog']),
+                       '--quest-player', quest['address'], str(root / quest['log']), str(quest['logcatPid']),
+                       '--evidence-zip', str(evidence_zip)]
+            required = ['--world-journal', str(journal), '--require-tracked-vr-start']
+
+            def run(*arguments, expected=1, message=None):
+                result = subprocess.run(command + list(arguments), capture_output=True, encoding='utf-8', timeout=10)
+                self.assertEqual(expected, result.returncode, result.stderr)
+                self.assertNotIn(directory, result.stderr + result.stdout)
+                if message is not None:
+                    self.assertIn(message, result.stderr)
+                return json.loads(result.stdout) if expected == 0 else None
+
+            report = run(*required, expected=0)
+            self.assertEqual(1, report['players'])
+            self.assertEqual({'appliedAtSequence': 8, 'preparingFrame': 1, 'firstRunningFrame': 2, 'trackedPlayers': 2},
+                             report['worldJournal']['trackedVrStart'])
+            self.assertNotIn(departed, json.dumps(report))
+            run(message='requires the original closed world journal')
+            run(*required, '--session', str(root / 'mixed.json'), expected=2, message='Use --evidence-zip or all three')
+
+            for modifications, message in (
+                ({'streamId': id_for(998)}, 'original VR GameServer recording'),
+                ({'worldSequence': 2}, 'original Preparing boundary'),
+                ({'elapsedMilliseconds': 110}, 'original Preparing boundary'),
+                ({'players': evidence['trackedVrStart']['players'][:1]}, 'Player count differs'),
+            ):
+                with self.subTest(modifications=modifications):
+                    pack(dict(evidence, trackedVrStart=dict(evidence['trackedVrStart'], **modifications)))
+                    run(*required, message=message)
+            pack(extra='unrelated.json')
+            run(*required, message='exactly the original JSON records')
+            pack()
+            journal_with(rig='Simulated')
+            run(*required, message='original tracked roster')
+            journal_with(running_sequence=7)
+            run(*required, message='subsequent application')
+            pack(None)
+            self.assertNotIn('worldJournal', run(expected=0))
+            run(*required, message='missing the original tracked VR opening evidence')
+
     def test_original_world_journal_matches_the_sealed_evidence(self):
         data = fixture()
         world = data[2]['finalWorld']

@@ -191,12 +191,13 @@ export function mountClosure(getState, unauthorized, openReview, report) {
   fieldButton.addEventListener('click', async () => {
     if (fieldButton.disabled || fieldRequest) return;
     const { selected: id, key } = getState(), startContext = context(), request = new AbortController();
+    const source = `/api/sessions/${id}/field-evidence.zip${trackedStart ? '?includeTrackedVrStart=true' : ''}`;
     const current = () => fieldRequest === request && active && !refreshFailed && context() === startContext
       && getState().key === key && document.visibilityState === 'visible';
     fieldRequest = request; render(); fieldStatus.textContent = '正在下載場館驗收資料…';
     const timeout = setTimeout(() => request.abort(), 8000);
     try {
-      const response = await fetch(`/api/sessions/${id}/field-evidence.zip`, {
+      const response = await fetch(source, {
         headers: { Authorization: 'Bearer ' + key }, signal: request.signal, cache: 'no-store'
       });
       if (!current()) return;
