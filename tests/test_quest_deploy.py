@@ -1420,6 +1420,10 @@ else:
         mapping.write_text(json.dumps({'version': 1, 'seats': selected}), encoding='utf-8')
         session = str(self.session_ids[0])
         calls = []
+        frame_route = f'/api/sessions/{session}/world/frames/14'
+        original_frame = {'sequence': 14, 'observedSequence': 27, 'suspended': False,
+                          'frame': {'phase': 'Preparing', 'tick': 0}}
+        saved_frame = original_frame
         readiness = {'version': 1, 'sessionId': session, 'sessionSequence': 27, 'observedSequence': 27,
                      'worldSequence': 14, 'sourceState': 'Fresh', 'origin': 'GameServer', 'mrStartState': 'WaitingPlayers',
                      'sampledAtUtc': '2026-11-10T00:00:00Z', 'capturedAtUtc': '2026-11-09T23:59:59.950Z', 'sourceAgeMilliseconds': 50,
@@ -1450,6 +1454,16 @@ else:
                 self.respond(receipt)
 
             def do_GET(self):
+                if self.path == frame_route:
+                    if self.headers.get('Authorization') != 'Bearer private-fixture-master':
+                        self.send_error(401)
+                        return
+                    if saved_frame is None:
+                        calls.append(self.path)
+                        self.send_error(404)
+                        return
+                    self.respond({'packet': saved_frame})
+                    return
                 self.respond({'version': 1, 'sessionId': session, 'sessionEnded': False, 'address': '192.168.1.10', 'port': 7777})
 
             def log_message(self, *args):
@@ -1490,6 +1504,8 @@ else:
                 ready = readback(*flags, *bound, '-WaitForTrackedSeconds', '5')
                 self.assertEqual(0, ready.returncode, ready.stderr)
                 ready_report = json.loads(ready.stdout)
+                probe_calls = deploy_calls[:2] + ['/api/venue/tracked-readiness']
+                self.assertEqual(deploy_calls + probe_calls * 2 + [frame_route], calls)
                 self.assertEqual(['tracked-ready'] * 2, [row['status'] for row in ready_report['seats']])
                 self.assertEqual(deployment_hash, ready_report['deploymentSha256'])
                 self.assertEqual((1, hashlib.sha256(original_bundle).hexdigest()),
@@ -1512,6 +1528,31 @@ else:
                 self.assertEqual(1, missing_capture.returncode, missing_capture.stderr)
                 missing_report = json.loads(missing_capture.stdout)
                 self.assertEqual({'maximumSeconds': 5, 'samples': 1, 'outcome': 'source-capture-unverified'}, missing_report['wait'])
+
+                readiness.update(capturedAtUtc='2026-11-09T23:59:59.950Z', mrStartState=None, mrTrackingState='Ready')
+                saved_frame = dict(original_frame, frame={'phase': 'Running', 'tick': 23})
+                late = readback(*flags, *bound, '-WaitForTrackedSeconds', '5')
+                self.assertEqual(1, late.returncode, late.stderr)
+                late_report = json.loads(late.stdout)
+                self.assertFalse(late_report['complete'])
+                self.assertEqual(['source-outside-preparing'] * 2, [row['status'] for row in late_report['seats']])
+                self.assertEqual({'maximumSeconds': 5, 'samples': 1, 'outcome': 'source-outside-preparing'}, late_report['wait'])
+                live = readback(*flags)
+                self.assertEqual(0, live.returncode, live.stderr)
+                self.assertNotIn('deploymentSha256', json.loads(live.stdout))
+                invalid_frames = (
+                    None,
+                    dict(original_frame, observedSequence=26),
+                    dict(original_frame, sequence=15),
+                    dict(original_frame, frame={'phase': ['Preparing'], 'tick': 0}),
+                    dict(original_frame, frame={'phase': 'Preparing', 'tick': 1}),
+                )
+                for saved_frame in invalid_frames:
+                    incomplete = readback(*flags, *bound)
+                    self.assertEqual(1, incomplete.returncode, incomplete.stderr)
+                    invalid_report = json.loads(incomplete.stdout)
+                    self.assertFalse(invalid_report['complete'])
+                    self.assertEqual(['source-frame-unverified'] * 2, [row['status'] for row in invalid_report['seats']])
 
                 header_error = 'complete release-verified deployment report for this original ZIP and device map'
                 seat_error = 'does not match the original completed seat admissions'
@@ -1541,7 +1582,9 @@ else:
                 self.assert_rejected(readback('-DeviceMap', str(mapping), *bound), 'only with -VerifyTrackedSeats')
                 self.assertEqual(deployment_hash, hashlib.sha256(deployment.read_bytes()).hexdigest())
                 self.assertEqual(before, (self.root / 'adb.log').read_bytes())
-                self.assertEqual(deploy_calls + (deploy_calls[:2] + ['/api/venue/tracked-readiness']) * 5, calls)
+                self.assertEqual(deploy_calls + probe_calls * 2 + [frame_route] + probe_calls * 3
+                                 + probe_calls + [frame_route] + probe_calls
+                                 + (probe_calls + [frame_route]) * len(invalid_frames), calls)
             finally:
                 server.shutdown()
                 thread.join(timeout=5)

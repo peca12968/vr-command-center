@@ -505,7 +505,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 
 工具在連線管理服務前，先核對 ZIP 原檔雜湊、裝置對照表，以及每席原場次、玩家、入場名額和端口。每席須已完成 APK 與檔案核對，並送出啟動指令。取樣報告的 `deploymentSha256` 是所讀部署報告原檔的 SHA-256。查詢仍依管理服務當下的追蹤狀態判定，且全程無需 ADB。 [核對發行 APK](#核對頭盔內已安裝的發行-apk)
 
-要做戰後核對，請在按「開始任務」前保存退出碼為 0 的完整 JSON。這份回條另含 `venueSha256`，每席保留原場次、世界序號、已套用的管理序號及畫格擷取時間。選用 `-DeploymentReport` 時，已就緒席位必須有 GameServer 的畫格及擷取時間。 [在封存回放核對開場畫格](EXTERNAL_CLIENTS.md#核對-quest-開場追蹤回條)
+要做戰後核對，請在按「開始任務」前保存退出碼為 0 的完整 JSON。這份回條另含 `venueSha256`，每席保留原場次、世界序號、已套用的管理序號及畫格擷取時間。選用 `-DeploymentReport` 時，工具會用原 GameServer 的世界序號重讀每個場次的同一張保存畫格。同場多人共用該次讀取。畫格須在準備中、遊戲 tick 為 0，並且套用了取樣時的管理序號。一般即時追蹤查詢可用於任務進行中。 [在封存回放核對開場畫格](EXTERNAL_CLIENTS.md#核對-quest-開場追蹤回條)
 
 ##### 等候指定席位同時追蹤就緒
 
@@ -523,6 +523,8 @@ JSON 仍只輸出一次。`wait.samples` 是嘗試的取樣次數，`wait.outcom
 | `awaiting-tracked-pose`、`not-tracked` | 檢查頭盔有無進入遊戲、恢復焦點並完成 MR 取點 |
 | `source-not-fresh`、`source-revision-pending`、`mr-profile-pending` | 查看遊戲伺服器及房卡，等有效快照套用目前的場次狀態 |
 | `source-capture-unverified` | 確認原場次已接上 GameServer，且快照含擷取時間，再重新核對 |
+| `source-frame-unverified` | 確認管理服務可讀回該次取樣的原世界畫格及管理序號，再重新核對 |
+| `source-outside-preparing` | 本次取樣已超過開場證據的準備階段。使用該場開場前保存的原回條 |
 | `source-expired-in-transit` | 畫格在管理服務取樣時有效，收到回應時已超過期限，可重新核對 |
 | `venue-changed` | 核對期間原場次、房間或版本已有變更，請核對現場並重新取樣 |
 | `seat-unavailable`、`admission-changed`、`seat-headset-mismatch` | 核對當前名冊與所選席位，重新下載有變更的部署包 |

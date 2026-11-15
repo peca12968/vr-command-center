@@ -675,18 +675,67 @@ function New-TrackedSeatReport($Venue, [object[]]$Map, $Batch, [switch]$IncludeA
     return $report
 }
 
+function Confirm-PreparingReadinessFrames($Target, $Report, [int]$RequestMilliseconds) {
+    $handler = [Net.Http.HttpClientHandler]::new()
+    $handler.UseProxy = $handler.AllowAutoRedirect = $false
+    $client = [Net.Http.HttpClient]::new($handler)
+    $client.MaxResponseContentBufferSize = 256KB
+    $cancellation = [Threading.CancellationTokenSource]::new()
+    if ($RequestMilliseconds -gt 0) { $cancellation.CancelAfter($RequestMilliseconds) }
+    else { $cancellation.Cancel() }
+    try {
+        $client.DefaultRequestHeaders.Add('Authorization', $Target.Headers.Authorization)
+        foreach ($session in ($Report.seats | Group-Object sessionId)) {
+            $seat = $session.Group[0]
+            $url = [Uri]::new($Target.Origin, "/api/sessions/$($seat.sessionId)/world/frames/$($seat.worldSequence)")
+            $status = 'source-frame-unverified'
+            $response = $null
+            try {
+                $response = $client.GetAsync($url, $cancellation.Token).GetAwaiter().GetResult()
+                if ($response.StatusCode -eq 200) {
+                    $stored = ConvertFrom-Json -InputObject ($response.Content.ReadAsStringAsync().GetAwaiter().GetResult())
+                    $packet = $stored.packet
+                    if ((Test-JsonInteger $packet.sequence) -and $packet.sequence -eq $seat.worldSequence -and
+                        (Test-JsonInteger $packet.observedSequence) -and $packet.observedSequence -eq $seat.observedSequence -and
+                        $packet.suspended -is [bool] -and -not $packet.suspended -and $packet.frame.phase -is [string] -and
+                        (Test-JsonInteger $packet.frame.tick)) {
+                        if ($packet.frame.phase -ceq 'Preparing' -and $packet.frame.tick -eq 0) { $status = 'tracked-ready' }
+                        elseif ($packet.frame.phase -cin @('Running','Paused','Ended')) { $status = 'source-outside-preparing' }
+                    }
+                }
+            } catch { $status = 'source-frame-unverified' }
+            finally { if ($response) { $response.Dispose() } }
+            if ($status -cne 'tracked-ready') {
+                $session.Group | ForEach-Object { $_.status = $status }
+                $Report.complete = $false
+            }
+        }
+    } finally { $cancellation.Dispose(); $client.Dispose() }
+}
+
+function Read-TrackedSeatReport($Target, $Venue, [object[]]$Map, [int]$RequestMilliseconds, [switch]$IncludeAllHeadsets) {
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $batch = Read-VenueTrackedReadiness $Target $Venue $RequestMilliseconds
+    $report = New-TrackedSeatReport $Venue $Map $batch -IncludeAllHeadsets:$IncludeAllHeadsets
+    if ($DeploymentReport -and $report.complete) {
+        $remaining = [int][Math]::Floor($RequestMilliseconds - $timer.Elapsed.TotalMilliseconds)
+        Confirm-PreparingReadinessFrames $Target $report $remaining
+    }
+    return $report
+}
+
 function Confirm-TrackedSeats($Venue, [object[]]$Map, [switch]$IncludeAllHeadsets) {
     Confirm-VenueReadback $Venue
     $target = Get-ManagementTarget $ManagementApi
     if (-not $WaitForTrackedSeconds) {
-        return New-TrackedSeatReport $Venue $Map (Read-VenueTrackedReadiness $target $Venue 10000) -IncludeAllHeadsets:$IncludeAllHeadsets
+        return Read-TrackedSeatReport $target $Venue $Map 10000 -IncludeAllHeadsets:$IncludeAllHeadsets
     }
 
     $timer = [Diagnostics.Stopwatch]::StartNew()
     $limit = 1000 * $WaitForTrackedSeconds
     $samples = 0
     $terminal = @('venue-changed','seat-unavailable','admission-changed','seat-headset-mismatch','readiness-invalid','readiness-access-denied',
-        'source-capture-unverified')
+        'source-capture-unverified','source-outside-preparing')
     $report = $null
     do {
         $ticketMilliseconds = ($Venue.EarliestExpiry - [DateTimeOffset]::UtcNow).TotalMilliseconds
@@ -697,14 +746,14 @@ function Confirm-TrackedSeats($Venue, [object[]]$Map, [switch]$IncludeAllHeadset
         }
         if ($remaining -lt 1) { $outcome = 'timed-out'; break }
         $timeout = [int][Math]::Floor([Math]::Min(10000, [Math]::Min($remaining, $ticketMilliseconds)))
-        $batch = Read-VenueTrackedReadiness $target $Venue $timeout
+        $sample = Read-TrackedSeatReport $target $Venue $Map $timeout -IncludeAllHeadsets:$IncludeAllHeadsets
         $samples++
         if ($Venue.EarliestExpiry -le [DateTimeOffset]::UtcNow) {
             $report = New-TrackedSeatReport $Venue $Map @{ Status = 'ticket-expired' } -IncludeAllHeadsets:$IncludeAllHeadsets
             $outcome = 'ticket-expired'; break
         }
         if ($timer.Elapsed.TotalMilliseconds -ge $limit) { $outcome = 'timed-out'; break }
-        $report = New-TrackedSeatReport $Venue $Map $batch -IncludeAllHeadsets:$IncludeAllHeadsets
+        $report = $sample
         if ($report.complete) { $outcome = 'ready'; break }
         if (-not $report.seats.Count) { $outcome = 'no-selected-seats'; break }
         $invalid = $report.seats | Where-Object { $_.status -cin $terminal } | Select-Object -First 1
