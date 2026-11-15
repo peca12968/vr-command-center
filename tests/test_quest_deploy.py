@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ADB_FIXTURE = r"""
 $remote = Join-Path $env:QUEST_TEST_ROOT 'remote'
 $installedApp = Join-Path $env:QUEST_TEST_ROOT 'installed-app'
+$probeNonce = Join-Path $env:QUEST_TEST_ROOT 'openxr-probe'
 [IO.File]::AppendAllText((Join-Path $env:QUEST_TEST_ROOT 'adb.log'), (($args -join ' ') + "`n"))
 if ($args[0] -eq 'devices') {
     "List of devices attached"
@@ -141,7 +142,13 @@ switch ($args[2]) {
                 if ($env:QUEST_TEST_FAIL -eq 'force-stop') { exit 1 }
                 if ($args[4] -ceq 'start') {
                     $target = '--user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n com.vrcommand.quest/com.unity3d.player.UnityPlayerActivity'
-                    if (($args[5..($args.Count - 1)] -join ' ') -cnotin @("-W $target", "-W -S $target")) { exit 98 }
+                    $last = $args.Count - 1
+                    if ($args[$last - 2] -ceq '--es') {
+                        if ($args[$last - 1] -cne 'com.vrcommand.quest.OPENXR_PROBE' -or $args[$last] -cnotmatch '\A[a-f0-9]{32}\z') { exit 98 }
+                        [IO.File]::WriteAllText($probeNonce, $args[$last])
+                        $last -= 3
+                    }
+                    if (($args[5..$last] -join ' ') -cnotin @("-W $target", "-W -S $target")) { exit 98 }
                     if ($env:QUEST_TEST_FAIL -eq 'launch-timeout') { 'Status: timeout' } else { 'Status: ok' }
                     'Activity: com.vrcommand.quest/com.unity3d.player.UnityPlayerActivity'
                 }
@@ -156,6 +163,19 @@ switch ($args[2]) {
         if ($env:QUEST_TEST_FAIL -eq 'process-restarted') { [IO.File]::WriteAllText((Join-Path $remote 'observed-process'), '4242') }
         if ($env:QUEST_TEST_FAIL -eq 'process-crashed') { 'E/AndroidRuntime( 4242): FATAL EXCEPTION: main' }
         'I/Unity   ( 4242): startup fixture log'
+        if (Test-Path -LiteralPath $probeNonce) {
+            $nonce = [IO.File]::ReadAllText($probeNonce)
+            if ($env:QUEST_TEST_FAIL -eq 'xr-stale') {
+                'I/Unity   ( 4242): VR_QUEST_OPENXR nonce=11111111111111111111111111111111 loader=1 display=1 input=1'
+                "I/Unity   ( 4243): VR_QUEST_OPENXR nonce=$nonce loader=1 display=1 input=1"
+            } else {
+                $input = if ($env:QUEST_TEST_FAIL -eq 'xr-not-ready') { 0 } else { 1 }
+                "I/Unity   ( 4242): VR_QUEST_OPENXR nonce=$nonce loader=1 display=1 input=$input"
+                if ($env:QUEST_TEST_FAIL -eq 'xr-conflicting') {
+                    "I/Unity   ( 4242): VR_QUEST_OPENXR nonce=$nonce loader=1 display=0 input=1"
+                }
+            }
+        }
         exit 0
     }
 }
@@ -369,20 +389,20 @@ class QuestDeployTests(unittest.TestCase):
         self.assertEqual(self.player, json.loads((self.remote/'vr-connection.json').read_bytes()))
         self.assertEqual(expected, hashlib.sha256(apk.read_bytes()).hexdigest())
 
-    def run_smoke(self, serial='fixture', failure='', *, resume=False):
+    def run_smoke(self, serial='fixture', failure='', *, resume=False, require_openxr=False, version_code=72):
         apk = self.root / 'sample.apk'
         apk.write_bytes(b'first-launch test APK')
         expected = hashlib.sha256(apk.read_bytes()).hexdigest()
         release = self.root / 'release.json'
         self.write(release, {'verified': True, 'scope': 'offline-package-consistency', 'quest': {
             'applicationId': 'com.vrcommand.quest', 'architecture': 'arm64-v8a', 'signatureV2': True,
-            'versionCode': 72, 'sha256': expected}})
+            'versionCode': version_code, 'sha256': expected}})
         env = {**os.environ, 'QUEST_TEST_ROOT': str(self.root), 'QUEST_TEST_FAIL': failure,
                'QUEST_TEST_ALTER_ALIGNMENT': '', 'QUEST_TEST_RELEASE_HASH': expected}
         return subprocess.run(['pwsh','-NoProfile','-NonInteractive','-File',str(self.script), '-SmokeTest',
                                '-Serial', serial, '-AdbPath', str(self.adb), '-ApkPath', str(apk), '-ReleaseReport', str(release),
-                               *(['-ResumeSmokeTest'] if resume else [])],
-                              env=env, capture_output=True, encoding='utf-8', timeout=25)
+                               *(['-ResumeSmokeTest'] if resume else []), *(['-RequireOpenXR'] if require_openxr else [])],
+                              env=env, capture_output=True, encoding='utf-8', timeout=35)
 
     def test_fresh_quest_launch_verifies_apk_and_observes_started_process(self):
         result = self.run_smoke()
@@ -432,6 +452,30 @@ class QuestDeployTests(unittest.TestCase):
         self.assertEqual(1, commands.count(' am start -W -S '))
         for operation in (' install ', ' uninstall ', ' pm clear ', ' push '):
             self.assertNotIn(operation, commands)
+
+    def test_quest_openxr_smoke_observes_only_the_current_launch(self):
+        self.assert_rejected(self.run_smoke(require_openxr=True), 'version code 74 or later')
+        self.assertFalse(self.commands.exists())
+        result = self.run_smoke(require_openxr=True, version_code=74)
+        self.assertEqual(0, result.returncode, result.stderr)
+        receipt = json.loads(result.stdout)
+        self.assertEqual('openxr-ready', receipt['status'])
+        self.assertEqual({'loader': 'OpenXR', 'displayRunning': True, 'inputRunning': True}, receipt['openXR'])
+        self.assertGreaterEqual(receipt['processObservationSeconds'], 3)
+        nonce = (self.root / 'openxr-probe').read_text()
+        self.assertRegex(nonce, r'^[a-f0-9]{32}$')
+        self.assertIn(f'--es com.vrcommand.quest.OPENXR_PROBE {nonce}', self.commands.read_text())
+        self.assertNotIn(nonce, result.stdout + result.stderr)
+        for failure, expected in (('xr-not-ready', 'loader=1, display=1, input=0'),
+                                  ('xr-conflicting', 'conflicting or invalid OpenXR evidence'),
+                                  ('xr-stale', 'No OpenXR evidence was observed')):
+            with self.subTest(failure=failure):
+                self.commands.unlink()
+                blocked = self.run_smoke(failure=failure, require_openxr=True, version_code=74, resume=True)
+                self.assert_rejected(blocked, expected)
+                self.assertEqual('', blocked.stdout)
+                self.assertNotIn(' install ', self.commands.read_text())
+                self.assertNotEqual(nonce, (self.root / 'openxr-probe').read_text())
 
     def test_quest_first_launch_stops_for_missing_access_and_bad_startup(self):
         cases = (

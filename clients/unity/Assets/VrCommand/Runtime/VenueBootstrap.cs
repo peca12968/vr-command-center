@@ -77,6 +77,9 @@ namespace VrCommand.Unity
         private IEnumerator Start()
         {
             Instance = this;
+#if UNITY_ANDROID && !UNITY_EDITOR
+            if (ReadQuestOpenXRProbe() is Guid nonce) StartCoroutine(ObserveQuestOpenXR(nonce));
+#endif
             var spectator = GameObject.Find("Desktop Spectator");
             if (Application.platform == RuntimePlatform.Android) ConfigureWaitingHead(spectator);
             Application.targetFrameRate = Application.platform == RuntimePlatform.Android ? 72 : 90;
@@ -170,6 +173,37 @@ namespace VrCommand.Unity
                 }
             }
         }
+
+#if UNITY_ANDROID && !UNITY_EDITOR
+        private static Guid? ReadQuestOpenXRProbe()
+        {
+            try
+            {
+                using var player = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+                using var activity = player.GetStatic<AndroidJavaObject>("currentActivity");
+                using var intent = activity?.Call<AndroidJavaObject>("getIntent");
+                var value = intent?.Call<string>("getStringExtra", "com.vrcommand.quest.OPENXR_PROBE");
+                return Guid.TryParseExact(value, "N", out var nonce) && nonce != Guid.Empty ? nonce : (Guid?)null;
+            }
+            catch (AndroidJavaException) { return null; }
+        }
+
+        private static IEnumerator ObserveQuestOpenXR(Guid nonce)
+        {
+            var deadline = Time.realtimeSinceStartupAsDouble + 12;
+            bool loaderReady, displayRunning, inputRunning;
+            do
+            {
+                var loader = XRGeneralSettings.Instance?.Manager?.activeLoader as OpenXRLoader;
+                loaderReady = loader != null;
+                displayRunning = loader?.GetLoadedSubsystem<XRDisplaySubsystem>()?.running == true;
+                inputRunning = loader?.GetLoadedSubsystem<XRInputSubsystem>()?.running == true;
+                if (displayRunning && inputRunning || Time.realtimeSinceStartupAsDouble >= deadline) break;
+                yield return null;
+            } while (true);
+            Debug.Log($"VR_QUEST_OPENXR nonce={nonce:N} loader={(loaderReady ? 1 : 0)} display={(displayRunning ? 1 : 0)} input={(inputRunning ? 1 : 0)}");
+        }
+#endif
 
         internal static bool CanStartDesktopOpenXR(string role, RuntimePlatform platform, bool batchMode, GraphicsDeviceType graphics)
             => role == "Client" && platform == RuntimePlatform.WindowsPlayer && !batchMode && graphics != GraphicsDeviceType.Null;

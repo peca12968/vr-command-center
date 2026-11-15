@@ -5,6 +5,7 @@ param(
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Refresh')][Parameter(ParameterSetName='Smoke')][string]$AdbPath = 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe',
     [Parameter(Mandatory, ParameterSetName='Smoke')][switch]$SmokeTest,
     [Parameter(ParameterSetName='Smoke')][switch]$ResumeSmokeTest,
+    [Parameter(ParameterSetName='Smoke')][switch]$RequireOpenXR,
     [Parameter(Mandatory, ParameterSetName='Refresh')][switch]$RefreshPlayerTicket,
     [Parameter(Mandatory, ParameterSetName='PlayerTracking')][switch]$VerifyPlayerTracking,
     [Parameter(ParameterSetName='Player')][string]$AlignmentFile,
@@ -1383,25 +1384,53 @@ function Invoke-QuestFirstLaunch([string]$Apk, $Release) {
     if ($LASTEXITCODE -ne 0 -or $activities.Count -ne 1) { throw 'Could not resolve a launcher activity for the installed Quest app.' }
     $launchOptions = @('-W')
     if ($ResumeSmokeTest) { $launchOptions += '-S' }
-    $startup = @(& $AdbPath -s $Serial shell am start @launchOptions --user current @launcherIntent -n $activities[0] 2>$null)
+    $extras = @()
+    if ($RequireOpenXR) {
+        $nonce = [Guid]::NewGuid().ToString('N')
+        $extras = @('--es', 'com.vrcommand.quest.OPENXR_PROBE', $nonce)
+    }
+    $startup = @(& $AdbPath -s $Serial shell am start @launchOptions --user current @launcherIntent -n $activities[0] @extras 2>$null)
     if ($LASTEXITCODE -ne 0 -or $startup -cnotcontains 'Status: ok' -or
         $startup -cnotcontains "Activity: $($activities[0])") {
         throw 'Android did not confirm that the Quest launcher activity started.'
     }
     $appPid = & $AdbPath -s $Serial shell pidof $package 2>$null
     if ($LASTEXITCODE -ne 0 -or [string]$appPid -cnotmatch '\A[1-9][0-9]{0,9}\z') { throw 'Quest game process was not present after launch.' }
+    $clock = [Diagnostics.Stopwatch]::StartNew()
     Start-Sleep -Seconds 3
-    $logs = @(& $AdbPath -s $Serial logcat -d -t 1000 "--pid=$appPid" -v brief -s Unity AndroidRuntime 2>$null)
-    if ($LASTEXITCODE -ne 0) { throw 'Could not read the launched Quest process logs.' }
-    $remainingPid = & $AdbPath -s $Serial shell pidof $package 2>$null
-    if ($LASTEXITCODE -ne 0 -or [string]$remainingPid -cne [string]$appPid -or ($logs -cmatch '^E/AndroidRuntime\s*\([^)]*\): FATAL EXCEPTION')) {
-        throw 'The Quest game process exited, restarted or reported a fatal error during first launch.'
-    }
-    return [ordered]@{
+    do {
+        $logs = @(& $AdbPath -s $Serial logcat -d -t 1000 "--pid=$appPid" -v brief -s Unity AndroidRuntime 2>$null)
+        if ($LASTEXITCODE -ne 0) { throw 'Could not read the launched Quest process logs.' }
+        $remainingPid = & $AdbPath -s $Serial shell pidof $package 2>$null
+        if ($LASTEXITCODE -ne 0 -or [string]$remainingPid -cne [string]$appPid -or ($logs -cmatch '^E/AndroidRuntime\s*\([^)]*\): FATAL EXCEPTION')) {
+            throw 'The Quest game process exited, restarted or reported a fatal error during first launch.'
+        }
+        if (-not $RequireOpenXR) { break }
+        $prefix = "\AI/Unity\s*\(\s*$appPid\s*\): VR_QUEST_OPENXR nonce=$nonce "
+        $probe = @($logs -cmatch $prefix)
+        if ($probe.Count -gt 0) {
+            if ($probe.Count -ne 1 -or $probe[0] -cnotmatch ($prefix + 'loader=([01]) display=([01]) input=([01])\z')) {
+                throw 'The current Quest launch produced conflicting or invalid OpenXR evidence.'
+            }
+            if ($Matches[1] -ne '1' -or $Matches[2] -ne '1' -or $Matches[3] -ne '1') {
+                throw "Quest OpenXR did not become ready (loader=$($Matches[1]), display=$($Matches[2]), input=$($Matches[3]))."
+            }
+            break
+        }
+        if ($clock.Elapsed.TotalSeconds -ge 20) { throw 'No OpenXR evidence was observed for the current Quest launch.' }
+        Start-Sleep -Milliseconds 500
+    } while ($true)
+    $report = [ordered]@{
         phase = 'quest-first-launch'; status = 'process-observed'; model = 'Quest 3'; versionCode = $Release.versionCode
         apkVerified = $true; apkSha256 = $Release.sha256; installedThisRun = -not $ResumeSmokeTest; processObservationSeconds = 3
         unityLogLines = @($logs -cmatch '^[VDIWEF]/Unity\s*\(').Count
     }
+    if ($RequireOpenXR) {
+        $report.status = 'openxr-ready'
+        $report.processObservationSeconds = [Math]::Round($clock.Elapsed.TotalSeconds, 2)
+        $report['openXR'] = [ordered]@{ loader = 'OpenXR'; displayRunning = $true; inputRunning = $true }
+    }
+    return $report
 }
 
 if ($PSCmdlet.ParameterSetName -eq 'Venue') {
@@ -1457,6 +1486,7 @@ $apk = if ($ApkPath) { $ApkPath } else { Join-Path $projectRoot 'artifacts/quest
 if ($PSCmdlet.ParameterSetName -eq 'Smoke') {
     if (-not $SmokeTest) { throw 'Specify -SmokeTest to install and check a first launch.' }
     $release = Read-QuestRelease $ReleaseReport
+    if ($RequireOpenXR -and $release.versionCode -lt 74) { throw 'The OpenXR smoke check requires a Quest APK with version code 74 or later.' }
     Confirm-LocalQuestApk $apk $release.sha256
     $deploymentLock = Enter-QuestDeployment
     try { Invoke-QuestFirstLaunch $apk $release | ConvertTo-Json -Compress }

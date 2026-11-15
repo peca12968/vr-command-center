@@ -1,6 +1,8 @@
 # Quest 3 接入與工具鏈
 
-2026-11-16 Quest 開發 APK `0.50.8`／73 為 61,039,210 bytes，SHA-256 `04a84cdb6739891c8ff8fd5da7874e6239e15140f27fa0960553d89d3ee3d9e9`。通過 ARM64、SDK 32／35、OpenXR 程式庫、APK v2 簽章及同版 Windows 來源核對。實體部署待 USB 偵錯接通。 [APK](../artifacts/quest/VrCommand.apk) · [發行報告](../artifacts/venue-release-tracked-vr-0508.json)
+2026-11-16 Quest 開發 APK `0.50.9`／74 為 61,038,434 bytes，SHA-256 `53d965a70d8ffbdad95f01a955386909ec995a4156d762f9110294c66d905c8f`。通過 ARM64、SDK 32／35、OpenXR 程式庫、APK v2 簽章及同版 Windows 來源核對。新增首次啟動的 OpenXR 顯示與輸入檢查，實體部署待 USB 偵錯接通。 [APK](../artifacts/quest/VrCommand.apk) · [發行報告](../artifacts/venue-release-quest-openxr-0509.json)
+
+2026-11-16 Quest 開發 APK `0.50.8`／73 為 61,039,210 bytes，SHA-256 `04a84cdb6739891c8ff8fd5da7874e6239e15140f27fa0960553d89d3ee3d9e9`。通過 ARM64、SDK 32／35、OpenXR 程式庫、APK v2 簽章及同版 Windows 來源核對。 [APK 封存](../artifacts/history/unity-0508-before-quest-openxr-c4ccb59a/quest/VrCommand.apk) · [發行報告](../artifacts/venue-release-tracked-vr-0508.json)
 
 2026-11-11 Quest 開發 APK 0.50.7／72 為 61,037,854 bytes，SHA-256 `74457e3422ae4d312ba4d073fca1e3e982aedc55bccf9312656a21c638cf0473`。發行核對通過 ARM64、最低 SDK 32、目標 SDK 35、OpenXR 預載及 APK v2 開發簽章。安裝與操作待頭盔。 [APK](../artifacts/quest-packages/vr-command-quest-0.50.7-arm64-debug.apk) · [發行核對](../artifacts/venue-release-0.50.7-local-profiler.json)
 
@@ -45,7 +47,7 @@ pwsh -NoProfile -NonInteractive -File .\scripts\check-quest-usb.ps1
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -SmokeTest -Serial '<ADB 序號>' `
-  -ReleaseReport .\artifacts\venue-release-tracked-vr-0508.json
+  -ReleaseReport .\artifacts\venue-release-quest-openxr-0509.json
 ```
 
 工具核對指定 Quest 3，在目前 Android 使用者下安裝 APK，並讀回裝置上的 APK 雜湊。沒有既有玩家設定時，工具等待 Android 確認啟動，接著讀取該程序的 Unity 與 AndroidRuntime 日誌，並在三秒後重查原程序。成功輸出 JSON 的 `status` 為 `process-observed`。`unityLogLines` 是查到的 Unity 日誌列數，允許為零。預設遇到既有安裝會停止。
@@ -53,6 +55,12 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -SmokeTest -Serial '<ADB 序號
 如果 APK 安裝完成後遇到暫時的啟動或日誌錯誤，可在原命令加上 `-ResumeSmokeTest`。工具先核對已安裝 APK 的雜湊與原發行報告一致，並確認沒有玩家連線設定，才停止該遊戲程序並重新啟動。應用程式資料會保留。成功回條的 `installedThisRun` 在這次續測為 `false`，本輪完成首次安裝時為 `true`。 [Android 啟動指令](https://developer.android.com/tools/adb#am)
 
 這項檢查無需玩家票券。後續備妥測試場次，依[單房實機追蹤驗收](#單房實機追蹤驗收)部署新配發的玩家設定，再驗證入場、OpenXR 追蹤、MR 對位及操作。
+
+### 核對首次啟動的 OpenXR 子系統
+
+Quest APK 0.50.9／74 起，首次啟動命令可加 `-RequireOpenXR`。腳本隨 Android Launcher Intent 傳入當次識別碼，從原程序的 Unity 日誌讀取相同識別碼的回報。同一次啟動必須載入 OpenXR，且顯示與輸入子系統都在執行，才會回傳 `status: "openxr-ready"`。舊日誌、其他程序的日誌，或互相衝突的回報都無法通過。 [Android Activity 啟動](https://developer.android.com/tools/adb#am) · [Unity XR 顯示子系統](https://docs.unity3d.com/6000.0/Documentation/ScriptReference/XR.XRDisplaySubsystem.html)
+
+檢查使用沒有玩家連線設定的 Quest。部署工具最多輪詢 20 秒，期間若遊戲退出或重啟會中止。已安裝相同版本可同時加 `-ResumeSmokeTest`，用新的識別碼重新檢查。頭手追蹤、入場、MR 對位及操作仍在單房實機驗收中確認。
 
 ### 單房實機追蹤驗收
 

@@ -1,5 +1,7 @@
 # Windows 遊戲伺服器包
 
+2026-11-16 `VRCommand-GameServer-0.50.9-1.24-win-x64.zip` 為 84,984,800 bytes，SHA-256 `10a905084d642c8ebee152a1572cb16ca8ad4a8d30819942a9a3c4d620f74152`。解壓核對 331 筆清單，已和 Quest 0.50.9 核對來源及網路識別。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.9-1.24-win-x64.zip) · [發行報告](../artifacts/venue-release-quest-openxr-0509.json)
+
 2026-11-16 `VRCommand-GameServer-0.50.8-1.24-win-x64.zip` 為 84,984,763 bytes，SHA-256 `9949eeb0c2f1c07ad983783e126c1bb8e93f854d2add56f8c67b5d17f5877f62`。解壓核對 331 筆清單，支援 VR 場次的 `GameServer` 追蹤來源。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.8-1.24-win-x64.zip) · [發行核對](../artifacts/venue-release-tracked-vr-0508.json)
 
 2026-11-13 `VRCommand-GameServer-0.50.7-1.23-win-x64.zip` 為 84,984,410 bytes，SHA-256 `1b5a6789d6ba8d5ea6f63495866359fc75bc33bf854b3703f391e9a936f6b2ae`。解壓核對 331 筆清單。五房批次視窗可複製本輪就緒與結果報告的完整路徑。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.7-1.23-win-x64.zip)
