@@ -356,6 +356,16 @@ Quest 小批次驗證可在三包命令加上 `--check-vr-venue-tickets --check-
 
 單場 `--run` 或五房 `--venue-run` 可加 `--tracked-vr on`。透過 `start-verified-venue.py` 啟動五房時加 `--tracked-vr`。有需保留的 UDP 與戰績連線證據時，可同時啟用來源診斷。一般桌面排演可沿用預設的 `Simulation`。MR 場次採用 `GameServer`，並依原房間校正與追蹤規則開場。
 
+### 重跑五房追蹤來源驗證
+
+用解壓後的 Windows 0.50.8 伺服器包及支援第四版計畫的管理包，在同一台電腦驗證 `GameServer` 來源及開場條件。測試只開本機迴環位址上的伺服器，會先驗證獨立五房，再驗證五房合併。每輪用空名冊驗證全館追蹤開場被拒，然後結束場次、核對逐場封存及完整回放。
+
+```powershell
+python scripts/check-server-package.py '<解壓後的 VRCommand-GameServer>' `
+  --control-package '<解壓後的 VRCommand-ControlServer>' `
+  --runtime-root "$env:LOCALAPPDATA/VrCommand/TrackedVenueChecks" --tracked-vr-venue-only
+```
+
 ### 無人值守時關閉私人網路入站提示
 
 新解壓路徑的遊戲程式可能觸發 Windows 安全性的入站連線提示。若這台測試電腦使用私人網路、希望自動測試期間安靜執行，請在系統管理員 PowerShell 執行以下設定。它只關閉私人網路的防火牆入站通知，現有允許及封鎖規則仍生效。 [Microsoft Windows 防火牆命令列設定](https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/configure-with-command-line)

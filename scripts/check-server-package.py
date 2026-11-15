@@ -237,6 +237,7 @@ def main():
     p.add_argument('--mixed-venue-bundle-only', action='store_true', help='Verify a mixed five-room console ZIP and mapped mock Quest deployment from native publishers')
     p.add_argument('--openxr-mock-only', action='store_true', help='Verify a packaged graphical OpenXR client with the installed Unity mock runtime')
     p.add_argument('--check-tracked-vr-source', action='store_true', help='Verify the tracked VR source with a mock OpenXR client and a desktop peer')
+    p.add_argument('--tracked-vr-venue-only', action='store_true', help='Verify tracked VR sources in both five-room topologies without player processes')
     p.add_argument('--check-openxr-reconnect', action='store_true', help='Interrupt the tracked UDP client and reload its ticket with the mock right Vive menu button')
     p.add_argument('--check-openxr-revocation', action='store_true', help='Reject a revoked OpenXR ticket when the same seat receives a new admission')
     p.add_argument('--openxr-mock-pose-dll', type=Path, help='Compiled tests/fixtures/openxr-mock-pose.c for the OpenXR mock check')
@@ -251,8 +252,12 @@ def main():
         p.error('--check-mr-venue-write-gate requires --check-mr-venue-source-recovery')
     if args.check_room_endpoints and not (args.check_vr_venue_tickets or args.mixed_venue_bundle_only):
         p.error('--check-room-endpoints requires --check-vr-venue-tickets or --mixed-venue-bundle-only')
-    venue_only = args.mr_venue_bundle_only or args.mixed_venue_bundle_only
+    venue_bundle_only = args.mr_venue_bundle_only or args.mixed_venue_bundle_only
+    venue_only = venue_bundle_only or args.tracked_vr_venue_only
     if args.mr_venue_bundle_only and args.mixed_venue_bundle_only:p.error('Choose a single venue bundle check')
+    if args.tracked_vr_venue_only and (venue_bundle_only or args.game_address or args.player_package or args.check_venue_launcher
+                                       or args.check_interrupted_replay):
+        p.error('--tracked-vr-venue-only uses the two packages on loopback without a separate venue launcher check')
     if args.openxr_mock_only and (venue_only or not args.player_package):
         p.error('--openxr-mock-only requires a player package and its own native room')
     if args.check_tracked_vr_source and (not args.openxr_mock_only or args.check_openxr_reconnect or args.check_openxr_revocation
@@ -273,7 +278,7 @@ def main():
         p.error('--check-venue-openxr-reconnect requires --check-venue-openxr and its own connection and combat checks')
     if (args.openxr_mock_only or args.check_venue_openxr) != bool(args.openxr_mock_pose_dll):
         p.error('Supply --openxr-mock-pose-dll with --openxr-mock-only or --check-venue-openxr')
-    if venue_only:
+    if venue_bundle_only:
         if not args.game_address or args.player_package:p.error('The venue bundle check needs --game-address and no player package')
     elif not args.openxr_mock_only and bool(args.player_package)!=bool(args.game_address):p.error('Provide --player-package and --game-address together')
     if args.check_lan_preflight and not args.player_package:
@@ -739,7 +744,7 @@ def main():
         check(completed.returncode==0 and output.is_file(),label+' shipped Chromium reviews the original launcher file: '+diagnostic[-600:])
         return read(output)
 
-    def launch_venue(states, linked, *, unlocked_mr=False, label=None):
+    def launch_venue(states, linked, *, unlocked_mr=False, label=None, tracked_vr=False):
         topology='Linked' if linked else 'Independent'
         label=label or ('unlocked-mr-venue' if unlocked_mr else topology.lower()+'-venue')
         plan_file=runtime/(label+'.json')
@@ -1018,7 +1023,7 @@ def main():
                 check([row['sessionSequence'] for row in result['servers']]==[state['sequence'] for state in states],
                       'Existing v2 plans still preview the exact revisions with the guarded packages')
         else:
-            if args.check_venue_udp_readiness or args.check_venue_roster_ui or args.venue_field_evidence:
+            if tracked_vr or args.check_venue_udp_readiness or args.check_venue_roster_ui or args.venue_field_evidence:
                 plan['version']=4
                 plan['servers']=[{**row,'sessionSequence':state['sequence'],'missionId':state['mission']['id']}
                                  for row,state in zip(plan['servers'],states,strict=True)]
@@ -1176,6 +1181,8 @@ def main():
         extra=['--peer-diagnostics','on'] if args.peer_diagnostics else []
         if guarded_start is None:
             launch_command = [str(exe), *map(str, args_for(plan_file, work, ready)), '--report', str(report), *extra]
+            if tracked_vr:
+                launch_command.extend(('--tracked-vr', 'on'))
         else:
             launch_command = [*guarded_start, '--work', str(work), '--seconds', '600', '--ready-report', str(ready),
                               '--report', str(report), *(['--peer-diagnostics'] if args.peer_diagnostics else [])]
@@ -4813,6 +4820,37 @@ def main():
             save('imported-mission.json',imported_mission)
         if args.openxr_mock_only:
             check_openxr_mock()
+        if args.tracked_vr_venue_only:
+            rooms = list(range(1, 6))
+            phase_route = '/api/venue/phase'
+            for topology, scopes in (('Independent', [[room] for room in rooms]), ('Linked', [rooms])):
+                label = f'tracked-vr-{topology.lower()}'
+                states = [create(scope, f'{label}-{scope[0]}') for scope in scopes]
+                entries = launch_venue(states, topology == 'Linked', label=label, tracked_vr=True)
+                launch_ids = set()
+                for entry, state in zip(entries, states, strict=True):
+                    route = f'/api/sessions/{state["id"]}'
+                    current, world_state = request(route), request(route + '/world')
+                    source, header = current['combatStream'], world_state['header']
+                    launch_id = source['venueLaunchId']
+                    check(uuid.UUID(launch_id).int != 0 and source['expectedSequence'] == state['sequence']
+                          and source['origin'] == header['origin'] == 'GameServer'
+                          and source['streamId'] == header['streamId'] == entry['ready']['streamId']
+                          and header['roomIds'] == state['roomIds'] and current['state'] == 'Preparing',
+                          f'{entry["label"]} publishes its reviewed GameServer source for the original rooms')
+                    launch_ids.add(launch_id)
+                check(len(launch_ids) == 1, f'{label} shares one native source batch identity')
+                phase = request(phase_route)
+                denied = request(phase_route, {'action': 'Begin', 'targets': phase['begin'], 'requireFullTracking': True},
+                                 request_id=str(uuid.uuid4()), expected=409)
+                check(denied['code'] == 'venue-begin-not-ready' and denied['roomIds'] == rooms
+                      and request(phase_route) == phase, f'{label} rejects Begin without five tracked room rosters')
+                request(phase_route, {'action': 'End', 'targets': phase['end']}, request_id=str(uuid.uuid4()))
+                for entry in entries:
+                    finish(entry)
+                    final_world = entry['sealed']['world']
+                    check(final_world['header']['origin'] == 'GameServer' and final_world['header']['streamId'] == entry['ready']['streamId'],
+                          f'{entry["label"]} seals the original tracked VR world')
         if args.check_venue_launcher:
             unlocked=create(list(range(1,6)),'unlocked venue alignment',experience='MR')
             launch_venue([unlocked],True,unlocked_mr=True)
@@ -5357,26 +5395,28 @@ def main():
         if args.check_venue_ticket_freshness:
             verify_stale_ticket_source()
         # A killed launcher must close its already-assigned Job and stop the exact owned native handle.
-        crash=launch(create([1],'parent-exit',auto_attack=args.check_interrupted_replay),'parent-exit',listen_address='0.0.0.0')
-        if args.check_interrupted_replay:
-            crash_client = player(crash, 1)
-            roster = [crash_client['player']['id']]
-            wait(lambda: observe(crash, roster), 60, 'interrupted round original player')
-            begun = command(crash['sessionId'], 'Begin')['session']['sequence']
-            def damaged():
-                frame = observe(crash, roster, begun)
-                return frame and any(row['damageTaken'] > 0 for row in frame['statistics'])
-            wait(damaged, 20, 'original player damaged before the owned server exits')
-            check(True, 'interrupted native round records original player damage before the crash')
-        crash['process'].kill();crash['process'].wait(timeout=10);w=crash['witness'];check(w.kernel.WaitForSingleObject(w.handle,15000)==0,'parent death stops original job child');w.close();crash['witness']=None;check(not crash['reportPath'].exists(),'killed parent cannot publish success');command(crash['sessionId'],'End')
-        if args.check_interrupted_replay:
-            verify_interrupted_replay(crash, crash_client)
+        if not args.tracked_vr_venue_only:
+            crash=launch(create([1],'parent-exit',auto_attack=args.check_interrupted_replay),'parent-exit',listen_address='0.0.0.0')
+            if args.check_interrupted_replay:
+                crash_client = player(crash, 1)
+                roster = [crash_client['player']['id']]
+                wait(lambda: observe(crash, roster), 60, 'interrupted round original player')
+                begun = command(crash['sessionId'], 'Begin')['session']['sequence']
+                def damaged():
+                    frame = observe(crash, roster, begun)
+                    return frame and any(row['damageTaken'] > 0 for row in frame['statistics'])
+                wait(damaged, 20, 'original player damaged before the owned server exits')
+                check(True, 'interrupted native round records original player damage before the crash')
+            crash['process'].kill();crash['process'].wait(timeout=10);w=crash['witness'];check(w.kernel.WaitForSingleObject(w.handle,15000)==0,'parent death stops original job child');w.close();crash['witness']=None;check(not crash['reportPath'].exists(),'killed parent cannot publish success');command(crash['sessionId'],'End')
+            if args.check_interrupted_replay:
+                verify_interrupted_replay(crash, crash_client)
         check(all(x['state']=='Ended' for x in request('/api/sessions?includeEnded=true')),'no active management sessions')
         if args.check_room_endpoints:
             room_rows=request('/api/rooms/readiness')['rooms']
             check(len(room_rows) == 5 and all(row['sessionId'] is None and 'endpoint' not in row for row in room_rows),
                   'ended native sources leave no endpoint in the five current room rows')
-        save('evidence.json',{'rounds':rounds,'scope':('One packaged graphical Unity mock OpenXR client and one desktop peer on the same host.' if args.openxr_mock_only else
+        save('evidence.json',{'rounds':rounds,'scope':('Native tracked VR sources in five Independent rooms and one Linked session on loopback without player processes.' if args.tracked_vr_venue_only else
+            'One packaged graphical Unity mock OpenXR client and one desktop peer on the same host.' if args.openxr_mock_only else
             'One graphical Unity mock OpenXR client and 24 desktop peers in each same-host venue topology.' if args.check_venue_openxr else
             'Five Windows VR/MR Preparing endpoints and 25 signed files from the console mixed ZIP.' if args.mixed_venue_bundle_only else
             'Real Windows MR Preparing endpoints and 25 signed files per topology.' if args.mr_venue_bundle_only else
@@ -5471,12 +5511,13 @@ def main():
         if venue_password and venue_password in text:raise RuntimeError('Public metadata contains the test certificate password')
     save('checks.json',{'complete':True,'checks':len(checks),'findings':checks,'runtimeDirectory':str(runtime),
         'packageDirectory':str(folder),'playerPackageDirectory':str(player_folder) if player_folder else None,
-        'scope':('Same-machine tracked rig from Unity mock OpenXR and a simulated desktop peer, no physical headset.' if args.openxr_mock_only else
+        'scope':('Same-machine GameServer registration, guarded Begin refusal and Preparing seals in both five-room topologies.' if args.tracked_vr_venue_only else
+                 'Same-machine tracked rig from Unity mock OpenXR and a simulated desktop peer, no physical headset.' if args.openxr_mock_only else
                  'Five Independent rooms then Linked, one Unity mock OpenXR rig and 24 desktop peers per topology, same host.' if args.check_venue_openxr else
                  'Same-machine VR/MR servers in Preparing and mock ADB with no headset client.' if args.mixed_venue_bundle_only else
                  'Same-machine native MR servers in Preparing with no headset client.' if args.mr_venue_bundle_only else
                  'Same-machine VR simulation and a separate MR Preparing admission and seal check.' if args.check_managed_mr else 'Same-machine Simulation only.')
                 + (' Venue game processes use pinned HTTPS and WSS on the same Windows PC.' if venue_pin else '')
-                +' The separate parent-death case intentionally leaves the world unsealed.'})
+                + ('' if args.tracked_vr_venue_only else ' The separate parent-death case intentionally leaves the world unsealed.')})
     print(json.dumps({'complete':True,'checks':len(checks),'directory':str(out)}))
 if __name__=='__main__':main()
