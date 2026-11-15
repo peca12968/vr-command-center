@@ -606,6 +606,84 @@ class QuestVenueTests(unittest.TestCase):
         return {'role':'Client', 'address':'192.168.1.10', 'port':port,
                 'joinTicket':make_ticket(room, seat, **claims)}
 
+    def test_single_player_tracking_reads_the_original_preparing_seat(self):
+        session = self.session_ids[3]
+        player, admission = str(self.players[17]), str(self.admissions[17])
+        config = self.config(4, 2, session, 7777)
+        path = self.root / 'connection.json'
+        path.write_text(json.dumps(config), encoding='utf-8')
+        readiness_url = f'/api/sessions/{session}/readiness'
+        frame_url = f'/api/sessions/{session}/world/frames/23'
+        original = {'version': 1, 'sessionId': str(session), 'sessionSequence': 7, 'observedSequence': 7,
+                    'sampledAtUtc': '2026-11-16T01:00:00.100Z', 'capturedAtUtc': '2026-11-16T01:00:00Z',
+                    'sourceState': 'Fresh', 'sourceAgeMilliseconds': 100, 'origin': 'GameServer', 'worldSequence': 23,
+                    'players': [{'roomId': 4, 'seat': 2, 'playerId': player, 'admissionId': admission,
+                                 'state': 'Participating', 'rigKind': 'Tracked', 'canParticipate': True}]}
+        original_frame = {'packet': {'sequence': 23, 'observedSequence': 7, 'suspended': False,
+                                     'frame': {'phase': 'Preparing', 'tick': 0}}}
+        state = {'readiness': original, 'frame': original_frame}
+        requests = []
+        key = 'test-operator'
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                requests.append((self.path, self.headers.get('Authorization')))
+                if self.headers.get('Authorization') != 'Bearer ' + key:
+                    self.send_error(403)
+                    return
+                response = {readiness_url: state['readiness'], frame_url: state['frame']}.get(self.path)
+                if response is None:
+                    self.send_error(404)
+                    return
+                payload = json.dumps(response).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, *args):
+                pass
+
+        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+            worker = Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            command = ['pwsh', '-NoProfile', '-NonInteractive', '-File', str(ROOT / 'scripts/deploy-quest.ps1'),
+                       '-ClientConfig', str(path), '-VerifyPlayerTracking', '-ManagementApi', f'http://127.0.0.1:{server.server_port}']
+            cases = (
+                (original, original_frame, 'tracked-ready', True),
+                (dict(original, players=[dict(original['players'][0], admissionId=str(uuid.uuid4()))]),
+                 original_frame, 'admission-changed', False),
+                (dict(original, origin='Simulation'), original_frame, 'source-capture-unverified', False),
+                (dict(original, sessionId=str(uuid.uuid4())), original_frame, 'readiness-invalid', False),
+                (original, None, 'source-frame-unverified', True),
+                (original, {'packet': dict(original_frame['packet'], frame={'phase': 'Running', 'tick': 1})},
+                 'source-outside-preparing', True),
+            )
+            try:
+                for snapshot, frame, expected, reads_frame in cases:
+                    with self.subTest(expected=expected):
+                        state.update(readiness=snapshot, frame=frame)
+                        requests.clear()
+                        result = subprocess.run(command, env={**os.environ, 'VR_COMMAND_MASTER_KEY': key},
+                                                capture_output=True, encoding='utf-8', timeout=15)
+                        ready = expected == 'tracked-ready'
+                        self.assertEqual(0 if ready else 1, result.returncode, result.stderr)
+                        report = json.loads(result.stdout)
+                        self.assertEqual(('player', ready), (report['scope'], report['complete']))
+                        seat, = report['seats']
+                        self.assertEqual((str(session), 4, 3, expected),
+                                         (seat['sessionId'], seat['roomId'], seat['seat'], seat['status']))
+                        if ready:
+                            self.assertEqual((23, 7), (seat['worldSequence'], seat['observedSequence']))
+                        for secret in (key, config['joinTicket'], player, admission):
+                            self.assertNotIn(secret, result.stdout + result.stderr)
+                        urls = [readiness_url, frame_url] if reads_frame else [readiness_url]
+                        self.assertEqual([(url, 'Bearer ' + key) for url in urls], requests)
+            finally:
+                server.shutdown()
+                worker.join()
+
     def prepare(self, topology):
         manifest = {'version':1, 'topology':topology, 'rooms':[]}
         rooms = {}

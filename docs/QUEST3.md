@@ -36,7 +36,16 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -SmokeTest -Serial '<ADB 序號
 1. 啟動 Windows 管理服務。用主控台建立一場單房 VR 任務，將 Quest 3 玩家登記在該房。
 2. 從伺服器啟動器選擇同一場次，填入頭盔能連到的場館 IPv4 及 UDP 埠。勾選「VR 房間只接受追蹤姿態」及「記錄本次玩家連線來源（場館驗收）」。CLI 使用 `--tracked-vr on --peer-diagnostics on`。 [伺服器操作](WINDOWS_SERVER_PACKAGE.md#vr-場次使用實機追蹤)
 3. 等伺服器就緒，在主控台下載同一席的最新連線檔，再用 `deploy-quest.ps1 -ClientConfig` 及原發行報告部署。頭盔入場後，核對本房名冊的席位、`Tracked` 狀態及玩家頭手是否正確。
-4. 開始任務前啟動[原始日誌擷取](#收集-quest-場館驗收日誌)。結束後保持遊戲開啟至戰績確認完成，保存伺服器的戰鬥與世界封存及同一席的日誌。 [單場封存核對](EXTERNAL_CLIENTS.md#核對封存戰績與-udp-來源)
+4. 開始任務前用原玩家連線檔執行下方席位核對，再啟動[原始日誌擷取](#收集-quest-場館驗收日誌)。結束後保持遊戲開啟至戰績確認完成，保存伺服器的戰鬥與世界封存及同一席的日誌。 [單場封存核對](EXTERNAL_CLIENTS.md#核對封存戰績與-udp-來源)
+
+在已設好 `VR_COMMAND_MASTER_KEY` 的管理主機終端機執行。管理服務在其他主機時，使用它的 HTTPS 網址。
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\quest-player.json `
+  -VerifyPlayerTracking -ManagementApi http://127.0.0.1:5080
+```
+
+工具從原連線檔找出場次、房號、席次和入場身分，向管理服務核對本次已連線且有有效追蹤的玩家，並讀回同一張 GameServer 準備中畫格。成功回條的 `scope` 為 `player`，包含原世界和管理序號。已換過入場身分、追蹤尚未就緒或場次已開始時，輸出 `complete: false` 及原因，退出碼為 1。這項查詢只讀管理服務，無需 ADB。頭盔畫面和操作仍需在現場驗收。
 
 ## 開場前從頭盔執行 UDP 預檢
 

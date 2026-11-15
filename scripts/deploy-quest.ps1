@@ -1,11 +1,12 @@
 [CmdletBinding(DefaultParameterSetName='Player')]
 param(
-    [Parameter(Mandatory, ParameterSetName='Player')][Parameter(Mandatory, ParameterSetName='Refresh')][string]$ClientConfig,
+    [Parameter(Mandatory, ParameterSetName='Player')][Parameter(Mandatory, ParameterSetName='Refresh')][Parameter(Mandatory, ParameterSetName='PlayerTracking')][string]$ClientConfig,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Refresh')][Parameter(Mandatory, ParameterSetName='Smoke')][string]$Serial,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Refresh')][Parameter(ParameterSetName='Smoke')][string]$AdbPath = 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe',
     [Parameter(Mandatory, ParameterSetName='Smoke')][switch]$SmokeTest,
     [Parameter(ParameterSetName='Smoke')][switch]$ResumeSmokeTest,
     [Parameter(Mandatory, ParameterSetName='Refresh')][switch]$RefreshPlayerTicket,
+    [Parameter(Mandatory, ParameterSetName='PlayerTracking')][switch]$VerifyPlayerTracking,
     [Parameter(ParameterSetName='Player')][string]$AlignmentFile,
     [Parameter(ParameterSetName='Player')][switch]$Passthrough,
     [Parameter(ParameterSetName='Player')][switch]$MixedReality,
@@ -26,7 +27,7 @@ param(
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$DeploymentReport,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,120)][int]$WaitForTrackedSeconds,
     [Parameter(ParameterSetName='Bundle')][switch]$AllHeadsets,
-    [Parameter(ParameterSetName='Venue')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Windows')][ValidateNotNullOrEmpty()][string]$ManagementApi,
+    [Parameter(ParameterSetName='Venue')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Windows')][Parameter(Mandatory, ParameterSetName='PlayerTracking')][ValidateNotNullOrEmpty()][string]$ManagementApi,
     [Parameter(Mandatory, ParameterSetName='Windows')][ValidateNotNullOrEmpty()][string]$WindowsSeatMap,
     [Parameter(Mandatory, ParameterSetName='Windows')][ValidateNotNullOrEmpty()][string]$WindowsOutputDirectory
 )
@@ -214,7 +215,7 @@ function Get-ManagementTarget([string]$Address) {
         throw 'ManagementApi must be an HTTPS origin or a local loopback HTTP origin, without credentials, path, query or fragment.'
     }
     $masterKey = [Environment]::GetEnvironmentVariable('VR_COMMAND_MASTER_KEY')
-    if ([string]::IsNullOrWhiteSpace($masterKey)) { throw 'Set VR_COMMAND_MASTER_KEY for the live venue check.' }
+    if ([string]::IsNullOrWhiteSpace($masterKey)) { throw 'Set VR_COMMAND_MASTER_KEY for the live management check.' }
     return @{ Origin = $uri; Headers = @{ Authorization = 'Bearer ' + $masterKey } }
 }
 
@@ -568,33 +569,59 @@ function Read-QuestDeviceMap([string]$Path, [switch]$Partial) {
     $map.seats | Sort-Object roomId, seat
 }
 
-function Read-VenueTrackedReadiness($Target, $Venue, [int]$RequestMilliseconds) {
-    $url = [Uri]::new($Target.Origin, '/api/venue/tracked-readiness')
-    $rooms = @($Venue.LiveRooms | ForEach-Object { @{ roomId = $_.roomId; sessionId = $_.sessionId } })
-    $ids = @($rooms.sessionId | Sort-Object -Unique)
-    $body = @{ topology = $Venue.Report.topology; rooms = $rooms } | ConvertTo-Json -Compress -Depth 3
+function Read-TrackedReadinessResponse($Target, [Uri]$Url, [int]$RequestMilliseconds, [string]$Body) {
     $handler = [Net.Http.HttpClientHandler]::new()
     $handler.UseProxy = $handler.AllowAutoRedirect = $false
     $client = [Net.Http.HttpClient]::new($handler)
     $client.MaxResponseContentBufferSize = 256KB
     $cancellation = [Threading.CancellationTokenSource]::new($RequestMilliseconds)
-    $content = [Net.Http.StringContent]::new($body, [Text.Encoding]::UTF8, 'application/json')
+    $content = $null
     $response = $null
     $timer = [Diagnostics.Stopwatch]::StartNew()
     try {
         $client.DefaultRequestHeaders.Add('Authorization', $Target.Headers.Authorization)
-        $response = $client.PostAsync($url, $content, $cancellation.Token).GetAwaiter().GetResult()
-        if ($response.StatusCode -eq 409) { return @{ Status = 'venue-changed' } }
+        if ($Body) {
+            $content = [Net.Http.StringContent]::new($Body, [Text.Encoding]::UTF8, 'application/json')
+            $response = $client.PostAsync($Url, $content, $cancellation.Token).GetAwaiter().GetResult()
+            if ($response.StatusCode -eq 409) { return @{ Status = 'venue-changed' } }
+        } else {
+            $response = $client.GetAsync($Url, $cancellation.Token).GetAwaiter().GetResult()
+        }
         if ($response.StatusCode -in 401,403) { return @{ Status = 'readiness-access-denied' } }
         if ($response.StatusCode -ne 200) { return @{ Status = 'readiness-unavailable' } }
         $raw = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
     } catch { return @{ Status = 'readiness-unavailable' } }
     finally {
         if ($response) { $response.Dispose() }
-        $content.Dispose(); $cancellation.Dispose(); $client.Dispose()
+        if ($content) { $content.Dispose() }
+        $cancellation.Dispose(); $client.Dispose()
     }
-    try { $batch = ConvertFrom-Json -InputObject $raw }
+    try { return @{ Document = ConvertFrom-Json -InputObject $raw; Elapsed = $timer.Elapsed.TotalMilliseconds } }
     catch { return @{ Status = 'readiness-invalid' } }
+}
+
+function Test-TrackedReadinessSnapshot($Snapshot, [int]$MaxAge) {
+    return (Test-JsonInteger $Snapshot.version) -and $Snapshot.version -eq 1 -and
+        $Snapshot.sessionId -is [string] -and $Snapshot.sampledAtUtc -and
+        $Snapshot.players -is [array] -and $Snapshot.players.Count -le 25 -and
+        $Snapshot.sourceState -is [string] -and
+        $Snapshot.sourceState -cin @('Fresh','Ended','NoRecording','WaitingFrame','UnknownCaptureTime','ClockSkew','Stale','Suspended','PhasePending') -and
+        (Test-JsonInteger $Snapshot.worldSequence) -and $Snapshot.worldSequence -ge 0 -and
+        (Test-JsonInteger $Snapshot.sessionSequence) -and $Snapshot.sessionSequence -ge 1 -and
+        (Test-JsonInteger $Snapshot.observedSequence) -and $Snapshot.observedSequence -ge 0 -and
+        ($Snapshot.sourceState -cne 'Fresh' -or (((Test-JsonInteger $Snapshot.sourceAgeMilliseconds) -or
+            $Snapshot.sourceAgeMilliseconds -is [double]) -and [double]::IsFinite($Snapshot.sourceAgeMilliseconds) -and
+            $Snapshot.sourceAgeMilliseconds -ge -1000 -and $Snapshot.sourceAgeMilliseconds -le $MaxAge))
+}
+
+function Read-VenueTrackedReadiness($Target, $Venue, [int]$RequestMilliseconds) {
+    $url = [Uri]::new($Target.Origin, '/api/venue/tracked-readiness')
+    $rooms = @($Venue.LiveRooms | ForEach-Object { @{ roomId = $_.roomId; sessionId = $_.sessionId } })
+    $ids = @($rooms.sessionId | Sort-Object -Unique)
+    $body = @{ topology = $Venue.Report.topology; rooms = $rooms } | ConvertTo-Json -Compress -Depth 3
+    $response = Read-TrackedReadinessResponse $Target $url $RequestMilliseconds $body
+    if ($response.Status) { return $response }
+    $batch = $response.Document
     if (-not (Test-JsonInteger $batch.version) -or $batch.version -ne 1 -or $batch.topology -cne $Venue.Report.topology -or
         -not $batch.sampledAtUtc -or -not (Test-JsonInteger $batch.maxSourceAgeMilliseconds) -or $batch.maxSourceAgeMilliseconds -ne 1500 -or
         $batch.sessions -isnot [array] -or $batch.sessions.Count -ne $ids.Count) {
@@ -602,27 +629,18 @@ function Read-VenueTrackedReadiness($Target, $Venue, [int]$RequestMilliseconds) 
     }
     $readings = @{}
     foreach ($snapshot in $batch.sessions) {
-        if (-not (Test-JsonInteger $snapshot.version) -or $snapshot.version -ne 1 -or $snapshot.sessionId -cnotin $ids -or
-            $readings.ContainsKey($snapshot.sessionId) -or $snapshot.sampledAtUtc -cne $batch.sampledAtUtc -or
-            $snapshot.players -isnot [array] -or $snapshot.players.Count -gt 25 -or
-            $snapshot.sourceState -cnotin @('Fresh','Ended','NoRecording','WaitingFrame','UnknownCaptureTime','ClockSkew','Stale','Suspended','PhasePending') -or
-            -not (Test-JsonInteger $snapshot.worldSequence) -or $snapshot.worldSequence -lt 0 -or
-            -not (Test-JsonInteger $snapshot.sessionSequence) -or $snapshot.sessionSequence -lt 1 -or
-            -not (Test-JsonInteger $snapshot.observedSequence) -or $snapshot.observedSequence -lt 0 -or
-            ($snapshot.sourceState -ceq 'Fresh' -and ((-not (Test-JsonInteger $snapshot.sourceAgeMilliseconds) -and
-                $snapshot.sourceAgeMilliseconds -isnot [double]) -or -not [double]::IsFinite($snapshot.sourceAgeMilliseconds) -or
-                $snapshot.sourceAgeMilliseconds -lt -1000 -or $snapshot.sourceAgeMilliseconds -gt $batch.maxSourceAgeMilliseconds))) {
+        if (-not (Test-TrackedReadinessSnapshot $snapshot $batch.maxSourceAgeMilliseconds) -or $snapshot.sessionId -cnotin $ids -or
+            $readings.ContainsKey($snapshot.sessionId) -or $snapshot.sampledAtUtc -cne $batch.sampledAtUtc) {
             return @{ Status = 'readiness-invalid' }
         }
         $readings[$snapshot.sessionId] = $snapshot
     }
     return @{ Sessions = $readings; SampledAtUtc = $batch.sampledAtUtc; MaxAge = $batch.maxSourceAgeMilliseconds;
-        Elapsed = $timer.Elapsed.TotalMilliseconds }
+        Elapsed = $response.Elapsed }
 }
 
-function Get-TrackedSeatStatus($Batch, $Snapshot, $Connection) {
+function Get-TrackedSeatStatus($Batch, $Snapshot, $Ticket, [bool]$RequiresMr) {
     if ($Batch.Status) { return $Batch.Status }
-    $ticket = $Connection.Ticket
     $rows = @($snapshot.players | Where-Object { $_.roomId -eq $ticket.RoomId -and $_.seat -eq $ticket.Seat })
     if ($rows.Count -eq 0) { return 'seat-unavailable' }
     if ($rows.Count -ne 1) { return 'readiness-invalid' }
@@ -636,7 +654,7 @@ function Get-TrackedSeatStatus($Batch, $Snapshot, $Connection) {
     if ($snapshot.sourceAgeMilliseconds + $Batch.Elapsed -gt $Batch.MaxAge) { return 'source-expired-in-transit' }
     if ($snapshot.origin -cnotin @('Simulation','GameServer') -or $snapshot.worldSequence -eq 0 -or
         $snapshot.observedSequence -ne $snapshot.sessionSequence) { return 'source-revision-pending' }
-    if ($Connection.Alignment -and ($snapshot.origin -cne 'GameServer' -or
+    if ($RequiresMr -and ($snapshot.origin -cne 'GameServer' -or
         @($snapshot.mrStartState, $snapshot.mrResumeState, $snapshot.mrTrackingState).Where({ $_ -cin @('Ready','WaitingPlayers') }).Count -eq 0)) {
         return 'mr-profile-pending'
     }
@@ -656,7 +674,7 @@ function New-TrackedSeatReport($Venue, [object[]]$Map, $Batch, [switch]$IncludeA
         }
         $connection = $Venue.Connections[$key]
         $snapshot = if ($batch.Sessions) { $batch.Sessions[$connection.Ticket.SessionId.ToString('D')] }
-        $result = [ordered]@{ roomId = $row.roomId; seat = $row.seat; status = Get-TrackedSeatStatus $batch $snapshot $connection;
+        $result = [ordered]@{ roomId = $row.roomId; seat = $row.seat; status = Get-TrackedSeatStatus $batch $snapshot $connection.Ticket ([bool]$connection.Alignment);
             sourceState = $snapshot.sourceState; worldSequence = $snapshot.worldSequence }
         if ($IncludeAllHeadsets) { $result.registeredHeadset = $headset }
         if ($DeploymentReport) {
@@ -712,6 +730,36 @@ function Confirm-PreparingReadinessFrames($Target, $Report, [int]$RequestMillise
             }
         }
     } finally { $cancellation.Dispose(); $client.Dispose() }
+}
+
+function Confirm-PlayerTrackedSeat($Target, $Ticket) {
+    $sessionId = $Ticket.SessionId.ToString('D')
+    $url = [Uri]::new($Target.Origin, "/api/sessions/$sessionId/readiness")
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $reading = Read-TrackedReadinessResponse $Target $url 10000
+    $snapshot = $reading.Document
+    $sample = @{ Status = $reading.Status; Elapsed = $reading.Elapsed; MaxAge = 1500 }
+    if (-not $sample.Status -and (-not (Test-TrackedReadinessSnapshot $snapshot $sample.MaxAge) -or $snapshot.sessionId -cne $sessionId)) {
+        $sample.Status = 'readiness-invalid'
+        $snapshot = $null
+    }
+    $status = Get-TrackedSeatStatus $sample $snapshot $Ticket ([bool]$Ticket.AlignmentHash)
+    if ($status -ceq 'tracked-ready' -and ($snapshot.origin -cne 'GameServer' -or -not $snapshot.capturedAtUtc)) {
+        $status = 'source-capture-unverified'
+    }
+    $seat = [ordered]@{ sessionId = $sessionId; roomId = $Ticket.RoomId; seat = $Ticket.Seat + 1; status = $status
+        sourceState = $snapshot.sourceState; worldSequence = $snapshot.worldSequence; observedSequence = $snapshot.observedSequence
+        capturedAtUtc = $snapshot.capturedAtUtc }
+    $report = [ordered]@{ phase = 'tracked-readiness'; scope = 'player'; complete = $status -ceq 'tracked-ready'
+        sampledAtUtc = $snapshot.sampledAtUtc; seats = @($seat) }
+    if ($report.complete) {
+        Confirm-PreparingReadinessFrames $Target $report ([int][Math]::Floor(10000 - $timer.Elapsed.TotalMilliseconds))
+    }
+    if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) {
+        $seat.status = 'ticket-expired'
+        $report.complete = $false
+    }
+    return $report
 }
 
 function Read-TrackedSeatReport($Target, $Venue, [object[]]$Map, [int]$RequestMilliseconds, [switch]$IncludeAllHeadsets) {
@@ -1328,6 +1376,16 @@ if ($PSCmdlet.ParameterSetName -eq 'Refresh') {
 }
 
 if ($PSCmdlet.ParameterSetName -eq 'Windows') { Export-WindowsVenueSeats; return }
+
+if ($PSCmdlet.ParameterSetName -eq 'PlayerTracking') {
+    if (-not $VerifyPlayerTracking) { throw 'Specify -VerifyPlayerTracking to check the player seat before Begin.' }
+    $connection = (Read-DeploymentJson $ClientConfig 4096 'player connection').Document
+    $ticket = Read-PlayerConfig $connection
+    $result = Confirm-PlayerTrackedSeat (Get-ManagementTarget $ManagementApi) $ticket
+    $result | ConvertTo-Json -Depth 4 -Compress
+    if (-not $result.complete) { exit 1 }
+    return
+}
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $apk = if ($ApkPath) { $ApkPath } else { Join-Path $projectRoot 'artifacts/quest/VrCommand.apk' }
