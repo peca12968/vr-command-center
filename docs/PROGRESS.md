@@ -5,6 +5,7 @@
 - 新增 `scripts/check-quest-usb.ps1`，分別讀取 Windows Meta USB 介面及本機現有 ADB 清單。報告區分未列舉、缺少 ADB 介面、PnP 問題碼、未授權、離線及多裝置狀態。診斷只透過回送介面查詢，輸出省略裝置序號及位址。部署遇到缺少或未授權的偵錯裝置時會指向該工具。 [診斷操作](QUEST3.md#windows-usb-與-adb-診斷)
 - 本機已連接的 Quest 3 讀到 5 個 Meta USB 節點，其中 1 個檔案傳輸介面、0 個 ADB 介面。既有 ADB 服務回報零台，查詢前後程序相同。原 APK 0.50.8／73、61,039,210 bytes 的 SHA-256 仍符合發行報告，實機安裝與追蹤待偵錯介面接通。 [唯讀實測](../artifacts/quest-usb-host-26d8a2a4.json) · [原發行報告](../artifacts/venue-release-tracked-vr-0508.json)
 - 通過 3 項 USB 診斷測試及 62 項部署回歸。用受控回送連線核對腳本只送裝置清單查詢。首次啟動的缺裝置和未授權檢查另以序列方式複驗，確認只查清單，並保留診斷指引。測試並行時曾碰到部署互斥鎖，序列複驗通過。
+- 功能提交 `920ad25` 已推送。GitHub Actions 因帳務或支出上限未啟動，工作執行步驟數為零。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43766605391/job/132973033933)
 
 ## 2026-11-16 從五房結束批次查看離場戰績和回放
 
