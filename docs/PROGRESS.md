@@ -6,6 +6,7 @@
 - 通過 273 項 Unity EditMode、128 項封存驗收與 64 項 Quest 部署測試。封存夾具在獨立與合併各核對 5 個 Quest 席，拒絕錯 PID、錯連線和缺片；單場命令回傳相同一席摘要。首輪夾具少宣告每房 2 席，補齊原席數後通過。Windows 玩家與伺服器原包各 331 筆，配對 324 筆遊戲檔；APK ARM64、SDK 32／35、OpenXR 程式庫、v2 簽章與新版量測片段均核對。 [發行報告](../artifacts/venue-release-quest-link-0510.json) · [0.50.9 原件](../artifacts/history/unity-0509-before-quest-link-7650a819/)
 - 0.50.10 的 Windows 原生排演使用既有防火牆規則路徑及回送介面。獨立與合併各 5 個背景玩家執行 40 秒，通過 20 項，完成 6 場雙封存與回放。兩種模式各送出並收到 150 筆原遊戲探測，無逾時，原程序已收尾。 [同機排演結果](../artifacts/desktop-exercise/20261116-062844-b5f5ff8d/exercise-result.json)
 - 建置後的 Windows 仍辨識 Quest 3 檔案傳輸介面，ADB 介面數為零。實體頭盔延遲、顯示幀率、跨機 25 席與廠商硬體待現地驗收。 [唯讀 USB 診斷](../artifacts/quest-usb-host-after-0510-f65d582d.json)
+- 功能提交 `2a07558` 已推送。GitHub Actions 因帳務或支出上限未啟動，工作執行步驟數為零。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43769888360/job/132983204421)
 
 ## 2026-11-16 Quest 首次啟動核對 OpenXR 顯示與輸入
 
