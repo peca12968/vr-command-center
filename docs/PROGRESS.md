@@ -5,6 +5,7 @@
 - 管理包 0.31.204 在獨立或合併批次結束後，於原場次子 ZIP 保留離場玩家的原入場、加入與移除序號及封存戰績。控制台顯示各場的離場戰績數。含回條的 ZIP 按結束名冊核對原送達。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [批次封存操作](EXTERNAL_CLIENTS.md#核對五房批次中的離場戰績)
 - 離線工具核對每房明列的結束人數，從原戰鬥與世界雙封存重算離場戰績，並拒絕換房、錯配 End 或缺少原日誌。合併場結束名冊全空也可查驗戰績，送達計數為零。5／10／25 席階段沿用原名冊與原容量條件。
 - 管理包解壓核對 568 筆清單。解壓包通過 147 項五房瀏覽器專測及 825 項 HTTP 檢查，另有 20 項單場、1,115 項領域、117 項 Node 和 7 項封裝檢查。五房專測使用同機管理服務和測試畫格，在兩種模式各匯出一份原 ZIP，第一房結束名冊皆為空，其餘四席均確認原戰績。Windows 仍列出 Quest 3，現有 ADB 裝置數為零，頭盔與跨機驗收待進行。 [五房背景檢查](../artifacts/console-venue-departures-package-229f32f4/checks.json) · [單場回歸](../artifacts/console-venue-departures-single-4ab59f33/checks.json)
+- 解壓包通過 1,236 項完整背景瀏覽器回歸，離線工具通過 127 項 Python 檢查。功能提交 `bfaf491` 已推送。GitHub Actions 因帳務或支出上限未啟動，工作執行步驟數為零。 [完整回歸](../artifacts/console-venue-departures-regression-6ff0dd95/checks.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43763977453/job/132964852895)
 
 ## 2026-11-16 單場驗收保留離場玩家戰績
 
