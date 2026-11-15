@@ -4,6 +4,7 @@
 
 - 管理包 0.31.203 可在單場 ZIP 留存結束前被移出的玩家。`roster-departures.json` 保存原入場、房號、加入與移除管理序號。原戰鬥與世界日誌雙封存後，工具可重算封存統計，檢查移除後無有效參戰姿態，並按結束名冊逐位核對戰績送達。 [驗收操作](EXTERNAL_CLIENTS.md#核對任務中被移出的玩家)
 - 通過 126 項 Python 封存驗收、1,115 項領域及 7 項封裝檢查。Windows 包解壓核對 568 筆清單，通過 20 項單場及 11 項原匯出專測。五房背景回歸通過 143 項。用管理台實際下載的兩人已離場 ZIP 搭配合成日誌驗證，核對兩份封存分數及零筆送達。另一測試使用一發離場玩家的原戰鬥記錄格式核對非零耗彈，並拒絕移除後射擊。現有 ADB 仍無可用頭盔，實機與跨機待驗。 [解壓包驗證](../artifacts/console-roster-departures-package-a578de6d/checks.json) · [五房回歸](../artifacts/console-roster-departures-venue-5a7ac013/checks.json)
+- 功能提交 `f2ecc7f` 已推送。GitHub Actions 因帳務或支出上限未啟動，工作執行步驟數為零。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43762216372/job/132959315657)
 
 ## 2026-11-16 單場驗收 ZIP 附追蹤開場資料
 
