@@ -374,6 +374,12 @@ python scripts/check-server-package.py '<解壓後的 VRCommand-GameServer>' `
 
 Windows 依執行檔的完整路徑套用程式規則。即使只有同機測試，新解壓路徑的 `vrcommand.exe` 也可能觸發入站連線提示。自動測試用 `127.0.0.1`，並先核對實際 EXE 路徑在目前網路設定檔的既有規則。新路徑尚未確認時，可先跑建置、套件驗證及使用測試替身的檢查。 [Microsoft Windows 防火牆規則](https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/rules)
 
+桌面場館及共用同一啟動檢查的測試會在啟動 Unity 前，自動確認所有啟用中的設定檔。若某個設定檔會顯示通知，且執行檔的實際路徑缺少涵蓋入站 TCP 與 UDP 的程式規則，測試會在終端機回報該設定檔與路徑。這項檢查只讀取防火牆設定。其他會啟動原生執行檔的測試，可用同一支指令先檢查指定路徑。
+
+```powershell
+pwsh -NoProfile -NonInteractive -File .\scripts\check-windows-firewall-notifications.ps1 -Executable .\artifacts\desktop\VrCommand.exe
+```
+
 測試電腦使用私人網路時，可以從系統管理員 PowerShell 一次關閉私人網路的入站提示，再核對 `NotifyOnListen` 為 `False`。防火牆與現有允許和封鎖規則繼續生效。 [Microsoft Windows 防火牆命令列設定](https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/configure-with-command-line)
 
 ```powershell
