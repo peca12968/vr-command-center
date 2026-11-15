@@ -366,9 +366,11 @@ python scripts/check-server-package.py '<解壓後的 VRCommand-GameServer>' `
   --runtime-root "$env:LOCALAPPDATA/VrCommand/TrackedVenueChecks" --tracked-vr-venue-only
 ```
 
-### 無人值守時關閉私人網路入站提示
+### 無人值守的 Windows 測試
 
-新解壓路徑的遊戲程式可能觸發 Windows 安全性的入站連線提示。若這台測試電腦使用私人網路、希望自動測試期間安靜執行，請在系統管理員 PowerShell 執行以下設定。它只關閉私人網路的防火牆入站通知，現有允許及封鎖規則仍生效。 [Microsoft Windows 防火牆命令列設定](https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/configure-with-command-line)
+Windows 依執行檔的完整路徑套用程式規則。即使只有同機測試，新解壓路徑的 `vrcommand.exe` 也可能觸發入站連線提示。自動測試用 `127.0.0.1`，並先核對實際 EXE 路徑在目前網路設定檔的既有規則。新路徑尚未確認時，可先跑建置、套件驗證及使用測試替身的檢查。 [Microsoft Windows 防火牆規則](https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/rules)
+
+測試電腦使用私人網路時，可以從系統管理員 PowerShell 一次關閉私人網路的入站提示，再核對 `NotifyOnListen` 為 `False`。防火牆與現有允許和封鎖規則繼續生效。 [Microsoft Windows 防火牆命令列設定](https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/configure-with-command-line)
 
 ```powershell
 Set-NetFirewallProfile -Profile Private -NotifyOnListen False
