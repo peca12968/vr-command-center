@@ -59,6 +59,12 @@ class WindowsLinkCriteriaFailed(EvidenceError):
         self.metrics = metrics
 
 
+class ConcurrentRosterIncomplete(EvidenceError):
+    def __init__(self, message, overlap):
+        super().__init__(message)
+        self.overlap = overlap
+
+
 class QuestCapturesIncomplete(EvidenceError):
     def __init__(self, captures):
         super().__init__('Quest capture reports must cover the planned Quest seats exactly' if captures['missingSeats']
@@ -620,20 +626,29 @@ def roster_periods(players, minimum_ms, applied_end, *, require_tracked=False, s
 
 
 class VenueRosterOverlap:
-    def __init__(self, minimum_ms, *, require_tracked=False, require_fire=False):
+    def __init__(self, minimum_ms, *, require_tracked=False, require_fire=False, inspect=False):
         self.minimum_ms = minimum_ms
         self.minimum = timedelta(milliseconds=minimum_ms)
+        self.sample_minimum_ms = 1 if inspect else minimum_ms
+        self.sample_minimum = timedelta(milliseconds=self.sample_minimum_ms)
         self.require_tracked = require_tracked
         self.require_fire = require_fire
+        self.inspect = inspect
         self.fires = []
         self.intervals = None
+        self.groups = []
+        self.seats = {}
 
-    def add(self, capture_started_at, periods, fires):
+    def add(self, capture_started_at, periods, fires, players=None):
         require(capture_started_at is not None, 'Concurrent roster verification requires an original UTC capture clock')
         capture = datetime.fromisoformat(capture_started_at).astimezone(timezone.utc)
         self.fires.extend((capture + timedelta(milliseconds=before), capture + timedelta(milliseconds=after), pid)
                           for before, after, pid in fires)
         right = [(capture + timedelta(milliseconds=start), capture + timedelta(milliseconds=end)) for start, end in periods]
+        if self.inspect:
+            self.groups.append({'roomIds': sorted({player['roomId'] for player in players.values()}),
+                                'longestMilliseconds': max((end - start for start, end in periods), default=0)})
+            self.seats.update({pid: (player['roomId'], player['seat'] + 1) for pid, player in players.items()})
         if self.intervals is None:
             self.intervals = right
             return
@@ -642,7 +657,7 @@ class VenueRosterOverlap:
         while i < len(left) and j < len(right):
             a, b = left[i], right[j]
             start, end = max(a[0], b[0]), min(a[1], b[1])
-            if end - start >= self.minimum:
+            if end - start >= self.sample_minimum:
                 intersection.append((start, end))
             if a[1] <= b[1]:
                 i += 1
@@ -650,15 +665,17 @@ class VenueRosterOverlap:
                 j += 1
         self.intervals = intersection
 
-    def summary(self, players):
-        require(self.intervals, 'Original recordings do not show the required continuous concurrent roster')
-        candidates = self.intervals
+    def summary(self, players, *, staged_minimum=None):
+        candidates = [pair for pair in self.intervals or () if pair[1] - pair[0] >= self.minimum]
+        if not candidates:
+            self.reject('Original recordings do not show the required continuous concurrent roster', 'insufficient-overlap')
         if self.require_fire:
             # A world event only gives a tick. Both samples bracketing it must
             # fit inside the common UTC window to count it for the original seat.
             fires = sorted(self.fires)
-            candidates = []
-            for start, end in self.intervals:
+            sufficient = []
+            best = None
+            for start, end in candidates:
                 seats = set()
                 index = bisect_left(fires, start, key=lambda fire: fire[0])
                 while index < len(fires) and fires[index][0] <= end:
@@ -667,15 +684,39 @@ class VenueRosterOverlap:
                         seats.add(player)
                     index += 1
                 if len(seats) == players:
-                    candidates.append((start, end))
-            require(candidates, 'No continuous concurrent roster interval contains a sealed shot from every original seat')
+                    sufficient.append((start, end))
+                elif self.inspect and (best is None or (len(seats), end - start) > (len(best[0]), best[2] - best[1])):
+                    best = seats, start, end
+            if not sufficient:
+                self.reject('No continuous concurrent roster interval contains a sealed shot from every original seat',
+                            'missing-fire', best=best)
+            candidates = sufficient
         start, end = max(candidates, key=lambda pair: pair[1] - pair[0])
-        return {'players': players, 'minimumMilliseconds': self.minimum_ms,
-                'longestMilliseconds': (end - start) // timedelta(milliseconds=1),
+        longest = (end - start) // timedelta(milliseconds=1)
+        if self.inspect and staged_minimum is not None and longest < staged_minimum:
+            self.reject('Venue batch lacks the continuous concurrent roster required by the staged plan',
+                        'insufficient-overlap', minimum=staged_minimum, longest=longest)
+        return {'players': players, 'minimumMilliseconds': self.minimum_ms, 'longestMilliseconds': longest,
                 'maxFrameGapMilliseconds': MAX_CONCURRENT_FRAME_GAP_MS,
                 'fromUtc': start.isoformat(), 'throughUtc': end.isoformat(),
                 **({'playersWithConfirmedFire': players} if self.require_fire else {}),
                 **({'rigKind': 'Tracked'} if self.require_tracked else {})}
+
+    def reject(self, message, status, *, minimum=None, longest=None, best=None):
+        if not self.inspect:
+            raise EvidenceError(message)
+        if longest is None:
+            longest = max(((end - start) // timedelta(milliseconds=1) for start, end in self.intervals or ()), default=0)
+        detail = {'status': status, 'minimumMilliseconds': minimum or self.minimum_ms, 'longestMilliseconds': longest,
+                  'maxFrameGapMilliseconds': MAX_CONCURRENT_FRAME_GAP_MS, 'requireTrackedRoster': self.require_tracked,
+                  'requireConcurrentFire': self.require_fire, 'groups': sorted(self.groups, key=lambda row: row['roomIds'])}
+        if best is not None:
+            seen, start, end = best
+            detail['bestFireWindowMilliseconds'] = (end - start) // timedelta(milliseconds=1)
+            detail['playersWithConfirmedFire'] = len(seen)
+            detail['missingFireSeats'] = [{'roomId': room, 'seat': seat}
+                                          for room, seat in sorted(self.seats[pid] for pid in self.seats.keys() - seen)]
+        raise ConcurrentRosterIncomplete(message, detail)
 
 
 class VenueReconnectWindow:
@@ -779,7 +820,7 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
         for seat in quest_readiness:
             readiness_frames.setdefault(seat['worldSequence'], []).append(seat)
     if concurrency is not None:
-        observe_roster, periods, fires = roster_periods(players, concurrency.minimum_ms, applied_end,
+        observe_roster, periods, fires = roster_periods(players, concurrency.sample_minimum_ms, applied_end,
                                                        require_tracked=concurrency.require_tracked, sealed_fires=sealed_fires)
     if reconnect_window is not None:
         observe_reconnect, finish_reconnect = reconnect_window.watch(players, applied_end, world['acceptedSequence'],
@@ -883,7 +924,7 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
                 'World journal lacks an active accepted pose for an original seat')
     if concurrency is not None:
         require(not sealed_fires, 'Original sealed combat fire is missing from the world journal')
-        concurrency.add(journal['captureStartedAtUtc'], periods, fires)
+        concurrency.add(journal['captureStartedAtUtc'], periods, fires, players)
     if reconnect_window is not None:
         capture = journal['captureStartedAtUtc']
         require(capture is not None, 'Reconnect window requires an original UTC capture clock')
@@ -2562,7 +2603,7 @@ def inspect_stage_evidence(manifest, entries, expected, base, archives):
 
 def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_logs=False, inspect_udp=False,
                        inspect_missing=False,
-                       staged_roster=None, staged_link_criteria=None, expected_stage=None):
+                       staged_roster=None, staged_link_criteria=None, expected_stage=None, inspect_roster_minimum=None):
     manifest_path = manifest_path.resolve(strict=True)
     with manifest_path.open('rb') as stream:
         raw_manifest = limited_read(stream)
@@ -2657,7 +2698,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     concurrency = None
     if minimum is not None:
         require(journals, 'Concurrent roster verification requires the original world journals for the full batch')
-        concurrency = VenueRosterOverlap(minimum, require_tracked=require_tracked, require_fire=require_fire)
+        concurrency = VenueRosterOverlap(minimum, require_tracked=require_tracked, require_fire=require_fire,
+                                         inspect=inspect_roster_minimum is not None)
     require_distinct_remote_roster = manifest.get('requireDistinctRemoteRoster', False)
     require(type(require_distinct_remote_roster) is bool, 'requireDistinctRemoteRoster must be a boolean')
     require(not require_distinct_remote_roster or (topology == 'direct-lan' and concurrency is not None),
@@ -3115,7 +3157,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
             **({'worldJournalsVerified': len(summaries)} if journals else {}),
             **({'combatJournalsVerified': len(summaries)} if combat_journals else {}),
             **({'venueControlBatches': control_summary} if control_summary else {}),
-            **({'concurrentRoster': concurrency.summary(len(player_ids))} if concurrency is not None else {}),
+            **({'concurrentRoster': concurrency.summary(len(player_ids), staged_minimum=inspect_roster_minimum)}
+               if concurrency is not None else {}),
             **begin_summary,
             **reconnect_summary,
             **({'roomAlignmentsVerified': sum(len(row.get('roomAlignments', [])) for row in summaries)} if check_alignments else {})}
@@ -3217,7 +3260,7 @@ def verify_venue_stages(plan_path, *, inspect=False):
         paths[path] = index
         try:
             report, batch = verify_venue_batch(path, inspect_quest_logs=inspect, inspect_udp=inspect,
-                                               inspect_missing=inspect,
+                                               inspect_missing=inspect, inspect_roster_minimum=minimum if inspect else None,
                                                staged_roster=staged_roster, staged_link_criteria=link_criteria,
                                                expected_stage=expected_stage)
             key = (report['mode'], report['players'])
@@ -3241,6 +3284,9 @@ def verify_venue_stages(plan_path, *, inspect=False):
             continue
         except WindowsLinkCriteriaFailed as error:
             reject(f'Venue manifest entry {index}: {error}', index, windowsLinkMetrics=error.metrics)
+            continue
+        except ConcurrentRosterIncomplete as error:
+            reject(f'Venue manifest entry {index}: {error}', index, concurrentRoster=error.overlap)
             continue
         except QuestCapturesIncomplete as error:
             reject(f'Venue manifest entry {index}: {error}', index, questCaptures=error.captures)

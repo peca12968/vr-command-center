@@ -1233,6 +1233,26 @@ class FieldResultsTests(unittest.TestCase):
                     path.write_text(json.dumps(dict(plan, **changes)), encoding='utf-8')
                     with self.assertRaisesRegex(field.EvidenceError, error):
                         field.verify_venue_stages(path)
+            inspection = field.verify_venue_stages(path, inspect=True)
+            self.assertFalse(inspection['complete'])
+            self.assertEqual(6, len(inspection['issues']))
+            for issue in inspection['issues']:
+                overlap = issue['concurrentRoster']
+                self.assertEqual('insufficient-overlap', overlap['status'])
+                self.assertEqual(9000, overlap['minimumMilliseconds'])
+                self.assertGreater(overlap['longestMilliseconds'], 0)
+                self.assertLess(overlap['longestMilliseconds'], 9000)
+                self.assertEqual(list(range(1, 6)), [room for group in overlap['groups'] for room in group['roomIds']])
+                self.assertGreaterEqual(min(group['longestMilliseconds'] for group in overlap['groups']),
+                                        overlap['longestMilliseconds'])
+            first = root / names[0]
+            raw_first = first.read_bytes()
+            first.write_text(json.dumps(dict(json.loads(raw_first), minimumConcurrentMilliseconds=9000)), encoding='utf-8')
+            path.write_text(json.dumps(plan), encoding='utf-8')
+            local_minimum = field.verify_venue_stages(path, inspect=True)
+            self.assertEqual([[1]], [issue['entries'] for issue in local_minimum['issues']])
+            self.assertEqual(inspection['issues'][0]['concurrentRoster'], local_minimum['issues'][0]['concurrentRoster'])
+            first.write_bytes(raw_first)
             changed_release = root / '5-Linked' / 'release.json'
             changed_release.write_bytes(changed_release.read_bytes() + b'\n')
             self.assertEqual(25, field.verify_venue(root / names[-1])['players'])
@@ -1295,6 +1315,15 @@ class FieldResultsTests(unittest.TestCase):
                     path.write_text(json.dumps(invalid), encoding='utf-8')
                     with self.assertRaisesRegex(field.EvidenceError, 'Venue manifest entry 6: .*' + message):
                         field.verify_venue_stages(path)
+                    if label == 'missing-shot':
+                        result = field.verify_venue_stages(path, inspect=True)
+                        self.assertFalse(result['complete'])
+                        self.assertEqual([[6]], [issue['entries'] for issue in result['issues']])
+                        overlap = result['issues'][0]['concurrentRoster']
+                        self.assertEqual('missing-fire', overlap['status'])
+                        self.assertEqual(24, overlap['playersWithConfirmedFire'])
+                        self.assertEqual([{'roomId': 5, 'seat': 5}], overlap['missingFireSeats'])
+                        self.assertGreaterEqual(overlap['bestFireWindowMilliseconds'], overlap['minimumMilliseconds'])
             last = root / plan['venueManifests'][-1]
             batch = json.loads(last.read_bytes())
             batch['sessions'][0].pop('combatJournal')
