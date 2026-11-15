@@ -854,6 +854,11 @@ class QuestVenueTests(unittest.TestCase):
                                          (seat['sessionId'], seat['roomId'], seat['seat'], seat['status']))
                         if ready:
                             self.assertEqual((23, 7), (seat['worldSequence'], seat['observedSequence']))
+                            self.assertEqual(1, report['evidenceVersion'])
+                            identity_bytes = f'quest-player-readiness-v1/{session}/{player}/{admission}'.encode('ascii')
+                            self.assertEqual(hashlib.sha256(identity_bytes).hexdigest(), seat['admissionSha256'])
+                        else:
+                            self.assertNotIn('admissionSha256', seat)
                         for secret in (key, config['joinTicket'], player, admission):
                             self.assertNotIn(secret, result.stdout + result.stderr)
                         urls = [readiness_url, frame_url] if reads_frame else [readiness_url]

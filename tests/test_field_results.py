@@ -4270,6 +4270,87 @@ class FieldResultsTests(unittest.TestCase):
             self.assertEqual(1, duplicate.returncode)
             self.assertNotIn(directory, duplicate.stderr)
 
+    def test_single_session_cli_matches_quest_readiness_to_original_admission(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, manifest, _ = venue_fixture(root, 'Independent', remote=True, quest_per_room=2, with_journals=True,
+                                           room_sizes=(3,) * 5, game_server=True)
+            entry = manifest['sessions'][0]
+            session, stats, endpoint = field.management_zip(root / entry['evidenceZip'])
+            started = datetime.fromisoformat(session['startedAtUtc'])
+            captured = started - timedelta(seconds=1)
+            launcher_path = root / entry['launcherReport']
+            launcher = json.loads(launcher_path.read_bytes())
+            journal = root / entry['worldJournal']
+            bodies = [{'id': owner['id'], 'roomId': owner['roomId'], 'connected': True, 'health': 100,
+                       'rig': {'kind': 'Tracked'}} for owner in session['players']]
+            world_journal(journal, launcher['finalWorld'], capture_start=(captured - timedelta(milliseconds=100)).isoformat(),
+                          players=lambda _, __: bodies)
+            launcher_path.write_text(json.dumps(launcher), encoding='utf-8')
+            command = [sys.executable, str(SCRIPT), '--topology', 'direct-lan', '--server-ip', manifest['serverIps'][0],
+                       '--launcher-report', str(launcher_path), '--server-log', str(root / entry['serverLog'])]
+            for name, record in [('session', session), ('statistics', stats), ('endpoint', endpoint)]:
+                path = root / f'{name}.json'
+                path.write_text(json.dumps(record), encoding='utf-8')
+                command += ['--' + name, str(path)]
+            for player in entry['players']:
+                source = [player['address'], str(root / player['log'])]
+                command += ['--quest-player', *source, str(player['logcatPid'])] if 'logcatPid' in player else ['--player', *source]
+
+            def make_receipt(owner):
+                identity = f"quest-player-readiness-v1/{session['id']}/{owner['id']}/{owner['admissionId']}"
+                return {'evidenceVersion': 1, 'phase': 'tracked-readiness', 'scope': 'player', 'complete': True,
+                        'sampledAtUtc': (captured + timedelta(milliseconds=50)).isoformat(),
+                        'seats': [{'roomId': owner['roomId'], 'seat': owner['seat'] + 1, 'sessionId': session['id'],
+                                   'admissionSha256': hashlib.sha256(identity.encode('ascii')).hexdigest(),
+                                   'status': 'tracked-ready', 'sourceState': 'Fresh', 'worldSequence': 1,
+                                   'observedSequence': 7, 'capturedAtUtc': captured.isoformat()}]}
+
+            first_path, second_path = root / 'first.json', root / 'second.json'
+            original = make_receipt(session['players'][1])
+            first_path.write_text(json.dumps(original), encoding='utf-8')
+            second_path.write_text(json.dumps(make_receipt(session['players'][2])), encoding='utf-8')
+            receipts = ['--quest-readiness-report', str(second_path), '--quest-readiness-report', str(first_path)]
+            world = ['--world-journal', str(journal)]
+
+            def run(*args):
+                return subprocess.run(command + list(args), capture_output=True, encoding='utf-8', timeout=10)
+
+            result = run(*world, *receipts)
+            self.assertEqual(0, result.returncode, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(2, report['questLogcatPlayers'])
+            self.assertEqual([{'worldSequence': 1, 'observedSequence': 7, 'seatsVerified': 2}],
+                             report['worldJournal']['questReadinessFrames'])
+            self.assertNotIn('questReadinessFrames', json.loads(run(*world).stdout)['worldJournal'])
+            self.assertNotIn(directory, result.stdout)
+            self.assertNotIn(original['seats'][0]['admissionSha256'], result.stdout)
+
+            for args, message in ((receipts, 'closed world journal'),
+                                  (world + receipts[:2], 'one Quest readiness report per original Quest log'),
+                                  (world + receipts[:2] * 2, 'Evidence paths must be distinct')):
+                result = run(*args)
+                self.assertEqual(1, result.returncode, result.stderr)
+                self.assertIn(message, result.stderr)
+
+            for changes, row_changes, replacement, message in (
+                ({}, {'admissionSha256': 'b' * 64}, None, 'original admission'),
+                ({}, {'worldSequence': 2}, None, 'original Preparing frame'),
+                ({'sampledAtUtc': (started + timedelta(milliseconds=10)).isoformat()}, {}, None, 'before the original Begin'),
+                ({'complete': False}, {}, None, 'completed single-player'),
+                ({}, {}, 0, 'original Quest log for its admission'),
+                ({}, {}, 2, 'distinct, fresh seat'),
+            ):
+                with self.subTest(message=message):
+                    invalid = deepcopy(original) if replacement is None else make_receipt(session['players'][replacement])
+                    invalid.update(changes)
+                    invalid['seats'][0].update(row_changes)
+                    first_path.write_text(json.dumps(invalid), encoding='utf-8')
+                    result = run(*world, *receipts)
+                    self.assertEqual(1, result.returncode, result.stderr)
+                    self.assertIn(message, result.stderr)
+                    self.assertNotIn(directory, result.stderr)
+
     def test_original_world_journal_matches_the_sealed_evidence(self):
         data = fixture()
         world = data[2]['finalWorld']

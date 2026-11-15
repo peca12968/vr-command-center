@@ -457,6 +457,10 @@ python scripts/verify-field-results.py --topology direct-lan `
 
 Quest 3 席位使用 `--quest-player 192.168.1.21 '.\quest logcat.txt' 7342`，依序填頭盔本次使用的 IPv4、原始 logcat 路徑和遊戲程序 PID。可與 Windows 的 `--player` 混用。Quest 3 須登記在原名冊，且其 UDP 來源須在伺服器位址清單外。摘要的 `questLogcatPlayers` 只計算通過原入場及戰績核對的 logcat 檔案數。 [Quest 擷取方式](QUEST3.md#收集-quest-場館驗收日誌)
 
+### 核對單場 Quest 開場追蹤回條
+
+在單場命令加入 `--world-journal .\room-01.worldlog` 和 `--quest-readiness-report .\quest-player-readiness.json`。每份 `--quest-player` 日誌各提供一份開場前成功的 `-VerifyPlayerTracking` 回條，可用任意順序傳入。工具用原場次和入場雜湊配對席位，再確認回條的原管理序號、世界序號和擷取時間能對回封存中的 GameServer 準備畫格，以及畫格中的玩家已連線並有 `Tracked` 姿態。摘要在 `worldJournal.questReadinessFrames` 按畫格列出核對席數。 [保存開場回條](QUEST3.md#單房實機追蹤驗收)
+
 ### 一次核對五房 25 席
 
 兩種模式各準備一份私人 `venue.json`。使用 `--peer-diagnostics on` 啟動參與驗收的每個遊戲伺服器，並由主控一次結束全館。等待各場雙封存、原伺服器終止及玩家寫完戰績，保留同場啟動器 `--report`、原始 `server.log` 及每位玩家的完整日誌。

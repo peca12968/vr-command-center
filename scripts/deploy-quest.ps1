@@ -794,6 +794,11 @@ function Confirm-PlayerTrackedSeat($Target, $Ticket) {
         $seat.status = 'ticket-expired'
         $report.complete = $false
     }
+    if ($report.complete) {
+        $admission = "quest-player-readiness-v1/$sessionId/$($Ticket.PlayerId.ToString('D'))/$($Ticket.AdmissionId.ToString('D'))"
+        $seat.admissionSha256 = Get-QuestSha256 ([Text.Encoding]::UTF8.GetBytes($admission))
+        $report.evidenceVersion = 1
+    }
     return $report
 }
 

@@ -1077,12 +1077,17 @@ def verify_player_terminal_result(result, owner, stats, boundary):
 
 def verify(topology, server_ips, launcher, session, statistics, endpoint, server_log, player_logs, *, quest_player_logs=(),
            world_journal=None, combat_journal=None, room_alignments=None, udp_preflight=None, udp_source_preflights=None,
-           verify_player_sources=False, verify_reconnect_history=False):
+           verify_player_sources=False, verify_reconnect_history=False, quest_readiness_reports=()):
+    quest_readiness = ()
+    if quest_readiness_reports:
+        require(world_journal is not None and len(quest_readiness_reports) == len(quest_player_logs),
+                'Provide the closed world journal and one Quest readiness report per original Quest log')
+        quest_readiness = single_session_quest_readiness(quest_readiness_reports, session)
     report, _ = verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log,
                                len(player_logs) + len(quest_player_logs), player_logs, quest_player_logs=quest_player_logs,
                                world_journal=world_journal, combat_journal=combat_journal, room_alignments=room_alignments, udp_preflight=udp_preflight,
                                udp_source_preflights=udp_source_preflights, verify_player_sources=verify_player_sources,
-                               verify_reconnect_history=verify_reconnect_history)
+                               verify_reconnect_history=verify_reconnect_history, quest_readiness=quest_readiness)
     return report
 
 
@@ -1116,10 +1121,10 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
             and session['state'] == 'Ended' and session['mode'] == mode and header['roomIds'] == rooms,
             'Session identity, room scope or terminal state differs')
     started, ended = (datetime.fromisoformat(session[field]) for field in ('startedAtUtc', 'endedAtUtc'))
-    require(not quest_readiness or world_journal is not None and all(seat['sampledAtUtc'] <= started for seat in quest_readiness),
-            'Quest readiness requires a sample taken before the original Begin and a sealed world journal')
     require(started.utcoffset() is not None and ended.utcoffset() is not None and started <= ended,
             'Invalid session start or end time')
+    require(not quest_readiness or world_journal is not None and all(seat['sampledAtUtc'] <= started for seat in quest_readiness),
+            'Quest readiness requires a sample taken before the original Begin and a sealed world journal')
     boundary = sealed_result_boundary(session, statistics, world, combat, stream_id)
     origin = boundary['origin']
     world_sequence, through, combat_sequence = (boundary[key] for key in ('worldSequence', 'throughSequence', 'finalStreamSequence'))
@@ -1140,6 +1145,7 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
     player_sources = {} if verify_player_sources else None
     source_seats = set()
     quest_players = 0
+    unmatched_readiness = {seat['playerId'] for seat in quest_readiness}
     windows_logs = ((address, log, None, None) for address, log in player_logs)
     quest_logs = ((address, log, pid, None) for address, log, pid in quest_player_logs)
     for expected_ip, log, pid, capture_seat in chain(windows_logs, quest_logs, quest_capture_logs):
@@ -1163,6 +1169,7 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
             require(owner.get('headset') == 'Quest3' and topology == 'direct-lan' and expected_ip not in server_ips,
                     'Quest logcat requires a Quest 3 admission and its own direct LAN address')
             quest_players += 1
+            unmatched_readiness.discard(player_id)
         room = verify_player_terminal_result(result, owner, stats, boundary)
         require(room in rooms, 'Player result admission or room differs')
         if (capture_seat is not None or pid is not None and quest_deployments is not None
@@ -1204,6 +1211,7 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
         opening_peer_ips.add(planned[0] if planned else observed[0])
         room_sources.setdefault(room, []).append(observed[0])
     require(used_connections == acknowledged and used_players == set(players), 'Extra acknowledgement or missing result')
+    require(not unmatched_readiness, 'Quest readiness requires the original Quest log for its admission')
     if verify_reconnect_history:
         require(verified_history == peers.keys(), 'Server log contains unmatched UDP peer records')
     if require_distinct_remote_roster:
@@ -2129,6 +2137,50 @@ def quest_readiness_time(value):
     return when
 
 
+def quest_readiness_frame(row, sampled):
+    world, observed = integer(row.get('worldSequence'), 1), integer(row.get('observedSequence'), 1)
+    captured = quest_readiness_time(row.get('capturedAtUtc'))
+    require(timedelta(seconds=-1) <= sampled - captured <= timedelta(milliseconds=1500),
+            'Quest readiness sample is outside the original source freshness window')
+    return world, observed, captured
+
+
+def single_session_quest_readiness(reports, session):
+    session_id = identity(session['id'])
+    seats = {}
+    for player in session['players']:
+        if player.get('headset') == 'Quest3':
+            seat = integer(player['roomId'], 1, 5), integer(player['seat'], 0, 4) + 1
+            require(seat not in seats, 'Duplicate Quest seat in the final roster')
+            seats[seat] = player
+
+    verified = []
+    used = set()
+    for report in reports:
+        require(report.get('phase') == 'tracked-readiness' and report.get('scope') == 'player'
+                and report.get('complete') is True and integer(report.get('evidenceVersion'), 1, 1),
+                'Use a completed single-player Quest readiness report with admission evidence')
+        rows = report.get('seats')
+        require(type(rows) is list and len(rows) == 1 and type(rows[0]) is dict,
+                'Single-player Quest readiness requires exactly one seat')
+        row = rows[0]
+        seat = integer(row.get('roomId'), 1, 5), integer(row.get('seat'), 1, 5)
+        player = seats.get(seat)
+        require(player is not None and seat not in used and row.get('sessionId') == session_id
+                and row.get('status') == 'tracked-ready' and row.get('sourceState') == 'Fresh',
+                'Quest readiness requires a distinct, fresh seat in the original Quest roster')
+        player_id, admission_id = identity(player['id']), identity(player['admissionId'])
+        key = f'quest-player-readiness-v1/{session_id}/{player_id}/{admission_id}'.encode('ascii')
+        require(row.get('admissionSha256') == hashlib.sha256(key).hexdigest(),
+                'Quest readiness does not match the original admission')
+        sampled = quest_readiness_time(report.get('sampledAtUtc'))
+        world, observed, captured = quest_readiness_frame(row, sampled)
+        verified.append({'roomId': seat[0], 'playerId': player_id, 'worldSequence': world, 'observedSequence': observed,
+                         'capturedAtUtc': captured, 'sampledAtUtc': sampled})
+        used.add(seat)
+    return verified
+
+
 def read_quest_readiness_reports(paths, mode, attempts, deployed, evidence_path):
     require(type(paths) is list and 1 <= len(paths) <= 25, 'Provide 1 to 25 original Quest readiness reports')
     sessions, used, verified = {}, set(), set()
@@ -2156,10 +2208,7 @@ def read_quest_readiness_reports(paths, mode, attempts, deployed, evidence_path)
             require(admission is not None and admission == deployed.get(seat) and seat not in verified
                     and row.get('sessionId') == admission[0] and row.get('status') == 'tracked-ready'
                     and row.get('sourceState') == 'Fresh', 'Quest readiness seat does not match its original deployed session')
-            world, observed = integer(row.get('worldSequence'), 1), integer(row.get('observedSequence'), 1)
-            captured = quest_readiness_time(row.get('capturedAtUtc'))
-            require(timedelta(seconds=-1) <= sampled - captured <= timedelta(milliseconds=1500),
-                    'Quest readiness sample is outside the original source freshness window')
+            world, observed, captured = quest_readiness_frame(row, sampled)
             frame = world, observed, captured
             require(current_frames.setdefault(admission[0], frame) == frame,
                     'Quest readiness reports different frames for one session in the same sample')
@@ -3385,12 +3434,15 @@ def main():
         parser.add_argument('--' + name, type=Path)
     parser.add_argument('--player', action='append', nargs=2, metavar=('EXPECTED_IPV4', 'LOG'))
     parser.add_argument('--quest-player', action='append', nargs=3, metavar=('EXPECTED_IPV4', 'LOGCAT', 'PID'))
+    parser.add_argument('--quest-readiness-report', action='append', type=Path,
+                        help='Original single-player -VerifyPlayerTracking report; repeat once per Quest log')
     args = parser.parse_args()
     json_paths = [args.launcher_report, args.session, args.statistics, args.endpoint]
     single_args = [args.topology, args.server_ip, *json_paths, args.server_log, args.player or args.quest_player]
     batch = args.venue_manifest or args.venue_stages
     extra_single_args = [args.world_journal, args.combat_journal, args.room_alignment, args.udp_preflight,
-                         args.udp_source_preflight, args.verify_player_sources, args.verify_reconnect_history]
+                         args.udp_source_preflight, args.verify_player_sources, args.verify_reconnect_history,
+                         args.quest_readiness_report]
     if (batch and any(single_args + extra_single_args)) or (not batch and not all(single_args)):
         parser.error('Provide --venue-manifest or --venue-stages alone, or all single-session options.')
     if args.inspect_windows_inbox and not args.venue_manifest:
@@ -3415,6 +3467,10 @@ def main():
                 inputs.append(args.world_journal)
             if args.combat_journal is not None:
                 inputs.append(args.combat_journal)
+            if args.quest_readiness_report:
+                require(args.world_journal is not None and len(args.quest_readiness_report) == len(quest),
+                        'Provide the closed world journal and one Quest readiness report per original Quest log')
+                inputs.extend(args.quest_readiness_report)
             if args.udp_preflight is not None:
                 inputs.extend(args.udp_preflight)
             if args.udp_source_preflight is not None:
@@ -3438,7 +3494,8 @@ def main():
                             quest_player_logs=quest_players, world_journal=args.world_journal, combat_journal=args.combat_journal,
                             room_alignments=alignments,
                             udp_preflight=args.udp_preflight, udp_source_preflights=args.udp_source_preflight,
-                            verify_player_sources=args.verify_player_sources, verify_reconnect_history=args.verify_reconnect_history)
+                            verify_player_sources=args.verify_player_sources, verify_reconnect_history=args.verify_reconnect_history,
+                            quest_readiness_reports=[read_quest_json(path) for path in args.quest_readiness_report or ()])
     except EvidenceError as error:
         parser.exit(1, f'Field evidence rejected. {error}.\n')
     except (OSError, UnicodeError, ArithmeticError, AttributeError, KeyError, TypeError, ValueError, RecursionError,
