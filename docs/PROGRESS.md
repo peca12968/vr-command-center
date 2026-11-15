@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-16 Quest 3 單席部署線上核對
+
+- `deploy-quest.ps1 -ClientConfig -ManagementApi` 會核對原始連線 JSON、Quest 3 席位、簽章、入場識別、公告 IPv4／UDP 埠及近期同階段遊戲畫格。MR 同時核對原鎖定校正檔。`-CheckOnly` 可在電腦端執行。實際部署在安裝 APK 和啟用連線設定前再核對，若席位在兩步之間變更，保留原啟用中的設定。 [操作說明](QUEST3.md#部署前核對單席連線檔)
+- 61 項本機部署及擷取測試通過。模擬 ADB 核對早期拒絕、晚期變更保留原設定及成功啟用。Windows 管理包解壓核對 568 筆清單，原建置及解壓包各通過 VR 15 項、MR 12 項專測。MR 測試從實際管理 API 和原連線檔執行 `-CheckOnly`。另通過 50 項 MR 開場與暫停生命週期檢查，已更新原錄製來源文案的測試預期。現有 ADB 回報零台，實機部署及跨機仍待驗收。 [VR 解壓包](../artifacts/console-single-quest-package-vr-69a6f468/checks.json) · [MR 解壓包](../artifacts/console-single-quest-package-mr-dfcb02b0/checks.json)
+
 ## 2026-11-16 查找被覆寫的全館敵軍畫格
 
 - 管理台 0.31.198 可從最近一批全館敵軍策略的已覆寫或已結束列查找原畫格。API 依原批次、場次、命令序號、行為與自動攻擊定位第一個有效執行畫格。回放在原房間暫停，顯示該格的在場和存活數。合併場按房分算原錄製的人數。 [操作說明](LAYOUT.md#核對最近一批敵軍策略)

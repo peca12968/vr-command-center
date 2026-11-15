@@ -27,7 +27,7 @@ param(
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$DeploymentReport,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,120)][int]$WaitForTrackedSeconds,
     [Parameter(ParameterSetName='Bundle')][switch]$AllHeadsets,
-    [Parameter(ParameterSetName='Venue')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Windows')][Parameter(Mandatory, ParameterSetName='PlayerTracking')][ValidateNotNullOrEmpty()][string]$ManagementApi,
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Venue')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Windows')][Parameter(Mandatory, ParameterSetName='PlayerTracking')][ValidateNotNullOrEmpty()][string]$ManagementApi,
     [Parameter(Mandatory, ParameterSetName='Windows')][ValidateNotNullOrEmpty()][string]$WindowsSeatMap,
     [Parameter(Mandatory, ParameterSetName='Windows')][ValidateNotNullOrEmpty()][string]$WindowsOutputDirectory
 )
@@ -569,7 +569,7 @@ function Read-QuestDeviceMap([string]$Path, [switch]$Partial) {
     $map.seats | Sort-Object roomId, seat
 }
 
-function Read-TrackedReadinessResponse($Target, [Uri]$Url, [int]$RequestMilliseconds, [string]$Body) {
+function Read-ManagementJson($Target, [Uri]$Url, [int]$RequestMilliseconds, [string]$Body, [string]$AdmissionId) {
     $handler = [Net.Http.HttpClientHandler]::new()
     $handler.UseProxy = $handler.AllowAutoRedirect = $false
     $client = [Net.Http.HttpClient]::new($handler)
@@ -580,10 +580,11 @@ function Read-TrackedReadinessResponse($Target, [Uri]$Url, [int]$RequestMillisec
     $timer = [Diagnostics.Stopwatch]::StartNew()
     try {
         $client.DefaultRequestHeaders.Add('Authorization', $Target.Headers.Authorization)
+        if ($AdmissionId) { $client.DefaultRequestHeaders.Add('If-Match-Admission', $AdmissionId) }
         if ($Body) {
             $content = [Net.Http.StringContent]::new($Body, [Text.Encoding]::UTF8, 'application/json')
             $response = $client.PostAsync($Url, $content, $cancellation.Token).GetAwaiter().GetResult()
-            if ($response.StatusCode -eq 409) { return @{ Status = 'venue-changed' } }
+            if ($response.StatusCode -eq 409) { return @{ Status = 'management-conflict' } }
         } else {
             $response = $client.GetAsync($Url, $cancellation.Token).GetAwaiter().GetResult()
         }
@@ -598,6 +599,32 @@ function Read-TrackedReadinessResponse($Target, [Uri]$Url, [int]$RequestMillisec
     }
     try { return @{ Document = ConvertFrom-Json -InputObject $raw; Elapsed = $timer.Elapsed.TotalMilliseconds } }
     catch { return @{ Status = 'readiness-invalid' } }
+}
+
+function Confirm-QuestPlayerReadback($LiveSeat) {
+    $ticket = $LiveSeat.Ticket
+    $path = "/api/sessions/$($ticket.SessionId)/rooms/$($ticket.RoomId)/players/$($ticket.PlayerId)/quest-deployment-check"
+    $url = [Uri]::new($LiveSeat.Target.Origin, $path)
+    $reading = Read-ManagementJson $LiveSeat.Target $url 10000 $LiveSeat.Body ($ticket.AdmissionId.ToString('D'))
+    if ($reading.Status -ceq 'management-conflict') { throw 'Quest deployment refused because the session or admission changed.' }
+    if ($reading.Status) { throw 'Could not verify the Quest seat with the management service.' }
+    $receipt = $reading.Document
+    if (-not (Test-JsonInteger $receipt.roomId) -or $receipt.roomId -ne $ticket.RoomId -or
+        -not (Test-JsonInteger $receipt.seat) -or $receipt.seat -ne $ticket.Seat -or $receipt.status -isnot [string]) {
+        throw 'The management service returned an invalid Quest deployment receipt.'
+    }
+    if ($receipt.status -cin @('headset-mismatch','mode-mismatch','endpoint-unpublished','source-stale','endpoint-mismatch',
+        'connection-invalid','ticket-invalid','wrong-seat','admission-changed','alignment-not-locked','connection-hash-mismatch',
+        'alignment-invalid','alignment-wrong-room','alignment-hash-mismatch')) {
+        throw "Quest deployment refused: $($receipt.status)."
+    }
+    try { $expiry = [DateTimeOffset]$receipt.expiresAtUtc }
+    catch { throw 'The management service returned an invalid Quest deployment receipt.' }
+    if ($receipt.status -cne 'matched' -or $receipt.address -isnot [string] -or $receipt.address -cne $LiveSeat.Address -or
+        -not (Test-JsonInteger $receipt.port) -or $receipt.port -ne $LiveSeat.Port -or $expiry -ne $ticket.ExpiresAtUtc -or
+        $expiry -le [DateTimeOffset]::UtcNow) {
+        throw 'The management service returned an invalid Quest deployment receipt.'
+    }
 }
 
 function Test-TrackedReadinessSnapshot($Snapshot, [int]$MaxAge) {
@@ -619,7 +646,8 @@ function Read-VenueTrackedReadiness($Target, $Venue, [int]$RequestMilliseconds) 
     $rooms = @($Venue.LiveRooms | ForEach-Object { @{ roomId = $_.roomId; sessionId = $_.sessionId } })
     $ids = @($rooms.sessionId | Sort-Object -Unique)
     $body = @{ topology = $Venue.Report.topology; rooms = $rooms } | ConvertTo-Json -Compress -Depth 3
-    $response = Read-TrackedReadinessResponse $Target $url $RequestMilliseconds $body
+    $response = Read-ManagementJson $Target $url $RequestMilliseconds $body
+    if ($response.Status -ceq 'management-conflict') { return @{ Status = 'venue-changed' } }
     if ($response.Status) { return $response }
     $batch = $response.Document
     if (-not (Test-JsonInteger $batch.version) -or $batch.version -ne 1 -or $batch.topology -cne $Venue.Report.topology -or
@@ -736,7 +764,7 @@ function Confirm-PlayerTrackedSeat($Target, $Ticket) {
     $sessionId = $Ticket.SessionId.ToString('D')
     $url = [Uri]::new($Target.Origin, "/api/sessions/$sessionId/readiness")
     $timer = [Diagnostics.Stopwatch]::StartNew()
-    $reading = Read-TrackedReadinessResponse $Target $url 10000
+    $reading = Read-ManagementJson $Target $url 10000
     $snapshot = $reading.Document
     $sample = @{ Status = $reading.Status; Elapsed = $reading.Elapsed; MaxAge = 1500 }
     if (-not $sample.Status -and (-not (Test-TrackedReadinessSnapshot $snapshot $sample.MaxAge) -or $snapshot.sessionId -cne $sessionId)) {
@@ -1230,7 +1258,7 @@ function Update-QuestPlayerTicket($Fresh, $Ticket) {
 }
 
 function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment, [switch]$UsePassthrough, [switch]$RequestMixedReality,
-    [hashtable]$Deployment = @{}, $LiveVenue) {
+    [hashtable]$Deployment = @{}, $LiveVenue, $LiveSeat) {
     $Deployment.Step = 'prepare-device'
     $remoteDirectory = '/sdcard/Android/data/com.vrcommand.quest/files'
     & $AdbPath -s $TargetSerial shell mkdir -p $remoteDirectory | Out-Null
@@ -1267,6 +1295,7 @@ function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment
                         throw 'The selected seat is not assigned to a Quest 3 player.'
                     }
                 }
+                if ($LiveSeat) { Confirm-QuestPlayerReadback $LiveSeat }
                 $Deployment.Step = 'check-expiry-before-stop'
                 if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired before activation. Download a fresh connection file.' }
                 $Deployment.Step = 'stop-game'
@@ -1401,6 +1430,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Smoke') {
 
 $alignment = $null
 $alignmentHash = $null
+$liveSeat = $null
 if ($ApkPath -and (-not $ReleaseReport -or $DeviceMap)) {
     throw 'Use -ApkPath only for a single-seat install with -ReleaseReport.'
 }
@@ -1479,7 +1509,8 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
         throw 'The selected seat is not assigned to a Quest 3 player.'
     }
 } else {
-    $config = (Read-DeploymentJson $ClientConfig 4096 'player connection').Document
+    $connectionFile = Read-DeploymentJson $ClientConfig $(if ($ManagementApi) { 2048 } else { 4096 }) 'player connection'
+    $config = $connectionFile.Document
     $ticket = Read-PlayerConfig $config
     $isMixedReality = $MixedReality -or $null -ne $ticket.AlignmentHash
     if (($Passthrough -or $isMixedReality) -and -not $AlignmentFile) { throw 'Quest passthrough requires a checked room alignment JSON export.' }
@@ -1489,6 +1520,13 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
         if ($ticket.AlignmentHash -and $ticket.AlignmentHash -cne $alignmentHash) {
             throw "The supplied file does not match the locked MR alignment for room $($ticket.RoomId)."
         }
+    }
+    if ($ManagementApi) {
+        $body = @{ connectionFile = [Convert]::ToBase64String($connectionFile.Bytes) }
+        if ($isMixedReality) { $body.alignmentFile = [Convert]::ToBase64String($alignment.Bytes) }
+        $liveSeat = @{ Target = Get-ManagementTarget $ManagementApi; Body = $body | ConvertTo-Json -Compress
+            Ticket = $ticket; Address = $config.address; Port = $config.port }
+        Confirm-QuestPlayerReadback $liveSeat
     }
 }
 $release = if ($ReleaseReport) { Read-QuestRelease $ReleaseReport }
@@ -1526,19 +1564,20 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Could not identify the selected Android device.' }
     $model = ([string]$model).Trim()
     if ($model -ne 'Quest 3') { throw 'Selected device is not a Meta Quest 3. No app was installed.' }
-    if ($ManagementApi) { Confirm-VenueReadback $venue -RequireLiveSource }
+    if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') { Confirm-VenueReadback $venue -RequireLiveSource }
     if ($release) {
         $stagedApk = New-VerifiedQuestApk $apk $release.sha256
         $apk = $stagedApk
     }
+    if ($liveSeat) { Confirm-QuestPlayerReadback $liveSeat }
     & $AdbPath -s $Serial install -r $apk
     if ($LASTEXITCODE -ne 0) { throw 'APK installation failed.' }
     if ($release -and (Get-QuestApkStatus $Serial $release.sha256) -cne 'ready') {
         throw 'Installed Quest APK could not be verified against the release report.'
     }
-    if ($ManagementApi) { Confirm-VenueReadback $venue -RequireLiveSource }
+    if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') { Confirm-VenueReadback $venue -RequireLiveSource }
     Set-QuestConnection $Serial $config $ticket $alignment -UsePassthrough:$Passthrough -RequestMixedReality:$isMixedReality `
-        -LiveVenue $(if ($ManagementApi) { $venue })
+        -LiveVenue $(if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') { $venue }) -LiveSeat $liveSeat
 } finally {
     $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose()
     if ($stagedApk) { Remove-Item -LiteralPath $stagedApk -ErrorAction SilentlyContinue }

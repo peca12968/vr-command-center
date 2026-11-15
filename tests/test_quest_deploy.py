@@ -198,9 +198,11 @@ class QuestDeployTests(unittest.TestCase):
     def write(path, document):
         path.write_text(json.dumps(document), encoding='utf-8')
 
-    def run_script(self, *flags, failure='', alter=False, release_hash=''):
+    def run_script(self, *flags, failure='', alter=False, release_hash='', management_key=None):
         env = {**os.environ, 'QUEST_TEST_ROOT':str(self.root), 'QUEST_TEST_FAIL':failure,
                'QUEST_TEST_ALTER_ALIGNMENT':str(self.plan) if alter else '', 'QUEST_TEST_RELEASE_HASH':release_hash}
+        if management_key is not None:
+            env['VR_COMMAND_MASTER_KEY'] = management_key
         return subprocess.run(['pwsh','-NoProfile','-NonInteractive','-File',str(self.script),
                                '-ClientConfig',str(self.config),'-AdbPath',str(self.adb),*flags],
                               env=env, capture_output=True, encoding='utf-8', timeout=20)
@@ -211,7 +213,7 @@ class QuestDeployTests(unittest.TestCase):
     def assert_rejected(self, result, message):
         self.assertNotEqual(0, result.returncode)
         self.assertIn(message, result.stderr)
-        ticket = json.loads(self.config.read_text(encoding='utf-8'))['joinTicket']
+        ticket = json.loads(self.config.read_text(encoding='utf-8-sig'))['joinTicket']
         if ticket.startswith('v2.'):
             self.assertNotIn(ticket, result.stdout + result.stderr)
 
@@ -219,6 +221,104 @@ class QuestDeployTests(unittest.TestCase):
         apk = self.root / 'artifacts/quest/VrCommand.apk'
         apk.parent.mkdir(parents=True)
         apk.write_bytes(b'mock APK')
+
+    def test_single_deploy_verifies_original_files_and_rechecks_before_activation(self):
+        session, player, admission = (uuid.uuid4() for _ in range(3))
+        ticket = make_ticket(5, 1, self.expiry, session, player, admission)
+        config = dict(self.player, joinTicket=ticket)
+        requests = []
+        state = {'reject': None}
+        key = 'test-master-single-seat'
+        expires = datetime.fromtimestamp(self.expiry).astimezone().isoformat()
+        path = f'/api/sessions/{session}/rooms/5/players/{player}/quest-deployment-check'
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                payload = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                requests.append((self.path, self.headers.get('Authorization'), self.headers.get('If-Match-Admission'), payload))
+                if state['reject'] == len(requests):
+                    self.send_error(409)
+                    return
+                body = json.dumps({'status': 'matched', 'roomId': 5, 'seat': 1, 'expiresAtUtc': expires,
+                                   'address': config['address'], 'port': config['port']}).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        self.provision_apk()
+        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            flags = ('-ManagementApi', f'http://127.0.0.1:{server.server_port}', '-Serial', 'fixture')
+            active = self.remote / 'vr-connection.json'
+            try:
+                for mode in ('VR', 'MR'):
+                    with self.subTest(mode=mode):
+                        self.commands.unlink(missing_ok=True)
+                        active.write_bytes(b'previous connection')
+                        selected = dict(config)
+                        options = ()
+                        expected_body = {}
+                        if mode == 'MR':
+                            alignment = self.plan.read_bytes()
+                            selected['roomAlignmentSha256'] = hashlib.sha256(alignment).hexdigest()
+                            expected_body['alignmentFile'] = base64.b64encode(alignment).decode()
+                            options = ('-MixedReality', '-AlignmentFile', str(self.plan))
+                        original = b'\xef\xbb\xbf' + json.dumps(selected).encode() + b'\r\n'
+                        self.config.write_bytes(original)
+                        expected_body['connectionFile'] = base64.b64encode(original).decode()
+                        original_request = (path, f'Bearer {key}', str(admission), expected_body)
+
+                        requests.clear()
+                        state['reject'] = None
+                        checked = self.run_script(*flags, *options, '-CheckOnly', management_key=key)
+                        self.assertEqual(0, checked.returncode, checked.stderr)
+                        self.assertTrue(json.loads(checked.stdout)['managementVerified'])
+                        self.assertEqual([original_request], requests)
+                        self.assertFalse(self.commands.exists())
+
+                        requests.clear()
+                        state['reject'] = 1
+                        denied = self.run_script(*flags, *options, management_key=key)
+                        self.assert_rejected(denied, 'session or admission changed')
+                        self.assertEqual([original_request], requests)
+                        self.assertFalse(self.commands.exists())
+
+                        requests.clear()
+                        state['reject'] = 3
+                        changed = self.run_script(*flags, *options, management_key=key)
+                        self.assert_rejected(changed, 'session or admission changed')
+                        self.assertEqual([original_request] * 3, requests)
+                        commands = self.commands.read_text(encoding='utf-8')
+                        self.assertIn(' install ', commands)
+                        self.assertNotIn(' force-stop ', commands)
+                        self.assertNotIn(' monkey ', commands)
+                        self.assertEqual(b'previous connection', active.read_bytes())
+                        self.assertFalse(list(self.remote.glob('*.tmp')))
+
+                        requests.clear()
+                        state['reject'] = None
+                        self.commands.unlink()
+                        deployed = self.run_script(*flags, *options, management_key=key)
+                        self.assertEqual(0, deployed.returncode, deployed.stderr)
+                        self.assertEqual([original_request] * 3, requests)
+                        commands = self.commands.read_text(encoding='utf-8')
+                        self.assertIn(' force-stop ', commands)
+                        self.assertIn(' monkey ', commands)
+                        saved = json.loads(active.read_bytes())
+                        self.assertEqual(ticket, saved['joinTicket'])
+                        self.assertEqual(mode == 'MR', saved.get('requestMixedReality', False))
+                        for result in (checked, denied, changed, deployed):
+                            self.assertNotIn(key, result.stdout + result.stderr)
+                            self.assertNotIn(ticket, result.stdout + result.stderr)
+            finally:
+                server.shutdown()
+                thread.join()
 
     def test_single_seat_checks_local_release_and_installed_apk_before_activation(self):
         apk = self.root / 'selected release.apk'

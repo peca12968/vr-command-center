@@ -20,7 +20,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
   const session = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Linked', roomIds: [1, 2, 3, 4, 5] }, 'Master', 201);
   const route = `/sessions/${session.id}`;
   let ended = false, sequence = 0;
-  const url = (player, room = player.roomId) => `${base}/api${route}/rooms/${room}/players/${player.id}/vr-connection-check`;
+  const url = (player, room = player.roomId, check = 'vr-connection-check') => `${base}/api${route}/rooms/${room}/players/${player.id}/${check}`;
   async function add(roomId, name, headset, playerId = randomUUID()) {
     const view = await api(route + '/players', 'POST', { roomId, name, headset, playerId });
     return view.players.find(player => player.id === playerId);
@@ -29,8 +29,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const signed = await api(`${route}/players/${player.id}/join-ticket`, 'POST', undefined, 'Master', 200, player.admissionId);
     return { role: 'Client', address, port, joinTicket: signed.ticket };
   }
-  async function request(player, bytes, { role = 'Room1', room = player.roomId, admission = player.admissionId, expected = 200 } = {}) {
-    const response = await fetch(url(player, room), { method: 'POST', headers: { 'Content-Type': 'application/json',
+  async function request(player, bytes, { role = 'Room1', room = player.roomId, admission = player.admissionId, expected = 200, endpoint } = {}) {
+    const response = await fetch(url(player, room, endpoint), { method: 'POST', headers: { 'Content-Type': 'application/json',
       ...(role ? { Authorization: 'Bearer ' + tokens[role] } : {}), ...(admission ? { 'If-Match-Admission': admission } : {}) },
       body: JSON.stringify({ connectionFile: bytes.toString('base64') }) });
     assert.equal(response.status, expected, 'VR connection check HTTP status');
@@ -94,6 +94,14 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const valid = await call(originalBytes, { role: 'Master' });
     check(valid.status === 'matched' && valid.address === address && valid.port === port && Date.parse(valid.expiresAtUtc) > Date.now(),
       'The live original endpoint verifies signed VR bytes and returns only the seat, endpoint and expiry');
+    const quest = { endpoint: 'quest-deployment-check' };
+    const questMatch = await call(originalBytes, quest);
+    const wrongHeadset = await request(second, wrongSeat, quest);
+    await call(originalBytes, { ...quest, role: 'Room2', expected: 403 });
+    await call(originalBytes, { ...quest, admission: randomUUID(), expected: 409 });
+    check(questMatch.status === 'matched' && wrongHeadset.status === 'headset-mismatch'
+      && (await call(connectionBytes({ ...original, port: port + 1 }), quest)).status === 'endpoint-mismatch',
+    'The single Quest deployment check verifies the original VR destination and refuses another headset or admission');
 
     await page.goto(base + '/console/'); await page.locator('#login-key').fill(tokens.Room1); await page.locator('#login-form button').click();
     await page.locator('#session-select').selectOption(session.id); await panel.waitFor();

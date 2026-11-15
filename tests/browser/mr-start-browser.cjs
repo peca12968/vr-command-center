@@ -104,7 +104,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       'Real accepted MR snapshots identify exactly two waiting seats among five rooms and 25 roster entries');
     const venueStatus = await venueRoom(4, 'WaitingPlayers').evaluate(row =>
       [...row.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join('').trim());
-    check(venueStatus === '房間 4 · 等候席位 2、5 的追蹤'
+    check(venueStatus === '房間 4 · 等候席位 2、5 的追蹤 · 錄製來源 GameServer'
       && await page.locator('[data-begin-state="WaitingLinkedRooms"]').count() === 4 && await venueButton.isDisabled(),
       'Only the linked room with missing tracking names waiting seats, and the entire shared session remains blocked');
     const fourthSeats = page.locator('[data-begin-seat-room="4"] td');

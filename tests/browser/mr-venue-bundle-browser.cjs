@@ -39,16 +39,30 @@ module.exports = async ({ context, api, tokens, base, root, directory, screensho
     const streamId = randomUUID();
     const origin = 'GameServer';
     await api(roomPath(session.id) + '/combat-stream', 'POST', { streamId, origin }, 'GameServer');
+    const started = Date.now();
     const header = { sessionId: session.id, streamId, roomIds: session.roomIds, origin, calibration: 'quest-room-mr-v1',
-      captureStartedAtUtc: new Date().toISOString().replace('Z', '0000+00:00') };
-    const process = spawnSync('python', [path.join(root, 'scripts/world_test_socket.py')], { encoding: 'utf8', timeout: 6000, windowsHide: true,
+      captureStartedAtUtc: new Date(started).toISOString().replace('Z', '0000+00:00') };
+    const send = (...messages) => execute('python', [path.join(root, 'scripts/world_test_socket.py')], {
       input: JSON.stringify({ port: Number(new URL(base).port), route: '/api' + roomPath(session.id) + '/world/publish',
-        token: tokens.GameServer, messages: [{ type: 'header', payload: header }] }) });
-    assert.equal(process.status, 0, 'World source must attach before publishing a connection endpoint');
+        token: tokens.GameServer, messages: [{ type: 'header', payload: header }, ...messages] })
+    });
+    send();
     const address = '192.0.2.51';
     const endpoint = await api(roomPath(session.id) + '/connection-endpoint', 'PUT', { version: 1, streamId, address, port }, 'GameServer');
     assert.equal(endpoint.streamId, streamId);
-    return endpoint;
+    return { ...endpoint, async publishPreparing() {
+      const current = await api(roomPath(session.id));
+      const players = current.players.map(player => {
+        const head = { x: (player.roomId - 3) * 14, y: 1.65, z: -3 };
+        return { id: player.id, roomId: player.roomId, connected: false, head, muzzle: head,
+          forward: { x: 0, y: 0, z: 1 }, health: 100, magazine: 30, reserve: 90, rig: { kind: 'None' } };
+      });
+      const packets = [0, Date.now() - started].map((elapsedMilliseconds, index) => ({ type: 'frame', payload: {
+        sequence: index + 1, elapsedMilliseconds, observedSequence: current.sequence, weather: 'Clear',
+        throughCombatSequence: 0, events: [], frame: { phase: 'Preparing', tick: 0, throughSequence: 0, players }
+      } }));
+      assert.equal(JSON.parse(send(...packets)).acceptedSequence, 2);
+    } };
   }
   async function upload(files) {
     for (const roomId of roomIds)
@@ -91,9 +105,26 @@ module.exports = async ({ context, api, tokens, base, root, directory, screensho
     }
     const result = await api('/mr-deployment/venue-check', 'POST', verify);
     assert.ok(result.allMatched && result.seats.length === 25);
+    const room = verify.rooms[0], seat = request.rooms[0].players[0];
+    const single = `/sessions/${room.sessionId}/rooms/${room.roomId}/players/${seat.playerId}/quest-deployment-check`;
+    const original = { connectionFile: room.connectionFiles[0], alignmentFile: room.alignmentFile };
+    const verifySingle = body => api(single, 'POST', body, 'Room1', 200, seat.admissionId);
+    const stale = await verifySingle(original);
+    assert.equal(stale.status, 'source-stale');
+    await endpoints.get(room.sessionId).publishPreparing();
+    const matched = await verifySingle(original);
+    const reformatted = Buffer.concat([Buffer.from(room.alignmentFile, 'base64'), Buffer.from('\n')]);
+    const changedAlignment = await verifySingle({ ...original, alignmentFile: reformatted.toString('base64') });
+    assert.equal((await verifySingle({ connectionFile: original.connectionFile })).status, 'mode-mismatch');
+    check(matched.status === 'matched' && changedAlignment.status === 'alignment-hash-mismatch'
+      && matched.address === endpoints.get(room.sessionId).address,
+    `${request.topology} single Quest MR deployment requires the fresh source and exact locked alignment bytes`);
     if (process.env.VR_COMMAND_VENUE_DEPLOY_CHECK === '1') {
       const options = { env: { ...process.env, VR_COMMAND_MASTER_KEY: tokens.Master } };
       const common = ['-NoProfile', '-File', path.join(root, 'scripts/deploy-quest.ps1'), '-ManagementApi', base];
+      const cli = execute('pwsh', [...common, '-ClientConfig', path.join(folder, 'seats-1', 'room-01-seat-01.json'),
+        '-AlignmentFile', path.join(folder, 'room-01-alignment.json'), '-CheckOnly'], options);
+      assert.equal(JSON.parse(cli).managementVerified, true);
       const report = JSON.parse(execute('pwsh', [...common, '-VenueManifest', manifestPath], options));
       const direct = JSON.parse(execute('pwsh', [...common, '-VenueBundle', outer], options));
       assert.deepEqual(direct, report);

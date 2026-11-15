@@ -82,8 +82,8 @@ public sealed partial class WorldRecordings
         {
             var session = manager.Get(id, actor);
             AccessPolicy.Player(actor, session, roomId);
-            if (session.State == SessionState.Ended || session.Environment.Mode != ExperienceMode.VR)
-                throw new InvalidOperationException("VR file checks require an active VR session.");
+            if (session.State == SessionState.Ended)
+                throw new InvalidOperationException("Deployment file checks require an active session.");
             var endpoint = EndpointRow(session);
             return (session, endpoint, endpoint is not null && TicketSourceLive(session, includeLegacy: true) == true);
         }

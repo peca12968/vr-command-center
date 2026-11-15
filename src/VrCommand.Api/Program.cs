@@ -530,10 +530,27 @@ app.MapPost("/api/sessions/{id:guid}/rooms/{roomId:int}/players/{playerId:guid}/
     var expected = AdmissionMatch(context) ?? throw new ArgumentException("If-Match-Admission is required; reload the current player roster.");
     var file = await VrVenueTickets.ReadSeatFile(context.Request, context.RequestAborted);
     var (session, endpoint, sourceLive) = worlds.ReadSeatDeploymentSource(id, roomId, actor);
+    if (session.Environment.Mode != ExperienceMode.VR)
+        throw new InvalidOperationException("VR file checks require an active VR session.");
     var player = session.Players.SingleOrDefault(p => p.Id == playerId && p.RoomId == roomId)
         ?? throw new KeyNotFoundException("Player does not exist in this room.");
     if (expected != player.AdmissionId) throw new InvalidOperationException("Player admission changed; reload the current roster.");
     return VrVenueTickets.CheckSeatFile(id, player, file, endpoint, sourceLive, ticketSigner);
+});
+app.MapPost("/api/sessions/{id:guid}/rooms/{roomId:int}/players/{playerId:guid}/quest-deployment-check", async (Guid id,
+    int roomId, Guid playerId, WorldRecordings worlds, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var actor = Actor(context);
+    if (actor.Role != OperatorRole.Master && (actor.Role != OperatorRole.RoomController || actor.RoomId != roomId))
+        throw new AccessDeniedException("Deployment checks are limited to the controller's room.");
+    var expected = AdmissionMatch(context) ?? throw new ArgumentException("If-Match-Admission is required; reload the current player roster.");
+    var files = await QuestSeatDeployment.ReadFiles(context.Request, context.RequestAborted);
+    var (session, endpoint, sourceLive) = worlds.ReadSeatDeploymentSource(id, roomId, actor);
+    var player = session.Players.SingleOrDefault(p => p.Id == playerId && p.RoomId == roomId)
+        ?? throw new KeyNotFoundException("Player does not exist in this room.");
+    if (expected != player.AdmissionId) throw new InvalidOperationException("Player admission changed; reload the current roster.");
+    return QuestSeatDeployment.Check(session, player, files, endpoint, sourceLive, ticketSigner);
 });
 app.MapPost("/api/mr-deployment/venue-check", async (WorldRecordings worlds, SessionManager manager, HttpContext context) =>
 {
