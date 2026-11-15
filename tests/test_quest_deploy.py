@@ -460,6 +460,9 @@ class QuestDeployTests(unittest.TestCase):
                 self.assert_rejected(result, message)
                 self.assertEqual('', result.stdout)
                 commands = self.commands.read_text(encoding='utf-8')
+                if serial != 'fixture':
+                    self.assertIn('scripts/check-quest-usb.ps1', result.stderr)
+                    self.assertEqual(commands.splitlines(), ['devices'])
                 self.assertEqual(install, ' install ' in commands)
                 self.assertEqual(launch, ' am start ' in commands)
                 self.assertNotIn(' push ', commands)

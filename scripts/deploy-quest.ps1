@@ -1353,7 +1353,7 @@ function Invoke-QuestFirstLaunch([string]$Apk, $Release) {
     $deviceState = $inventory[$Serial]
     if ($deviceState -cne 'device') {
         if ($deviceState -cnotin @('unauthorized','offline','ambiguous')) { $deviceState = 'missing or unavailable' }
-        throw "Quest 3 ADB state: $deviceState. Connect the headset and allow USB debugging."
+        throw "Quest 3 ADB state: $deviceState. On Windows, use scripts/check-quest-usb.ps1 to distinguish USB enumeration from ADB authorization."
     }
     $model = @(& $AdbPath -s $Serial shell getprop ro.product.model 2>$null)
     if ($LASTEXITCODE -ne 0 -or $model.Count -ne 1 -or $model[0].Trim() -cne 'Quest 3') { throw 'Select an authorized Meta Quest 3.' }
@@ -1587,14 +1587,14 @@ if (-not (Test-Path -LiteralPath $apk -PathType Leaf)) { throw 'Build the Quest 
 if (-not $Serial) {
     $devices = @(& $AdbPath devices | Select-String '^([^\s]+)\s+device$' | ForEach-Object { $_.Matches[0].Groups[1].Value })
     if ($LASTEXITCODE -ne 0) { throw 'Could not list authorized Android devices.' }
-    if ($devices.Count -ne 1) { throw 'Connect and authorize one Quest 3, or specify -Serial explicitly.' }
+    if ($devices.Count -ne 1) { throw 'Connect and authorize one Quest 3, or specify -Serial explicitly. On Windows, check USB and ADB with scripts/check-quest-usb.ps1.' }
     $Serial = $devices[0]
 }
 $deploymentLock = Enter-QuestDeployment
 $stagedApk = $null
 try {
     $model = & $AdbPath -s $Serial shell getprop ro.product.model
-    if ($LASTEXITCODE -ne 0) { throw 'Could not identify the selected Android device.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Could not identify the selected Android device. On Windows, check USB and ADB with scripts/check-quest-usb.ps1.' }
     $model = ([string]$model).Trim()
     if ($model -ne 'Quest 3') { throw 'Selected device is not a Meta Quest 3. No app was installed.' }
     if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') { Confirm-VenueReadback $venue -RequireLiveSource }

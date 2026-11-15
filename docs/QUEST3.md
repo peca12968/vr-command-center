@@ -14,6 +14,29 @@
 
 2026-11-10 Quest 3 開發 APK 為 0.50.0／65，檔案 `vr-command-quest-0.50.0-arm64-debug.apk` 為 60,997,166 bytes，SHA-256 `0cb23ff041b1787e24a694b0ae9b8184764f150740710876c8cceef70d9f1bba`。與同版 Windows 玩家和伺服器使用相同的遊戲來源及場景網路識別。已核對 ARM64、最低 SDK 32、目標 SDK 35 及 APK v2 開發簽章。頭盔安裝及現場 MR 驗收待實機。 [建置紀錄](PROGRESS.md#2026-11-10-合併場分房敵軍策略)
 
+## Windows USB 與 ADB 診斷
+
+接上頭盔後，可在 PowerShell 7 執行唯讀檢查。工具讀取 Windows 目前列舉的 Meta USB 裝置及 ADB 介面描述，並向 `127.0.0.1:5037` 上現有的 ADB 服務查詢清單。它只輸出計數和狀態，省略裝置序號、位址和原始回覆。執行過程無需提權、啟動 ADB 或調整防火牆。 [Windows 裝置相容識別](https://learn.microsoft.com/windows-hardware/drivers/install/devpkey-device-compatibleids) · [ADB 主機查詢協定](https://android.googlesource.com/platform/packages/modules/adb/+/HEAD/docs/dev/services.md)
+
+```powershell
+pwsh -NoProfile -NonInteractive -File .\scripts\check-quest-usb.ps1
+```
+
+| 狀態 | 觀察結果 |
+| --- | --- |
+| `windows-usb-inventory-unavailable` | 無法讀取 Windows USB 裝置清單。 |
+| `meta-usb-not-enumerated` | Windows 的目前清單沒有列出 Meta USB 裝置。 |
+| `meta-usb-without-adb-interface` | Windows 已列舉 Meta USB，已讀到的介面描述中沒有 ADB。`portableMediaInterfaces` 顯示其中有幾個介面可用於檔案傳輸。 |
+| `meta-usb-interface-descriptors-incomplete` | 部分裝置的介面描述讀不到，ADB 介面狀態仍未確認。 |
+| `adb-usb-driver-problem` | Windows 已列出 ADB 介面，該介面有 PnP 問題碼。 |
+| `adb-server-inventory-unavailable` | Windows 已列出 ADB 介面，本機服務未回傳可解讀的裝置清單。 |
+| `adb-usb-transport-unmatched` | Windows 已列出 ADB 介面，本機 ADB 清單沒有可和 Meta USB 裝置比對的序號。 |
+| `adb-usb-unauthorized`／`adb-usb-offline` | ADB 清單中和 Meta USB 序號相符的裝置仍待授權，或處於離線。 |
+| `adb-usb-other` | 相同序號出現不支援的 ADB 狀態或重複項目。 |
+| `adb-usb-device`／`adb-usb-mixed-states` | 已比對的裝置處於 `device`，或有多種狀態。以 `adb.matchingMetaUsb` 查看每種狀態的數量，再由部署工具核對實際型號。 |
+
+退出碼 0 表示已輸出快照。`adb.unmatchedEntries` 包含其他 Android 裝置、無序號項目，以及無法和 USB 序號比對的無線連線。若狀態為 `unauthorized`，依 Meta 指引在頭盔內確認本機的 USB 偵錯授權。 [Meta 實機設定](https://developers.meta.com/vr/documentation/android-apps/enable-developer-mode/) · [Android Debug Bridge](https://developer.android.com/tools/adb)
+
 ## 首次安裝與啟動檢查
 
 準備一台尚未安裝 VR Command 的 Quest 3。在手機 Meta Horizon App 開啟頭盔的開發者模式，接上資料線，再於頭盔內允許 USB 偵錯。從 `adb devices -l` 取得狀態為 `device` 的裝置序號。Windows 若只顯示 Reality Labs 的 USB 介面，請確認開發者模式、重啟頭盔並重新連接。 [Meta 實機設定](https://developers.meta.com/vr/documentation/android-apps/enable-developer-mode/) · [Android Debug Bridge](https://developer.android.com/tools/adb)
