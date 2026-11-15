@@ -134,7 +134,8 @@ switch ($args[2]) {
             'am' {
                 if ($env:QUEST_TEST_FAIL -eq 'force-stop') { exit 1 }
                 if ($args[4] -ceq 'start') {
-                    if (($args[5..13] -join ' ') -cne '-W --user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n com.vrcommand.quest/com.unity3d.player.UnityPlayerActivity') { exit 98 }
+                    $target = '--user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n com.vrcommand.quest/com.unity3d.player.UnityPlayerActivity'
+                    if (($args[5..($args.Count - 1)] -join ' ') -cnotin @("-W $target", "-W -S $target")) { exit 98 }
                     if ($env:QUEST_TEST_FAIL -eq 'launch-timeout') { 'Status: timeout' } else { 'Status: ok' }
                     'Activity: com.vrcommand.quest/com.unity3d.player.UnityPlayerActivity'
                 }
@@ -257,7 +258,7 @@ class QuestDeployTests(unittest.TestCase):
         self.assertEqual(self.player, json.loads((self.remote/'vr-connection.json').read_bytes()))
         self.assertEqual(expected, hashlib.sha256(apk.read_bytes()).hexdigest())
 
-    def run_smoke(self, serial='fixture', failure=''):
+    def run_smoke(self, serial='fixture', failure='', *, resume=False):
         apk = self.root / 'sample.apk'
         apk.write_bytes(b'first-launch test APK')
         expected = hashlib.sha256(apk.read_bytes()).hexdigest()
@@ -268,7 +269,8 @@ class QuestDeployTests(unittest.TestCase):
         env = {**os.environ, 'QUEST_TEST_ROOT': str(self.root), 'QUEST_TEST_FAIL': failure,
                'QUEST_TEST_ALTER_ALIGNMENT': '', 'QUEST_TEST_RELEASE_HASH': expected}
         return subprocess.run(['pwsh','-NoProfile','-NonInteractive','-File',str(self.script), '-SmokeTest',
-                               '-Serial', serial, '-AdbPath', str(self.adb), '-ApkPath', str(apk), '-ReleaseReport', str(release)],
+                               '-Serial', serial, '-AdbPath', str(self.adb), '-ApkPath', str(apk), '-ReleaseReport', str(release),
+                               *(['-ResumeSmokeTest'] if resume else [])],
                               env=env, capture_output=True, encoding='utf-8', timeout=25)
 
     def test_fresh_quest_launch_verifies_apk_and_observes_started_process(self):
@@ -279,6 +281,7 @@ class QuestDeployTests(unittest.TestCase):
                          tuple(receipt[key] for key in ('phase', 'status', 'model', 'versionCode', 'apkVerified',
                                                         'processObservationSeconds', 'unityLogLines')))
         self.assertEqual(hashlib.sha256((self.root/'sample.apk').read_bytes()).hexdigest(), receipt['apkSha256'])
+        self.assertIs(receipt['installedThisRun'], True)
         self.assertNotIn('startup fixture log', result.stdout)
         commands = self.commands.read_text(encoding='utf-8').splitlines()
         staged = commands[3].split(' --pkg com.vrcommand.quest ', 1)[1]
@@ -291,6 +294,33 @@ class QuestDeployTests(unittest.TestCase):
         self.assertFalse(list(self.remote.iterdir()))
         self.assert_rejected(self.run_smoke(), 'requires a headset without an existing VR Command app')
         self.assertEqual(1, self.commands.read_text(encoding='utf-8').count(' install '))
+
+    def test_resume_quest_smoke_checks_existing_apk_and_config_before_restart(self):
+        self.assert_rejected(self.run_smoke(resume=True), 'No existing VR Command app to resume')
+        self.assert_rejected(self.run_smoke(failure='log-unavailable'), 'Could not read the launched Quest process logs.')
+        self.assertTrue((self.root/'installed-app').exists())
+        self.commands.unlink()
+
+        self.assert_rejected(self.run_smoke(failure='installed-apk-mismatch', resume=True),
+                             'Installed Quest APK could not be verified')
+        config = self.remote/'vr-connection.json'
+        self.write(config, self.player)
+        config_bytes = config.read_bytes()
+        self.assert_rejected(self.run_smoke(resume=True), 'has no existing player configuration')
+        self.assertEqual(config_bytes, config.read_bytes())
+        self.assertNotIn(' am start ', self.commands.read_text(encoding='utf-8'))
+        config.unlink()
+
+        resumed = self.run_smoke(resume=True)
+        self.assertEqual(0, resumed.returncode, resumed.stderr)
+        receipt = json.loads(resumed.stdout)
+        self.assertEqual('process-observed', receipt['status'])
+        self.assertIs(receipt['installedThisRun'], False)
+        self.assertIs(receipt['apkVerified'], True)
+        commands = self.commands.read_text(encoding='utf-8')
+        self.assertEqual(1, commands.count(' am start -W -S '))
+        for operation in (' install ', ' uninstall ', ' pm clear ', ' push '):
+            self.assertNotIn(operation, commands)
 
     def test_quest_first_launch_stops_for_missing_access_and_bad_startup(self):
         cases = (

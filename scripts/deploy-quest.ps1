@@ -4,6 +4,7 @@ param(
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Refresh')][Parameter(Mandatory, ParameterSetName='Smoke')][string]$Serial,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Refresh')][Parameter(ParameterSetName='Smoke')][string]$AdbPath = 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe',
     [Parameter(Mandatory, ParameterSetName='Smoke')][switch]$SmokeTest,
+    [Parameter(ParameterSetName='Smoke')][switch]$ResumeSmokeTest,
     [Parameter(Mandatory, ParameterSetName='Refresh')][switch]$RefreshPlayerTicket,
     [Parameter(ParameterSetName='Player')][string]$AlignmentFile,
     [Parameter(ParameterSetName='Player')][switch]$Passthrough,
@@ -1248,13 +1249,17 @@ function Invoke-QuestFirstLaunch([string]$Apk, $Release) {
     $package = 'com.vrcommand.quest'
     $installed = @(& $AdbPath -s $Serial shell pm list packages -u --user current $package 2>$null)
     if ($LASTEXITCODE -ne 0) { throw 'Could not check if the app is already present.' }
-    if ($installed -ccontains "package:$package") { throw 'The first-launch test requires a headset without an existing VR Command app. Use a new player configuration to test an existing installation.' }
-
-    $stagedApk = New-VerifiedQuestApk $Apk $Release.sha256
-    try {
-        $install = @(& $AdbPath -s $Serial install -R --user current --pkg $package $stagedApk 2>$null)
-        if ($LASTEXITCODE -ne 0 -or $install -cnotcontains 'Success') { throw 'Quest APK installation did not return Success.' }
-    } finally { Remove-Item -LiteralPath $stagedApk -ErrorAction SilentlyContinue }
+    $appPresent = $installed -ccontains "package:$package"
+    if ($ResumeSmokeTest) {
+        if (-not $appPresent) { throw 'No existing VR Command app to resume. Run -SmokeTest without -ResumeSmokeTest to install.' }
+    } else {
+        if ($appPresent) { throw 'The first-launch test requires a headset without an existing VR Command app. Use -ResumeSmokeTest to check the matching APK without a player configuration.' }
+        $stagedApk = New-VerifiedQuestApk $Apk $Release.sha256
+        try {
+            $install = @(& $AdbPath -s $Serial install -R --user current --pkg $package $stagedApk 2>$null)
+            if ($LASTEXITCODE -ne 0 -or $install -cnotcontains 'Success') { throw 'Quest APK installation did not return Success.' }
+        } finally { Remove-Item -LiteralPath $stagedApk -ErrorAction SilentlyContinue }
+    }
     if ((Get-QuestApkStatus $Serial $Release.sha256) -cne 'ready') { throw 'Installed Quest APK could not be verified against the release report.' }
 
     $config = '/sdcard/Android/data/com.vrcommand.quest/files/vr-connection.json'
@@ -1264,7 +1269,9 @@ function Invoke-QuestFirstLaunch([string]$Apk, $Release) {
     $resolved = @(& $AdbPath -s $Serial shell pm resolve-activity --brief --user current @launcherIntent -p $package 2>$null)
     $activities = @($resolved -cmatch '\Acom\.vrcommand\.quest/[A-Za-z0-9._]+\z')
     if ($LASTEXITCODE -ne 0 -or $activities.Count -ne 1) { throw 'Could not resolve a launcher activity for the installed Quest app.' }
-    $startup = @(& $AdbPath -s $Serial shell am start -W --user current @launcherIntent -n $activities[0] 2>$null)
+    $launchOptions = @('-W')
+    if ($ResumeSmokeTest) { $launchOptions += '-S' }
+    $startup = @(& $AdbPath -s $Serial shell am start @launchOptions --user current @launcherIntent -n $activities[0] 2>$null)
     if ($LASTEXITCODE -ne 0 -or $startup -cnotcontains 'Status: ok' -or
         $startup -cnotcontains "Activity: $($activities[0])") {
         throw 'Android did not confirm that the Quest launcher activity started.'
@@ -1280,7 +1287,7 @@ function Invoke-QuestFirstLaunch([string]$Apk, $Release) {
     }
     return [ordered]@{
         phase = 'quest-first-launch'; status = 'process-observed'; model = 'Quest 3'; versionCode = $Release.versionCode
-        apkVerified = $true; apkSha256 = $Release.sha256; processObservationSeconds = 3
+        apkVerified = $true; apkSha256 = $Release.sha256; installedThisRun = -not $ResumeSmokeTest; processObservationSeconds = 3
         unityLogLines = @($logs -cmatch '^[VDIWEF]/Unity\s*\(').Count
     }
 }

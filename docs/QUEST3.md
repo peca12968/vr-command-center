@@ -25,7 +25,9 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -SmokeTest -Serial '<ADB 序號
   -ReleaseReport .\artifacts\venue-release-tracked-vr-0508.json
 ```
 
-工具核對指定 Quest 3，在目前 Android 使用者下安裝 APK，並讀回裝置上的 APK 雜湊。沒有既有玩家設定時，工具等待 Android 確認啟動，接著讀取該程序的 Unity 與 AndroidRuntime 日誌，並在三秒後重查原程序。成功輸出 JSON 的 `status` 為 `process-observed`。`unityLogLines` 是查到的 Unity 日誌列數，允許為零。工具遇到既有安裝會停止，若安裝後檢查失敗，已安裝的 APK 仍留在頭盔上。
+工具核對指定 Quest 3，在目前 Android 使用者下安裝 APK，並讀回裝置上的 APK 雜湊。沒有既有玩家設定時，工具等待 Android 確認啟動，接著讀取該程序的 Unity 與 AndroidRuntime 日誌，並在三秒後重查原程序。成功輸出 JSON 的 `status` 為 `process-observed`。`unityLogLines` 是查到的 Unity 日誌列數，允許為零。預設遇到既有安裝會停止。
+
+如果 APK 安裝完成後遇到暫時的啟動或日誌錯誤，可在原命令加上 `-ResumeSmokeTest`。工具先核對已安裝 APK 的雜湊與原發行報告一致，並確認沒有玩家連線設定，才停止該遊戲程序並重新啟動。應用程式資料會保留。成功回條的 `installedThisRun` 在這次續測為 `false`，本輪完成首次安裝時為 `true`。 [Android 啟動指令](https://developer.android.com/tools/adb#am)
 
 這項檢查無需玩家票券。後續備妥測試場次，依[單房實機追蹤驗收](#單房實機追蹤驗收)部署新配發的玩家設定，再驗證入場、OpenXR 追蹤、MR 對位及操作。
 
