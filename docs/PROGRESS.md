@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-16 Quest 逐席連線門檻與六批收件診斷
+
+- 單場、五房及 5／10／25 席總表可指定 Quest 最低回覆數和 p95 上限。總表與單批逐項採較嚴的數值。收件結果分別列出缺量測、無效報告及未達標席位。通過批次會顯示回覆數最低與 p95 最高的原房號、席位。 [操作方式](EXTERNAL_CLIENTS.md#逐席核對-quest-連線量測門檻)
+- 六批合成資料共核對 30 份 Quest 量測與 80 筆原入場格式的模擬戰績確認。收件反例分別拒絕較嚴門檻未達、缺量測、片段順序錯誤。單場核對通過 p95 等於上限，拒絕比上限高的結果。0.50.10 APK 雜湊和原發行報告相符。Windows 仍未列舉原 Quest 3 的 ADB 介面，頭盔與跨機 25 席待現地驗收。 [合成驗收報告](../artifacts/quest-link-criteria-fixture-a7e8ba08.json) · [發行報告](../artifacts/venue-release-quest-link-0510.json)
+
 ## 2026-11-16 Quest 遊戲內連線量測與封存核對
 
 - Quest 0.50.10／75 部署可加 `-RecordLinkMetrics`，在第一次收到 `Running` 後使用原遊戲連線取得 30 筆回覆、逾時或中斷。量測保存於原 logcat。單場及五房可要求逐席核對原程序、最終戰績的連線及完整片段，並輸出 p95 與 Unity 每秒更新數。 [部署操作](QUEST3.md#記錄-quest-遊戲內連線量測) · [封存操作](EXTERNAL_CLIENTS.md#quest-遊戲內連線量測)

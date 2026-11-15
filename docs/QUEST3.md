@@ -700,6 +700,8 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\room-01-seat-01
 
 五房部署也可在原 `-VenueBundle`、`-DeviceMap`、`-DeployMappedSeats` 指令加上同一選項。讓任務執行到採樣 30 次結案，再保存原玩家程序的 logcat。量測在第一次看到執行中狀態才開始，留出五房準備與追蹤核對時間。票券更新會保留已安裝的量測設定。 [收集日誌](#收集-quest-場館驗收日誌) · [併入場館驗收](EXTERNAL_CLIENTS.md#quest-遊戲內連線量測)
 
+有現場門檻時，封存驗收可逐席核對最低回覆數及 p95 上限。5、10、25 席總表可統一設定，個別批次也可以採用更嚴的門檻。 [設定 Quest 逐席門檻](EXTERNAL_CLIENTS.md#逐席核對-quest-連線量測門檻)
+
 ## 收集 Quest 場館驗收日誌
 
 原程序斷線且票券過期時，可先更新同一入場的票券，再由玩家按 B 重連。 [票券更新](QUEST_RECONNECT.md#保留遊戲程序並更新票券)

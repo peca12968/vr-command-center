@@ -46,6 +46,21 @@ def quest_logcat(log, port=7777, pid=7342):
             + ''.join(logcat_line(line, pid) for line in log.splitlines()))
 
 
+def insert_quest_link_metrics(log, pid, connection, *, process_id=None, report_connection=None, frame_pid=None, drop=False):
+    samples = [{'sequence': i + 1, 'tick': 20 * (i + 1), 'playerLoopFrames': 72,
+                'windowSeconds': 1, 'roundTripMilliseconds': 20 + i if i < 28 else 0,
+                'result': 'Reply' if i < 28 else 'Timeout' if i == 28 else 'Interrupted'} for i in range(30)]
+    data = json.dumps({'version': 1, 'processId': pid if process_id is None else process_id,
+                       'connection': int(connection if report_connection is None else report_connection), 'complete': True,
+                       'batchMode': False, 'graphicsDeviceActive': True, 'reason': 'Limit', 'samples': samples}, separators=(',', ':'))
+    chunks = [data[i:i + 480] for i in range(0, len(data), 480)]
+    lines = ''.join(logcat_line(f'VR_QUEST_LINK_METRICS id={connection} part={index}/{len(chunks)} {chunk}', frame_pid or pid)
+                    for index, chunk in enumerate(chunks, 1) if not drop or index != 2)
+    marker = logcat_line(f'VR_CLIENT_CONNECTED id={connection}', pid)
+    assert marker in log
+    return log.replace(marker, marker + lines, 1)
+
+
 def fixture(*, remote=True):
     server_ip = ipaddress.IPv4Address('192.168.5.10')
     peer = ipaddress.IPv4Address('192.168.5.20') if remote else server_ip
@@ -550,20 +565,6 @@ def preflight_fixture(root, label, *, server, peer, port, exchange=None):
 
 class FieldResultsTests(unittest.TestCase):
     def test_quest_link_metrics_verify_original_pid_connection_and_seat_in_both_modes(self):
-        def insert_link_metrics(log, pid, connection, *, process_id=None, report_connection=None, frame_pid=None, drop=False):
-            samples = [{'sequence': i + 1, 'tick': 20 * (i + 1), 'playerLoopFrames': 72,
-                        'windowSeconds': 1, 'roundTripMilliseconds': 20 + i if i < 28 else 0,
-                        'result': 'Reply' if i < 28 else 'Timeout' if i == 28 else 'Interrupted'} for i in range(30)]
-            data = json.dumps({'version': 1, 'processId': pid if process_id is None else process_id,
-                               'connection': int(connection if report_connection is None else report_connection), 'complete': True,
-                               'batchMode': False, 'graphicsDeviceActive': True, 'reason': 'Limit', 'samples': samples}, separators=(',', ':'))
-            chunks = [data[i:i + 480] for i in range(0, len(data), 480)]
-            lines = ''.join(logcat_line(f'VR_QUEST_LINK_METRICS id={connection} part={index}/{len(chunks)} {chunk}', frame_pid or pid)
-                            for index, chunk in enumerate(chunks, 1) if not drop or index != 2)
-            marker = logcat_line(f'VR_CLIENT_CONNECTED id={connection}', pid)
-            self.assertIn(marker, log)
-            return log.replace(marker, marker + lines, 1)
-
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
@@ -580,7 +581,7 @@ class FieldResultsTests(unittest.TestCase):
                         source = root / player['log']
                         log, pid = source.read_text(encoding='utf-8'), player['logcatPid']
                         connection, _ = field.quest_client_result(log, pid, port)
-                        source.write_text(insert_link_metrics(log, pid, connection), encoding='utf-8')
+                        source.write_text(insert_quest_link_metrics(log, pid, connection), encoding='utf-8')
                         original_logs.append((source, log, pid, connection))
                 result = field.verify_venue(path)
                 self.assertEqual(5, result['questLinkMetricsVerified'])
@@ -600,6 +601,14 @@ class FieldResultsTests(unittest.TestCase):
                     cli = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', timeout=12)
                     self.assertEqual(0, cli.returncode, cli.stderr)
                     self.assertEqual(rows[:1], json.loads(cli.stdout)['questLinkMetrics'])
+                    thresholds = [*command[:-1], '--quest-minimum-replies', '28', '--quest-maximum-p95-ms']
+                    accepted = subprocess.run([*thresholds, '46'], capture_output=True, text=True, encoding='utf-8', timeout=12)
+                    self.assertEqual(0, accepted.returncode, accepted.stderr)
+                    self.assertEqual({'minimumReplies': 28, 'maximumP95RoundTripMs': 46, 'seatsVerified': 1},
+                                     json.loads(accepted.stdout)['questLinkCriteria'])
+                    rejected = subprocess.run([*thresholds, '45'], capture_output=True, text=True, encoding='utf-8', timeout=12)
+                    self.assertEqual(1, rejected.returncode)
+                    self.assertIn('Quest link criteria not met at room 1 seat 2', rejected.stderr)
 
                 source, log, pid, connection = original_logs[0]
                 for changes, reason in [({'process_id': pid + 1}, 'original graphical client process'),
@@ -607,7 +616,7 @@ class FieldResultsTests(unittest.TestCase):
                                         ({'frame_pid': pid + 1}, 'Missing complete Quest link report'),
                                         ({'drop': True}, 'missing, reordered or repeated fragments')]:
                     with self.subTest(changes=changes):
-                        source.write_text(insert_link_metrics(log, pid, connection, **changes), encoding='utf-8')
+                        source.write_text(insert_quest_link_metrics(log, pid, connection, **changes), encoding='utf-8')
                         with self.assertRaisesRegex(field.EvidenceError, f'room 1 seat 2: .*{reason}'):
                             field.verify_venue(path)
                 source.write_text(log, encoding='utf-8')
@@ -616,9 +625,9 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertNotIn('questLinkMetricsVerified', field.verify_venue(path))
 
     def staged_batch(self, root, mode, count, id_offset, minutes_after, *, remote=False, tracked_fire=False,
-                     missing_shot=False, runtime='Test OpenXR Runtime', windows_inbox=False, windows_links=False):
+                     missing_shot=False, runtime='Test OpenXR Runtime', windows_inbox=False, windows_links=False, quest_links=False):
         root.mkdir()
-        path, manifest, _ = venue_fixture(root, mode, remote=remote, with_journals=True,
+        path, manifest, _ = venue_fixture(root, mode, remote=remote, with_journals=True, quest_per_room=int(quest_links),
             room_sizes=(count,) * 5, id_offset=id_offset, minutes_after=minutes_after)
         offsets = [0] if mode == 'Linked' else [0, 100, 200, 300, 400]
         capture_start = datetime.fromisoformat('2026-11-09T08:00:00+08:00') + timedelta(minutes=minutes_after)
@@ -640,7 +649,16 @@ class FieldResultsTests(unittest.TestCase):
         else:
             self.concurrent_journals(root, manifest, offsets, capture_start=capture_start)
             manifest['minimumConcurrentMilliseconds'] = 1000
-        self.add_shared_release(root, manifest, 0)
+        self.add_shared_release(root, manifest, int(quest_links))
+        if quest_links:
+            for entry in manifest['sessions']:
+                port = json.loads((root / entry['launcherReport']).read_bytes())['udpBinding']['port']
+                for player in entry['players']:
+                    if 'logcatPid' in player:
+                        path_to_log, pid = root / player['log'], player['logcatPid']
+                        log = path_to_log.read_text(encoding='utf-8')
+                        connection, _ = field.quest_client_result(log, pid, port)
+                        path_to_log.write_text(insert_quest_link_metrics(log, pid, connection), encoding='utf-8')
         if windows_links:
             self.add_windows_links(root, manifest)
         if count != 5:
@@ -649,13 +667,15 @@ class FieldResultsTests(unittest.TestCase):
             manifest = self.windows_inbox_fixture(root, manifest)
         elif mode == 'Linked':
             manifest = self.pack_venue(root, manifest)
+            if not manifest['windowsPlayers']:
+                del manifest['windowsPlayers']
         path.write_text(json.dumps(manifest), encoding='utf-8')
         return str(path.relative_to(root.parent))
 
-    def staged_plan(self, root, *, remote=False, tracked_fire=False, windows_inbox=False, windows_links=False):
+    def staged_plan(self, root, *, remote=False, tracked_fire=False, windows_inbox=False, windows_links=False, quest_links=False):
         names = [self.staged_batch(root / f'{count}-{mode}', mode, count, index * 10000, minutes, remote=remote,
                                    tracked_fire=tracked_fire, windows_inbox=windows_inbox and count == 1,
-                                   windows_links=windows_links)
+                                   windows_links=windows_links, quest_links=quest_links)
                  for minutes, count in enumerate((1, 2, 5), 1)
                  for index, mode in ((minutes * 2, 'Independent'), (minutes * 2 + 1, 'Linked'))]
         return {'version': 1, 'topology': 'direct-lan' if remote else 'same-host',
@@ -1137,6 +1157,72 @@ class FieldResultsTests(unittest.TestCase):
             rejected = subprocess.run(command, capture_output=True)
             self.assertEqual(1, rejected.returncode)
             self.assertIn(b'Venue manifest entry 1: Windows link criteria not met', rejected.stderr)
+
+    def test_staged_quest_link_criteria_report_missing_invalid_and_below_threshold_seats(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = self.staged_plan(root, remote=True, quest_links=True)
+            names = [root / name for name in plan['venueManifests']]
+            path = root / 'stages.json'
+            criteria = {'minimumReplies': 28, 'maximumP95RoundTripMs': 46}
+            prepare = [sys.executable, str(SCRIPT.with_name('prepare-venue-stages.py')), '--topology', 'direct-lan',
+                       '--minimum-concurrent-ms', '2000', '--output', str(path), '--quest-minimum-replies', '28']
+            manifests = list(map(str, reversed(names)))
+            rejected = subprocess.run([*prepare, *manifests], capture_output=True)
+            self.assertEqual(1, rejected.returncode)
+            self.assertIn(b'Provide both Quest link criteria', rejected.stderr)
+            self.assertFalse(path.exists())
+            subprocess.run([*prepare, '--quest-maximum-p95-ms', '46', *manifests], capture_output=True, check=True)
+            self.assertEqual(criteria, json.loads(path.read_bytes())['questLinkCriteria'])
+
+            def set_local(index, values):
+                manifest = json.loads(names[index].read_bytes())
+                manifest['questLinkCriteria'] = values
+                names[index].write_text(json.dumps(manifest), encoding='utf-8')
+                return manifest
+
+            set_local(0, {'minimumReplies': 1, 'maximumP95RoundTripMs': 900})
+            command = [sys.executable, str(SCRIPT), '--venue-stages', str(path)]
+            valid = json.loads(subprocess.check_output(command))
+            self.assertEqual(criteria, valid['questLinkCriteria'])
+            self.assertEqual(80, valid['serverAcknowledgements'])
+            self.assertFalse(valid['networkCapacityAccepted'])
+            self.assertEqual([dict(criteria, seatsVerified=5)] * 6, [stage['questLinkCriteria'] for stage in valid['stages']])
+            self.assertEqual({'lowestReplies': {'roomId': 1, 'seat': 1, 'replies': 28},
+                              'highestP95RoundTripMs': {'roomId': 1, 'seat': 1, 'p95RoundTripMs': 46}},
+                             valid['stages'][0]['questLinkObserved'])
+
+            set_local(0, {'minimumReplies': 29, 'maximumP95RoundTripMs': 900})
+            set_local(1, {'minimumReplies': 1, 'maximumP95RoundTripMs': 45})
+            mixed = json.loads(names[3].read_bytes())
+            first, second, *_ = (names[3].parent / row['log'] for row in mixed['sessions'][0]['players'])
+            original_first, original_second = first.read_bytes(), second.read_bytes()
+            first.write_bytes(b''.join(line for line in original_first.splitlines(keepends=True) if b'VR_QUEST_LINK_METRICS ' not in line))
+            second.write_bytes(original_second.replace(b' part=1/', b' part=2/', 1))
+            audit = subprocess.run([*command, '--inspect-venue-stages'], capture_output=True)
+            self.assertEqual(1, audit.returncode, audit.stderr.decode())
+            report = json.loads(audit.stdout)
+            self.assertEqual([[1], [2], [4]], [issue['entries'] for issue in report['issues']])
+            below_minimum, above_p95, intake = [issue['questLinkMetrics'] for issue in report['issues']]
+            self.assertEqual(dict(criteria, minimumReplies=29), below_minimum['criteria'])
+            self.assertEqual(dict(criteria, maximumP95RoundTripMs=45), above_p95['criteria'])
+            for observed, failure in ((below_minimum, 'minimumReplies'), (above_p95, 'maximumP95RoundTripMs')):
+                self.assertEqual(5, observed['verifiedSeats'])
+                self.assertTrue(all(row['criteriaFailures'] == [failure] for row in observed['seats']))
+            self.assertEqual(3, intake['verifiedSeats'])
+            self.assertEqual([{'roomId': 1, 'seat': 2}], intake['missingSeats'])
+            [invalid] = intake['invalidReports']
+            self.assertEqual((2, 2), (invalid['roomId'], invalid['seat']))
+            self.assertIn('missing, reordered or repeated fragments', invalid['reason'])
+            self.assertNotIn(str(root), audit.stdout.decode())
+            self.assertNotIn('192.168.', audit.stdout.decode())
+
+            first.write_bytes(original_first)
+            second.write_bytes(original_second)
+            set_local(0, criteria)
+            set_local(1, criteria)
+            accepted = subprocess.run([*command, '--inspect-venue-stages'], capture_output=True, check=True)
+            self.assertTrue(json.loads(accepted.stdout)['complete'])
 
             for invalid in (None, {}, {'minimumReplies': True, 'maximumP95RoundTripMs': 14}):
                 path.write_text(json.dumps(dict(plan, windowsLinkCriteria=invalid)), encoding='utf-8')
@@ -3312,6 +3398,15 @@ class FieldResultsTests(unittest.TestCase):
                 delayed.rename(returning)
                 self.assertEqual(expected, field.verify_venue(output))
                 generated = json.loads(output.read_bytes())
+                thresholds = output.with_name('venue-with-quest-criteria.json')
+                prepared = subprocess.run([*command, '--quest-minimum-replies', '28', '--quest-maximum-p95-ms', '46',
+                                           '--output', str(thresholds)], capture_output=True)
+                self.assertEqual(0, prepared.returncode, prepared.stderr.decode())
+                self.assertEqual({'minimumReplies': 28, 'maximumP95RoundTripMs': 46},
+                                 json.loads(thresholds.read_bytes())['questLinkCriteria'])
+                with self.assertRaises(field.QuestLinkCriteriaFailed) as missing:
+                    field.verify_venue(thresholds)
+                self.assertEqual(5, len(missing.exception.metrics['missingSeats']))
                 self.assertTrue(all(not Path(value).is_absolute() for value in (
                     generated['questCaptures']['deviceMap'], generated['questCaptures']['networkPlan'],
                     generated['venueNetworkPlan'],

@@ -523,6 +523,7 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `windowsSeatMap` | 選用。收件資料夾用的版本 1 Windows 電腦對照表。混合 Quest 場次須指定應收的 Windows 席位 |
 | `windowsStationAddresses` | 選用。Windows 電腦標籤與預期 IPv4 的對照表。須搭配 `windowsEvidenceDirectory` 及 `windowsSeatMap` |
 | `windowsLinkCriteria` | 選用。場館填入 `minimumReplies` 和 `maximumP95RoundTripMs`，逐席驗收原 Windows 連線量測。 |
+| `questLinkCriteria` | 選用。場館填入 `minimumReplies` 和 `maximumP95RoundTripMs`，逐席驗收原 Quest logcat 內的遊戲連線量測。 |
 | `sessions[].players` | 逐場填寫尚未由 `windowsPlayers` 或 `questCaptures` 提供的席位，每筆填實際 IPv4 `address` 及原日誌路徑 `log`。手動填入 Quest 3 原 logcat 時另填數字 `logcatPid`，例如 `7342`。該場席位已全部由前兩欄提供時可省略 |
 
 路徑可以是絕對路徑，或相對於 `venue.json` 所在資料夾。同一檔案只能使用一次。以下是五房獨立模式的 Windows 範例，請依現場配置填入實際地址與檔名。混合場可改用 `questCaptures` 或逐場補上 Quest 原 logcat。兩種方式合計每房須有五席。
@@ -661,6 +662,8 @@ python scripts/verify-field-results.py --venue-stages .\stages.json --inspect-ve
 
 若批次已設定 `windowsLinkCriteria`，Windows 收件核對完成但量測缺漏或未達門檻，總表會在 `issues[].windowsLinkMetrics` 顯示該批門檻、已核對席數、缺量測的房號與席號，以及已收到的逐席回覆數與 p95 往返時間。`criteriaFailures` 會指出該席未通過的門檻。原始資料可使用散檔、逐席 ZIP 或 Windows 收件資料夾。 [連線量測門檻](#逐席核對-windows-連線量測門檻)
 
+Quest 批次已設定 `questLinkCriteria` 時，`issues[].questLinkMetrics` 會區分缺量測的 `missingSeats`、片段或內容無效的 `invalidReports`，以及原量測有效但未達門檻的 `seats[].criteriaFailures`。席位位置依封存戰績與伺服器確認決定。 [Quest 逐席門檻](#逐席核對-quest-連線量測門檻)
+
 若 Quest 擷取報告尚未涵蓋原計畫席位，`issues[].questCaptures` 會列出預期席數、報告中標示完成的席數、失敗嘗試次數及待補的房號與席號。找不到原擷取或部署報告時，`issues[].missingFile` 會附檔案類型與檔名。 [重試擷取](QUEST3.md#重試未完成的-quest-擷取席位)
 
 若原 UDP 預檢報告尚未完成，`issues[].udpPreflight` 會列出該批引用的報告項次、檔名、已核對數量及 `pendingSeats`。全館報告會指出缺少、過期或重複的來源對應到哪些席位，並列出無法配對的報告數。Quest 報告會指出待補席位及失敗階段，例如裝置未就緒或探測失敗。找不到報告檔時，同一明細會列出缺少的報告。席位狀態取自預檢報告，補測後須保留原雙端紀錄並重跑正式驗收。 [補測全館 UDP](#補測未完成的全館-udp-預檢)
@@ -674,6 +677,8 @@ python scripts/verify-field-results.py --venue-stages .\stages.json --inspect-ve
 ##### 六批共用 Windows 連線量測門檻
 
 可在 `stages.json` 加入 `"windowsLinkCriteria": {"minimumReplies": 28, "maximumP95RoundTripMs": 40}`，讓六批都核對原 Windows 逐席量測。個別批次可要求更高的最低回覆數或更低的 p95 上限，每項採兩份清單中較嚴的值。總表會顯示共用門檻，並逐批列出實際門檻及核對席數。每批至少須有一席 Windows 量測才能通過這項選用檢查。
+
+六批皆有 Quest 席位時，也可在 `stages.json` 加 `questLinkCriteria`，或使用產生器的 `--quest-minimum-replies` 及 `--quest-maximum-p95-ms`。總表與個別批次逐項取較嚴的門檻。只需驗收其中幾批 Quest 時，在各該批清單指定即可。通過後 `questLinkObserved` 提供該批回覆數最低及 p95 最高的原房號與席位。
 
 通過量測門檻的批次會在 `windowsLinkObserved` 列出回覆數最低及 p95 最高的房號、席號和數值。多席同值時顯示房號及席號最前的一席。可在總驗收及收件報告直接找出每批最接近門檻的席位。量測未通過的批次仍會在收件問題中顯示逐席結果。
 
@@ -828,6 +833,16 @@ python scripts/verify-field-results.py --venue-stages .\stages.json --inspect-ve
 在原五房驗收清單頂層加入 `"requireQuestLinkMetrics": true`，或在產生清單時加 `--require-quest-link-metrics`。單場驗收也可在原 `--quest-player` 指令加同一旗標。工具逐席從原 logcat 合併報告片段，核對 PID、原連線及伺服器確認的最終戰績。量測片段須位於該條連線建立與最終戰績之間。缺少、重複或順序錯誤的片段會使該席量測驗收失敗。若玩家在採樣後重連，保留本場封存戰績，另安排從同一條連線完成採樣及收尾的驗收。
 
 五房結果在 `questLinkMetricsVerified` 列出通過數量，並在各場 `questLinkMetrics` 顯示房號、席位、回覆／逾時／中斷與效能摘要。Windows 席位可同時沿用下方量測格式。原 logcat 已保留量測片段，無需把頭盔日誌重新編排成量測檔。 [Android 日誌格式](https://developer.android.com/tools/logcat)
+
+### 逐席核對 Quest 連線量測門檻
+
+若現場有指定的連線門檻，把兩個數值設為場館規格。回覆數為 1 到 30，p95 往返時間上限為 0 到 900 毫秒。
+
+```json
+{"questLinkCriteria":{"minimumReplies":28,"maximumP95RoundTripMs":40}}
+```
+
+`prepare-venue-field-manifest.py` 可用 `--quest-minimum-replies 28 --quest-maximum-p95-ms 40` 寫入相同欄位。單場模式把這兩個旗標加到原 `verify-field-results.py --quest-player` 驗收指令。每位 Quest 玩家以自身 30 筆原始採樣判定，p95 等於上限時可通過。通過的摘要保存實際門檻與 `seatsVerified`。混合場可另用 `windowsLinkCriteria` 設定 Windows 的門檻。
 
 ## Windows 玩家連線量測
 

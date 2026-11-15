@@ -59,6 +59,16 @@ class WindowsLinkCriteriaFailed(EvidenceError):
         self.metrics = metrics
 
 
+class QuestLinkCriteriaFailed(EvidenceError):
+    def __init__(self, message, metrics):
+        super().__init__(message)
+        self.metrics = metrics
+
+
+class QuestLinkReportMissing(EvidenceError):
+    pass
+
+
 class ConcurrentRosterIncomplete(EvidenceError):
     def __init__(self, message, overlap):
         super().__init__(message)
@@ -413,7 +423,7 @@ def quest_client_result(log, pid, port, *, connections=None):
     return client_result('\n'.join(markers), connections=connections)
 
 
-def quest_link_metrics(log, pid, connection):
+def quest_link_metrics(log, pid, connection, criteria=None):
     chunk_pattern = re.compile(r'VR_QUEST_LINK_METRICS id=(0|[1-9][0-9]{0,19}) part=([1-9][0-9]?)/([1-9][0-9]?) ([ -~]{1,480})')
     active, total, chunks = False, None, []
     for line in log.splitlines():
@@ -435,17 +445,25 @@ def quest_link_metrics(log, pid, connection):
                     'Quest link report is outside its original connection or has missing, reordered or repeated fragments')
             total = count
             chunks.append(chunk[4])
-    require(chunks and len(chunks) == total, 'Missing complete Quest link report for the original acknowledged connection')
-    metrics = read_json(''.join(chunks))
-    require(integer(metrics.get('version'), 1, 1) and integer(metrics.get('processId'), 1, 2**31 - 1) == pid
-            and integer(metrics.get('connection'), 1, 2**64 - 1) == int(connection)
-            and metrics.get('batchMode') is False and metrics.get('graphicsDeviceActive') is True,
-            'Quest link report does not belong to the original graphical client process and connection')
-    require(metrics.get('complete') is True and metrics.get('reason') == 'Limit', 'Quest link report did not complete its sample window')
-    summary = summarize_link_samples(metrics, 'Quest')
-    samples = metrics['samples']
-    seconds = sum(Decimal(row['windowSeconds']) for row in samples)
-    return {**summary, 'playerLoopFramesPerSecond': float(round(sum(row['playerLoopFrames'] for row in samples) / seconds, 2))}
+    if not chunks:
+        raise QuestLinkReportMissing('Missing complete Quest link report for the original acknowledged connection')
+    require(len(chunks) == total, 'Incomplete Quest link report for the original acknowledged connection')
+    try:
+        metrics = read_json(''.join(chunks))
+        require(type(metrics) is dict, 'Invalid Quest link report payload')
+        require(integer(metrics.get('version'), 1, 1) and integer(metrics.get('processId'), 1, 2**31 - 1) == pid
+                and integer(metrics.get('connection'), 1, 2**64 - 1) == int(connection)
+                and metrics.get('batchMode') is False and metrics.get('graphicsDeviceActive') is True,
+                'Quest link report does not belong to the original graphical client process and connection')
+        require(metrics.get('complete') is True and metrics.get('reason') == 'Limit', 'Quest link report did not complete its sample window')
+        summary = summarize_link_samples(metrics, 'Quest', criteria)
+        samples = metrics['samples']
+        seconds = sum(Decimal(row['windowSeconds']) for row in samples)
+        return {**summary, 'playerLoopFramesPerSecond': float(round(sum(row['playerLoopFrames'] for row in samples) / seconds, 2))}
+    except EvidenceError:
+        raise
+    except (ValueError, TypeError, KeyError, ArithmeticError, RecursionError) as error:
+        raise EvidenceError('Invalid Quest link report payload') from error
 
 
 def verify_reconnect_chain(connections, peers, acknowledged, approved, released, expected_ip, planned=None):
@@ -1153,9 +1171,11 @@ def tracked_vr_start_boundary(evidence, session, world, through):
 def verify(topology, server_ips, launcher, session, statistics, endpoint, server_log, player_logs, *, quest_player_logs=(),
            world_journal=None, combat_journal=None, room_alignments=None, udp_preflight=None, udp_source_preflights=None,
            verify_player_sources=False, verify_reconnect_history=False, quest_readiness_reports=(), tracked_vr_start=None,
-           roster_departures=None, require_quest_link_metrics=False):
+           roster_departures=None, require_quest_link_metrics=False, quest_link_criteria=None):
     quest_readiness = ()
-    require(not require_quest_link_metrics or quest_player_logs, 'Quest link verification requires an original Quest log')
+    require(not (require_quest_link_metrics or quest_link_criteria is not None) or quest_player_logs,
+            'Quest link verification requires an original Quest log')
+    quest_link_issues = [] if quest_link_criteria is not None else None
     if quest_readiness_reports:
         require(world_journal is not None and len(quest_readiness_reports) == len(quest_player_logs),
                 'Provide the closed world journal and one Quest readiness report per original Quest log')
@@ -1166,7 +1186,10 @@ def verify(topology, server_ips, launcher, session, statistics, endpoint, server
                                udp_source_preflights=udp_source_preflights, verify_player_sources=verify_player_sources,
                                verify_reconnect_history=verify_reconnect_history, quest_readiness=quest_readiness,
                                tracked_vr_start=tracked_vr_start, roster_departures=roster_departures,
-                               require_quest_link_metrics=require_quest_link_metrics)
+                               require_quest_link_metrics=require_quest_link_metrics, quest_link_criteria=quest_link_criteria,
+                               quest_link_issues=quest_link_issues)
+    if quest_link_criteria is not None:
+        report['questLinkCriteria'] = check_quest_link_criteria(report.get('questLinkMetrics', []), quest_link_issues, quest_link_criteria)
     return report
 
 
@@ -1201,7 +1224,8 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                    guarded_begin=None, concurrency=None, verify_reconnect_history=False, reconnect_window=None,
                    quest_deployments=None, require_distinct_remote_roster=False, control_batches=(),
                    observed_quest_addresses=None, quest_readiness=(), planned_seat_addresses=None, reconnect_sources=None,
-                   tracked_vr_start=None, roster_departures=None, topology_witness=None, require_quest_link_metrics=False):
+                   tracked_vr_start=None, roster_departures=None, topology_witness=None, require_quest_link_metrics=False,
+                   quest_link_criteria=None, quest_link_issues=None):
     integer(size, 0 if roster_departures is not None else 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(not verify_player_sources or world_journal is not None, 'Player source verification requires the original closed world journal')
@@ -1290,13 +1314,17 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
             unmatched_readiness.discard(player_id)
         room = verify_player_terminal_result(result, owner, stats, boundary)
         require(room in rooms, 'Player result admission or room differs')
-        if pid is not None and require_quest_link_metrics:
-            seat_number = integer(owner['seat'], 0, 4) + 1
+        if pid is not None and (require_quest_link_metrics or quest_link_criteria is not None):
+            location = {'roomId': room, 'seat': integer(owner['seat'], 0, 4) + 1}
             try:
-                samples = quest_link_metrics(log, pid, connection)
+                samples = quest_link_metrics(log, pid, connection, quest_link_criteria)
             except EvidenceError as error:
-                raise EvidenceError(f'Quest link metrics for room {room} seat {seat_number}: {error}') from error
-            quest_link_rows.append({'roomId': room, 'seat': seat_number, **samples})
+                if quest_link_issues is None:
+                    raise EvidenceError(f"Quest link metrics for room {room} seat {location['seat']}: {error}") from error
+                status = 'missing' if isinstance(error, QuestLinkReportMissing) else 'invalid'
+                quest_link_issues.append({**location, 'status': status, 'reason': str(error)})
+            else:
+                quest_link_rows.append({**location, **samples})
         if (capture_seat is not None or pid is not None and quest_deployments is not None
                 or player_sources is not None or verify_reconnect_history or planned_seat_addresses is not None):
             seat = integer(owner['seat'], 0, 4) + 1
@@ -1734,19 +1762,35 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
     if measured or link_criteria is not None:
         missing_metrics = [seat_row(seat) for seat in sorted(set(selected.values()) - measured.keys())]
         measured_rows = [dict(seat_row(seat), file=received[seat], **measured[seat]) for seat in sorted(measured)]
-        link_report['windowsLinkMetrics'] = windows_link_summary(measured_rows, missing_metrics, link_criteria)
+        link_report['windowsLinkMetrics'] = link_intake_summary(measured_rows, missing_metrics, link_criteria)
     return groups, {'complete': not missing and not issues, 'expectedWindowsSeats': len(selected),
                     'receivedWindowsSeats': len(received), 'missingSeats': [seat_row(seat) for seat in missing],
                     'receivedSeats': [dict(seat_row(seat), file=received[seat]) for seat in sorted(received)], 'issues': issues,
                     **link_report, **reconnect_report}
 
 
-def windows_link_summary(rows, missing_seats, criteria):
+def link_intake_summary(rows, missing_seats, criteria):
     summary = {'verifiedSeats': len(rows), 'missingSeats': missing_seats, 'seats': rows}
     if criteria is not None:
         summary['criteria'] = criteria
         summary['meetsCriteria'] = not missing_seats and all(not row.get('criteriaFailures') for row in rows)
     return summary
+
+
+def check_quest_link_criteria(rows, issues, criteria):
+    def seat_order(row):
+        return row['roomId'], row['seat']
+
+    missing = [{key: row[key] for key in ('roomId', 'seat')} for row in issues if row['status'] == 'missing']
+    invalid = [{key: row[key] for key in ('roomId', 'seat', 'reason')} for row in issues if row['status'] == 'invalid']
+    failing = sorted({seat_order(row) for row in issues} | {seat_order(row) for row in rows if row.get('criteriaFailures')})
+    if not rows or failing:
+        metrics = dict(link_intake_summary(sorted(rows, key=seat_order), sorted(missing, key=seat_order), criteria),
+                       invalidReports=sorted(invalid, key=seat_order), meetsCriteria=False)
+        locations = ', '.join(f'room {room} seat {seat}' for room, seat in failing)
+        reason = 'Quest link criteria not met at ' + locations if locations else 'Quest link criteria require original Quest logs'
+        raise QuestLinkCriteriaFailed(reason, metrics)
+    return {**criteria, 'seatsVerified': len(rows)}
 
 
 def verify_windows_link(log_hash, connection, launch, raw_metrics, criteria=None):
@@ -2701,15 +2745,32 @@ def verify_venue(manifest_path):
     return report
 
 
-def read_windows_link_criteria(document):
-    if 'windowsLinkCriteria' not in document:
+def read_link_criteria(document, platform):
+    key = platform.lower() + 'LinkCriteria'
+    if key not in document:
         return None
-    criteria = document['windowsLinkCriteria']
+    criteria = document[key]
     require(type(criteria) is dict and set(criteria) == {'minimumReplies', 'maximumP95RoundTripMs'},
-            'Windows link criteria require minimumReplies and maximumP95RoundTripMs')
+            f'{platform} link criteria require minimumReplies and maximumP95RoundTripMs')
     integer(criteria['minimumReplies'], 1, 30)
     integer(criteria['maximumP95RoundTripMs'], 0, 900)
     return criteria
+
+
+def link_criteria_arguments(minimum_replies, maximum_p95_ms, platform):
+    if minimum_replies is None and maximum_p95_ms is None:
+        return None
+    require(minimum_replies is not None and maximum_p95_ms is not None, f'Provide both {platform} link criteria')
+    return read_link_criteria({platform.lower() + 'LinkCriteria': {
+        'minimumReplies': minimum_replies, 'maximumP95RoundTripMs': maximum_p95_ms,
+    }}, platform)
+
+
+def stricter_link_criteria(local, staged):
+    if local is None or staged is None:
+        return local or staged
+    return {'minimumReplies': max(local['minimumReplies'], staged['minimumReplies']),
+            'maximumP95RoundTripMs': min(local['maximumP95RoundTripMs'], staged['maximumP95RoundTripMs'])}
 
 
 def missing_references(row, fields, base, **location):
@@ -2830,17 +2891,15 @@ def venue_final_room_counts(manifest):
 def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_logs=False, inspect_udp=False,
                        inspect_missing=False,
                        staged_roster=None, staged_link_criteria=None, expected_stage=None, inspect_roster_minimum=None,
-                       staged=False):
+                       staged=False, staged_quest_link_criteria=None):
     manifest_path = manifest_path.resolve(strict=True)
     with manifest_path.open('rb') as stream:
         raw_manifest = limited_read(stream)
     manifest = read_json(raw_manifest.decode('utf-8-sig'))
     integer(manifest['version'], 1, 1)
-    link_criteria = read_windows_link_criteria(manifest)
-    if staged_link_criteria is not None:
-        local = link_criteria or staged_link_criteria
-        link_criteria = {'minimumReplies': max(local['minimumReplies'], staged_link_criteria['minimumReplies']),
-                         'maximumP95RoundTripMs': min(local['maximumP95RoundTripMs'], staged_link_criteria['maximumP95RoundTripMs'])}
+    link_criteria = stricter_link_criteria(read_link_criteria(manifest, 'Windows'), staged_link_criteria)
+    quest_link_criteria = stricter_link_criteria(read_link_criteria(manifest, 'Quest'), staged_quest_link_criteria)
+    quest_link_issues = [] if quest_link_criteria is not None else None
     final_counts = venue_final_room_counts(manifest)
     players_per_room = integer(manifest.get('expectedPlayersPerRoom', 5), 1, 5)
     if final_counts is not None:
@@ -3296,7 +3355,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
                                          planned_seat_addresses=planned_seat_addresses, reconnect_sources=reconnect_sources,
                                          roster_departures=departures, tracked_vr_start=documents.get('tracked-vr-start.json'),
                                          topology_witness=historical_ips if final_counts is not None else None,
-                                         require_quest_link_metrics=require_quest_link_metrics)
+                                         require_quest_link_metrics=require_quest_link_metrics, quest_link_criteria=quest_link_criteria,
+                                         quest_link_issues=quest_link_issues)
         for paths in source_paths or ():
             hashes = original_pairs.get(paths)
             if hashes is not None:
@@ -3356,7 +3416,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
         missing = [{'roomId': room, 'seat': seat} for room, seat in sorted(windows_seats - measured)]
         outside = [f"room {row['roomId']} seat {row['seat']}" for row in metrics if row.get('criteriaFailures')]
         if not all_or_none or not metrics or outside:
-            diagnostic = windows_link_summary(metrics, missing, link_criteria)
+            diagnostic = link_intake_summary(metrics, missing, link_criteria)
             diagnostic['meetsCriteria'] = False
             reason = incomplete_links if not all_or_none else (
                 'Windows link criteria not met at ' + ', '.join(outside) if outside else
@@ -3364,6 +3424,10 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
             raise WindowsLinkCriteriaFailed(reason, diagnostic)
     else:
         require(all_or_none, incomplete_links)
+    quest_link_policy = {}
+    if quest_link_criteria is not None:
+        quest_rows = list(chain.from_iterable(row.get('questLinkMetrics', ()) for row in summaries))
+        quest_link_policy['questLinkCriteria'] = check_quest_link_criteria(quest_rows, quest_link_issues, quest_link_criteria)
     peer_ips = {address for sources in rooms.values() for address in sources}
     remote = peer_ips - server_ips
     if require_distinct_remote_roster:
@@ -3406,7 +3470,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
             **({'distinctRemoteRoster': {'seatsVerified': len(player_ids), 'distinctSourceAddresses': len(remote),
                 'connectionsVerified': reconnect_summary['reconnectHistory']['observedConnections']}} if require_distinct_remote_roster else {}),
             **({'questLogcatPlayers': quest_players} if quest_players else {}),
-            **({'questLinkMetricsVerified': quest_players} if require_quest_link_metrics else {}),
+            **({'questLinkMetricsVerified': quest_players} if require_quest_link_metrics or quest_link_policy else {}),
+            **quest_link_policy,
             **({**capture_summary, 'questCaptureSeatsVerified': quest_players} if capture_supplied else {}),
             **({'questDeployment': deployment_summary} if deployment_summary is not None else {}),
             **({'questReadiness': readiness_summary} if readiness_summary is not None else {}),
@@ -3433,12 +3498,14 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
 
 def staged_batch_report(report, batch):
     observed = {}
-    if 'windowsLinkCriteria' in report:
-        rows = sorted(chain.from_iterable(session.get('windowsLinkMetrics', ()) for session in report['sessions']),
+    for platform in ('windows', 'quest'):
+        if platform + 'LinkCriteria' not in report:
+            continue
+        rows = sorted(chain.from_iterable(session.get(platform + 'LinkMetrics', ()) for session in report['sessions']),
                       key=lambda row: (row['roomId'], row['seat']))
         fewest = min(rows, key=lambda row: row['replies'])
         slowest = max(rows, key=lambda row: row['p95RoundTripMs'])
-        observed['windowsLinkObserved'] = {
+        observed[platform + 'LinkObserved'] = {
             'lowestReplies': {key: fewest[key] for key in ('roomId', 'seat', 'replies')},
             'highestP95RoundTripMs': {key: slowest[key] for key in ('roomId', 'seat', 'p95RoundTripMs')},
         }
@@ -3448,7 +3515,8 @@ def staged_batch_report(report, batch):
             'endedAtUtc': batch['ended'].astimezone(timezone.utc).isoformat(),
             'serverAcknowledgements': report['serverAcknowledgements'],
             'worldJournalsVerified': report['worldJournalsVerified'], 'concurrentRoster': report['concurrentRoster'],
-            **{key: report[key] for key in ('combatJournalsVerified', 'distinctRemoteRoster', 'windowsLinkCriteria',
+            **{key: report[key] for key in ('combatJournalsVerified', 'distinctRemoteRoster', 'windowsLinkCriteria', 'questLinkCriteria',
+                                           'questLinkMetricsVerified',
                                            'windowsStationAddresses', 'venueNetworkPlan', 'reconnectSourcePlan',
                                            'verifiedVenueStart') if key in report}, **observed}
 
@@ -3475,12 +3543,14 @@ def verify_venue_stages(plan_path, *, inspect=False):
     plan = read_json(raw_plan.decode('utf-8-sig'))
     required = {'version', 'topology', 'minimumConcurrentMilliseconds', 'venueManifests'}
     roster_options = ('requireTrackedRoster', 'requireConcurrentFire')
-    optional = {'expectedStages', 'requireDistinctRemoteRoster', 'requireVerifiedVenueStart', 'windowsLinkCriteria', *roster_options}
+    optional = {'expectedStages', 'requireDistinctRemoteRoster', 'requireVerifiedVenueStart', 'windowsLinkCriteria', 'questLinkCriteria', *roster_options}
     require(type(plan) is dict and required <= plan.keys() <= required | optional,
             'Invalid staged venue plan fields')
     integer(plan['version'], 1, 1)
-    link_criteria = read_windows_link_criteria(plan)
-    link_policy = {'windowsLinkCriteria': link_criteria} if link_criteria is not None else {}
+    link_criteria = read_link_criteria(plan, 'Windows')
+    quest_link_criteria = read_link_criteria(plan, 'Quest')
+    link_policy = {key: value for key, value in (('windowsLinkCriteria', link_criteria), ('questLinkCriteria', quest_link_criteria))
+                   if value is not None}
     topology = plan['topology']
     require(topology in ('same-host', 'direct-lan'), 'Invalid staged venue topology')
     minimum = integer(plan['minimumConcurrentMilliseconds'], 1000, 900000)
@@ -3525,7 +3595,7 @@ def verify_venue_stages(plan_path, *, inspect=False):
             report, batch = verify_venue_batch(path, inspect_quest_logs=inspect, inspect_udp=inspect,
                                                inspect_missing=inspect, inspect_roster_minimum=minimum if inspect else None,
                                                staged_roster=staged_roster, staged_link_criteria=link_criteria,
-                                               expected_stage=expected_stage, staged=True)
+                                               expected_stage=expected_stage, staged=True, staged_quest_link_criteria=quest_link_criteria)
             key = (report['mode'], report['players'])
             require(key in stage_keys, 'Staged venue evidence must cover each mode and seat count exactly once')
             require(report['declaredTopology'] == topology, 'Venue batch topology differs from the staged plan')
@@ -3547,6 +3617,9 @@ def verify_venue_stages(plan_path, *, inspect=False):
             continue
         except WindowsLinkCriteriaFailed as error:
             reject(f'Venue manifest entry {index}: {error}', index, windowsLinkMetrics=error.metrics)
+            continue
+        except QuestLinkCriteriaFailed as error:
+            reject(f'Venue manifest entry {index}: {error}', index, questLinkMetrics=error.metrics)
             continue
         except ConcurrentRosterIncomplete as error:
             reject(f'Venue manifest entry {index}: {error}', index, concurrentRoster=error.overlap)
@@ -3651,6 +3724,8 @@ def main():
     parser.add_argument('--player', action='append', nargs=2, metavar=('EXPECTED_IPV4', 'LOG'))
     parser.add_argument('--quest-player', action='append', nargs=3, metavar=('EXPECTED_IPV4', 'LOGCAT', 'PID'))
     parser.add_argument('--require-quest-link-metrics', action='store_true', help='Verify the in-game link report embedded in each original Quest log')
+    parser.add_argument('--quest-minimum-replies', type=int, help='Minimum replies per Quest seat (1 to 30)')
+    parser.add_argument('--quest-maximum-p95-ms', type=int, help='Maximum p95 round trip in milliseconds per Quest seat (0 to 900)')
     parser.add_argument('--quest-readiness-report', action='append', type=Path,
                         help='Original single-player -VerifyPlayerTracking report; repeat once per Quest log')
     args = parser.parse_args()
@@ -3661,7 +3736,8 @@ def main():
                          args.udp_source_preflight, args.verify_player_sources, args.verify_reconnect_history,
                          args.quest_readiness_report, args.evidence_zip, args.require_tracked_vr_start, args.player, args.quest_player,
                          args.require_quest_link_metrics, *record_paths]
-    if (batch and any(single_args + extra_single_args)) or (not batch and not all(single_args)):
+    if (batch and (any(single_args + extra_single_args) or args.quest_minimum_replies is not None
+                   or args.quest_maximum_p95_ms is not None)) or (not batch and not all(single_args)):
         parser.error('Provide --venue-manifest or --venue-stages alone, or all single-session options.')
     if not batch and (args.evidence_zip and any(record_paths) or not args.evidence_zip and not all(record_paths)):
         parser.error('Use --evidence-zip or all three of --session, --statistics and --endpoint.')
@@ -3685,6 +3761,7 @@ def main():
         else:
             windows = args.player or []
             quest = args.quest_player or []
+            quest_link_criteria = link_criteria_arguments(args.quest_minimum_replies, args.quest_maximum_p95_ms, 'Quest')
             integer(len(windows) + len(quest), 0 if args.evidence_zip else 1, 25)
             inputs = [args.launcher_report, args.server_log, *(Path(row[1]) for row in chain(windows, quest))]
             inputs.extend([args.evidence_zip] if args.evidence_zip else record_paths)
@@ -3730,7 +3807,7 @@ def main():
                             verify_player_sources=args.verify_player_sources, verify_reconnect_history=args.verify_reconnect_history,
                             quest_readiness_reports=[read_quest_json(path) for path in args.quest_readiness_report or ()],
                             tracked_vr_start=evidence.get('tracked-vr-start.json'), roster_departures=evidence.get('roster-departures.json'),
-                            require_quest_link_metrics=args.require_quest_link_metrics)
+                            require_quest_link_metrics=args.require_quest_link_metrics, quest_link_criteria=quest_link_criteria)
     except EvidenceError as error:
         parser.exit(1, f'Field evidence rejected. {error}.\n')
     except (OSError, UnicodeError, ArithmeticError, AttributeError, KeyError, TypeError, ValueError, RecursionError,

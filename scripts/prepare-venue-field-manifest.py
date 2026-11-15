@@ -95,13 +95,8 @@ def prepare(args, output):
                       'Uneven or empty final rooms require per-player logs and cannot use a uniform terminal seat inventory')
         if uniform:
             players_per_room = next(iter(final_counts.values()))
-    windows_link_criteria = None
-    if args.windows_minimum_replies is not None or args.windows_maximum_p95_ms is not None:
-        field.require(args.windows_minimum_replies is not None and args.windows_maximum_p95_ms is not None,
-                      'Provide both Windows link criteria')
-        windows_link_criteria = field.read_windows_link_criteria({'windowsLinkCriteria': {
-            'minimumReplies': args.windows_minimum_replies, 'maximumP95RoundTripMs': args.windows_maximum_p95_ms,
-        }})
+    windows_link_criteria = field.link_criteria_arguments(args.windows_minimum_replies, args.windows_maximum_p95_ms, 'Windows')
+    quest_link_criteria = field.link_criteria_arguments(args.quest_minimum_replies, args.quest_maximum_p95_ms, 'Quest')
     minimum = args.minimum_concurrent_ms
     if minimum is not None:
         field.integer(minimum, 1000, 900000)
@@ -224,6 +219,8 @@ def prepare(args, output):
         manifest['minimumConcurrentMilliseconds'] = minimum
     if windows_link_criteria is not None:
         manifest['windowsLinkCriteria'] = windows_link_criteria
+    if quest_link_criteria is not None:
+        manifest['questLinkCriteria'] = quest_link_criteria
     if args.require_quest_link_metrics:
         manifest['requireQuestLinkMetrics'] = True
     release = windows_seats = None
@@ -308,6 +305,8 @@ def main():
     parser.add_argument('--windows-station-addresses', type=Path)
     parser.add_argument('--windows-minimum-replies', type=int, help='Minimum replies per Windows seat (1 to 30)')
     parser.add_argument('--windows-maximum-p95-ms', type=int, help='Maximum p95 round trip in milliseconds per Windows seat (0 to 900)')
+    parser.add_argument('--quest-minimum-replies', type=int, help='Minimum replies per Quest seat (1 to 30)')
+    parser.add_argument('--quest-maximum-p95-ms', type=int, help='Maximum p95 round trip in milliseconds per Quest seat (0 to 900)')
     parser.add_argument('--require-quest-link-metrics', action='store_true', help='Require the in-game link report for each Quest log')
     parser.add_argument('--venue-network-plan', type=Path, help='Original whole-venue network plan with all seat IPv4 assignments')
     parser.add_argument('--verify-reconnect-history', action='store_true', help='Check original reconnect histories at inbox intake and final verification')

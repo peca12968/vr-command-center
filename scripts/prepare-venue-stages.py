@@ -25,12 +25,12 @@ def prepare(args, output):
     ):
         if enabled:
             plan[key] = True
-    if args.windows_minimum_replies is not None or args.windows_maximum_p95_ms is not None:
-        field.require(args.windows_minimum_replies is not None and args.windows_maximum_p95_ms is not None,
-                      'Provide both Windows link criteria')
-        plan['windowsLinkCriteria'] = {'minimumReplies': args.windows_minimum_replies,
-                                       'maximumP95RoundTripMs': args.windows_maximum_p95_ms}
-        field.read_windows_link_criteria(plan)
+    windows_link_criteria = field.link_criteria_arguments(args.windows_minimum_replies, args.windows_maximum_p95_ms, 'Windows')
+    quest_link_criteria = field.link_criteria_arguments(args.quest_minimum_replies, args.quest_maximum_p95_ms, 'Quest')
+    if windows_link_criteria is not None:
+        plan['windowsLinkCriteria'] = windows_link_criteria
+    if quest_link_criteria is not None:
+        plan['questLinkCriteria'] = quest_link_criteria
 
     batches, paths, release_digests = {}, set(), set()
     for index, supplied in enumerate(args.venue_manifest, 1):
@@ -76,6 +76,8 @@ def main():
     parser.add_argument('--require-concurrent-fire', action='store_true')
     parser.add_argument('--windows-minimum-replies', type=int)
     parser.add_argument('--windows-maximum-p95-ms', type=int)
+    parser.add_argument('--quest-minimum-replies', type=int)
+    parser.add_argument('--quest-maximum-p95-ms', type=int)
     args = parser.parse_args()
     try:
         output = args.output.resolve()
