@@ -769,7 +769,9 @@ Quest 批次已設定 `questLinkCriteria` 時，`issues[].questLinkMetrics` 會�
 
 ### 直接使用 Quest 批次擷取報告
 
-若擷取時使用 `--deployment-report`，請在同一份 `venue.json` 的 `questDeployments.reports` 提供擷取所引用的完整部署原檔。工具會逐份核對 SHA-256、房間、席位、場次與埠，通過時摘要列出 `questCaptureDeploymentReportsMatched`。原部署報告和擷取報告應一起保存。 [Quest 批次擷取](QUEST3.md#一次擷取五房-quest-日誌)
+若擷取時使用 `--deployment-report`，請在同一份 `venue.json` 的 `questDeployments.reports` 提供擷取所引用的部署原檔。工具會逐份核對 SHA-256、房間、席位、場次與埠，通過時摘要列出 `questCaptureDeploymentReportsMatched`。原部署報告和擷取報告應一起保存。 [Quest 批次擷取](QUEST3.md#一次擷取五房-quest-日誌)
+
+使用 `--capture-deployed-seats` 時，同時提交該次擷取所引用的原未完成部署報告，以及後續部署與擷取原檔。若沿用累計重試，提交銜接兩份報告的原重試歷程。驗收確認每個提早擷取的席位已包含於它引用的原成功批次，並列出引用的未完成部署報告數 `questPartialDeploymentsReferenced`。全部 Quest 席位仍需有完整擷取後才通過。 [部署中斷後擷取](QUEST3.md#部署中斷時先擷取已啟動的席位)
 
 在 `direct-lan` 場館清單加入下列欄位。保留每份原 `capture-report.json` 與同一資料夾內的原日誌。網路計畫使用 Quest UDP 預檢的版本 1 格式，列出這次五房所有遊戲端點，以及各 Quest 席位實際使用的 IPv4。 [網路計畫格式](QUEST3.md#批次預檢五房-quest-席位) · [整批擷取](QUEST3.md#一次擷取五房-quest-日誌)
 

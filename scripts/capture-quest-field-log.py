@@ -187,6 +187,8 @@ def retry_capture_plan(plan, report_path):
     report = field.read_quest_capture_report(report_path, plan['topology'])
     field.require(report.get('deploymentSha256') == plan.get('deploymentSha256'),
                   'Retry with the same original Quest deployment report as the first capture')
+    field.require(report.get('partialDeployment') == plan.get('partialDeployment'),
+                  'Retry with the same deployed-seat capture option as the first capture')
     seats = {(row['roomId'], row['seat']): row for row in plan['seats']}
     retry = []
     for row in report['seats']:
@@ -199,47 +201,69 @@ def retry_capture_plan(plan, report_path):
     return {**plan, 'seats': retry}
 
 
-def bind_deployment(plan, path):
+def bind_deployment(plan, path, *, completed_only=False, after=None):
     report, raw = field.read_quest_document(path)
     seats = plan['seats']
     devices = report.get('devices')
     field.require(report.get('phase') == 'deployment' and report.get('topology') == plan['topology']
-                  and report.get('complete') is report.get('managementVerified') is True
-                  and field.integer(report.get('apkVerificationVersion'), 1, 1)
+                  and report.get('managementVerified') is True and field.integer(report.get('apkVerificationVersion'), 1, 1)
                   and type(devices) is list and len(devices) == len(seats),
-                  'Provide the completed Quest deployment report for the original mapped seats')
+                  'Provide the original Quest deployment report for the original mapped seats')
+    devices, launched = field.quest_deployment_rows(report)
+    field.require(report['complete'] is not completed_only, 'Use --capture-deployed-seats only with an incomplete Quest deployment report'
+                  if completed_only else 'Use --capture-deployed-seats to capture from an incomplete Quest deployment report')
+    field.require(launched, 'The original Quest deployment has no successfully launched seats')
     version_code = field.integer(report.get('expectedVersionCode'), 1, 2**31 - 1)
     require_openxr = report.get('requireOpenXR', False)
     field.require(type(require_openxr) is bool and (not require_openxr or version_code >= 74),
                   'Invalid Quest OpenXR deployment option for the original release')
     apk_digest = report.get('expectedApkSha256')
     field.require(type(apk_digest) is str and re.fullmatch(r'[0-9a-f]{64}', apk_digest), 'Quest deployment report lacks a verified release APK')
-    proof, _ = field.quest_deployment_retry_proof(report, len(seats))
+    proof, predecessor = field.quest_deployment_retry_proof(report, len(seats))
     field.require(proof is not None and proof['venueSha256'] == plan['venueSha256'],
                   'Quest deployment report does not match the original venue ZIP')
     device_map = {(row['roomId'], row['seat']): row['serial'] for row in seats}
     field.require(field.quest_deployment_map_fingerprint(proof['salt'], device_map) == proof['mapSha256'],
                   'Quest deployment report does not match the original device map')
+    skip = 0
+    if after is not None:
+        prior, prior_raw = field.read_quest_document(after)
+        field.require(predecessor == hashlib.sha256(prior_raw).hexdigest(),
+                      'Use the exact preceding Quest deployment report')
+        prior_devices, prior_launched = field.quest_deployment_rows(prior)
+        fields = ('phase', 'topology', 'managementVerified', 'apkVerificationVersion', 'expectedVersionCode', 'expectedApkSha256')
+        field.require(prior['complete'] is False and prior.get('retry') == proof and len(prior_devices) == len(seats)
+                      and prior.get('requireOpenXR', False) is require_openxr
+                      and all(type(prior.get(key)) is type(report.get(key)) and prior[key] == report[key] for key in fields)
+                      and launched[:len(prior_launched)] == prior_launched,
+                      'Quest deployment retry changes its original proof or completed prefix')
+        skip = len(prior_launched)
+        field.require(len(launched) > skip, 'No seats have launched since the preceding Quest deployment report')
     bound_seats = []
     for seat, device, fingerprint in zip(seats, devices, proof['devices'], strict=True):
-        field.require(type(device) is dict and device.get('status') == 'launch-requested'
-                      and device.get('apkVerified') is device.get('filesVerified') is True
+        field.require(all(type(device.get(key)) is int and device[key] == seat[key] for key in ('roomId', 'seat')),
+                      'Quest deployment report does not match the original mapped seat order')
+        if device['status'] != 'launch-requested':
+            continue
+        field.require(device.get('apkVerified') is device.get('filesVerified') is True
                       and field.integer(device.get('versionCode'), 1) == version_code
                       and all(type(device.get(key)) is type(seat[key]) and device[key] == seat[key]
-                              for key in ('roomId', 'seat', 'port', 'sessionId', 'playerId', 'admissionId')),
+                              for key in ('port', 'sessionId', 'playerId', 'admissionId')),
                       'Quest deployment report differs from an original admitted seat')
         opening = field.quest_openxr_proof(device, require_openxr)
         bound_seats.append({**seat, 'deviceIdentity': (proof['salt'], fingerprint), 'openXR': opening})
     field.require(not require_openxr or len({row['openXR'][1] for row in bound_seats}) == len(bound_seats),
                   'Quest OpenXR launch nonce was reused between seats')
     return {**plan, 'deploymentSha256': hashlib.sha256(raw).hexdigest(),
-            'seats': bound_seats}
+            **({'partialDeployment': True} if completed_only else {}),
+            'seats': bound_seats[skip:]}
 
 
 async def capture_venue(adb, plan, directory, seconds):
     directory.mkdir()
     ready = 0
     failed = False
+    partial_deployment = {'partialDeployment': True} if plan.get('partialDeployment') else {}
 
     async def capture_seat(row):
         nonlocal ready, failed
@@ -253,7 +277,8 @@ async def capture_venue(adb, plan, directory, seconds):
             report_ready(pid, **seat)
             ready += 1
             if ready == len(plan['seats']) and not failed:
-                print(json.dumps({'stage': 'venue-capture-ready', 'seats': ready}), file=sys.stderr, flush=True)
+                print(json.dumps({'stage': 'venue-capture-ready', 'seats': ready, **partial_deployment}),
+                      file=sys.stderr, flush=True)
 
         try:
             report = await capture([*adb, '-s', row['serial']], source['port'], admission, log, seconds, on_ready,
@@ -270,7 +295,7 @@ async def capture_venue(adb, plan, directory, seconds):
     seats = await asyncio.gather(*(capture_seat(row) for row in plan['seats']))
     captured = sum(row['complete'] for row in seats)
     summary = {'version': 1, 'complete': captured == len(seats), 'topology': plan['topology'],
-               'expectedSeats': len(seats), 'capturedSeats': captured, 'scope': 'quest-logcat-only'}
+               'expectedSeats': len(seats), 'capturedSeats': captured, 'scope': 'quest-logcat-only', **partial_deployment}
     if 'deploymentSha256' in plan:
         summary['deploymentSha256'] = plan['deploymentSha256']
     with (directory / 'capture-report.json').open('x', encoding='utf-8') as report:
@@ -287,7 +312,10 @@ def main():
     parser.add_argument('--output', type=Path, help='New output log path in a private directory')
     parser.add_argument('--venue-bundle', type=Path, help='Original five-room deployment ZIP for concurrent capture')
     parser.add_argument('--device-map', type=Path, help='Version 1 Quest device map used for deployment')
-    parser.add_argument('--deployment-report', type=Path, help='Original completed deployment report for these exact mapped seats')
+    parser.add_argument('--deployment-report', type=Path, help='Original deployment report for these exact mapped seats')
+    parser.add_argument('--capture-deployed-seats', action='store_true',
+                        help='Capture only the successfully launched seats in the original incomplete deployment report')
+    parser.add_argument('--after-deployment-report', type=Path, help='Capture only seats launched since this preceding deployment report')
     parser.add_argument('--allow-partial-map', action='store_true', help='Capture only the explicitly mapped Quest seats')
     parser.add_argument('--retry-incomplete', type=Path, help='Read only the failed seats from this original venue capture report')
     parser.add_argument('--output-directory', type=Path, help='New private directory for venue captures and the report')
@@ -299,11 +327,16 @@ def main():
         adb = [str(args.adb.resolve())]
         single = (args.serial, args.connection_file, args.output)
         venue = (args.venue_bundle, args.device_map, args.output_directory)
+        field.require(not args.capture_deployed_seats or args.deployment_report,
+                      'Use --capture-deployed-seats with the original incomplete --deployment-report')
+        field.require(not args.after_deployment_report or args.deployment_report,
+                      'Use --after-deployment-report with --deployment-report')
         if any(venue) or args.allow_partial_map or args.retry_incomplete or args.deployment_report:
             field.require(all(venue) and not any(single), 'Use a venue ZIP, device map and output directory together')
             plan = venue_plan(args.venue_bundle, args.device_map, args.allow_partial_map)
             if args.deployment_report:
-                plan = bind_deployment(plan, args.deployment_report)
+                plan = bind_deployment(plan, args.deployment_report, completed_only=args.capture_deployed_seats,
+                                       after=args.after_deployment_report)
             if args.retry_incomplete:
                 plan = retry_capture_plan(plan, args.retry_incomplete)
             report = asyncio.run(capture_venue(adb, plan, args.output_directory, args.seconds))

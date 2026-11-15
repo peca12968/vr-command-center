@@ -2189,12 +2189,15 @@ def udp_preflight_batch(batch, path, mode, expected_rooms, *, expected_sessions=
 def read_quest_capture_report(path, mode):
     report = read_quest_plan_file(path)
     fields = {'version', 'complete', 'topology', 'expectedSeats', 'capturedSeats', 'scope', 'seats'}
-    require(set(report) in (fields, fields | {'deploymentSha256'})
+    require(fields <= report.keys() <= fields | {'deploymentSha256', 'partialDeployment'}
             and type(report['complete']) is bool and report['topology'] == mode and report['scope'] == 'quest-logcat-only',
             'Quest capture report has an invalid format or the wrong topology')
     if 'deploymentSha256' in report:
         digest = report['deploymentSha256']
         require(type(digest) is str and re.fullmatch(r'[0-9a-f]{64}', digest), 'Invalid original Quest deployment digest in capture report')
+    if 'partialDeployment' in report:
+        require(report['partialDeployment'] is True and 'deploymentSha256' in report,
+                'Capture of deployed seats requires the original incomplete Quest deployment digest')
     count = integer(report['expectedSeats'], 1, 25)
     captured = integer(report['capturedSeats'], 0, count)
     rows = report['seats']
@@ -2252,7 +2255,7 @@ def read_quest_capture_batches(spec, mode, expected, evidence_path, shared_netwo
         path = evidence_path(name, kind='questCaptureReport')
         report = read_quest_capture_report(path, mode)
         if 'deploymentSha256' in report:
-            deployments.append((report['deploymentSha256'], report['seats']))
+            deployments.append((report['deploymentSha256'], report['seats'], report.get('partialDeployment', False)))
         incomplete_reports += not report['complete']
         failed_attempts += report['expectedSeats'] - report['capturedSeats']
         for row in report['seats']:
@@ -2349,6 +2352,17 @@ def quest_deployment_retry_proof(report, count):
             'Invalid Quest deployment retry proof')
     require('previousDeploymentSha256' not in report or hex_field(previous, 64), 'Invalid Quest deployment predecessor digest')
     return proof, previous
+
+
+def quest_deployment_rows(report):
+    devices = report.get('devices')
+    require(type(devices) is list and 1 <= len(devices) <= 25
+            and all(type(row) is dict and type(row.get('status')) is str for row in devices),
+            'Invalid Quest deployment device list')
+    launched = [row for row in devices if row['status'] == 'launch-requested']
+    require(report.get('complete') is (len(launched) == len(devices))
+            and devices[:len(launched)] == launched, 'Quest deployment report lacks a consistent successful prefix')
+    return devices, launched
 
 
 def quest_deployment_leaves(attempts):
@@ -2504,13 +2518,7 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
         require_openxr = report.get('requireOpenXR', False)
         require(type(require_openxr) is bool and (not require_openxr or version >= 74),
                 'Invalid Quest OpenXR deployment option for the original release')
-        devices = report.get('devices')
-        require(type(devices) is list and 1 <= len(devices) <= 25
-                and all(type(row) is dict and type(row.get('status')) is str for row in devices),
-                'Invalid Quest deployment device list')
-        launched = [row for row in devices if row.get('status') == 'launch-requested']
-        require(report.get('complete') is (len(launched) == len(devices))
-                and devices[:len(launched)] == launched, 'Quest deployment report lacks a consistent successful prefix')
+        devices, launched = quest_deployment_rows(report)
         proof, previous = quest_deployment_retry_proof(report, len(devices))
         seats, confirmed, openxr = {}, {}, {}
         for row in devices:
@@ -2531,10 +2539,11 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
                                      launched=launched, confirmed=confirmed, openxr=openxr, require_openxr=require_openxr)
 
     matched_maps = set()
-    for deployment_digest, seats in capture_reports:
+    for deployment_digest, seats, partial in capture_reports:
         deployment = attempts.get(deployment_digest)
-        require(deployment is not None and deployment['complete'] and deployment['proof'] is not None,
-                'Provide the exact completed Quest deployment report referenced by the capture')
+        require(deployment is not None and deployment['complete'] is not partial and deployment['proof'] is not None,
+                'Provide the exact incomplete Quest deployment report referenced by the capture' if partial
+                else 'Provide the exact completed Quest deployment report referenced by the capture')
         if capture_device_map is not None and deployment_digest not in matched_maps:
             require(capture_device_map.keys() >= set(deployment['seats']), 'Quest device map lacks a seat from the referenced deployment')
             original_map = {seat: capture_device_map[seat] for seat in deployment['seats']}
@@ -2591,6 +2600,9 @@ def read_venue_quest_evidence(manifest, mode, expected, evidence_path, release, 
             capture_device_map=device_map, readiness_reports=manifest.get('questReadinessReports'))
         if references:
             summary['questCaptureDeploymentReportsMatched'] = len(references)
+            partial_deployments = {digest for digest, _, partial in references if partial}
+            if partial_deployments:
+                summary['questPartialDeploymentsReferenced'] = len(partial_deployments)
     return captures, endpoints, summary, deployments, deployment_summary, readiness, openxr
 
 

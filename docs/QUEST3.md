@@ -755,6 +755,21 @@ python .\scripts\capture-quest-field-log.py --adb $adb `
 
 若部署時使用發行報告核對 APK，可加 `--deployment-report .\quest-deployment.json`，指定同一份 ZIP、同一份裝置清單的完整部署結果。工具會逐席比對原入場，並在開始讀取及保存完整日誌前各讀一次裝置識別。如果 ADB 回報的裝置與原部署不同，該席不會發布完整日誌，已擷取的內容保留為 `.partial`。擷取報告只增加原部署報告的 SHA-256，裝置序號留在原私人裝置清單。 [核對發行 APK](#核對頭盔內已安裝的發行-apk)
 
+### 部署中斷時先擷取已啟動的席位
+
+五房部署中途停止時，可使用同一份部署 ZIP、當時的完整裝置對照表，以及最新的原未完成部署報告。用 `--capture-deployed-seats` 選取報告中已成功啟動的席位，原本使用部分對照表時加上 `--allow-partial-map`。
+
+```powershell
+python .\scripts\capture-quest-field-log.py --adb $adb `
+    --venue-bundle .\vr-venue-connections.zip --device-map .\device-map.json `
+    --deployment-report .\quest-deploy-first.json --capture-deployed-seats `
+    --output-directory .\quest-capture-first
+```
+
+工具核對完整原對照表的指紋，再讀取已確認席位的原程序。使用 `-RequireOpenXR` 時，仍須確認原 PID 及原啟動記錄。擷取就緒訊息及報告會標記 `partialDeployment: true`，並只計算本次選取的席位。未啟動或啟動結果未確認的席位由主控繼續處理。
+
+若使用 `-RetryIncomplete` 補完部署，用新報告作為 `--deployment-report`，把它直接承接的前一份報告傳給 `--after-deployment-report`，並指定新擷取資料夾。工具會核對直接前一份原報告的雜湊，並只擷取這次新增啟動的席位。若新部署報告仍為未完成，該次擷取也加上 `--capture-deployed-seats`。若改用獨立的部分對照表部署剩餘席位，則用該批原對照表與報告擷取。戰後提交各批原報告和日誌。 [部署重試](#從原部署報告重試未完成席位) · [合併驗收](EXTERNAL_CLIENTS.md#直接使用-quest-批次擷取報告)
+
 ### 重試未完成的 Quest 擷取席位
 
 若 ADB 中斷後仍能讀到原遊戲程序的啟動、入場、最終戰績及結束斷線記錄，使用相同的部署 ZIP、原裝置對照表與原擷取報告重試。混合場繼續帶 `--allow-partial-map`。新輸出資料夾須尚未建立。
@@ -766,7 +781,7 @@ python .\scripts\capture-quest-field-log.py --adb $adb `
     --output-directory .\quest-capture-retry --seconds 1800
 ```
 
-重試只擷取原報告中失敗的席位。若首次用了 `--deployment-report`，重試須指定同一份部署原檔。保留首次和重試的原報告、各自的日誌及原裝置對照表。五房驗收可同時帶入裝置表與記錄實際 IPv4 的網路計畫。重試仍須取得同一個原入場的完整紀錄。混合場可在同一份驗收清單加入 Windows 席位。 [核對原始擷取報告](EXTERNAL_CLIENTS.md#直接使用-quest-批次擷取報告)
+重試只擷取原報告中失敗的席位。若首次用了 `--deployment-report`，重試須指定同一份部署原檔並沿用原席位選取選項。保留首次和重試的原報告、各自的日誌及原裝置對照表。五房驗收可同時帶入裝置表與記錄實際 IPv4 的網路計畫。重試仍須取得同一個原入場的完整紀錄。混合場可在同一份驗收清單加入 Windows 席位。 [核對原始擷取報告](EXTERNAL_CLIENTS.md#直接使用-quest-批次擷取報告)
 
 ## 連線與仍待實作事項
 

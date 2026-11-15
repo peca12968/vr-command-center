@@ -2189,6 +2189,68 @@ else:
                 self.assert_rejected(invoke('-RequireOpenXR', '-RetryIncomplete', str(failed_report)),
                                      'Confirm the previous launch outcome')
                 self.assertFalse(adb_log.exists())
+
+                captured = self.root / 'capture-deployed-seats'
+                active_path = self.root / 'fixture-01/vr-connection.json'
+                active = active_path.read_bytes()
+                scripts = self.root / 'capture-adb'
+                scripts.mkdir()
+                launch = initial['devices'][0]
+                outcome = {key: launch[key] for key in ('roomId', 'sessionId', 'playerId', 'admissionId')}
+                messages = (
+                    f'VR_QUEST_OPENXR nonce={nonce} loader=1 display=1 input=1',
+                    'VR_NETWORK_STARTED role=Client started=True background=False port=7777',
+                    'VR_CLIENT_CONNECTED id=1', 'VR_CLIENT_DEBRIEF_FINAL ' + json.dumps(dict(outcome, version=1)),
+                    'VR_CLIENT_DISCONNECTED',
+                )
+                raw = ''.join(f'11-09 14:30:00.000 4301 14325 I Unity : {message}\r\n' for message in messages).encode()
+                (scripts / 'fixture-01').write_text(f'''import sys
+from pathlib import Path
+args = sys.argv[1:]
+with Path("commands").open("a") as audit:
+    audit.write(" ".join(args) + "\\n")
+if args == ["shell", "getprop", "ro.serialno"]:
+    print("HARDWARE-SERIAL-fixture-01")
+elif args == ["shell", "pidof", "com.vrcommand.quest"]:
+    print(4301)
+else:
+    assert args == ["logcat", "-b", "main", "--pid=4301", "-v", "threadtime", "-s", "Unity:I"]
+    sys.stdout.buffer.write({raw!r})
+''', encoding='utf-8')
+                capture_command = [sys.executable, str(ROOT / 'scripts/capture-quest-field-log.py'), '--adb', sys.executable,
+                                   '--venue-bundle', str(bundle), '--device-map', str(mapping), '--allow-partial-map',
+                                   '--deployment-report', str(failed_report), '--output-directory', str(captured), '--seconds', '8']
+                skipped = subprocess.run(capture_command, cwd=scripts, capture_output=True, encoding='utf-8', timeout=12)
+                self.assert_rejected(skipped, 'Use --capture-deployed-seats')
+                mapped = mapping.read_bytes()
+                changed = json.loads(mapped)
+                next(row for row in changed['seats'] if row['roomId'] == 5)['serial'] = 'fixture-22'
+                mapping.write_text(json.dumps(changed), encoding='utf-8')
+                rejected = subprocess.run([*capture_command, '--capture-deployed-seats'], cwd=scripts,
+                                          capture_output=True, encoding='utf-8', timeout=12)
+                self.assert_rejected(rejected, 'original device map')
+                mapping.write_bytes(mapped)
+                self.assertFalse(captured.exists())
+                self.assertFalse((scripts / 'commands').exists())
+                unchanged = subprocess.run([*capture_command, '--capture-deployed-seats', '--after-deployment-report', str(previous)],
+                                           cwd=scripts, capture_output=True, encoding='utf-8', timeout=12)
+                self.assert_rejected(unchanged, 'No seats have launched since')
+                self.assertFalse(captured.exists())
+                observed = subprocess.run([*capture_command, '--capture-deployed-seats'], cwd=scripts,
+                                          capture_output=True, encoding='utf-8', timeout=15)
+                self.assertEqual(0, observed.returncode, observed.stderr)
+                summary = json.loads(observed.stdout)
+                self.assertEqual((True, True, 1, 1), tuple(summary[key] for key in
+                                 ('partialDeployment', 'complete', 'expectedSeats', 'capturedSeats')))
+                self.assertEqual(hashlib.sha256(failed_report.read_bytes()).hexdigest(), summary['deploymentSha256'])
+                self.assertIn({'stage': 'venue-capture-ready', 'seats': 1, 'partialDeployment': True},
+                              [json.loads(line) for line in observed.stderr.splitlines()])
+                self.assertEqual(raw, (captured / 'room-01-seat-01-logcat.txt').read_bytes())
+                self.assertEqual(active, active_path.read_bytes())
+                self.assertEqual(['shell getprop ro.serialno', 'shell pidof com.vrcommand.quest',
+                                  'logcat -b main --pid=4301 -v threadtime -s Unity:I',
+                                  'shell pidof com.vrcommand.quest', 'shell getprop ro.serialno'],
+                                 (scripts / 'commands').read_text().splitlines())
             finally:
                 server.shutdown()
                 thread.join(timeout=5)
@@ -2312,6 +2374,10 @@ else:
                 bound = capture.bind_deployment(capture_plan, final_report)
                 self.assertEqual(hashlib.sha256(final_report.read_bytes()).hexdigest(), bound['deploymentSha256'])
                 self.assertEqual(final['retry']['devices'], [seat['deviceIdentity'][1] for seat in bound['seats']])
+                with self.assertRaisesRegex(capture.field.EvidenceError, 'exact preceding Quest deployment report'):
+                    capture.bind_deployment(capture_plan, final_report, after=first_report)
+                incremental = capture.bind_deployment(capture_plan, final_report, after=report)
+                self.assertEqual(bound['seats'][2:], incremental['seats'])
                 changed_map = copy.deepcopy(capture_plan)
                 changed_map['seats'][0]['serial'] = 'fixture-04'
                 with self.assertRaisesRegex(capture.field.EvidenceError, 'original device map'):
@@ -2348,6 +2414,12 @@ else:
                 capture_report = capture.field.read_quest_capture_report(captured / 'capture-report.json', 'Independent')
                 for seat in capture_report['seats']:
                     self.assertEqual(original_logs[seat['roomId'], seat['seat']], (captured / seat['log']).read_bytes())
+                captured_delta = self.root / 'capture-newly-deployed'
+                with redirect_stderr(io.StringIO()):
+                    delta_result = asyncio.run(capture.capture_venue([sys.executable, str(adb_capture)], incremental, captured_delta, 10))
+                self.assertEqual((1, 1), (delta_result['expectedSeats'], delta_result['capturedSeats']))
+                self.assertEqual(original_logs[1, 3], (captured_delta / 'room-01-seat-03-logcat.txt').read_bytes())
+                self.assertEqual({'capture-report.json', 'room-01-seat-03-logcat.txt'}, {file.name for file in captured_delta.iterdir()})
                 self.assertNotIn('HARDWARE-SERIAL-', json.dumps(capture_report))
                 self.assertEqual(done_bytes, done_config.read_bytes())
                 commands = log.read_text(encoding='utf-8').splitlines()

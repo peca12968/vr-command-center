@@ -3728,6 +3728,87 @@ class FieldResultsTests(unittest.TestCase):
                 with self.assertRaisesRegex(field.EvidenceError, 'exact completed Quest deployment report'):
                     field.verify_venue(path)
 
+    def test_quest_captures_preserve_the_launched_prefix_of_an_incomplete_deployment(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest = quest_capture_venue_fixture(root, mode, quest_per_room=5, batches=1)
+                capture_spec = manifest['questCaptures']
+                capture_spec['deviceMap'] = observed_quest_capture_spec(root, capture_spec)['deviceMap']
+                map_path = root / capture_spec['deviceMap']
+                mapping = json.loads(map_path.read_bytes())
+                serials = {(row['roomId'], row['seat']): row['serial'] for row in mapping['seats']}
+                original = self.quest_deployment_evidence(root, manifest, 5)
+                devices = original['devices']
+                prefix, pending = devices[:12], devices[12:]
+
+                def proof_for(rows, salt):
+                    selected = {(row['roomId'], row['seat']): serials[row['roomId'], row['seat']] for row in rows}
+                    return {'version': 1, 'venueSha256': '1' * 64, 'salt': salt,
+                            'mapSha256': field.quest_deployment_map_fingerprint(salt, selected),
+                            'devices': [hashlib.sha256(serial.encode()).hexdigest() for serial in selected.values()]}
+
+                original['retry'] = proof_for(devices, '2' * 32)
+                early = dict(original, complete=False, devices=prefix + [
+                    {'roomId': row['roomId'], 'seat': row['seat'],
+                     'status': 'deployment-failed' if index == 0 else 'not-attempted'}
+                    for index, row in enumerate(pending)])
+                (root / 'deployment.json').write_text(json.dumps(early), encoding='utf-8')
+                early_hash = hashlib.sha256((root / 'deployment.json').read_bytes()).hexdigest()
+
+                capture_path = root / capture_spec['reports'][0]
+                capture = json.loads(capture_path.read_bytes())
+                seats = {(row['roomId'], row['seat']): row for row in capture['seats']}
+                initial_keys = {(row['roomId'], row['seat']) for row in prefix}
+                early_rows = [row for key, row in seats.items() if key in initial_keys]
+                later_rows = [row for key, row in seats.items() if key not in initial_keys]
+                early_capture = dict(capture, partialDeployment=True, deploymentSha256=early_hash,
+                                     expectedSeats=12, capturedSeats=12, seats=early_rows)
+                capture_path.write_text(json.dumps(early_capture), encoding='utf-8')
+                later_path = capture_path.with_name('capture-remaining.json')
+                capture_spec['reports'].append(str(later_path.relative_to(root)))
+                manifest['questDeployments']['reports'].append('deployment-remaining.json')
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+
+                for cumulative in (True, False):
+                    with self.subTest(cumulative=cumulative):
+                        later = (dict(original, previousDeploymentSha256=early_hash) if cumulative
+                                 else dict(original, devices=pending, retry=proof_for(pending, '3' * 32)))
+                        later_deployment = root / 'deployment-remaining.json'
+                        later_deployment.write_text(json.dumps(later), encoding='utf-8')
+                        later_capture = dict(capture, expectedSeats=13, capturedSeats=13, seats=later_rows,
+                                             deploymentSha256=hashlib.sha256(later_deployment.read_bytes()).hexdigest())
+                        later_path.write_text(json.dumps(later_capture), encoding='utf-8')
+                        result = field.verify_venue(path)
+                        self.assertEqual((25, 25, 1, 2), tuple(result[key] for key in (
+                            'questCaptureSeatsVerified', 'serverAcknowledgements',
+                            'questPartialDeploymentsReferenced', 'questCaptureDeploymentReportsMatched')))
+                        self.assertEqual(2, result['questDeployment']['deviceMapsMatched'])
+                        self.assertEqual(int(cumulative), result['questDeployment'].get('retryReportsLinked', 0))
+                        self.assertFalse(result['physicalHostsVerified'])
+
+                # A capture cannot claim an unfinished seat even if a later report proves it was deployed.
+                capture_path.write_text(json.dumps(dict(early_capture, expectedSeats=13, capturedSeats=13,
+                                                        seats=[*early_rows, later_rows[0]])), encoding='utf-8')
+                later_path.write_text(json.dumps(dict(later_capture, expectedSeats=12, capturedSeats=12,
+                                                      seats=later_rows[1:])), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'Quest capture seat does not match its referenced deployment'):
+                    field.verify_venue(path)
+                capture_path.write_text(json.dumps(early_capture), encoding='utf-8')
+                later_path.write_text(json.dumps(later_capture), encoding='utf-8')
+
+                # The original report and explicit subset marker are both required.
+                no_marker = {key: value for key, value in early_capture.items() if key != 'partialDeployment'}
+                capture_path.write_text(json.dumps(no_marker), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'exact completed Quest deployment report'):
+                    field.verify_venue(path)
+                capture_path.write_text(json.dumps(early_capture), encoding='utf-8')
+                manifest['questCaptures']['reports'].pop()
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                with self.assertRaises(field.QuestCapturesIncomplete) as incomplete:
+                    field.verify_venue(path)
+                self.assertEqual(13, len(incomplete.exception.captures['missingSeats']))
+
     def test_quest_capture_checks_device_map_and_network_plan_for_separate_deployments(self):
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
