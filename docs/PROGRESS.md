@@ -4,6 +4,7 @@
 
 - 管理包 0.31.202 在單場驗收 ZIP 加入已保存的 VR 追蹤開場。`--evidence-zip` 可直接讀原 ZIP。需要核對開場時加 `--require-tracked-vr-start` 與原 `.worldlog`，檢查原追蹤名冊、準備畫格及首個已套用開始的執行畫格。管理移除玩家且封存統計仍包含該玩家時，固定名冊驗收會拒絕整場匯出，原開場仍可回看。 [離線核對](EXTERNAL_CLIENTS.md#用單場-zip-核對追蹤開場)
 - 通過 125 項 Python 封存驗收、1,115 項領域及 7 項封裝檢查。瀏覽器原建置與解壓包各通過 18 項單場專測，另有原匯出 11 項和五房 143 項。用實際瀏覽器下載的 ZIP 搭配合成日誌與錄製通過離線核對，確認 2 席、準備格 1 及執行格 2。管理包解壓核對 568 筆清單。Quest 3 在 Windows 可見，現有 ADB 仍回報零台，實機與跨機待驗。 [解壓包驗證](../artifacts/console-tracked-vr-evidence-package-925c51bf/checks.json) · [五房回歸](../artifacts/console-tracked-vr-venue-evidence-1216939a/checks.json)
+- 功能提交 `8b28edf` 已推送。GitHub Actions 因帳務或支出上限未啟動，工作執行步驟數為零。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43761120412/job/132955957070)
 
 ## 2026-11-16 從任務收尾回看單場追蹤開場
 
