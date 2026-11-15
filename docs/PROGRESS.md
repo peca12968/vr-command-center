@@ -5,6 +5,7 @@
 - `deploy-quest.ps1 -SmokeTest -RequireOpenXR` 透過 Android Launcher Intent 傳入當次識別碼。腳本須從相同程序及相同識別碼的 Unity 日誌看到 OpenXR 載入、顯示與輸入子系統執行，才會回傳 `openxr-ready`。模擬部署驗證了舊版本、舊識別碼、其他 PID、衝突證據及缺少輸入的拒絕路徑。 [驗收操作](QUEST3.md#核對首次啟動的-openxr-子系統)
 - Unity EditMode 273 項全過，部署回歸 63 項、USB 診斷 3 項、發行核對 8 項。Windows 伺服器／玩家包各 331 筆，配對 324 筆遊戲檔案。Quest 0.50.9／74 通過 ARM64、SDK 32／35、OpenXR 程式庫與 APK v2 簽章檢查。新 APK 的 IL2CPP 中包含此次啟動檢查。兩平台來源雜湊相同，並核對原場景與玩家網路識別。 [發行報告](../artifacts/venue-release-quest-openxr-0509.json) · [0.50.8 封存](../artifacts/history/unity-0508-before-quest-openxr-c4ccb59a/)
 - 建置後連接的 Quest 3 仍只有檔案傳輸介面，本機 ADB 服務查詢無回覆。檢查採背景唯讀方式，實體安裝、OpenXR、追蹤與跨機驗收待偵錯介面接通。 [建置後 USB 報告](../artifacts/quest-usb-host-after-0509-90637563.json)
+- 功能提交 `84b4795` 已推送。GitHub Actions 因帳務或支出上限未啟動，工作執行步驟數為零。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43768491832/job/132978865849)
 
 ## 2026-11-16 Quest 3 部署前的 USB 與 ADB 診斷
 
