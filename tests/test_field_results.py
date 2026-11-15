@@ -776,6 +776,48 @@ class FieldResultsTests(unittest.TestCase):
                               ]}, inspection['issues'][-1])
             self.assertNotIn('private-directory', json.dumps(inspection))
 
+    def test_staged_inspection_lists_missing_player_originals_without_guessing_seats(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = self.staged_plan(root, windows_links=True)
+            plan_path = root / 'stages.json'
+            plan_path.write_text(json.dumps(plan), encoding='utf-8')
+            before = field.verify_venue_stages(plan_path)
+            independent, linked = (root / name for name in plan['venueManifests'][:2])
+            originals = {path: path.read_bytes() for path in (independent, linked)}
+            first, second = (json.loads(raw) for raw in originals.values())
+            windows = first['sessions'][0]['players'][0]
+            windows['launcherReport'] = 'private-folder/missing-launch.json'
+            windows['linkMetrics'] = 'private-folder/missing-metrics.json'
+            first['sessions'][2]['players'][0] = {
+                'address': '127.0.0.1', 'logcatPid': 7342, 'log': 'private-folder/missing-quest.log'}
+            second['windowsPlayers'][1] = {'address': '127.0.0.1', 'evidenceZip': 'private-folder/missing-player.zip'}
+            independent.write_text(json.dumps(first), encoding='utf-8')
+            linked.write_text(json.dumps(second), encoding='utf-8')
+
+            command = [sys.executable, str(SCRIPT), '--venue-stages', str(plan_path)]
+            inspected = subprocess.run([*command, '--inspect-venue-stages'], capture_output=True)
+            self.assertEqual(1, inspected.returncode, inspected.stderr)
+            self.assertFalse(inspected.stderr)
+            report = json.loads(inspected.stdout)
+            self.assertEqual([[1], [2]], [issue['entries'] for issue in report['issues']])
+            windows_location = {'sessionEntry': 1, 'playerEntry': 1, 'roomIds': [1], 'roomId': 1, 'seat': 1}
+            self.assertEqual([
+                {'kind': 'playerLauncherReport', 'name': 'missing-launch.json', **windows_location},
+                {'kind': 'playerLinkMetrics', 'name': 'missing-metrics.json', **windows_location},
+                {'kind': 'questLogcat', 'name': 'missing-quest.log', 'sessionEntry': 3, 'playerEntry': 1, 'roomIds': [3]},
+            ], report['issues'][0]['missingFiles'])
+            self.assertEqual([{'kind': 'playerEvidenceZip', 'name': 'missing-player.zip', 'playerEntry': 2}],
+                             report['issues'][1]['missingFiles'])
+            self.assertNotIn(b'private-folder', inspected.stdout)
+            self.assertNotIn(b'127.0.0.1', inspected.stdout)
+            rejected = subprocess.run(command, capture_output=True)
+            self.assertEqual(1, rejected.returncode)
+            self.assertFalse(rejected.stdout)
+            for path, raw in originals.items():
+                path.write_bytes(raw)
+            self.assertEqual(before, field.verify_venue_stages(plan_path))
+
     def test_staged_inspection_locates_incomplete_venue_and_quest_udp_reports(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

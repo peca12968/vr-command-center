@@ -92,7 +92,7 @@ class MissingEvidence(FileNotFoundError):
         self.file_name = Path(reference).name
 
 
-class MissingSessionEvidence(MissingEvidence):
+class MissingStageEvidence(MissingEvidence):
     def __init__(self, files):
         first = files[0]
         super().__init__(first['kind'], first['name'])
@@ -2454,49 +2454,114 @@ def read_windows_link_criteria(document):
     return criteria
 
 
-def inspect_session_evidence(entries, expected, base, *, packed, shared_launcher):
+def missing_references(row, fields, base, **location):
+    missing = []
+    for field, kind in fields:
+        reference = row.get(field)
+        if type(reference) is not str or not reference:
+            continue
+        try:
+            resolve_evidence_reference(base, reference, kind)
+        except MissingEvidence as error:
+            missing.append({'kind': kind, 'name': error.file_name, **location})
+        except (OSError, ValueError, RuntimeError):
+            # The regular verifier reports malformed and unreadable references.
+            continue
+    return missing
+
+
+def inspect_stage_evidence(manifest, entries, expected, base, archives):
     fields = [('launcherReport', 'serverLauncherReport'), ('evidenceZip', 'sessionEvidenceZip'),
               ('serverLog', 'serverLog'), ('worldJournal', 'worldJournal'), ('combatJournal', 'combatJournal')]
+    player_fields = [('launcherReport', 'playerLauncherReport'), ('linkMetrics', 'playerLinkMetrics'),
+                     ('log', 'playerLog'), ('evidenceZip', 'playerEvidenceZip')]
+    packed = archives is not None
+    shared_launcher = 'venueLauncherReport' in manifest
+    fields = [(field, kind) for field, kind in fields
+              if not (field == 'launcherReport' and shared_launcher or field == 'evidenceZip' and packed)]
     missing = []
+    session_inputs = {}
+    roster_cache = {}
+
+    def inspect_players(rows, *, session, **location):
+        if type(rows) is not list or len(rows) > 25:
+            return
+        for index, row in enumerate(rows, 1):
+            if type(row) is not dict:
+                continue
+            quest = 'logcatPid' in row
+            relevant = [('log', 'questLogcat')] if quest else player_fields
+            files = missing_references(row, relevant, base, playerEntry=index, **location)
+            if not files:
+                continue
+            seat = locate_seat(row, session) if not quest and (session is not None or 'sessionEntry' not in location) else {}
+            for item in files:
+                if session is not None:
+                    item['roomIds'] = session['roomIds']
+                item.update(seat)
+                missing.append(item)
+
+    def locate_seat(row, session):
+        try:
+            if 'evidenceZip' in row:
+                bundle = resolve_evidence_reference(base, row['evidenceZip'], 'playerEvidenceZip')
+                raw, _, _ = read_windows_evidence(None, None, bundle)
+                log = raw.decode('utf-8-sig')
+            else:
+                log = content(resolve_evidence_reference(base, row['log'], 'playerLog'))
+            _, result = client_result(log)
+            session_id = identity(result['sessionId'])
+            original = expected.get(session_id)
+            if original is None or (session is not None and session is not original):
+                return {}
+            if session_id not in roster_cache:
+                if packed:
+                    name = 'linked.zip' if manifest['mode'] == 'Linked' else f"room-{original['roomIds'][0]:02}.zip"
+                    roster, _, _ = management_zip_records(archives[name])
+                else:
+                    path = resolve_evidence_reference(base, session_inputs[session_id]['evidenceZip'], 'sessionEvidenceZip')
+                    roster, _, _ = management_zip(path)
+                require(roster['id'] == session_id and roster['roomIds'] == original['roomIds'], 'Seat roster mismatch')
+                roster_cache[session_id] = roster['players']
+            player_id, admission_id = identity(result['playerId']), identity(result['admissionId'])
+            owners = [owner for owner in roster_cache[session_id] if owner['id'] == player_id
+                      and owner['admissionId'] == admission_id]
+            room = integer(result['roomId'], 1, 5)
+            if len(owners) == 1 and owners[0]['roomId'] == room and room in original['roomIds']:
+                return {'roomId': room, 'seat': integer(owners[0]['seat'], 0, 4) + 1}
+        except (OSError, ValueError, KeyError, TypeError, RecursionError, zipfile.BadZipFile, zlib.error, RuntimeError):
+            pass
+        return {}
+
     for index, entry in enumerate(entries, 1):
         if type(entry) is not dict:
             continue
-        entry_missing = []
-        for field, kind in fields:
-            if (field == 'launcherReport' and shared_launcher) or (field == 'evidenceZip' and packed):
-                continue
-            reference = entry.get(field)
-            if type(reference) is not str or not reference:
-                continue
-            try:
-                resolve_evidence_reference(base, reference, kind)
-            except MissingEvidence as error:
-                entry_missing.append({'kind': kind, 'name': error.file_name, 'sessionEntry': index})
-            except (OSError, ValueError, RuntimeError):
-                # The regular verifier reports malformed and unreadable references.
-                continue
-        if not entry_missing:
-            continue
+        entry_missing = missing_references(entry, fields, base, sessionEntry=index)
         session_id = entry.get('sessionId')
         session = expected.get(session_id) if type(session_id) is str else None
-        # Older manifests carry the session ID in their per-session launcher receipt.
         launcher = entry.get('launcherReport')
         if session is None and not shared_launcher and type(launcher) is str and launcher:
             try:
                 report = read_json(content(resolve_evidence_reference(base, launcher, 'serverLauncherReport')))
-                session = expected.get(identity(report['sessionId']))
+                session_id = identity(report['sessionId'])
+                session = expected.get(session_id)
             except (OSError, ValueError, KeyError, TypeError, RecursionError, RuntimeError):
                 pass
+        if session is not None:
+            session_inputs[session_id] = entry
         for item in entry_missing:
             if session is not None:
                 item['roomIds'] = session['roomIds']
             missing.append(item)
+        inspect_players(entry.get('players'), sessionEntry=index, session=session)
+
+    inspect_players(manifest.get('windowsPlayers'), session=None)
     if missing:
-        raise MissingSessionEvidence(missing)
+        raise MissingStageEvidence(missing)
 
 
 def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_logs=False, inspect_udp=False,
-                       inspect_missing_sessions=False,
+                       inspect_missing=False,
                        staged_roster=None, staged_link_criteria=None, expected_stage=None):
     manifest_path = manifest_path.resolve(strict=True)
     with manifest_path.open('rb') as stream:
@@ -2561,9 +2626,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     expected_rooms, expected = venue_closure_sessions(mode, rows)
     require(type(entries) is list and len(entries) == len(rows),
             'Venue must contain the original five independent sessions or one linked session')
-    if inspect_missing_sessions:
-        inspect_session_evidence(entries, expected, manifest_path.parent, packed=packed,
-                                 shared_launcher='venueLauncherReport' in manifest)
+    if inspect_missing:
+        inspect_stage_evidence(manifest, entries, expected, manifest_path.parent, archives if packed else None)
     require(receipt_bytes is None or 'venueDebriefReceipts' not in manifest, 'Use either bundled or separate management debrief receipts')
     debrief_receipts, debrief_hash = None, None
     if not inspect_windows:
@@ -3153,7 +3217,7 @@ def verify_venue_stages(plan_path, *, inspect=False):
         paths[path] = index
         try:
             report, batch = verify_venue_batch(path, inspect_quest_logs=inspect, inspect_udp=inspect,
-                                               inspect_missing_sessions=inspect,
+                                               inspect_missing=inspect,
                                                staged_roster=staged_roster, staged_link_criteria=link_criteria,
                                                expected_stage=expected_stage)
             key = (report['mode'], report['players'])
@@ -3193,7 +3257,7 @@ def verify_venue_stages(plan_path, *, inspect=False):
         except MissingEvidence as error:
             reject(f'Venue manifest entry {index}: missing original evidence file', index,
                    missingFile={'kind': error.kind, 'name': error.file_name},
-                   **({'missingFiles': error.files} if isinstance(error, MissingSessionEvidence) else {}))
+                   **({'missingFiles': error.files} if isinstance(error, MissingStageEvidence) else {}))
             continue
         except (OSError, ValueError, ArithmeticError, AttributeError, KeyError, TypeError, RecursionError,
                 zipfile.BadZipFile, zlib.error, RuntimeError):
