@@ -86,7 +86,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\quest-player.js
   Set-Content -Encoding utf8 -LiteralPath .\quest-player-readiness.json
 ```
 
-工具從原連線檔找出場次、房號、席次和入場身分，向管理服務核對本次已連線且有有效追蹤的玩家，並讀回同一張 GameServer 準備中畫格。成功回條含 `scope: player`、`complete: true`、原世界及管理序號。`evidenceVersion: 1` 回條以入場雜湊供戰後核對，省略票券與金鑰。已換過入場身分、追蹤尚未就緒或場次已開始時，輸出 `complete: false` 及原因，退出碼為 1。這項查詢只讀管理服務，無需 ADB。頭盔畫面和操作仍需在現場驗收。
+工具從原連線檔找出場次、房號、席次和入場身分，向管理服務核對本次已連線且有有效追蹤的玩家，並讀回同一張 GameServer 準備中畫格。保存畫格也須在原房含有唯一的原玩家，且該玩家已連線、仍存活並有 `Tracked` 姿態。成功回條含 `scope: player`、`complete: true`、原世界及管理序號。`evidenceVersion: 1` 回條以入場雜湊供戰後核對，省略票券與金鑰。已換過入場身分、追蹤尚未就緒或場次已開始時，輸出 `complete: false` 及原因，退出碼為 1。這項查詢只讀管理服務，無需 ADB。頭盔畫面和操作仍需在現場驗收。
 
 戰後將原始回條傳給 `verify-field-results.py --quest-readiness-report .\quest-player-readiness.json`，並一同提供原 `.worldlog` 和 `--quest-player` 日誌。若使用舊版工具取得的回條缺少 `evidenceVersion`，須在 Begin 前用新版工具重新取得。 [回條核對方式](EXTERNAL_CLIENTS.md#核對單場-quest-開場追蹤回條)
 
@@ -632,7 +632,7 @@ pwsh -NoProfile -NonInteractive -File .\scripts\deploy-quest.ps1 `
     > .\quest-tracked-readiness.json
 ```
 
-每輪取樣會同時核對指定席位，全部就緒後逐場重讀原準備畫格。新版回條的 `evidenceVersion` 為 2，每席保留自己原部署報告的 SHA-256。戰後將這一份追蹤回條和它引用的各份部署原檔一併提交。 [封存操作](EXTERNAL_CLIENTS.md#核對-quest-開場追蹤回條)
+每輪取樣會同時核對指定席位。摘要就緒後，帶入單份或多份原部署報告的驗收會逐場重讀原準備畫格，再逐席核對原房內的原玩家、連線、存活與追蹤狀態。若某席的保存畫格與摘要不符，只在該席顯示 `source-seat-unverified`，整份回條維持未完成。合併多份部署時，`evidenceVersion` 為 2，每席保留自己原部署報告的 SHA-256。戰後將追蹤回條與它引用的各份部署原檔一併提交。 [封存操作](EXTERNAL_CLIENTS.md#核對-quest-開場追蹤回條)
 
 ##### 等候指定席位同時追蹤就緒
 
@@ -651,6 +651,7 @@ JSON 仍只輸出一次。`wait.samples` 是嘗試的取樣次數，`wait.outcom
 | `source-not-fresh`、`source-revision-pending`、`mr-profile-pending` | 查看遊戲伺服器及房卡，等有效快照套用目前的場次狀態 |
 | `source-capture-unverified` | 確認原場次已接上 GameServer，且快照含擷取時間，再重新核對 |
 | `source-frame-unverified` | 確認管理服務可讀回該次取樣的原世界畫格及管理序號，再重新核對 |
+| `source-seat-unverified` | 保存畫格無法確認該席原玩家已在原房連線、存活且有追蹤姿態。核對該席並重新取樣 |
 | `source-outside-preparing` | 本次取樣已超過開場證據的準備階段。使用該場開場前保存的原回條 |
 | `source-expired-in-transit` | 畫格在管理服務取樣時有效，收到回應時已超過期限，可重新核對 |
 | `venue-changed` | 核對期間原場次、房間或版本已有變更，請核對現場並重新取樣 |

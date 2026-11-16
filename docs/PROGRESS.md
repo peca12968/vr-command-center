@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 Quest 開場前逐席核對原保存畫格
+
+- 單席及帶有原部署報告的五房追蹤驗收，在讀回原 GameServer 準備畫格時逐席核對原玩家。畫格須有唯一的原玩家、房號相同、已連線、仍存活且有 `Tracked` 姿態。舊版實測會接受少了原玩家的畫格，也會接受錯房、斷線及模擬姿態。新版回報 `source-seat-unverified` 並保留其他席位結果，整份回條回傳退出碼 1。 [操作及狀態](QUEST3.md#核對本次部署與追蹤席位) · [舊版反例](../artifacts/quest-preparing-seat-proof-20261117/before-single.log)
+- 五房獨立及合併各以 25 席驗證，兩份原部署報告的席位加入同一輪取樣。改動同一席的保存姿態後，只有該席被標記，整份回條未完成。84 項 Quest 部署回歸中，1 個 Windows PowerShell 腳本政策子案例略過。142 項封存及戰績回歸通過。 [部署回歸](../artifacts/quest-preparing-seat-proof-20261117/quest-full.log) · [封存回歸](../artifacts/quest-preparing-seat-proof-20261117/field-full.log)
+- 同機 Windows 原生遊戲使用 OpenXR Mock Runtime，對管理包 0.31.219 驗證追蹤就緒、中斷、恢復及開場後拒絕發準備回條。原場次已完成雙封存與玩家確認，管理 API 無 TCP 或 UDP 監聽。兩次測試入口分別補正了單席參數與開場預期序號後通過。Quest USB 仍只有檔案傳輸介面。 [原生驗收](../artifacts/quest-preparing-seat-proof-20261117/native-readback.json) · [USB 快照](../artifacts/quest-preparing-seat-proof-20261117/usb-status.json)
+
 ## 2026-11-17 本房觀戰核對場景與戰鬥事件
 
 - 管理台 0.31.219 在本房觀戰檢查錄製標頭內的物件房號及位置，並核對快照的事件玩家及射線起點。舊版在 Chromium 回應替換測試中顯示了帶有跨房物件的標頭。新版在顯示前拒絕該標頭，並在即時及逐格資料出現跨房事件時保留上一格。重新連線及逐格讀取仍可顯示服務保存的本房射擊。 [觀戰說明](WORLD_RECORDING.md#從房卡或全館收尾開啟) · [舊版反例](../artifacts/desktop-guarded-openxr/20261117-023137-e65b1da5/browser.log)

@@ -27,6 +27,11 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 CAPTURE_FIXTURE = ROOT / 'tests/fixtures/run-quest-capture.py'
 
 
+def tracked_world_player(readiness):
+    return {'id': readiness['playerId'], 'roomId': readiness['roomId'], 'connected': True,
+            'health': 100, 'rig': {'kind': 'Tracked'}}
+
+
 def posix_shell():
     shell = shutil.which('sh')
     if shell is None and os.name == 'nt':
@@ -1193,8 +1198,9 @@ class QuestVenueTests(unittest.TestCase):
                     'sourceState': 'Fresh', 'sourceAgeMilliseconds': 100, 'origin': 'GameServer', 'worldSequence': 23,
                     'players': [{'roomId': 4, 'seat': 2, 'playerId': player, 'admissionId': admission,
                                  'state': 'Participating', 'rigKind': 'Tracked', 'canParticipate': True}]}
-        original_frame = {'packet': {'sequence': 23, 'observedSequence': 7, 'suspended': False,
-                                     'frame': {'phase': 'Preparing', 'tick': 0}}}
+        body = tracked_world_player(original['players'][0])
+        preparing = {'phase': 'Preparing', 'tick': 0, 'players': [body]}
+        original_frame = {'packet': {'sequence': 23, 'observedSequence': 7, 'suspended': False, 'frame': preparing}}
         state = {'readiness': original, 'frame': original_frame}
         requests = []
         key = 'test-operator'
@@ -1233,10 +1239,18 @@ class QuestVenueTests(unittest.TestCase):
                 (original, None, 'source-frame-unverified', True),
                 (original, {'packet': dict(original_frame['packet'], frame={'phase': 'Running', 'tick': 1})},
                  'source-outside-preparing', True),
+                (original, {'packet': dict(original_frame['packet'], frame={'phase': 'Preparing', 'tick': 0})},
+                 'source-frame-unverified', True),
             )
+            invalid_actors = ([], [dict(body, id=str(uuid.uuid4()))], [dict(body, roomId=3)], [body, body],
+                              [dict(body, connected=False)], [dict(body, connected='true')],
+                              [dict(body, health=0)], [dict(body, rig={'kind': 'Simulated'})],
+                              [dict(body, rig={'kind': ['Tracked']})])
+            cases += tuple((original, {'packet': dict(original_frame['packet'], frame=dict(preparing, players=players))},
+                            'source-seat-unverified', True) for players in invalid_actors)
             try:
                 for snapshot, frame, expected, reads_frame in cases:
-                    with self.subTest(expected=expected):
+                    with self.subTest(expected=expected, body=(frame or {}).get('packet', {}).get('frame', {}).get('players')):
                         state.update(readiness=snapshot, frame=frame)
                         requests.clear()
                         result = subprocess.run(command, env={**os.environ, 'VR_COMMAND_MASTER_KEY': key},
@@ -1255,6 +1269,7 @@ class QuestVenueTests(unittest.TestCase):
                             self.assertEqual(hashlib.sha256(identity_bytes).hexdigest(), seat['admissionSha256'])
                         else:
                             self.assertNotIn('admissionSha256', seat)
+                            self.assertNotIn('evidenceVersion', report)
                         for secret in (key, config['joinTicket'], player, admission):
                             self.assertNotIn(secret, result.stdout + result.stderr)
                         urls = [readiness_url, frame_url] if reads_frame else [readiness_url]
@@ -2299,6 +2314,7 @@ else:
         topology = 'Independent'
         snapshots = {}
         running_frame = None
+        simulated_body = None
 
         class Handler(BaseHTTPRequestHandler):
             def reply(self, body):
@@ -2321,7 +2337,12 @@ else:
             def do_GET(self):
                 session = self.path.split('/')[3]
                 snapshot = snapshots[session]
-                frame = {'phase': 'Running', 'tick': 1} if session == running_frame else {'phase': 'Preparing', 'tick': 0}
+                players = [tracked_world_player(row) for row in snapshot['players']]
+                for player in players:
+                    if player['id'] == simulated_body:
+                        player['rig']['kind'] = 'Simulated'
+                frame = {'phase': 'Running', 'tick': 1} if session == running_frame else {
+                    'phase': 'Preparing', 'tick': 0, 'players': players}
                 self.reply({'packet': {'sequence': snapshot['worldSequence'], 'observedSequence': snapshot['observedSequence'],
                                        'suspended': False, 'frame': frame}})
 
@@ -2411,6 +2432,17 @@ else:
                             self.assertEqual(7, len(calls))
                             running_frame = None
 
+                        simulated_body = devices[12]['playerId']
+                        conflicting_frame = sample()
+                        self.assertEqual(1, conflicting_frame.returncode, conflicting_frame.stderr)
+                        rejected = json.loads(conflicting_frame.stdout)
+                        self.assertFalse(rejected['complete'])
+                        self.assertEqual(['tracked-ready']*12 + ['source-seat-unverified'] + ['tracked-ready']*12,
+                                         [row['status'] for row in rejected['seats']])
+                        self.assertEqual(2 + len(snapshots), len(calls))
+                        self.assertNotIn(simulated_body, conflicting_frame.stdout)
+                        simulated_body = None
+
                         broken = snapshots[devices[12]['sessionId']]
                         player = next(row for row in broken['players'] if row['playerId'] == devices[12]['playerId'])
                         player['rigKind'] = 'Simulated'
@@ -2452,6 +2484,7 @@ else:
                                   'playerId': str(self.players[(row['roomId'] - 1) * 5 + row['seat'] - 1]),
                                   'admissionId': str(self.admissions[(row['roomId'] - 1) * 5 + row['seat'] - 1])}
                                  for row in selected]}
+        original_frame['frame']['players'] = [tracked_world_player(row) for row in readiness['players']]
 
         class Handler(BaseHTTPRequestHandler):
             def respond(self, payload):

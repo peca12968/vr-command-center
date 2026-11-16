@@ -764,7 +764,7 @@ function New-TrackedSeatReport($Venue, [object[]]$Map, $Batch, [switch]$IncludeA
     return $report
 }
 
-function Confirm-PreparingReadinessFrames($Target, $Report, [int]$RequestMilliseconds) {
+function Confirm-PreparingReadinessFrames($Target, $Report, [hashtable]$PlayersBySeat, [int]$RequestMilliseconds) {
     $handler = [Net.Http.HttpClientHandler]::new()
     $handler.UseProxy = $handler.AllowAutoRedirect = $false
     $client = [Net.Http.HttpClient]::new($handler)
@@ -775,20 +775,25 @@ function Confirm-PreparingReadinessFrames($Target, $Report, [int]$RequestMillise
     try {
         $client.DefaultRequestHeaders.Add('Authorization', $Target.Headers.Authorization)
         foreach ($session in ($Report.seats | Group-Object { $_.sessionId })) {
-            $seat = $session.Group[0]
-            $url = [Uri]::new($Target.Origin, "/api/sessions/$($seat.sessionId)/world/frames/$($seat.worldSequence)")
+            $sample = $session.Group[0]
+            $url = [Uri]::new($Target.Origin, "/api/sessions/$($sample.sessionId)/world/frames/$($sample.worldSequence)")
             $status = 'source-frame-unverified'
+            $players = $null
             $response = $null
             try {
                 $response = $client.GetAsync($url, $cancellation.Token).GetAwaiter().GetResult()
                 if ($response.StatusCode -eq 200) {
                     $stored = ConvertFrom-Json -InputObject ($response.Content.ReadAsStringAsync().GetAwaiter().GetResult())
                     $packet = $stored.packet
-                    if ((Test-JsonInteger $packet.sequence) -and $packet.sequence -eq $seat.worldSequence -and
-                        (Test-JsonInteger $packet.observedSequence) -and $packet.observedSequence -eq $seat.observedSequence -and
+                    if ((Test-JsonInteger $packet.sequence) -and $packet.sequence -eq $sample.worldSequence -and
+                        (Test-JsonInteger $packet.observedSequence) -and $packet.observedSequence -eq $sample.observedSequence -and
                         $packet.suspended -is [bool] -and -not $packet.suspended -and $packet.frame.phase -is [string] -and
                         (Test-JsonInteger $packet.frame.tick)) {
-                        if ($packet.frame.phase -ceq 'Preparing' -and $packet.frame.tick -eq 0) { $status = 'tracked-ready' }
+                        if ($packet.frame.phase -ceq 'Preparing' -and $packet.frame.tick -eq 0 -and
+                            $packet.frame.players -is [array] -and $packet.frame.players.Count -le 25) {
+                            $players = $packet.frame.players
+                            $status = 'tracked-ready'
+                        }
                         elseif ($packet.frame.phase -cin @('Running','Paused','Ended')) { $status = 'source-outside-preparing' }
                     }
                 }
@@ -797,6 +802,18 @@ function Confirm-PreparingReadinessFrames($Target, $Report, [int]$RequestMillise
             if ($status -cne 'tracked-ready') {
                 $session.Group | ForEach-Object { $_.status = $status }
                 $Report.complete = $false
+                continue
+            }
+            foreach ($seat in $session.Group) {
+                $playerId = $PlayersBySeat["$($seat.roomId)/$($seat.seat)"]
+                $matches = @($players | Where-Object { $_.id -is [string] -and $_.id -ceq $playerId })
+                $player = $matches | Select-Object -First 1
+                if ($matches.Count -ne 1 -or -not (Test-JsonInteger $player.roomId) -or $player.roomId -ne $seat.roomId -or
+                    $player.connected -isnot [bool] -or -not $player.connected -or -not (Test-JsonInteger $player.health) -or
+                    $player.health -lt 1 -or $player.health -gt 100 -or $player.rig.kind -isnot [string] -or $player.rig.kind -cne 'Tracked') {
+                    $seat.status = 'source-seat-unverified'
+                    $Report.complete = $false
+                }
             }
         }
     } finally { $cancellation.Dispose(); $client.Dispose() }
@@ -823,7 +840,8 @@ function Confirm-PlayerTrackedSeat($Target, $Ticket) {
     $report = [ordered]@{ phase = 'tracked-readiness'; scope = 'player'; complete = $status -ceq 'tracked-ready'
         sampledAtUtc = $snapshot.sampledAtUtc; seats = @($seat) }
     if ($report.complete) {
-        Confirm-PreparingReadinessFrames $Target $report ([int][Math]::Floor(10000 - $timer.Elapsed.TotalMilliseconds))
+        $playersBySeat = @{ "$($seat.roomId)/$($seat.seat)" = $Ticket.PlayerId.ToString('D') }
+        Confirm-PreparingReadinessFrames $Target $report $playersBySeat ([int][Math]::Floor(10000 - $timer.Elapsed.TotalMilliseconds))
     }
     if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) {
         $seat.status = 'ticket-expired'
@@ -842,8 +860,13 @@ function Read-TrackedSeatReport($Target, $Venue, [object[]]$Map, [int]$RequestMi
     $batch = Read-VenueTrackedReadiness $Target $Venue $RequestMilliseconds
     $report = New-TrackedSeatReport $Venue $Map $batch -IncludeAllHeadsets:$IncludeAllHeadsets
     if (($DeploymentReport -or $DeploymentReportsFile) -and $report.complete) {
+        $playersBySeat = @{}
+        foreach ($seat in $report.seats) {
+            $key = "$($seat.roomId)/$($seat.seat)"
+            $playersBySeat[$key] = $Venue.Connections[$key].Ticket.PlayerId.ToString('D')
+        }
         $remaining = [int][Math]::Floor($RequestMilliseconds - $timer.Elapsed.TotalMilliseconds)
-        Confirm-PreparingReadinessFrames $Target $report $remaining
+        Confirm-PreparingReadinessFrames $Target $report $playersBySeat $remaining
     }
     return $report
 }
