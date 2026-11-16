@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 保存具名五房任務配置
+
+- 管理台 0.31.225 可將五房獨立或全連線的任務配置命名存入管理服務。載入清單項目會套用原模式及精確版本，保留任務草稿並重新檢查場地。 [操作方式](MISSION_VERSIONS.md#在開場前保存五房任務配置)
+- 使用 0.31.224 建立既有任務庫，再用 0.31.225 保存及重啟讀回。原始碼及解壓包各通過 15 項 Chromium 專項，包含房控權限、錯誤回條的原請求重試、VR／MR 歷史版本、場地阻擋、五場獨立及一場合併的實際建立和收尾。所有管理程序皆使用本機 IPC，TCP 監聽與 UDP 端點為零。 [解壓包測試](../artifacts/venue-saved-mission-plans-031225/package/save-checks.json) · [重啟讀回](../artifacts/venue-saved-mission-plans-031225/package/restore-checks.json) · [手機畫面](../artifacts/venue-saved-mission-plans-031225/package/named-config-mobile.png)
+- 1124 項 .NET、123 項 Node 與 7 項套件測試通過。管理包驗證 574 個檔案，和原 0.50.12 Windows／Quest 通過發行核對。GitHub Actions 對 `3ff2cd0` 回報帳務或用量限制，工作未啟動。Quest USB 仍無 ADB 介面，頭盔與跨機待驗。 [管理包](../artifacts/venue-saved-mission-plans-031225/VRCommand-ControlServer-0.31.225.zip) · [發行報告](../artifacts/venue-saved-mission-plans-031225/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43963491165/job/133636731637)
+
 ## 2026-11-17 核對 Quest APK 的原生程式庫
 
 - 場館離線發行工具新增 ARM64 ELF 核對。檢查 Unity、IL2CPP、OpenXR 與 Meta MR 所需檔案，以及 APK 內所有原生程式庫的架構、程式標頭與檔案區段。原 0.50.12／77 APK 的 7 個程式庫通過，SHA-256 與原回條一致。管理包 0.31.224 和同源 Windows 遊戲兩包也通過這次發行核對。 [發行報告](../artifacts/quest-native-elf-20261117/venue-release.json) · [操作方式](EXTERNAL_CLIENTS.md#發送前離線核對交付套件)
