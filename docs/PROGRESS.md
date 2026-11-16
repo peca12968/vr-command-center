@@ -1,9 +1,15 @@
 # 開發進度
 
+## 2026-11-16 五房封存核對伺服器發行
+
+- `requireServerRelease` 可要求原場館發行報告與原 Windows 終止報告的 `serverManifestSha256` 一致。若提交經驗證的啟動回條，原預覽和就緒報告的摘要也必須相符。新版清單工具可在輸出前檢查這項條件。核對成立時，`venueRelease.server` 列出原摘要及場次數。 [操作方式](EXTERNAL_CLIENTS.md#核對五房伺服器發行版本)
+- 先以實際解壓的 Windows 1.25 啟動器重新核對原 0.50.11 發行，再將該摘要用於獨立與合併的各 25 席合成封存證據。新版命令核對 5 與 1 個場次，兩種模式改用不同摘要的終止檔時均退出 1。另以原始同機 0.50.7 六批資料重驗 18 場啟動、30 件啟動相關原檔及 80 份戰績確認，六批完整摘要與舊輸出逐位元組相符。新發行的場館啟動與實機待驗。 [新版封存排演](../artifacts/field-server-release-1250-05011-validation.json) · [舊啟動回條重驗](../artifacts/field-server-release-original-start-recheck.json) · [六批完整重驗](../artifacts/field-server-release-0507-legacy-recheck.json)
+- 135 項封存、9 項套件發行及 8 項網路清單測試通過。功能提交 `b8d7dea` 已推送，GitHub Actions 因帳務或支出上限未啟動，步驟數為零。 [封存測試紀錄](../artifacts/field-server-release-regression.log) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43783874476/job/133027034059)
+
 ## 2026-11-16 場館發行核對延伸到五房遊戲伺服器
 
 - Windows 伺服器啟動器 1.25 在離線核對、五房預覽及批次啟動支援 `--release-report`。與 Windows 玩家包及 Quest APK 共用發行報告，另比對伺服器清單的原始 SHA-256 與所有檔案。五房的就緒及收尾檔保存該摘要，`start-verified-venue.py` 使用同一份報告重做預覽與啟動。 [使用方式](WINDOWS_SERVER_PACKAGE.md#依場館發行報告核對伺服器包)
-- 實際解壓版通過 15 項 Windows CLI 檢查。兩端接受同一份新發行報告。缺少伺服器摘要、其他套件、重新封裝清單或檔案異動均遭拒。獨立與合併的錯誤報告在查詢管理服務前退出，未建立工作目錄或就緒檔。新解壓路徑的防火牆檢查仍有提示風險，此輪未執行正確包的五房 UDP 預覽或 Unity 啟動。另有 10 項發行、10 項伺服器包及 17 項區域網路檢查通過。 [Windows 測試](../artifacts/server-release-gate-validation-1250-05011.json)
+- 實際解壓版通過 15 項 Windows CLI 檢查。兩端接受同一份新發行報告。缺少伺服器摘要、其他套件、重新封裝清單或檔案異動均遭拒。獨立與合併的錯誤報告在查詢管理服務前退出，未建立工作目錄或就緒檔。新解壓路徑的防火牆檢查仍有提示風險，此輪未執行正確包的五房 UDP 預覽或 Unity 啟動。另有 10 項伺服器包及 17 項區域網路檢查通過。 [Windows 測試](../artifacts/server-release-gate-validation-1250-05011.json)
 - 同批採用管理台 0.31.206、既有遊戲 0.50.11 與原 Quest 76 APK。兩個 Windows ZIP 各核對 331 個清單檔案，324 個共用遊戲檔逐位元組一致。APK 重新核對 ARM64、OpenXR 及 v2 簽章，並用管理服務簽發的席位檔完成 Quest CLI `-CheckOnly`，確認本機 APK 與同一報告相符。USB 偵錯介面仍為零，這輪沒有啟動 ADB 或安裝頭盔。 [共同發行報告](../artifacts/venue-release-server-gate-1250-05011.json) · [伺服器 ZIP](../artifacts/windows-server-release-gate-1250-05011.zip) · [玩家 ZIP](../artifacts/windows-player-release-gate-05011.zip) · [Quest 離線核對](../artifacts/quest-server-release-gate-check-1250-05011.json)
 - 功能提交 `f0d4d59` 已推送。GitHub Actions 因帳務或支出上限未啟動，步驟數為零。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43782864638/job/133023804941)
 
