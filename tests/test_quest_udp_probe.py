@@ -20,6 +20,7 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'scripts'))
 SPEC = importlib.util.spec_from_file_location('quest_udp', ROOT / 'scripts/probe-quest-udp.py')
 quest_udp = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(quest_udp)
@@ -60,12 +61,19 @@ def write_guarded_launch(directory, mode, endpoints, prefix):
 class QuestUdpProtocolTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
+
+        java = java_tool('java')
+        try:
+            require_silent_windows_launch(java)
+        except WindowsFirewallLaunchError as error:
+            raise unittest.SkipTest(str(error)) from error
         work = tempfile.TemporaryDirectory(prefix='quest-udp-test-')
         cls.addClassCleanup(work.cleanup)
         cls.classes = Path(work.name)
         subprocess.run([java_tool('javac'), '--release', '8', '-d', str(cls.classes),
                         str(ROOT / 'tools/QuestUdpProbe/Probe.java')], check=True, capture_output=True, timeout=20)
-        cls.java = [java_tool('java'), '-cp', str(cls.classes), 'com.vrcommand.udpprobe.Probe']
+        cls.java = [java, '-cp', str(cls.classes), 'com.vrcommand.udpprobe.Probe']
 
     def setUp(self):
         work = tempfile.TemporaryDirectory(prefix='quest-udp-session-')
@@ -419,6 +427,75 @@ class QuestUdpVenuePlanTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'original Quest plan and sample count'):
             quest_venue.probe_venue([], Path('adb'), mode, groups, retry, 3, 900, output / 'preflight-report.json')
         self.assertFalse(retry.exists())
+
+    def test_venue_retry_rejects_changed_or_missing_sample_timeout_before_probe(self):
+        mode, groups = self.plan()
+        output = self.root / 'original'
+        with patch.object(quest_venue, 'probe_seat', side_effect=KeyboardInterrupt), redirect_stderr(io.StringIO()):
+            original = quest_venue.probe_venue([], Path('adb'), mode, groups, output, 3, 900)
+        original_path = output / 'preflight-report.json'
+        original_bytes = original_path.read_bytes()
+
+        legacy_path = output / 'legacy.json'
+        legacy = {key: value for key, value in original.items() if key != 'sampleTimeoutMs'}
+        legacy_path.write_text(json.dumps(legacy), encoding='utf-8')
+        for label, timeout, source in (('shorter-timeout', 200, original_path), ('legacy-report', 900, legacy_path)):
+            with self.subTest(label=label):
+                retry = self.root / label
+                with patch.object(quest_venue, 'probe_seat', side_effect=KeyboardInterrupt) as probe, \
+                        redirect_stderr(io.StringIO()):
+                    with self.assertRaisesRegex(ValueError, 'recorded Quest sample timeout'):
+                        quest_venue.probe_venue([], Path('adb'), mode, groups, retry, 3, timeout, source)
+                    probe.assert_not_called()
+                self.assertFalse(retry.exists())
+        self.assertEqual(original_bytes, original_path.read_bytes())
+
+    @unittest.skipUnless(POWERSHELL, 'PowerShell is required for the original UDP listener and probe')
+    def test_venue_retry_reprobes_an_original_sample_outside_the_recorded_timeout(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reservation:
+            reservation.bind((SERVER, 0))
+            port = reservation.getsockname()[1]
+        shell = [POWERSHELL, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned',
+                 '-File', str(ROOT / 'scripts/check-lan-udp.ps1')]
+        rooms = list(range(1, 6))
+        groups = [{'roomIds': rooms, 'address': SERVER, 'port': port, 'devices': [
+            {'roomId': room, 'seat': 1, 'serial': f'fixture-{room}', 'address': f'127.0.0.{room + 1}'}
+            for room in (1, 2)]}]
+
+        def local_probe(args):
+            command = [*shell, '-Mode', 'Probe', '-KeyFile', str(args.key_file), '-LocalAddress', args.local_address,
+                       '-PeerAddress', args.peer_address, '-Port', str(args.port), '-Count', str(args.count),
+                       '-TimeoutMs', str(args.timeout_ms)]
+            result = subprocess.run(command, capture_output=True, check=True, timeout=10,
+                                    creationflags=quest_venue.CREATE_NO_WINDOW)
+            return json.loads(result.stdout)
+
+        original = self.root / 'original-exchanges'
+        retry = self.root / 'retry-exchanges'
+        with patch.object(quest_venue, 'device_ready', return_value=True), patch.object(
+                quest_venue.quest_udp, 'run_probe', side_effect=local_probe) as probes, redirect_stderr(io.StringIO()):
+            first = quest_venue.probe_venue(shell, Path('adb'), 'Linked', groups, original, 2, 900)
+            self.assertTrue(first['complete'])
+            self.assertEqual(900, first['sampleTimeoutMs'])
+            raw_files = {path.name: path.read_bytes() for path in original.iterdir()}
+            slow, retained = first['groups'][0]['seats']
+            probe_data = json.loads(raw_files[slow['probe']])
+            probe_data['samples'][0]['roundTripMs'] = 901
+            slow_probe = original / 'slow-probe.json'
+            slow_probe.write_text(json.dumps(probe_data), encoding='utf-8')
+            slow.update(probe=slow_probe.name, probeSha256=hashlib.sha256(slow_probe.read_bytes()).hexdigest())
+            source = original / 'slow-batch.json'
+            source.write_text(json.dumps(first), encoding='utf-8')
+            probes.reset_mock()
+            second = quest_venue.probe_venue(shell, Path('adb'), 'Linked', groups, retry, 2, 900, source)
+            self.assertEqual(['fixture-1'], [call.args[0].serial for call in probes.call_args_list])
+
+        self.assertTrue(second['complete'])
+        self.assertEqual((900, 1), (second['sampleTimeoutMs'], second['reusedSeats']))
+        self.assertEqual(['verified', 'reused'], [row['stage'] for row in second['groups'][0]['seats']])
+        self.assertEqual(retained['exchangeSha256'], second['groups'][0]['seats'][1]['exchangeSha256'])
+        for name, raw in raw_files.items():
+            self.assertEqual(raw, (original / name).read_bytes())
 
 
 class QuestUdpAdbTests(unittest.TestCase):

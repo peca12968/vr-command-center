@@ -158,17 +158,17 @@ python .\scripts\probe-quest-venue.py --adb $adb --device-map .\device-map.json 
 
 ### 重試 Quest UDP 預檢席位
 
-某席失敗或操作員在探測中按 Ctrl+C 時，工具會保存已確認的結果與未完成席位。重試需使用支援 `--retry-report` 的版本所產生的報告。恢復裝置連線後，使用同一份裝置對照與網路清單、相同樣本數，以及新的輸出資料夾。
+某席失敗或操作員在探測中按 Ctrl+C 時，工具會保存已確認的結果與未完成席位。恢復裝置連線後，沿用原裝置對照表、網路清單、`--count` 及 `--timeout-ms`，並指定新的輸出資料夾。等待上限記在報告的 `sampleTimeoutMs`。若要改用其他上限，或舊報告沒有這個欄位，請開始新的預檢批次。舊報告仍可供離線驗收。
 
 若首次已核對 Windows 原啟動批次，重試也要提供相同原檔。場次更新或兩份原檔的 SHA-256 改變時，須用新計畫開始新的預檢批次。
 
 ```powershell
 python .\scripts\probe-quest-venue.py --adb $adb --device-map .\device-map.json `
-  --network-plan .\quest-network.json --count 5 `
+  --network-plan .\quest-network.json --count 5 --timeout-ms 900 `
   --retry-report .\quest-udp-batch\preflight-report.json --output-directory .\quest-udp-retry
 ```
 
-工具會逐席核對原監聽及探測報告的 SHA-256、來源、埠及有效時間。通過的席位標為 `reused`，其餘席位重新探測。`reusedSeats` 為仍有效且沿用的席位數。批次結束時已超過 30 分鐘的席位標為 `expired`。若還有缺件，可用最新一輪報告再次重試。
+工具會逐席核對原監聽及探測報告的 SHA-256、來源、埠、有效時間及每筆往返時間。通過的席位標為 `reused`，其餘席位重新探測。`reusedSeats` 為仍有效且沿用的席位數。批次結束時已超過 30 分鐘的席位標為 `expired`。若還有缺件，可用最新一輪報告再次重試。
 
 完成後用新一輪的 `preflight-report.json` 做場館核對。它仍會引用先前有效的原始雙端報告，請保留各輪資料夾與原相對位置。若更換裝置、來源 IPv4 或所用端點，請用更新的清單開始新批次。
 

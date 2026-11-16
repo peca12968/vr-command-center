@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-16 Quest UDP 補測沿用原等待上限
+
+- 舊版接受把每包等待上限由 900 ms 改為 200 ms 的重試，也接受未記錄上限的報告。新版會保存 `sampleTimeoutMs`，在建立輸出目錄及探測前核對原值。沿用的每席雙端報告須再核對各筆 RTT。較舊的報告仍可供離線驗收，需要補測時另開始新批次。 [舊版反例](../artifacts/quest-udp-timeout-20261116-142923/before.log) · [補測方式](QUEST3.md#重試-quest-udp-預檢席位)
+- 以已通過防火牆查核的 Windows PowerShell 在迴環位址實做兩席 UDP 驗證。把其中一席的副本改為 901 ms 並更新報告引用的雜湊，第 1 席重新探測，第 2 席沿用，原雙端檔案逐位元相符。9 項 Quest UDP 及 17 項 LAN 回歸通過。Java 測試組因實際 `java.exe` 路徑未通過防火牆查核而略過。USB 快照仍只有檔案傳輸介面，實機及跨機驗收待完成。 [Quest UDP 測試](../artifacts/quest-udp-timeout-20261116-142923/quest-udp-tests.log) · [LAN 測試](../artifacts/quest-udp-timeout-20261116-142923/lan-tests.log) · [防火牆查核](../artifacts/quest-udp-timeout-20261116-142923/firewall.log) · [USB 快照](../artifacts/quest-udp-timeout-20261116-142923/usb-status.json)
+
 ## 2026-11-16 Quest 擷取重試鎖定原部署包與裝置
 
 - 原版曾在同一場次與 UDP 埠的第 2 房第 3 席接受兩種替換：換成重新配票的部署 ZIP，或沿用票券但改對應的 ADB 裝置。兩種替換均以退出碼 0 發布日誌。新報告保存原 ZIP SHA-256 與加鹽的席位裝置指紋，重試在啟動 ADB 及建立輸出目錄前核對。原包配合僅調整列順序的裝置表仍可只補抓失敗席，並保存相同指紋與原日誌。 [舊版反例](../artifacts/quest-capture-binding-20261116-142214/before.log) · [擷取回歸](../artifacts/quest-capture-binding-20261116-142214/capture-tests.log)
