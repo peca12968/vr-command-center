@@ -7,6 +7,8 @@ import sys
 import time
 import uuid
 
+# Keep the extracted simulator package byte-for-byte verifiable after running the peer.
+sys.dont_write_bytecode = True
 from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
 
 

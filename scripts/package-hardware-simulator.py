@@ -3,7 +3,9 @@ import argparse,hashlib,json,shutil,uuid,zipfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 FILES=['VrCommand.HardwareSimulator.dll','VrCommand.HardwareSimulator.deps.json','VrCommand.HardwareSimulator.runtimeconfig.json','VrCommand.Core.dll','VrCommand.Simulation.dll']
-VERSION='0.2.19'
+VERSION='0.2.20'
+MOCK_FIREWALL_FILES=('windows_firewall.py','check-windows-firewall-notifications.ps1')
+LIVE_VERSIONS={*(f'0.2.{minor}' for minor in range(15)), '0.2.19', VERSION}
 README=f'''VR Command 硬體回饋模擬器 {VERSION}
 
 需要 .NET 10 runtime，本機使用10.0.14驗證。這不是Unity玩家程式或廠商SDK。
@@ -66,10 +68,13 @@ def sha(p):
     with p.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
 def verify(folder):
     folder=folder.resolve();manifest=read(folder/'hardware-package.json')
-    version=(manifest.get('toolVersion'),manifest.get('mode'))
-    if manifest.get('schemaVersion')!=1 or version not in {('0.1.0','OfflineSimulationOnly'),('0.2.0','OfflineAndLiveSimulation'),('0.2.1','OfflineAndLiveSimulation'),('0.2.2','OfflineAndLiveSimulation'),('0.2.3','OfflineAndLiveSimulation'),('0.2.4','OfflineAndLiveSimulation'),('0.2.5','OfflineAndLiveSimulation'),('0.2.6','OfflineAndLiveSimulation'),('0.2.7','OfflineAndLiveSimulation'),('0.2.8','OfflineAndLiveSimulation'),('0.2.9','OfflineAndLiveSimulation'),('0.2.10','OfflineAndLiveSimulation'),('0.2.11','OfflineAndLiveSimulation'),('0.2.12','OfflineAndLiveSimulation'),('0.2.13','OfflineAndLiveSimulation'),('0.2.14','OfflineAndLiveSimulation'),(VERSION,'OfflineAndLiveSimulation')}:raise ValueError('Unsupported simulator package')
+    version, mode=manifest.get('toolVersion'),manifest.get('mode')
+    valid_version=(version=='0.1.0' and mode=='OfflineSimulationOnly') or (
+        isinstance(version,str) and version in LIVE_VERSIONS and mode=='OfflineAndLiveSimulation')
+    if manifest.get('schemaVersion')!=1 or not valid_version:raise ValueError('Unsupported simulator package')
     expected=set(FILES)|{'example.json','README.txt'}
-    if version[1]=='OfflineAndLiveSimulation':expected.add('mock-device.py')
+    if mode=='OfflineAndLiveSimulation':expected.add('mock-device.py')
+    if version==VERSION:expected.update(MOCK_FIREWALL_FILES)
     if set(manifest['files'])!=expected:raise ValueError('Unexpected simulator package payload')
     actual={p.relative_to(folder).as_posix() for p in folder.rglob('*') if p.is_file()}
     if actual!=set(manifest['files'])|{'hardware-package.json'}:raise ValueError('Missing or additional package file')
@@ -100,6 +105,8 @@ def main():
     sample=evidence/'simulation-input.json';expected=read(evidence/'simulation-report.json')
     if not expected['simulatedHardwareOnly'] or expected['physicalDeliveryConfirmed']:raise ValueError('Not an offline simulation report')
     shutil.copyfile(sample,folder/'example.json');shutil.copyfile(peer,folder/'mock-device.py');(folder/'README.txt').write_text(README,encoding='utf-8')
+    for name in MOCK_FIREWALL_FILES:
+        shutil.copyfile(ROOT/'scripts'/name,folder/name)
     manifest={'schemaVersion':1,'toolVersion':VERSION,'mode':'OfflineAndLiveSimulation','requires':'.NET 10 runtime; Python 3.12 for the optional mock device',
         'testEvidence':str(evidence),'liveTestEvidence':str(live),'inputSteps':expected['inputSteps'],
         'scope':'No physical device, vendor wire format, authentication attestation, Unity / headset / network capacity acceptance. File hashes are not signatures.',

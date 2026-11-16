@@ -869,6 +869,10 @@ def run(args, api_command, api_cwd):
                     assert [(row['roomId'],row['sessionId']) for row in summary['rooms']]==list(owners.items())
                     return summary['rooms']
 
+                def venue_ack_count(directory, room):
+                    snapshot = venue_status(directory)[room-1]['status']
+                    return snapshot['progress']['acknowledged'] if snapshot is not None else None
+
                 check(all(row['state']=='waiting' and row['status'] is None for row in venue_status()) and not list(status_directory.iterdir()),
                       f'{mode} status without credentials reports five waiting rooms and writes no files')
                 venue_connections = {}
@@ -1307,7 +1311,7 @@ def run(args, api_command, api_cwd):
                         venue_connections[room] = accept(venue_peers[room], room, venue_connections[room], bound=True)
                     for room, kind, weather in ((1, 'cursor', 'Fog'), (2, 'clock', 'Rain')):
                         original_ids = send_venue_batch(room, 1)
-                        wait(lambda:venue_status(continuity_directory)[room-1]['status']['progress']['acknowledged']==1,
+                        wait(lambda:venue_ack_count(continuity_directory,room)==1,
                              'original acknowledgment before the continuity test')
                         pending_ids = send_venue_batch(room, 1, decision=None)
                         observed = request('/api/sessions/'+owners[room]+'/commands', {'commandId':str(uuid.uuid4()),
@@ -1374,7 +1378,7 @@ def run(args, api_command, api_cwd):
 
                         faults[room] = duplicate_signal
                         original_ids = send_venue_batch(room, 1)
-                        wait(lambda:venue_status(continuity_directory)[room-1]['status']['progress']['acknowledged']==1,
+                        wait(lambda:venue_ack_count(continuity_directory,room)==1,
                              'original acknowledgment before a repeated signal identity')
                         fresh = publish_venue_batch(room, count)[-1]
 
@@ -1401,7 +1405,7 @@ def run(args, api_command, api_cwd):
                         del faults[room]
 
                     unaffected = send_venue_batch(5, 1)
-                    wait(lambda:venue_status(continuity_directory)[4]['status']['progress']['acknowledged']==1,
+                    wait(lambda:venue_ack_count(continuity_directory,5)==1,
                          'room five remains active after other rooms reject authority regressions')
                     assert continuous.poll() is None
                     continuity_stop.touch()
@@ -1414,6 +1418,61 @@ def run(args, api_command, api_cwd):
                             for item in attempt['deliveries']}==unaffected
                     check(room_five['attempts'][0]['status']=='simulated-acknowledged' and room_five['termination']=='operator-stop',
                           f'{mode} unaffected room confirms fresh feedback on its original connection')
+
+                    order_directory = out/f'{label}-stream-order'
+                    order_directory.mkdir()
+                    order_report = order_directory/'room-05-report.json'
+                    ordered = invoke(5,'Room5',order_report,config=continuity_bindings/config_files[5].name,
+                                     status_directory=order_directory)
+                    room = 5
+                    venue_connections[room] = accept(venue_peers[room],room,venue_connections[room],bound=True)
+                    first = publish_venue_batch(room,1)[0]
+                    received = venue_peers[room].read('feedback')
+                    assert received['signals'][0]['signal']['reportId']==first['report']['reportId']
+                    venue_peers[room].reply('ack')
+                    wait(lambda:venue_ack_count(order_directory,room)==1,
+                         'original acknowledgement before stream order fault')
+                    same_page = mode=='Linked'
+                    substitutions = []
+
+                    def regress_stream(page):
+                        signals = page['signals']
+                        if len(signals)==(2 if same_page else 1) and signals[0]['streamSequence']>first['streamSequence']:
+                            replacement = signals[0]['streamSequence'] if same_page else first['streamSequence']-1
+                            assert 0 < replacement < signals[-1]['streamSequence']
+                            changed = dict(signals[-1],streamSequence=replacement)
+                            substitutions.append({'original':signals[-1],'substituted':changed})
+                            return dict(page,signals=[*signals[:-1],changed])
+                        return page
+
+                    faults[room] = regress_stream
+                    publish_venue_batch(room,2 if same_page else 1)
+
+                    def stream_order_outcome():
+                        if not venue_peers[room].lines.empty():
+                            return {'outbound':venue_peers[room].read('feedback')}
+                        exit_code = ordered.poll()
+                        return {'exitCode':exit_code} if exit_code is not None else None
+
+                    terminal = wait(stream_order_outcome,f'{mode} verifies the original combat stream order')
+                    assert substitutions
+                    order_proof = {'samePage':same_page,'confirmedStreamSequence':first['streamSequence'],
+                                   **substitutions[0],'result':terminal}
+                    if 'outbound' in terminal:
+                        save(f'{label}-stream-order.json',order_proof)
+                        raise AssertionError(f'{mode} sent a regressed combat stream sequence to the mock device')
+                    output, _ = ordered.communicate(timeout=8)
+                    result = json.loads(order_report.read_bytes())
+                    status = venue_status(order_directory)[room-1]
+                    save(f'{label}-stream-order.json',{**order_proof,'status':status,'report':result,'summary':output.strip()})
+                    check(venue_peers[room].lines.empty() and ordered.returncode==1
+                          and json.loads(output)=={'complete':False,'simulatedHardwareOnly':True,
+                          'physicalDeliveryConfirmed':False,'acknowledged':1}
+                          and status['state']=='stopped' and status['status']['termination']=='management-invalid-response'
+                          and result['acknowledged']==1 and len(result['attempts'])==1
+                          and result['attempts'][0]['status']=='simulated-acknowledged',
+                          f'{mode} keeps only the original ACK and rejects a repeated or regressed combat sequence before delivery')
+                    del faults[room]
 
                 stop_venue_room = runtime/f'{label}-stop-room-1'
                 room1_options = {'config':config_files[1],'status_directory':status_directory}

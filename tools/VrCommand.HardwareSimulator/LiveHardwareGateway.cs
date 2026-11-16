@@ -233,9 +233,10 @@ internal static partial class LiveHardwareGateway
             return observation;
         }
         var attempts = new List<Attempt>();
-        // Keep identities across reconnects. Authority reads for a pending batch may still repeat the original page.
+        // Keep attempted identities and sequence limits across reconnects. A pending batch may still re-read its original page.
         var attemptedEvents = new HashSet<Guid>();
         var attemptedReports = new HashSet<Guid>();
+        var lastAttemptedSequenceByStream = new Dictionary<Guid, long>();
         int connections = 0, attachments = 0, managementFaults = 0, mockFaults = 0, dropped = 0, acknowledged = 0;
         var termination = "duration";
         var statusSequence = 0;
@@ -310,6 +311,8 @@ internal static partial class LiveHardwareGateway
                         if (attempts.Count >= MaxAttempts) { termination = "attempt-limit"; break; }
                         if (deliveries.Any(item => attemptedEvents.Contains(item.Signal.EventId) || attemptedReports.Contains(item.Signal.ReportId)))
                             throw new InvalidDataException("A new hardware batch repeats an earlier signal identity.");
+                        if (deliveries[0].Signal.StreamSequence <= lastAttemptedSequenceByStream.GetValueOrDefault(epoch.Stream))
+                            throw new InvalidDataException("A new hardware batch regressed its combat stream sequence.");
 
                         var batch = Guid.NewGuid();
                         var status = "cancelled";
@@ -321,6 +324,7 @@ internal static partial class LiveHardwareGateway
                                 attemptedEvents.Add(delivery.Signal.EventId);
                                 attemptedReports.Add(delivery.Signal.ReportId);
                             }
+                            lastAttemptedSequenceByStream[epoch.Stream] = deliveries[^1].Signal.StreamSequence;
                             var invalid = await ExchangeFeedback(wire, ReadCurrent, config.RoomId, after, page, deliveries, connection, batch, run.Token);
                             if (invalid is not null)
                             {
@@ -484,18 +488,20 @@ internal static partial class LiveHardwareGateway
                 throw new BindingMismatch();
         }
         var last = after ?? 0;
+        long lastStream = 0;
         var eventIds = new HashSet<Guid>();
         var reportIds = new HashSet<Guid>();
         foreach (var signal in page.Signals)
         {
             if (signal is null || signal.EventSequence <= last || signal.EventSequence > page.ThroughSequence
-                || signal.ObservedSequence < page.RunningSinceSequence || signal.ObservedSequence >= signal.EventSequence || signal.StreamSequence < 1
+                || signal.ObservedSequence < page.RunningSinceSequence || signal.ObservedSequence >= signal.EventSequence || signal.StreamSequence <= lastStream
                 || signal.EventId == Guid.Empty || signal.ReportId == Guid.Empty || signal.PlayerId == Guid.Empty || signal.AdmissionId == Guid.Empty
                 || !eventIds.Add(signal.EventId) || !reportIds.Add(signal.ReportId)
                 || signal.Seat is < 0 or > 4 || signal.Kind is not (CombatKind.ShotFired or CombatKind.PlayerDamaged)
                 || signal.Damage != (signal.Kind == CombatKind.ShotFired ? 0 : Math.Clamp(signal.Damage, 1, 1000)))
                 throw new InvalidDataException("Invalid feedback signal.");
             last = signal.EventSequence;
+            lastStream = signal.StreamSequence;
         }
         return new(page, started);
     }
