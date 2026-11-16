@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 Quest 原席位換票與校正回讀
+
+- `-RefreshPlayerTicket` 在同一裝置端指令內核對原連線檔、暫存票券和已安裝的原校正檔。更名前校正不符會保留原票券。更名後讀回正式檔，任一雜湊不符就以失敗退出，即使新票券已寫入。重送相同票券也會讀回正式檔才回報目前票券相同。線上確認沿用同一入場，換票期間保留原遊戲程序。 [票券更新說明](QUEST_RECONNECT.md#保留遊戲程序並更新票券) · [舊版反例](../artifacts/quest-ticket-verified-20261117/before.log)
+- 七項票券更新回歸通過，涵蓋純 VR、保留透視的 VR、MR、舊席位、校正檔遺失及寫入後的改檔。實際 Windows SDK ADB 透過本機模擬裝置，在 PowerShell 7 和 Windows PowerShell 5.1 各跑正常、替換時校正改動、替換後校正改動及替換後連線檔改動。兩種終端都核對退出碼與實際檔案，暫存檔均已清理。USB 仍只列出檔案傳輸介面。 [ADB 結果](../artifacts/quest-ticket-verified-20261117/native-adb-readback.json) · [票券回歸](../artifacts/quest-ticket-verified-20261117/focused-final.log) · [USB 診斷](../artifacts/quest-ticket-verified-20261117/usb-status.json)
+- 部署回歸共 83 項，1 個 Windows PowerShell 腳本政策子案例略過。完整新跑包含批次 VR 與 MR 部署、失敗後續跑、混合場館及 25 席驗收流程的模擬。 [完整回歸](../artifacts/quest-ticket-verified-20261117/full.log)
+
 ## 2026-11-17 Quest MR 連線切換重新核對校正檔
 
 - 單席及批次部署會在裝置端更名前核對暫存連線檔與它引用的原校正檔，切換後再核對兩份正式檔才啟動。舊版在停止遊戲時改動校正檔，或在連線檔更名後改動，兩種情況都會接受。新版前者保留原正式連線檔，後者停在最終核對，批次均保留已成功席位。 [部署方式](QUEST3.md#啟動前核對裝置檔案) · [舊版反例](../artifacts/quest-mr-activation-20261117/before.log)

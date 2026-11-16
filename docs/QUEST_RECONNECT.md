@@ -27,11 +27,11 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -RefreshPlayerTicket `
     -AdbPath $adb -Serial '<已授權 Quest 3 序號>' -ClientConfig .\new-player-ticket.json
 ```
 
-工具私下讀取頭盔原設定，核對場次、玩家、入場識別、席位、伺服器位址與埠，並保留原透視和校正設定。MR 要使用同一鎖定校正值。工具只把票券更新到同資料夾的暫存檔，確認原檔及暫存檔的 SHA-256 後再替換。已經是同一票券時會回報 `ticket-file-current`。成功替換會回報 `ticket-file-refreshed`，原遊戲程序可接著處理 B 鍵重連。[Android ADB](https://developer.android.com/tools/adb) · [Android SHA-256 實作](https://android.googlesource.com/platform/external/toybox/+/40d21c59f76a9388b0ebb5c4c706732c2d034a67/toys/lsb/md5sum.c)
+工具從頭盔讀取原設定，核對場次、玩家、入場識別、席位、伺服器位址與埠，並保留原透視和校正設定。MR 要使用同一鎖定校正值。替換前，同一個裝置端指令會核對正式連線檔、暫存連線檔和原設定引用的校正檔 SHA-256。替換後讀回正式連線和校正檔，確認後才回報 `ticket-file-refreshed`。若讀回失敗，正式連線檔可能已換成新票券。已經是同一票券時也會核對這些正式檔案，再回報 `ticket-file-current`。操作全程保留原遊戲程序，玩家可接著按 B 重連。 [Android ADB](https://developer.android.com/tools/adb) · [Android SHA-256 實作](https://android.googlesource.com/platform/external/toybox/+/40d21c59f76a9388b0ebb5c4c706732c2d034a67/toys/lsb/md5sum.c)
 
 這次更新從讀取原設定到更新票券都使用同一條 ADB 連線。若連線消失，確認原頭盔重連後可重新執行。每次更新會再讀取當時的原設定，確認場次與入場身分。 [Quest 連線檢查](QUEST3.md#首次安裝與啟動檢查)
 
-在已設定 `VR_COMMAND_MASTER_KEY` 的管理主機上，可加 `-ManagementApi http://127.0.0.1:5080` 使用管理包 0.31.199 的線上核對。遠端管理服務須使用 HTTPS。工具會驗證新票券簽章、當前入場、公告端點和有效的遊戲畫格。MR 會從頭盔讀取原鎖定校正檔送驗，替換前再核對管理狀態和頭盔上的校正雜湊。通過的回條包含 `managementVerified: true`。 [單席驗證方式](QUEST3.md#部署前核對單席連線檔)
+在已設定 `VR_COMMAND_MASTER_KEY` 的管理主機上，可加 `-ManagementApi http://127.0.0.1:5080` 使用管理包 0.31.199 的線上核對。遠端管理服務須使用 HTTPS。工具會驗證新票券簽章、當前入場、公告端點和有效的遊戲畫格。MR 會從頭盔讀取原鎖定校正檔送驗。替換前會再核對管理狀態。通過的回條包含 `managementVerified: true`。 [單席驗證方式](QUEST3.md#部署前核對單席連線檔)
 
 若控制台已撤銷原席或重新建立入場，請走新的部署流程。重連時由遊戲伺服器驗證簽章、票券效期及當前入場，回到控制台確認有效參戰快照。USB 更新與頭盔按鍵仍需實機驗收。 [首次部署](QUEST3.md#區域網路原型操作)
 

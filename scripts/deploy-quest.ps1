@@ -1410,32 +1410,32 @@ function Publish-QuestFile([string[]]$Target, [string]$Local, [string]$Staging, 
         if ($LASTEXITCODE -ne 0) { throw "$Description could not be copied." }
         if (-not $ExpectedHash) { Confirm-QuestFileHash $Target $Staging $stagedHash $Description }
         if ($BeforeActivation) { & $BeforeActivation }
+        if ($null -ne $ConnectionDeployment) { $ConnectionDeployment.Step = 'activate-connection' }
+        $command = ''
         if ($ExpectedHash) {
-            $command = 'current=$(sha256sum ''{0}'') && staged=$(sha256sum ''{1}'') && [ "${{current%% *}}" = ''{2}'' ] && [ "${{staged%% *}}" = ''{3}'' ] && mv -f ''{1}'' ''{0}''' `
-                -f $Destination, $Staging, $ExpectedHash, $stagedHash
-            Invoke-QuestAdb ($Target + @('shell', $command)) *> $null
-            if ($LASTEXITCODE -ne 0) { throw 'Could not confirm ticket replacement. Check the selected device and read its current configuration before retrying.' }
-        } else {
-            if ($null -ne $ConnectionDeployment) { $ConnectionDeployment.Step = 'activate-connection' }
-            # Recheck the staged bytes and their alignment dependency after stopping the app.
-            $command = 'staged=$(sha256sum ''{0}'') && [ "${{staged%% *}}" = ''{1}'' ] || exit 42; ' -f $Staging, $stagedHash
-            if ($RequiredAlignment) {
-                $command += 'alignment=$(sha256sum ''{0}'') && [ "${{alignment%% *}}" = ''{1}'' ] || exit 43; ' `
-                    -f $RequiredAlignment.Path, $RequiredAlignment.Hash
-            }
-            $command += 'mv -f ''{0}'' ''{1}''' -f $Staging, $Destination
-            Invoke-QuestAdb ($Target + @('shell', $command)) *> $null
-            if ($LASTEXITCODE -eq 42) {
-                throw [IO.InvalidDataException]::new("$Description could not be verified on the selected Quest.")
-            }
-            if ($LASTEXITCODE -eq 43) {
-                throw [IO.InvalidDataException]::new('Room alignment file could not be verified on the selected Quest.')
-            }
-            if ($LASTEXITCODE -ne 0) { throw "$Description could not be activated." }
-            if ($null -ne $ConnectionDeployment) { $ConnectionDeployment.Step = 'verify-active-connection' }
-            Confirm-QuestFileHash $Target $Destination $stagedHash $Description
-            if ($RequiredAlignment) { Confirm-QuestFileHash $Target $RequiredAlignment.Path $RequiredAlignment.Hash 'Room alignment file' }
+            $command = 'current=$(sha256sum ''{0}'') && [ "${{current%% *}}" = ''{1}'' ] || exit 41; ' -f $Destination, $ExpectedHash
         }
+        # Check all files used by the replacement in the same device command as the rename.
+        $command += 'staged=$(sha256sum ''{0}'') && [ "${{staged%% *}}" = ''{1}'' ] || exit 42; ' -f $Staging, $stagedHash
+        if ($RequiredAlignment) {
+            $command += 'alignment=$(sha256sum ''{0}'') && [ "${{alignment%% *}}" = ''{1}'' ] || exit 43; ' `
+                -f $RequiredAlignment.Path, $RequiredAlignment.Hash
+        }
+        $command += 'mv -f ''{0}'' ''{1}''' -f $Staging, $Destination
+        Invoke-QuestAdb ($Target + @('shell', $command)) *> $null
+        if ($LASTEXITCODE -eq 43 -and $RequiredAlignment) {
+            throw [IO.InvalidDataException]::new('Room alignment file could not be verified on the selected Quest.')
+        }
+        if ($ExpectedHash -and $LASTEXITCODE -ne 0) {
+            throw 'Could not confirm ticket replacement. Check the selected device and read its current configuration before retrying.'
+        }
+        if ($LASTEXITCODE -eq 42) {
+            throw [IO.InvalidDataException]::new("$Description could not be verified on the selected Quest.")
+        }
+        if ($LASTEXITCODE -ne 0) { throw "$Description could not be activated." }
+        if ($null -ne $ConnectionDeployment) { $ConnectionDeployment.Step = 'verify-active-connection' }
+        Confirm-QuestFileHash $Target $Destination $stagedHash $Description
+        if ($RequiredAlignment) { Confirm-QuestFileHash $Target $RequiredAlignment.Path $RequiredAlignment.Hash 'Room alignment file' }
     } catch {
         $publishError = $_
         try {
@@ -1458,7 +1458,6 @@ function Update-QuestPlayerTicket($ConnectionFile, $Ticket, $Target) {
     $remote = '/sdcard/Android/data/com.vrcommand.quest/files'
     $destination = "$remote/vr-connection.json"
     $liveSeat = $null
-    $alignmentPath = $null
     $local = [IO.Path]::GetTempFileName()
     try {
         Invoke-QuestAdb ($deviceTarget + @('pull', $destination, $local)) *> $null
@@ -1478,13 +1477,15 @@ function Update-QuestPlayerTicket($ConnectionFile, $Ticket, $Target) {
         $sameTicket = $Fresh.joinTicket -ceq $current.joinTicket
         if ($Ticket.ExpiresAtUtc -lt $installed.ExpiresAtUtc) { throw 'Use a ticket with the same or a later expiry for this admission.' }
         if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'The replacement ticket expired before refresh.' }
+        $requiredAlignment = if ($installed.AlignmentHash) {
+            @{ Path = "$remote/vr-room-alignment-$($installed.AlignmentHash).json"; Hash = $installed.AlignmentHash }
+        }
         if ($Target) {
             $alignment = $null
             if ($Ticket.AlignmentHash) {
-                $alignmentPath = "$remote/vr-room-alignment-$($Ticket.AlignmentHash).json"
                 $alignmentCopy = [IO.Path]::GetTempFileName()
                 try {
-                    Invoke-QuestAdb ($deviceTarget + @('pull', $alignmentPath, $alignmentCopy)) *> $null
+                    Invoke-QuestAdb ($deviceTarget + @('pull', $requiredAlignment.Path, $alignmentCopy)) *> $null
                     if ($LASTEXITCODE -ne 0) { throw 'Could not read the original locked MR alignment on the selected Quest.' }
                     $alignment = Read-RoomAlignment $alignmentCopy $Ticket.RoomId
                     if ($alignment.Hash -cne $Ticket.AlignmentHash) { throw 'The installed MR alignment does not match the locked hash.' }
@@ -1493,14 +1494,19 @@ function Update-QuestPlayerTicket($ConnectionFile, $Ticket, $Target) {
             $liveSeat = New-QuestPlayerReadback $Target $ConnectionFile $Ticket $alignment
             Confirm-QuestPlayerReadback $liveSeat
         }
-        if (-not $sameTicket) {
-            $expectedHash = (Get-FileHash -LiteralPath $local -Algorithm SHA256).Hash.ToLowerInvariant()
+        $expectedHash = Get-QuestSha256 $original.Bytes
+        if ($sameTicket) {
+            Confirm-QuestFileHash $deviceTarget $destination $expectedHash 'Player ticket file'
+            if ($requiredAlignment) { Confirm-QuestFileHash $deviceTarget $requiredAlignment.Path $requiredAlignment.Hash 'Room alignment file' }
+        } else {
             $current.joinTicket = $Fresh.joinTicket
-            [IO.File]::WriteAllText($local, ($current | ConvertTo-Json -Depth 4 -Compress))
+            $replacement = [Text.Encoding]::UTF8.GetBytes(($current | ConvertTo-Json -Depth 4 -Compress))
+            [IO.File]::WriteAllBytes($local, $replacement)
             $staging = "$remote/vr-connection-$([Guid]::NewGuid().ToString('N')).tmp"
-            Publish-QuestFile $deviceTarget $local $staging $destination 'Player ticket file' $expectedHash -BeforeActivation {
+            Publish-QuestFile $deviceTarget $local $staging $destination 'Player ticket file' -ExpectedHash $expectedHash `
+                -ContentHash (Get-QuestSha256 $replacement) -RequiredAlignment $requiredAlignment -BeforeActivation {
                 if ($liveSeat) { Confirm-QuestPlayerReadback $liveSeat }
-                if ($alignmentPath) { Confirm-QuestFileHash $deviceTarget $alignmentPath $Ticket.AlignmentHash 'Original locked MR alignment' }
+                if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'The replacement ticket expired before refresh.' }
             }
         }
     } finally { Remove-Item -LiteralPath $local }

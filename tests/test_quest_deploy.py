@@ -112,6 +112,10 @@ switch ($args[2]) {
                 if ($args.Count -ne 4) { exit 96 }
                 $isConnection = $args[3].EndsWith("/vr-connection.json'")
                 if ($isConnection -and $env:QUEST_TEST_FAIL -eq 'config-move') { exit 1 }
+                if ($isConnection -and $env:QUEST_TEST_FAIL -eq 'refresh-alignment-at-replace') {
+                    $originalConfig = Get-Content -Raw -LiteralPath (Join-Path $remote 'vr-connection.json') | ConvertFrom-Json
+                    [IO.File]::AppendAllText((Join-Path $remote "vr-room-alignment-$($originalConfig.roomAlignmentSha256).json"), "`n")
+                }
                 Push-Location -LiteralPath $env:QUEST_TEST_ROOT
                 try { & $env:QUEST_TEST_SH -c $args[3].Replace('/sdcard/Android/data/com.vrcommand.quest/files/', 'remote/') }
                 finally { Pop-Location }
@@ -155,6 +159,7 @@ switch ($args[2]) {
                     "$hash  $($args[4])"; exit 0
                 }
                 $file = Join-Path $remote ($args[4].Split('/')[-1])
+                if (-not [IO.File]::Exists($file)) { exit 1 }
                 $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
                 if ($env:QUEST_TEST_FAIL -ceq 'alignment-late-stage-changed' -and $args[4] -cmatch '/vr-room-alignment-[a-f0-9]+\.tmp$') {
                     [IO.File]::AppendAllText($file, "`n")
@@ -806,11 +811,13 @@ class QuestDeployTests(unittest.TestCase):
                 self.assertEqual(dict(installed, joinTicket=fresh['joinTicket']), json.loads(current.read_bytes()))
                 self.assertEqual(self.plan.read_bytes(), alignment.read_bytes())
                 commands = self.commands.read_text(encoding='utf-8').splitlines()
-                self.assertEqual(5, len(commands))
+                self.assertEqual(7, len(commands))
                 self.assertEqual('devices -l', commands[0])
                 self.assertTrue(all(command.startswith('-t 41 ') for command in commands[1:]))
                 for phrase in ('getprop', 'pull', 'push', 'sha256sum'):
                     self.assertTrue(any(phrase in command for command in commands), commands)
+                self.assertTrue(commands[-2].endswith('shell sha256sum /sdcard/Android/data/com.vrcommand.quest/files/vr-connection.json'))
+                self.assertTrue(commands[-1].endswith('shell sha256sum /sdcard/Android/data/com.vrcommand.quest/files/' + alignment.name))
                 self.assertNotIn(fresh['joinTicket'], result.stdout + result.stderr + '\n'.join(commands))
                 self.assertNotIn(installed['joinTicket'], result.stdout + result.stderr + '\n'.join(commands))
                 raw = current.read_bytes()
@@ -818,7 +825,7 @@ class QuestDeployTests(unittest.TestCase):
                 repeat = self.run_refresh()
                 self.assertEqual(0, repeat.returncode, repeat.stderr)
                 self.assertEqual('ticket-file-current', json.loads(repeat.stdout)['status'])
-                self.assertEqual(3, len(self.commands.read_text(encoding='utf-8').splitlines()))
+                self.assertEqual(5, len(self.commands.read_text(encoding='utf-8').splitlines()))
                 self.assertEqual(raw, current.read_bytes())
                 self.assertFalse(list(self.remote.glob('*.tmp')))
 
@@ -839,6 +846,21 @@ class QuestDeployTests(unittest.TestCase):
                 self.assertNotIn(' push ', self.commands.read_text(encoding='utf-8'))
         self.assert_rejected(self.run_refresh('model'), 'authorized Meta Quest 3')
 
+    def test_ticket_refresh_of_plain_vr_only_reads_back_the_connection_file(self):
+        current, installed, fresh, _, alignment = self.ticket_refresh(self.expiry-300, mode='VR')
+        for key in ('roomAlignmentSha256', 'questPassthrough', 'requestMixedReality'):
+            del installed[key]
+        self.write(current, installed)
+        alignment.unlink()
+        result = self.run_refresh()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual('ticket-file-refreshed', json.loads(result.stdout)['status'])
+        self.assertEqual(dict(installed, joinTicket=fresh['joinTicket']), json.loads(current.read_bytes()))
+        commands = self.commands.read_text(encoding='utf-8').splitlines()
+        self.assertEqual(6, len(commands))
+        self.assertTrue(commands[-1].endswith('/vr-connection.json'))
+        self.assertFalse(any('vr-room-alignment-' in command for command in commands))
+
     def test_ticket_refresh_checks_remote_files_before_replacing_and_cleans_owned_staging(self):
         for fault in ('refresh-source-changed', 'refresh-stage-changed'):
             with self.subTest(fault=fault):
@@ -848,6 +870,37 @@ class QuestDeployTests(unittest.TestCase):
                 self.assert_rejected(result, 'Could not confirm ticket replacement')
                 self.assertEqual(original + (b'\n' if fault=='refresh-source-changed' else b''), current.read_bytes())
                 self.assertFalse(list(self.remote.glob('*.tmp')))
+
+    def test_ticket_refresh_requires_the_installed_alignment_at_replacement_and_for_current_ticket(self):
+        current, _, _, _, _ = self.ticket_refresh(self.expiry-300)
+        original = current.read_bytes()
+        self.assert_rejected(self.run_refresh('refresh-alignment-at-replace'), 'Room alignment file could not be verified')
+        self.assertEqual(original, current.read_bytes())
+        self.assertFalse(list(self.remote.glob('*.tmp')))
+
+        current, installed, fresh, _, alignment = self.ticket_refresh(self.expiry)
+        self.write(self.config, dict(fresh, joinTicket=installed['joinTicket']))
+        original = current.read_bytes()
+        alignment.unlink()
+        self.commands.unlink(missing_ok=True)
+        self.assert_rejected(self.run_refresh(), 'Room alignment file could not be verified')
+        self.assertEqual(original, current.read_bytes())
+        self.assertNotIn(' push ', self.commands.read_text(encoding='utf-8'))
+
+    def test_ticket_refresh_requires_readback_of_active_config_and_alignment(self):
+        for fault, message in (('config-active-changed', 'Player ticket file could not be verified'),
+                               ('alignment-changed-after-activation', 'Room alignment file could not be verified')):
+            with self.subTest(fault=fault):
+                current, installed, fresh, _, _ = self.ticket_refresh(self.expiry-300)
+                self.commands.unlink(missing_ok=True)
+                result = self.run_refresh(fault)
+                self.assert_rejected(result, message)
+                self.assertEqual('', result.stdout)
+                self.assertEqual(dict(installed, joinTicket=fresh['joinTicket']), json.loads(current.read_bytes()))
+                self.assertFalse(list(self.remote.glob('*.tmp')))
+                commands = self.commands.read_text(encoding='utf-8')
+                for operation in (' install ', ' force-stop ', ' am start '):
+                    self.assertNotIn(operation, commands)
 
     def test_ticket_refresh_live_verifies_original_bytes_through_publish(self):
         with self.live_quest_check(self.player) as (url, key, requests, state):
@@ -882,7 +935,7 @@ class QuestDeployTests(unittest.TestCase):
                     if mode == 'MR':
                         requests.clear()
                         changed = self.run_refresh('refresh-alignment-changed', **options)
-                        self.assert_rejected(changed, 'Original locked MR alignment could not be verified')
+                        self.assert_rejected(changed, 'Room alignment file could not be verified')
                         self.assertEqual([expected] * 2, requests)
                         self.assertEqual(original, current.read_bytes())
                         self.assertFalse(list(self.remote.glob('*.tmp')))
