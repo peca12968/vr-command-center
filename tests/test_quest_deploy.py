@@ -1882,6 +1882,7 @@ else:
                                    for row in devices[12:]]
                         early = deployment(mapped, devices[:12] + pending, 1, False)
                         later = deployment(mapped[12:], devices[12:], 2, True)
+                        early['venueReleaseReportSha256'] = later['venueReleaseReportSha256'] = 'c' * 64
                         early_path.write_text(json.dumps(early), encoding='utf-8')
                         later_path.write_text(json.dumps(later), encoding='utf-8')
                         report_list.write_text(json.dumps({'version': 1, 'reports': first_names}), encoding='utf-8')
@@ -1931,6 +1932,7 @@ else:
                             (deployment(mapped[13:], devices[13:], 2, True), 'cover every selected seat'),
                             (deployment(mapped[11:], devices[11:], 2, True), 'repeat a successfully launched seat'),
                             (dict(later, expectedApkSha256='b'*64), 'same verified APK'),
+                            (dict(later, venueReleaseReportSha256='d'*64), 'same original venue release report'),
                         ):
                             later_path.write_text(json.dumps(changed), encoding='utf-8')
                             self.assert_rejected(sample(), expected_error)
@@ -2216,6 +2218,7 @@ else:
         report = json.loads(result.stdout)
         self.assertEqual(('preflight', False, 64, original['quest']['sha256']),
                          (report['phase'], report['complete'], report['expectedVersionCode'], report['expectedApkSha256']))
+        self.assertEqual(hashlib.sha256(release.read_bytes()).hexdigest(), report['venueReleaseReportSha256'])
         self.assertEqual(25, len(report['devices']))
         self.assertEqual({2: 'apk-hash-mismatch', 4: 'apk-unverified', 8: 'apk-unverified', 9: 'apk-unverified',
                           10: 'apk-unverified', 25: 'version-mismatch'},
@@ -2297,6 +2300,9 @@ else:
                 self.assertEqual(1, first.returncode, first.stderr)
                 initial = json.loads(first.stdout)
                 self.assertIs(initial['requireOpenXR'], True)
+                release_bytes = release.read_bytes()
+                release_hash = hashlib.sha256(release_bytes).hexdigest()
+                self.assertEqual(release_hash, initial['venueReleaseReportSha256'])
                 self.assertEqual(['launch-requested', 'file-verification-failed', 'not-attempted'],
                                  [row['status'] for row in initial['devices']])
                 nonce = (self.root / 'fixture-01/openxr-probe').read_text()
@@ -2305,12 +2311,18 @@ else:
                 previous.write_text(first.stdout, encoding='utf-8')
                 adb_log = self.root / 'adb.log'
                 adb_log.unlink()
+                release.write_bytes(release_bytes + b'\n')
+                self.assert_rejected(invoke('-RequireOpenXR', '-RetryIncomplete', str(previous)),
+                                     'exact original Quest venue release report')
+                self.assertFalse(adb_log.exists())
+                release.write_bytes(release_bytes)
                 self.assert_rejected(invoke('-RetryIncomplete', str(previous)), 'original OpenXR requirement')
                 self.assertFalse(adb_log.exists())
 
                 failed = invoke('-RequireOpenXR', '-RetryIncomplete', str(previous), fault='xr-not-ready')
                 self.assertEqual(1, failed.returncode, failed.stderr)
                 result = json.loads(failed.stdout)
+                self.assertEqual(release_hash, result['venueReleaseReportSha256'])
                 self.assertEqual(initial['devices'][0], result['devices'][0])
                 affected = result['devices'][1]
                 self.assertEqual(('deployment-failed', 'observe-openxr', True),

@@ -1341,6 +1341,23 @@ class FieldResultsTests(unittest.TestCase):
                               'highestP95RoundTripMs': {'roomId': 1, 'seat': 1, 'p95RoundTripMs': 46}},
                              valid['stages'][0]['questLinkObserved'])
 
+            deployment_path = names[0].with_name('deployment.json')
+            deployment = json.loads(deployment_path.read_bytes())
+            original_release = names[0].with_name('release.json').read_bytes()
+            release_hash = hashlib.sha256(original_release).hexdigest()
+            deployment_path.write_text(json.dumps(dict(deployment, venueReleaseReportSha256=release_hash)), encoding='utf-8')
+            bound = json.loads(subprocess.check_output(command))
+            self.assertEqual({'venueReleaseReportSha256': release_hash, 'releaseReportSeatsVerified': 5},
+                             bound['stages'][0]['questRelease'])
+            self.assertNotIn('questRelease', bound['stages'][1])
+            deployment_path.write_text(json.dumps(dict(deployment, venueReleaseReportSha256='a' * 64)), encoding='utf-8')
+            inspection = field.verify_venue_stages(path, inspect=True)
+            [issue] = inspection['issues']
+            self.assertEqual([1], issue['entries'])
+            self.assertEqual({'kind': 'questDeploymentReport', 'name': deployment_path.name, 'status': 'venue-release-report-mismatch'},
+                             issue['evidenceMismatch'])
+            deployment_path.write_text(json.dumps(deployment), encoding='utf-8')
+
             set_local(0, {'minimumReplies': 29, 'maximumP95RoundTripMs': 900})
             set_local(1, {'minimumReplies': 1, 'maximumP95RoundTripMs': 45})
             mixed = json.loads(names[3].read_bytes())
@@ -3594,6 +3611,9 @@ class FieldResultsTests(unittest.TestCase):
                 manifest['venueNetworkPlan'] = whole_path.name
                 deployment_path = root / manifest['questDeployments']['reports'][0]
                 deployment = json.loads(deployment_path.read_bytes())
+                release_bytes = release.read_bytes()
+                release_hash = hashlib.sha256(release_bytes).hexdigest()
+                deployment['venueReleaseReportSha256'] = release_hash
                 salt = '1' * 32
                 serials = field.read_quest_device_map(map_path)
                 deployment['retry'] = {'version': 1, 'venueSha256': '2' * 64, 'salt': salt,
@@ -3614,6 +3634,8 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertEqual(5, expected['questCaptureSeatsVerified'])
                 self.assertEqual(20, expected['venueRelease']['windows']['seatsVerified'])
                 self.assertEqual(1, expected['questDeployment']['deviceMapsMatched'])
+                self.assertEqual((release_hash, 5), (expected['questDeployment']['venueReleaseReportSha256'],
+                                                    expected['questDeployment']['releaseReportSeatsVerified']))
                 self.assertEqual(25, expected['venueNetworkPlan']['verifiedSeats'])
 
                 output = root / 'handoff' / 'venue.json'
@@ -3626,6 +3648,12 @@ class FieldResultsTests(unittest.TestCase):
                            '--venue-network-plan', str(whole_path),
                            '--quest-capture-report', str(capture_path), '--quest-device-map', str(map_path), '--quest-network-plan', str(network_path),
                            '--quest-deployment-report', str(deployment_path)]
+                release.write_bytes(release_bytes + b'\n')
+                rejected = subprocess.run([*command, '--output', str(output)], capture_output=True)
+                self.assertEqual(1, rejected.returncode)
+                self.assertIn(b'Quest deployment report used different original venue release report bytes', rejected.stderr)
+                self.assertFalse(output.exists())
+                release.write_bytes(release_bytes)
                 returning = next(inbox.glob('*.ZIP'))
                 delayed = returning.rename(root / 'not-yet-returned.zip')
                 prepared = subprocess.run([*command, '--output', str(output)], capture_output=True)
@@ -3923,6 +3951,18 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertEqual(25, result['serverAcknowledgements'])
                 self.assertFalse(result['physicalHostsVerified'])
                 self.assertNotIn(rows[0]['admissionId'], json.dumps(result))
+
+                release = root / 'release.json'
+                raw_release = release.read_bytes()
+                release_hash = hashlib.sha256(raw_release).hexdigest()
+                retry_path = root / 'retry.json'
+                retry_path.write_text(json.dumps(dict(report, devices=rows[3:], venueReleaseReportSha256=release_hash)), encoding='utf-8')
+                bound = field.verify_venue(path)['questDeployment']
+                self.assertEqual((release_hash, len(rows) - 3),
+                                 (bound['venueReleaseReportSha256'], bound['releaseReportSeatsVerified']))
+                release.write_bytes(raw_release + b'\n')
+                with self.assertRaisesRegex(field.EvidenceError, 'Quest deployment report used different original venue release report bytes'):
+                    field.verify_venue(path)
 
     def test_quest_openxr_proof_matches_each_of_25_original_seats_in_both_modes(self):
         for mode in ('Independent', 'Linked'):

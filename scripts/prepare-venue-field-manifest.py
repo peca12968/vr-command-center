@@ -36,9 +36,9 @@ def session_files(result, folder, session_id):
 
 
 def check_quest_inputs(manifest, expected, evidence_path, release, sources, server_ips, windows_seats, venue_network,
-                       reconnect_sources):
+                       reconnect_sources, *, release_hash=None):
     captures, endpoints, _, deployments, _, _, openxr = field.read_venue_quest_evidence(
-        manifest, manifest['mode'], expected, evidence_path, release, venue_network=venue_network)
+        manifest, manifest['mode'], expected, evidence_path, release, release_hash=release_hash, venue_network=venue_network)
     for source in sources.values():
         if source['rooms'] in endpoints:
             field.require_quest_capture_endpoint(source['binding'], endpoints[source['rooms']])
@@ -288,7 +288,7 @@ def prepare(args, output):
         manifest['questReadinessReports'] = [ref(path.resolve(strict=True)) for path in args.quest_readiness_report]
     if quest_sources:
         check_quest_inputs(manifest, expected, evidence_path, release, quest_sources, addresses, windows_seats, venue_network,
-                           reconnect_sources)
+                           reconnect_sources, release_hash=release_hash)
     return manifest
 
 

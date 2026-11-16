@@ -819,7 +819,9 @@ Quest 批次已設定 `questLinkCriteria` 時，`issues[].questLinkMetrics` 會�
 
 ### 核對封存席位的 Quest 發行 APK
 
-使用 `-ReleaseReport` 部署時，保存正式部署指令輸出的 JSON，以及用來部署的原 `venue-release.json`。使用 `-RetryIncomplete` 續跑時，可在五房 `venue.json` 只填最新的累計報告，或把它與一路承接的原報告一併填入。檔案可任意排序，請保留原始位元組。使用手動分批清單時，填各份報告，各份成功席位必須互不重複。 [Quest 部署操作](QUEST3.md#從原部署報告重試未完成席位)
+使用 `-ReleaseReport` 部署時，保存正式部署指令輸出的 JSON，以及用來部署的原 `venue-release.json`。驗收會將部署報告的 `venueReleaseReportSha256` 與原檔比對。`releaseReportSeatsVerified` 列出通過整份發行報告核對的席位數，六批摘要會在各批的 `questRelease` 顯示。更換原發行檔時，即使 APK 摘要相同，收件檢查仍會以 `questDeploymentReport` 指出不符的部署報告。舊報告也可提交，已有的 APK、入場及戰績證據照常核對。
+
+使用 `-RetryIncomplete` 續跑時，可在五房 `venue.json` 只填最新的累計報告，或把它與一路承接的原報告一併填入。檔案可任意排序，請保留原始位元組。使用手動分批清單時，填各份報告，各份成功席位必須互不重複。 [Quest 部署操作](QUEST3.md#從原部署報告重試未完成席位)
 
 使用 `-RequireOpenXR` 的部署報告也會核對逐席原 logcat。原 PID 及本次啟動識別值須相符，且 loader、顯示及輸入子系統的就緒記錄須出現在最終戰績之前。成功摘要會列出 `questDeployment.openXRSeatsVerified`。 [部署時核對每席 OpenXR](QUEST3.md#部署時核對每席-openxr)
 

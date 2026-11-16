@@ -487,7 +487,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 
 批次預檢會先核對所有指定裝置。`apk-hash-mismatch` 表示版本代碼相符但 APK 位元組不同。`apk-unverified` 表示無法讀出 APK 的雜湊，或 Android 回傳多個套件檔。正式部署逐席開始寫入前會再核對一次。若第二次核對失敗，該席不寫入設定，後續席位標記為 `not-attempted`。`apkVerified: true` 表示該席已完成當階段的 APK 核對，入場及追蹤仍由主控台驗證。
 
-保存 `-DeployMappedSeats` 輸出的 UTF-8 JSON，包含中途中斷但已有成功席位的報告。成功席位附原場次、玩家、入場及連線埠，可在封存驗收與 logcat 和原戰績對照。 [核對封存席位](EXTERNAL_CLIENTS.md#核對封存席位的-quest-發行-apk)
+使用 `-ReleaseReport` 時，預檢與部署報告會記錄整份原發行 JSON 的 `venueReleaseReportSha256`。請將原發行 JSON 和 `-DeployMappedSeats` 的輸出一併保留，包括中途中斷但已有成功席位的報告。成功席位附原場次、玩家、入場及連線埠，可在封存驗收與 logcat 和原戰績對照。 [核對封存席位](EXTERNAL_CLIENTS.md#核對封存席位的-quest-發行-apk)
 
 #### 啟動前核對裝置檔案
 
@@ -535,7 +535,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
     > .\quest-deploy-retry.json
 ```
 
-工具跳過報告裡已送出啟動的裝置，只查詢及部署其餘席位。它會核對原 ZIP 雜湊、房席分配、Android 裝置身分及原 APK 條件。待重試的 ADB 連線若指向另一台頭盔，即使房席清單沒有改動，仍會在寫入前停下。每個待重試席位寫入前仍須通過原五房的線上檢查，所有票券須仍有效。報告只保存加鹽雜湊及必要場次資訊。
+工具跳過報告裡已送出啟動的裝置，只查詢及部署其餘席位。它會核對原 ZIP 雜湊、房席分配、Android 裝置身分及原 APK 條件。原部署報告若記有 `venueReleaseReportSha256`，重試須提交位元組完全相同的發行檔，檢查會在聯絡裝置前完成。舊部署的累計重試沿用原 APK 證據範圍。待重試的 ADB 連線若指向另一台頭盔，即使房席清單沒有改動，仍會在寫入前停下。每個待重試席位寫入前仍須通過原五房的線上檢查，所有票券須仍有效。報告只保存加鹽雜湊、發行摘要及必要場次資訊。
 
 進入寫入階段後，新報告會累計先前及本次已送出啟動的結果，並保存前一份報告原檔的 SHA-256。若再中斷，下一輪使用最新的部署報告。驗收可提交最新的累計報告，或提交可連續核對的原報告歷史。若重試只走到 `phase: "preflight"`，繼續保留上一份部署報告。若沒有完整回條、前次啟動結果不明、需替換頭盔或原票券已過期，先從主控與實機核對目前狀態，再用只列待部署席位的新清單和有效票券，以 `-AllowPartialMap -DeployMappedSeats` 重新部署。 [收尾驗收](EXTERNAL_CLIENTS.md#核對封存席位的-quest-發行-apk)
 

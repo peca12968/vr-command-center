@@ -882,7 +882,8 @@ function Get-QuestDeviceInventory {
 }
 
 function Read-QuestRelease([string]$Path) {
-    $report = (Read-DeploymentJson $Path 8192 'venue release report').Document
+    $original = Read-DeploymentJson $Path 8192 'venue release report'
+    $report = $original.Document
     $quest = $report.quest
     if ($report.verified -isnot [bool] -or -not $report.verified -or
         $report.scope -isnot [string] -or $report.scope -cne 'offline-package-consistency' -or
@@ -895,7 +896,7 @@ function Read-QuestRelease([string]$Path) {
     }
     if ($RecordLinkMetrics -and $quest.versionCode -lt 75) { throw 'Quest link metrics require an APK with version code 75 or later.' }
     if ($RequireOpenXR -and $quest.versionCode -lt 74) { throw 'The OpenXR check requires a Quest APK with version code 74 or later.' }
-    return $quest
+    return @{ versionCode = $quest.versionCode; sha256 = $quest.sha256; reportSha256 = Get-QuestSha256 $original.Bytes }
 }
 
 function Get-QuestApkStatus([string]$TargetSerial, [string]$ExpectedHash) {
@@ -1013,6 +1014,16 @@ function Test-QuestOpenXRProof($Proof) {
         $Proof.nonce -cmatch '\A[0-9a-f]{32}\z' -and $Proof.nonce -cne ('0' * 32))
 }
 
+function Get-QuestDeploymentReleaseHash($Report) {
+    if ($Report.PSObject.Properties['venueReleaseReportSha256']) {
+        $digest = $Report.venueReleaseReportSha256
+        if ($digest -isnot [string] -or $digest -cnotmatch '\A[0-9a-f]{64}\z') {
+            throw 'Invalid original Quest venue release report digest.'
+        }
+        return $digest
+    }
+}
+
 function Read-QuestTrackedDeployment($Venue, [object[]]$Map, [string]$Path, [switch]$AllowSuccessfulPrefix) {
     $original = Read-DeploymentJson $Path 32768 'original deployment report'
     $report = $original.Document
@@ -1069,7 +1080,8 @@ function Read-QuestTrackedDeployment($Venue, [object[]]$Map, [string]$Path, [swi
         throw 'The deployment report has no valid successful launch prefix.'
     }
     return @{ Sha256 = Get-QuestSha256 $original.Bytes; Seats = $launched
-        ApkSha256 = $report.expectedApkSha256; VersionCode = $report.expectedVersionCode }
+        ApkSha256 = $report.expectedApkSha256; VersionCode = $report.expectedVersionCode
+        ReleaseReportSha256 = Get-QuestDeploymentReleaseHash $report }
 }
 
 function Read-QuestTrackedDeployments($Venue, [object[]]$Map, [string]$Path) {
@@ -1083,6 +1095,7 @@ function Read-QuestTrackedDeployments($Venue, [object[]]$Map, [string]$Path) {
     $bindings = @{}
     $digests = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $release = $null
+    $releaseReportHash = $null
     foreach ($name in $list.reports) {
         if ($name -isnot [string] -or [string]::IsNullOrWhiteSpace($name)) { throw 'Use valid paths to original Quest deployment reports.' }
         $reportPath = if ([IO.Path]::IsPathRooted($name)) { $name } else { Join-Path $directory $name }
@@ -1090,6 +1103,12 @@ function Read-QuestTrackedDeployments($Venue, [object[]]$Map, [string]$Path) {
         if (-not $digests.Add($deployment.Sha256)) { throw 'The deployment report list repeats an original report.' }
         if ($release -and ($release.ApkSha256 -cne $deployment.ApkSha256 -or $release.VersionCode -ne $deployment.VersionCode)) {
             throw 'Combined Quest tracking requires the same verified APK for every deployment.'
+        }
+        if ($deployment.ReleaseReportSha256) {
+            if ($releaseReportHash -and $releaseReportHash -cne $deployment.ReleaseReportSha256) {
+                throw 'Combined Quest tracking requires the same original venue release report.'
+            }
+            $releaseReportHash = $deployment.ReleaseReportSha256
         }
         $release = $deployment
         foreach ($seat in $deployment.Seats) {
@@ -1101,13 +1120,18 @@ function Read-QuestTrackedDeployments($Venue, [object[]]$Map, [string]$Path) {
     return $bindings
 }
 
-function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, [string]$ExpectedHash) {
+function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, $Release) {
     $original = Read-DeploymentJson $RetryIncomplete 32768 'original deployment report'
     $previous = $original.Document
     $proof = $previous.retry
+    $expectedHash = [string]$Release.sha256
     if ($previous.complete -isnot [bool] -or $previous.complete -or $previous.expectedVersionCode -ne $VersionCode -or
         [string]$previous.expectedApkSha256 -cne $ExpectedHash -or -not (Test-QuestDeploymentMap $Venue $Map $previous)) {
         throw 'Use an incomplete deployment report for this original ZIP, device map and APK requirement.'
+    }
+    $releaseReportHash = Get-QuestDeploymentReleaseHash $previous
+    if ($releaseReportHash -and $releaseReportHash -cne $Release.reportSha256) {
+        throw 'Retry with the exact original Quest venue release report.'
     }
     if (($previous.PSObject.Properties['requireOpenXR'] -and $previous.requireOpenXR -isnot [bool]) -or
         [bool]$previous.requireOpenXR -ne [bool]$RequireOpenXR) {
@@ -1154,10 +1178,12 @@ function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, [s
         }
     }
     if ($completed.Count -eq $Map.Count) { throw 'This deployment report has no seats left to retry.' }
-    return @{ Proof = $proof; Completed = $completed.ToArray(); PreviousSha256 = Get-QuestSha256 $original.Bytes }
+    return @{ Proof = $proof; Completed = $completed.ToArray(); PreviousSha256 = Get-QuestSha256 $original.Bytes
+        ReleaseReportSha256 = $releaseReportHash }
 }
 
-function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, [string]$ExpectedHash, $Retry) {
+function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Release, $Retry) {
+    $expectedHash = [string]$Release.sha256
     Confirm-QuestAdbStartup 'Android platform-tools are not installed.'
     $originalMap = $Map
     if ($Retry) { $Map = @($Map | Select-Object -Skip $Retry.Completed.Count) }
@@ -1185,6 +1211,9 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, [str
     $report = [ordered]@{ phase = 'preflight'; topology = $Venue.Report.topology; expectedVersionCode = $VersionCode;
         earliestExpiryUtc = $Venue.Report.earliestExpiryUtc; complete = $false; devices = $devices }
     if ($ExpectedHash) { $report.expectedApkSha256 = $ExpectedHash }
+    if ($Release -and (-not $Retry -or $Retry.ReleaseReportSha256)) {
+        $report.venueReleaseReportSha256 = $Release.reportSha256
+    }
     if ($AllowPartialMap) {
         $report.mappedSeats = $Map.Count
         $report.unmappedSeats = $Venue.Report.seats - $Map.Count
@@ -1496,7 +1525,8 @@ function Invoke-QuestFirstLaunch([string]$Apk, $Release) {
     $observation = Read-QuestLaunchedProcess $Serial $nonce
     $report = [ordered]@{
         phase = 'quest-first-launch'; status = 'process-observed'; model = 'Quest 3'; versionCode = $Release.versionCode
-        apkVerified = $true; apkSha256 = $Release.sha256; installedThisRun = -not $ResumeSmokeTest; processObservationSeconds = 3
+        apkVerified = $true; apkSha256 = $Release.sha256; venueReleaseReportSha256 = $Release.reportSha256
+        installedThisRun = -not $ResumeSmokeTest; processObservationSeconds = 3
         unityLogLines = $observation.unityLogLines
     }
     if ($RequireOpenXR) {
@@ -1687,11 +1717,11 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
         $release = if ($ReleaseReport) { Read-QuestRelease $ReleaseReport }
         $versionCode = if ($release) { $release.versionCode } else { $ExpectedVersionCode }
         if ($DeployMappedSeats) {
-            $retry = if ($RetryIncomplete) { Read-QuestDeploymentRetry $venue $map $versionCode $release.sha256 }
+            $retry = if ($RetryIncomplete) { Read-QuestDeploymentRetry $venue $map $versionCode $release }
             $deploymentLock = Enter-QuestDeployment
-            try { $result = Invoke-MappedQuestSeats $venue $map $versionCode $release.sha256 $retry }
+            try { $result = Invoke-MappedQuestSeats $venue $map $versionCode $release $retry }
             finally { $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose() }
-        } else { $result = Invoke-MappedQuestSeats $venue $map $versionCode $release.sha256 }
+        } else { $result = Invoke-MappedQuestSeats $venue $map $versionCode $release }
         $result | ConvertTo-Json -Depth 4 -Compress
         if (-not $result.complete) { exit 1 }
         return
@@ -1748,7 +1778,10 @@ if ($CheckOnly) {
         alignmentSha256 = $alignmentHash
     }
     if ($ticket.AlignmentHash) { $report.alignmentPinsVerified = $true }
-    if ($release) { $report.localApkVerified = $true; $report.expectedVersionCode = $release.versionCode }
+    if ($release) {
+        $report.localApkVerified = $true; $report.expectedVersionCode = $release.versionCode
+        $report.venueReleaseReportSha256 = $release.reportSha256
+    }
     if ($ManagementApi) { $report.managementVerified = $true }
     if ($PSCmdlet.ParameterSetName -eq 'Bundle' -and $requiresLive -and $ManagementApi) {
         $report.headset = $venue.SeatHeadsets["$RoomId/$Seat"]
@@ -1794,5 +1827,6 @@ try {
 }
 if ($RequireOpenXR) {
     [ordered]@{ status = 'openxr-ready'; roomId = $ticket.RoomId; seat = $ticket.Seat + 1;
-        apkVerified = $true; filesVerified = $true; openXR = $deployment.OpenXR } | ConvertTo-Json -Compress
+        apkVerified = $true; filesVerified = $true; openXR = $deployment.OpenXR
+        venueReleaseReportSha256 = $release.reportSha256 } | ConvertTo-Json -Compress
 } else { Write-Host 'Quest client installed and launched. Ticket expiry and server admission still apply.' }

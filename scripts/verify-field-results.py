@@ -94,7 +94,7 @@ class VerifiedStartDigestMismatch(EvidenceError):
         self.evidence = {'kind': kind, 'name': path.name, 'status': 'sha256-mismatch'}
 
 
-class ServerReleaseEvidenceError(EvidenceError):
+class VenueReleaseEvidenceError(EvidenceError):
     def __init__(self, message, kind, path, status):
         super().__init__(message)
         self.evidence = {'kind': kind, 'status': status}
@@ -2390,6 +2390,7 @@ def quest_deployment_leaves(attempts):
             parent = attempts[parent_digest]
             require(not parent['complete'] and parent['proof'] == attempt['proof'] and parent['seats'] == attempt['seats']
                     and parent['require_openxr'] == attempt['require_openxr']
+                    and parent['release_hash'] == attempt['release_hash']
                     and attempt['launched'][:len(parent['launched'])] == parent['launched'],
                     'Quest deployment retry changes its original proof, seats or completed prefix')
 
@@ -2523,13 +2524,14 @@ def read_quest_readiness_reports(paths, mode, attempts, deployed, evidence_path)
     return sessions, summary
 
 
-def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_reports=(), capture_device_map=None,
+def read_quest_deployments(spec, mode, evidence_path, release=None, *, release_hash=None, capture_reports=(), capture_device_map=None,
                            readiness_reports=None):
     expected = {'releaseReport', 'reports'} if release is None else {'reports'}
     require(type(spec) is dict and set(spec) == expected,
             'Provide the original Quest deployment reports and exactly one release report for the selected mode')
     if release is None:
-        release = read_quest_json(evidence_path(spec['releaseReport'], kind='questReleaseReport'))
+        release, raw_release = read_quest_document(evidence_path(spec['releaseReport'], kind='questReleaseReport'))
+        release_hash = hashlib.sha256(raw_release).hexdigest()
     quest = release.get('quest')
     require(release.get('verified') is True and release.get('scope') == 'offline-package-consistency'
             and type(quest) is dict and quest.get('applicationId') == 'com.vrcommand.quest'
@@ -2542,7 +2544,8 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
     require(type(reports) is list and 1 <= len(reports) <= 25, 'Provide 1 to 25 Quest deployment reports')
     attempts = {}
     for name in reports:
-        report, raw = read_quest_document(evidence_path(name, kind='questDeploymentReport'))
+        report_path = evidence_path(name, kind='questDeploymentReport')
+        report, raw = read_quest_document(report_path)
         report_hash = hashlib.sha256(raw).hexdigest()
         require(report_hash not in attempts, 'Quest deployment repeats a successful seat or the same original report')
         require(report.get('phase') == 'deployment' and report.get('managementVerified') is True
@@ -2550,6 +2553,13 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
                 'Quest deployment report lacks verified deployment or uses another topology')
         require(report.get('expectedApkSha256') == apk_digest and integer(report.get('expectedVersionCode'), 1) == version,
                 'Quest deployment report differs from the original release APK')
+        deployment_release = report.get('venueReleaseReportSha256')
+        if 'venueReleaseReportSha256' in report:
+            require(type(deployment_release) is str and re.fullmatch(r'[0-9a-f]{64}', deployment_release),
+                    'Invalid original Quest venue release report digest')
+            if deployment_release != release_hash:
+                raise VenueReleaseEvidenceError('Quest deployment report used different original venue release report bytes',
+                                                'questDeploymentReport', report_path, 'venue-release-report-mismatch')
         require_openxr = report.get('requireOpenXR', False)
         require(type(require_openxr) is bool and (not require_openxr or version >= 74),
                 'Invalid Quest OpenXR deployment option for the original release')
@@ -2571,7 +2581,8 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
             if proof_row is not None:
                 openxr[room, seat] = proof_row
         attempts[report_hash] = dict(proof=proof, previous=previous, complete=report['complete'], seats=tuple(seats),
-                                     launched=launched, confirmed=confirmed, openxr=openxr, require_openxr=require_openxr)
+                                     launched=launched, confirmed=confirmed, openxr=openxr, require_openxr=require_openxr,
+                                     release_hash=deployment_release)
 
     matched_maps = set()
     for deployment_digest, seats, partial in capture_reports:
@@ -2603,6 +2614,9 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
         openxr.update(attempt['openxr'])
     require(len({nonce for _, nonce in openxr.values()}) == len(openxr), 'Quest OpenXR launch nonce was reused between seats')
     summary = {'versionCode': version, 'apkSha256': apk_digest, 'reportsVerified': len(reports), 'seatsVerified': len(deployed)}
+    bound_seats = sum(len(attempt['confirmed']) for attempt in leaves if attempt['release_hash'] is not None)
+    if bound_seats:
+        summary.update(venueReleaseReportSha256=release_hash, releaseReportSeatsVerified=bound_seats)
     if matched_maps:
         summary['deviceMapsMatched'] = len(matched_maps)
     if linked:
@@ -2612,7 +2626,8 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
     return deployed, summary, readiness, openxr
 
 
-def read_venue_quest_evidence(manifest, mode, expected, evidence_path, release, *, venue_network=None, inspect_logs=False):
+def read_venue_quest_evidence(manifest, mode, expected, evidence_path, release, *, release_hash=None,
+                              venue_network=None, inspect_logs=False):
     captures, endpoints, summary, references = {}, {}, {}, []
     device_map = deployments = deployment_summary = None
     readiness = {}, None
@@ -2631,7 +2646,7 @@ def read_venue_quest_evidence(manifest, mode, expected, evidence_path, release, 
     if 'questDeployments' in manifest:
         require(manifest['topology'] == 'direct-lan', 'Quest deployment evidence requires direct LAN evidence')
         deployments, deployment_summary, readiness, openxr = read_quest_deployments(
-            manifest['questDeployments'], mode, evidence_path, release, capture_reports=references,
+            manifest['questDeployments'], mode, evidence_path, release, release_hash=release_hash, capture_reports=references,
             capture_device_map=device_map, readiness_reports=manifest.get('questReadinessReports'))
         if references:
             summary['questCaptureDeploymentReportsMatched'] = len(references)
@@ -2682,21 +2697,21 @@ def verify_venue_server_release(release, terminal, *, required=False, release_ha
     actual = terminal.get('serverManifestSha256') if terminal is not None else None
     if required:
         if expected is None:
-            raise ServerReleaseEvidenceError('Server release verification requires the original venue release report and server manifest digest',
+            raise VenueReleaseEvidenceError('Server release verification requires the original venue release report and server manifest digest',
                                              'venueReleaseReport', release_path,
                                              'missing-report' if release is None else 'missing-server-manifest')
         if actual is None:
-            raise ServerReleaseEvidenceError('Server release verification requires the original release-bound terminal venue launch report',
+            raise VenueReleaseEvidenceError('Server release verification requires the original release-bound terminal venue launch report',
                                              'venueLauncherReport', terminal_path,
                                              'missing-report' if terminal is None else 'missing-server-manifest')
     if release is None or actual is None:
         return None
     if expected != actual:
-        raise ServerReleaseEvidenceError('Windows terminal launch report does not match the original venue server release',
+        raise VenueReleaseEvidenceError('Windows terminal launch report does not match the original venue server release',
                                          'venueLauncherReport', terminal_path, 'server-manifest-mismatch')
     stamps = server_release_stamps(terminal)
     if 'venueReleaseReportSha256' in stamps and stamps['venueReleaseReportSha256'] != release_hash:
-        raise ServerReleaseEvidenceError('Windows terminal launch report used different original venue release report bytes',
+        raise VenueReleaseEvidenceError('Windows terminal launch report used different original venue release report bytes',
                                          'venueReleaseReport', release_path, 'venue-release-report-mismatch')
     return {**stamps, 'sessionsVerified': terminal['sessions']}
 
@@ -2849,16 +2864,16 @@ def read_verified_venue_start(path, readiness_path, terminal, results, mode, *, 
     server_digest = terminal_stamps.get('serverManifestSha256')
     ready_digest = ready_stamps.get('serverManifestSha256')
     if ready_digest != server_digest:
-        raise ServerReleaseEvidenceError('Windows ready and terminal reports do not share the original server release',
+        raise VenueReleaseEvidenceError('Windows ready and terminal reports do not share the original server release',
                                          'windowsReadyReport', ready_path,
                                          'missing-server-manifest' if ready_digest is None else 'server-manifest-mismatch')
     if ready_stamps != terminal_stamps:
-        raise ServerReleaseEvidenceError('Windows ready and terminal reports used different original venue release report bytes',
+        raise VenueReleaseEvidenceError('Windows ready and terminal reports used different original venue release report bytes',
                                          'windowsReadyReport', ready_path, 'venue-release-report-mismatch')
     binding = preflight['launchBinding']
     if terminal_stamps or 'preview' in binding:
         if type(binding.get('preview')) is not str or not binding['preview']:
-            raise ServerReleaseEvidenceError('Server release verification requires the original launch preview',
+            raise VenueReleaseEvidenceError('Server release verification requires the original launch preview',
                                              'windowsLaunchPreview', None, 'missing-report')
         preview_path = resolve_evidence_reference(readiness_path.parent, binding['preview'], 'windowsLaunchPreview')
         preview, preview_raw = read_quest_document(preview_path)
@@ -2868,10 +2883,10 @@ def read_verified_venue_start(path, readiness_path, terminal, results, mode, *, 
         preview_stamps = server_release_stamps(preview)
         preview_digest = preview_stamps.get('serverManifestSha256')
         if preview_digest != server_digest:
-            raise ServerReleaseEvidenceError(message, 'windowsLaunchPreview', preview_path,
+            raise VenueReleaseEvidenceError(message, 'windowsLaunchPreview', preview_path,
                                              'missing-server-manifest' if preview_digest is None else 'server-manifest-mismatch')
         if preview_stamps != terminal_stamps:
-            raise ServerReleaseEvidenceError('Windows launch preview and terminal reports used different original venue release report bytes',
+            raise VenueReleaseEvidenceError('Windows launch preview and terminal reports used different original venue release report bytes',
                                              'windowsLaunchPreview', preview_path, 'venue-release-report-mismatch')
     checked = datetime.fromisoformat(receipt['checkedAtUtc'])
     require(checked.utcoffset() == timedelta(0)
@@ -3315,7 +3330,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     capture_supplied = 'questCaptures' in manifest
     captures, capture_endpoints, capture_summary, quest_deployments, deployment_summary, readiness, quest_openxr = (
         ({}, {}, {}, None, None, ({}, None), {}) if inspect_windows else
-        read_venue_quest_evidence(manifest, mode, expected, evidence_path, release,
+        read_venue_quest_evidence(manifest, mode, expected, evidence_path, release, release_hash=release_hash,
                                   venue_network=venue_network, inspect_logs=inspect_quest_logs))
     quest_readiness, readiness_summary = readiness
     observed_quest_addresses = set() if capture_summary.get('questCaptureAddressSource') == 'server-observed' else None
@@ -3695,6 +3710,9 @@ def staged_batch_report(report, batch):
             'highestP95RoundTripMs': {key: slowest[key] for key in ('roomId', 'seat', 'p95RoundTripMs')},
         }
     server_release = report.get('venueRelease', {}).get('server')
+    quest_deployment = report.get('questDeployment', {})
+    quest_release = {key: quest_deployment[key] for key in ('venueReleaseReportSha256', 'releaseReportSeatsVerified')
+                     if key in quest_deployment}
     return {'mode': report['mode'], 'players': report['players'], 'closureRequestId': batch['closureRequestId'],
             'manifestSha256': batch['manifestSha256'],
             'startedAtUtc': batch['started'].astimezone(timezone.utc).isoformat(),
@@ -3702,6 +3720,7 @@ def staged_batch_report(report, batch):
             'serverAcknowledgements': report['serverAcknowledgements'],
             'worldJournalsVerified': report['worldJournalsVerified'], 'concurrentRoster': report['concurrentRoster'],
             **({'serverRelease': server_release} if server_release is not None else {}),
+            **({'questRelease': quest_release} if quest_release else {}),
             **{key: report[key] for key in ('combatJournalsVerified', 'distinctRemoteRoster', 'windowsLinkCriteria', 'questLinkCriteria',
                                            'questLinkMetricsVerified',
                                            'windowsStationAddresses', 'venueNetworkPlan', 'reconnectSourcePlan',
@@ -3822,7 +3841,7 @@ def verify_venue_stages(plan_path, *, inspect=False):
         except UdpPreflightIncomplete as error:
             reject(f'Venue manifest entry {index}: {error}', index, udpPreflight=error.reports)
             continue
-        except (VerifiedStartDigestMismatch, ServerReleaseEvidenceError) as error:
+        except (VerifiedStartDigestMismatch, VenueReleaseEvidenceError) as error:
             reject(f'Venue manifest entry {index}: {error}', index, evidenceMismatch=error.evidence)
             continue
         except EvidenceError as error:
