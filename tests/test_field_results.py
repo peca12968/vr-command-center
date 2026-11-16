@@ -2075,6 +2075,86 @@ class FieldResultsTests(unittest.TestCase):
             with self.assertRaisesRegex(field.EvidenceError, 'Linked venue with its original world journal'):
                 field.verify_venue(path)
 
+    def test_prepared_venue_manifest_verifies_original_control_reports_before_publication(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, closure = venue_fixture(root, mode, with_journals=True)
+                selected = [1, 4] if mode == 'Independent' else list(range(1, 6))
+                policy = {'weather': 'Storm', 'timeOfDay': 'Night', 'lightning': True}
+                enemies = {'behavior': 'Patrol', 'autoAttack': False}
+                rooms = closure['sessions']
+                targets = [row for row in rooms if set(row['roomIds']) <= set(selected)]
+
+                def phase_report(ordinal, observed, rows, fields):
+                    return dict(requestId=id_for(ordinal), recordedAtUtc='2026-11-09T00:00:01+00:00',
+                                sessions=[dict(sessionId=row['sessionId'], roomIds=row['roomIds'], state='Ended',
+                                               appliedAtSequence=observed) for row in rows], **fields)
+
+                phase = phase_report(2091, 4, targets, policy)
+                weather = root / 'original weather.json'
+                weather.write_text(json.dumps({'latestEnvironment': phase}), encoding='utf-8-sig')
+                enemy = root / 'original enemies.json'
+                enemy.write_text(json.dumps({'latestEnemies': phase_report(2092, 6, rooms, enemies)}), encoding='utf-8')
+                for entry, row in zip(manifest['sessions'], rooms, strict=True):
+                    launcher = root / entry['launcherReport']
+                    original = json.loads(launcher.read_bytes())
+                    scoped = row in targets
+
+                    def configure(packet):
+                        if packet['frame']['phase'] != 'Running':
+                            return
+                        first = packet['sequence'] < 10
+                        packet.update(observedSequence=4 if first else 6, weather='Storm' if scoped else 'Clear', lightning=scoped)
+                        packet['frame'].update(night=scoped, **({'behavior': 'Hold', 'autoAttack': False} if first else enemies))
+
+                    world_journal(root / entry['worldJournal'], original['finalWorld'], preparing_sequence=3, edit_packet=configure)
+                    launcher.write_text(json.dumps(original), encoding='utf-8')
+                terminal, _, moved = self.terminal_venue_fixture(root, manifest, closure)
+                packed = self.pack_venue(root, manifest)
+                scope = (['--scoped-environment-batch', '4, 1'] if mode == 'Independent'
+                         else ['--venue-control-batch', 'SetEnvironment'])
+                command = [sys.executable, str(SCRIPT.with_name('prepare-venue-field-manifest.py')),
+                           '--venue-bundle', packed['venueBundle'], '--launcher-report', terminal.name,
+                           '--topology', 'same-host', '--server-ip', manifest['serverIps'][0], '--server-work-root', moved.name]
+                options = [*scope, weather.name, '--venue-control-batch', 'SetEnemies', enemy.name]
+                output = root / 'delivery' / 'prepared.json'
+                output.parent.mkdir()
+                call = subprocess.run([*command, '--output', str(output), *options], cwd=root, capture_output=True)
+                self.assertEqual(0, call.returncode, call.stderr.decode())
+                actual = json.loads(output.read_bytes())
+                refs = {batch['action']: batch for batch in actual['venueControlBatches']}
+                self.assertEqual((output.parent / refs['SetEnvironment']['phaseReport']).resolve(), weather)
+                self.assertEqual(refs['SetEnvironment'].get('roomIds'), [1, 4] if mode == 'Independent' else None)
+                self.assertEqual((output.parent / refs['SetEnemies']['phaseReport']).resolve(), enemy)
+
+                actual['windowsPlayers'] = [dict(player, log=str(Path('..') / player['log'])) for player in packed['windowsPlayers']]
+                output.write_text(json.dumps(actual), encoding='utf-8')
+                verified = field.verify_venue(output)
+                batch_counts = {batch['action']: batch['sessionsVerified'] for batch in verified['venueControlBatches']}
+                self.assertEqual(batch_counts, {'SetEnvironment': len(targets), 'SetEnemies': len(rooms)})
+
+                rejected = root / 'rejected.json'
+                cases = [(['--scoped-environment-batch', '1,1', weather.name],
+                          'distinct room numbers' if mode == 'Independent' else 'requires an Independent environment batch'),
+                         (['--scoped-environment-batch', '1;4', weather.name], 'comma-separated list'),
+                         (['--venue-control-batch', 'Pause', weather.name], 'must be SetEnvironment or SetEnemies'),
+                         ([*options, *scope, weather.name], 'distinct across the venue')]
+                if mode == 'Independent':
+                    cases.append((['--scoped-environment-batch', '1,3', weather.name], 'differs from the original room or session'))
+                for flags, message in cases:
+                    with self.subTest(flags=flags):
+                        call = subprocess.run([*command, '--output', str(rejected), *flags], cwd=root, capture_output=True)
+                        self.assertEqual(1, call.returncode)
+                        self.assertIn(message.encode(), call.stderr)
+                        self.assertFalse(rejected.exists())
+
+                weather.write_text(json.dumps({'latestEnvironment': dict(phase, lightning=False)}), encoding='utf-8')
+                call = subprocess.run([*command, '--output', str(rejected), *options], cwd=root, capture_output=True)
+                self.assertEqual(1, call.returncode)
+                self.assertIn(b'disagrees with the venue environment', call.stderr)
+                self.assertFalse(rejected.exists())
+
     def test_prepared_venue_manifest_uses_embedded_original_receipts(self):
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:

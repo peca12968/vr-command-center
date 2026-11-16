@@ -1,6 +1,7 @@
 """Prepare an offline field manifest from the original five-room Windows launch and closure."""
 
 import argparse
+from datetime import datetime
 import importlib.util
 import json
 import os
@@ -128,6 +129,21 @@ def prepare(args, output):
         seen_paths.add(path)
         return path
 
+    control_batches = []
+    for action, report in args.venue_control_batch or ():
+        field.require(action in ('SetEnvironment', 'SetEnemies'), 'Venue control action must be SetEnvironment or SetEnemies')
+        control_batches.append({'action': action, 'phaseReport': ref(Path(report).absolute())})
+    for selected, report in args.scoped_environment_batch or ():
+        field.require(re.fullmatch(r'[1-5](?:\s*,\s*[1-5]){0,4}', selected.strip()) is not None,
+                      'Provide a comma-separated list of room numbers from 1 to 5')
+        control_batches.append({'action': 'SetEnvironment', 'phaseReport': ref(Path(report).absolute()),
+                                'roomIds': sorted(int(room) for room in selected.split(','))})
+    controls = {}
+    if control_batches:
+        recorded_at = datetime.fromisoformat(closure['recordedAtUtc'])
+        field.require(recorded_at.utcoffset() is not None, 'Closure time must specify a time zone')
+        _, controls = field.read_venue_control_batches(control_batches, expected, closure, recorded_at, evidence_path, mode=mode)
+
     alignment_path = evidence_path(args.room_alignment_bundle.resolve()) if args.room_alignment_bundle is not None else None
     alignment_bundle = field.read_venue_alignment_bundle(alignment_path, mode, expected) if alignment_path is not None else None
     network_path = evidence_path(args.venue_network_plan.resolve()) if args.venue_network_plan is not None else None
@@ -196,7 +212,7 @@ def prepare(args, output):
         tracked_start = documents.get('tracked-vr-start.json')
         guarded_begin = field.tracked_vr_start_boundary(tracked_start, session, world, applied_end) if tracked_start is not None else None
         field.verify_world_journal(files['worldJournal'], world, boundary['finalStreamSequence'], boundary['throughSequence'], applied_end,
-                                   guarded_begin=guarded_begin, departed=departed)
+                                   guarded_begin=guarded_begin, departed=departed, control_batches=controls.get(session_id, ()))
         field.verify_combat_journal(files['combatJournal'], session_id, stream, boundary['origin'],
                                     boundary['finalStreamSequence'], applied_end, ledger, departed=departed)
         entries.append({'sessionId': session_id, **{key: ref(path) for key, path in files.items()},
@@ -205,6 +221,8 @@ def prepare(args, output):
 
     manifest = {'version': 1, 'mode': mode, 'topology': args.topology, 'serverIps': args.server_ip,
                 'venueBundle': ref(bundle), 'venueLauncherReport': ref(terminal), 'sessions': entries}
+    if control_batches:
+        manifest['venueControlBatches'] = control_batches
     if alignment_path is not None:
         manifest['roomAlignmentBundle'] = ref(alignment_path)
     if network_path is not None:
@@ -321,6 +339,10 @@ def main():
     parser.add_argument('--verified-start-receipt', type=Path, help='Original Windows verified-start receipt')
     parser.add_argument('--require-server-release', action='store_true', help='Require the terminal Windows server package to match the original venue release report')
     parser.add_argument('--room-alignment-bundle', type=Path, help='Original MR or mixed venue deployment ZIP')
+    parser.add_argument('--venue-control-batch', action='append', nargs=2, metavar=('ACTION', 'JSON'),
+                        help='Original full-venue phase report for SetEnvironment or SetEnemies; repeat for each batch')
+    parser.add_argument('--scoped-environment-batch', action='append', nargs=2, metavar=('ROOMS', 'JSON'),
+                        help='Comma-separated independent room IDs and original environment phase report; repeat for each batch')
     parser.add_argument('--quest-capture-report', action='append', type=Path, help='Original batch logcat capture report; repeat for separate batches')
     parser.add_argument('--quest-network-plan', type=Path, help='Original Quest IPv4 plan')
     parser.add_argument('--quest-device-map', type=Path, help='Original Quest seat-to-ADB assignment')
