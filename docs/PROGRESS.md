@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 核對 Quest APK 的原生程式庫
+
+- 場館離線發行工具新增 ARM64 ELF 核對。檢查 Unity、IL2CPP、OpenXR 與 Meta MR 所需檔案，以及 APK 內所有原生程式庫的架構、程式標頭與檔案區段。原 0.50.12／77 APK 的 7 個程式庫通過，SHA-256 與原回條一致。管理包 0.31.224 和同源 Windows 遊戲兩包也通過這次發行核對。 [發行報告](../artifacts/quest-native-elf-20261117/venue-release.json) · [操作方式](EXTERNAL_CLIENTS.md#發送前離線核對交付套件)
+- 使用 NDK、AAPT2 與 APK v2 簽章建立四份測試 APK。舊版核對接受四份，新版接受完整檔並拒絕把 x86-64 放在 ARM64 路徑、截斷 OpenXR ELF、缺少 Meta MR 程式庫的三份。Python 相關測試執行 39 項，38 項通過，1 項跳過。用原 APK 與新報告實跑獨立及合併各一席 VR、一席 MR 的 `CheckOnly`，只讀本機檔案。 [簽章測試](../artifacts/quest-native-elf-20261117/signed-fixtures.json) · [部署前核對](../artifacts/quest-native-elf-20261117/deployment-check-only.json)
+- Windows 可讀到已登錄的 x64 OpenXR 執行環境檔。Quest USB 仍無 ADB 介面，實機安裝、頭盔 VR／MR、VIVE 相容及跨機玩家待驗。GitHub Actions 對 `46cec07` 回報帳務或用量限制，工作未啟動。 [USB 快照](../artifacts/quest-native-elf-20261117/usb-status.json) · [Windows OpenXR 快照](../artifacts/quest-native-elf-20261117/windows-openxr-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43961701137/job/133630496770)
+
 ## 2026-11-17 匯出未確認戰績的席位清單
 
 - 管理台 0.31.224 可從全館或單房席位明細下載未確認清單 CSV。全館匯出須等有名冊的房間都能核對回條。每席保留原批次、場次、房席、管理與戰鬥及世界序號和七項戰績。CSV 使用 UTF-8 BOM、CRLF 與原試算表文字防護。 [操作方式](SESSION_CLOSURE.md#查看全館未確認席位)
