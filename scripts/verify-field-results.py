@@ -94,6 +94,14 @@ class VerifiedStartDigestMismatch(EvidenceError):
         self.evidence = {'kind': kind, 'name': path.name, 'status': 'sha256-mismatch'}
 
 
+class ServerReleaseEvidenceError(EvidenceError):
+    def __init__(self, message, kind, path, status):
+        super().__init__(message)
+        self.evidence = {'kind': kind, 'status': status}
+        if path is not None:
+            self.evidence['name'] = path.name
+
+
 class VenueStageMismatch(EvidenceError):
     def __init__(self, expected, observed):
         super().__init__(f"expected {expected['mode']} with {expected['players']} seats, "
@@ -2655,15 +2663,23 @@ def server_manifest_digest(document):
     return digest
 
 
-def verify_venue_server_release(release, terminal, *, required=False):
+def verify_venue_server_release(release, terminal, *, required=False, release_path=None, terminal_path=None):
     expected = server_manifest_digest(release.get('windows')) if release is not None else None
     actual = terminal.get('serverManifestSha256') if terminal is not None else None
     if required:
-        require(expected is not None, 'Server release verification requires the original venue release report and server manifest digest')
-        require(actual is not None, 'Server release verification requires the original release-bound terminal venue launch report')
+        if expected is None:
+            raise ServerReleaseEvidenceError('Server release verification requires the original venue release report and server manifest digest',
+                                             'venueReleaseReport', release_path,
+                                             'missing-report' if release is None else 'missing-server-manifest')
+        if actual is None:
+            raise ServerReleaseEvidenceError('Server release verification requires the original release-bound terminal venue launch report',
+                                             'venueLauncherReport', terminal_path,
+                                             'missing-report' if terminal is None else 'missing-server-manifest')
     if release is None or actual is None:
         return None
-    require(expected == actual, 'Windows terminal launch report does not match the original venue server release')
+    if expected != actual:
+        raise ServerReleaseEvidenceError('Windows terminal launch report does not match the original venue server release',
+                                         'venueLauncherReport', terminal_path, 'server-manifest-mismatch')
     return {'serverManifestSha256': actual, 'sessionsVerified': terminal['sessions']}
 
 
@@ -2811,16 +2827,25 @@ def read_verified_venue_start(path, readiness_path, terminal, results, mode, *, 
             and ready['topology'] == mode and identity(ready['instanceId']) == terminal['instanceId'],
             'Verified start receipt differs from the original ready venue report')
     server_digest = terminal.get('serverManifestSha256')
-    require(server_manifest_digest(ready) == server_digest,
-            'Windows ready and terminal reports do not share the original server release')
+    ready_digest = server_manifest_digest(ready)
+    if ready_digest != server_digest:
+        raise ServerReleaseEvidenceError('Windows ready and terminal reports do not share the original server release',
+                                         'windowsReadyReport', ready_path,
+                                         'missing-server-manifest' if ready_digest is None else 'server-manifest-mismatch')
     if server_digest is not None:
         binding = preflight['launchBinding']
-        require(type(binding.get('preview')) is str and binding['preview'], 'Server release verification requires the original launch preview')
+        if type(binding.get('preview')) is not str or not binding['preview']:
+            raise ServerReleaseEvidenceError('Server release verification requires the original launch preview',
+                                             'windowsLaunchPreview', None, 'missing-report')
         preview_path = resolve_evidence_reference(readiness_path.parent, binding['preview'], 'windowsLaunchPreview')
         preview, preview_raw = read_quest_document(preview_path)
-        require(hashlib.sha256(preview_raw).hexdigest() == binding.get('previewSha256')
-                and server_manifest_digest(preview) == server_digest,
-                'The original launch preview does not match the verified Windows server release')
+        message = 'The original launch preview does not match the verified Windows server release'
+        if hashlib.sha256(preview_raw).hexdigest() != binding.get('previewSha256'):
+            raise VerifiedStartDigestMismatch(message, 'windowsLaunchPreview', preview_path)
+        preview_digest = server_manifest_digest(preview)
+        if preview_digest != server_digest:
+            raise ServerReleaseEvidenceError(message, 'windowsLaunchPreview', preview_path,
+                                             'missing-server-manifest' if preview_digest is None else 'server-manifest-mismatch')
     checked = datetime.fromisoformat(receipt['checkedAtUtc'])
     require(checked.utcoffset() == timedelta(0)
             and datetime.fromisoformat(preflight['checkedAtUtc']) <= checked,
@@ -3014,7 +3039,7 @@ def venue_final_room_counts(manifest):
 def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_logs=False, inspect_udp=False,
                        inspect_missing=False,
                        staged_roster=None, staged_link_criteria=None, expected_stage=None, inspect_roster_minimum=None,
-                       staged=False, staged_quest_link_criteria=None):
+                       staged=False, staged_quest_link_criteria=None, staged_require_server_release=False):
     manifest_path = manifest_path.resolve(strict=True)
     with manifest_path.open('rb') as stream:
         raw_manifest = limited_read(stream)
@@ -3068,8 +3093,9 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
         return {'venueNetworkPlan': {'sha256': venue_network['sha256'], 'expectedSeats': len(planned_seat_addresses),
                                      'verifiedSeats': verified, 'endpointsVerified': len(venue_network['endpoints'])}}
 
-    release, release_hash = (read_venue_release(evidence_path(manifest['venueReleaseReport'], kind='venueReleaseReport'))
-                             if 'venueReleaseReport' in manifest else (None, None))
+    release_path = (evidence_path(manifest['venueReleaseReport'], kind='venueReleaseReport')
+                    if 'venueReleaseReport' in manifest else None)
+    release, release_hash = read_venue_release(release_path) if release_path is not None else (None, None)
     windows_release = release.get('windows') if release is not None else None
     windows_hash = windows_release.get('playerManifestSha256') if type(windows_release) is dict else None
 
@@ -3200,6 +3226,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
             raise UdpPreflightIncomplete(incomplete)
 
     venue_launcher, venue_results, verified_start = None, {}, None
+    terminal_path = None
     wants_verified_start = 'verifiedVenueStart' in manifest
     require(not wants_verified_start or (single_batch and 'venueLauncherReport' in manifest),
             'Verified start requires the original Windows venue report and one UDP readiness report')
@@ -3209,7 +3236,9 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
         terminal_path = evidence_path(manifest['venueLauncherReport'], kind='venueLauncherReport')
         venue_launcher, venue_results = read_terminal_venue_launcher(terminal_path, mode, expected,
                                                                      include_instance=wants_verified_start)
-    server_release = verify_venue_server_release(release, venue_launcher, required=require_server_release)
+    server_release = verify_venue_server_release(release, venue_launcher,
+                                                required=require_server_release or staged_require_server_release,
+                                                release_path=release_path, terminal_path=terminal_path)
     start_readiness_path = None
     if wants_verified_start:
         start_readiness_path = (udp_batch_paths[0] if udp_batch_paths is not None
@@ -3638,12 +3667,14 @@ def staged_batch_report(report, batch):
             'lowestReplies': {key: fewest[key] for key in ('roomId', 'seat', 'replies')},
             'highestP95RoundTripMs': {key: slowest[key] for key in ('roomId', 'seat', 'p95RoundTripMs')},
         }
+    server_release = report.get('venueRelease', {}).get('server')
     return {'mode': report['mode'], 'players': report['players'], 'closureRequestId': batch['closureRequestId'],
             'manifestSha256': batch['manifestSha256'],
             'startedAtUtc': batch['started'].astimezone(timezone.utc).isoformat(),
             'endedAtUtc': batch['ended'].astimezone(timezone.utc).isoformat(),
             'serverAcknowledgements': report['serverAcknowledgements'],
             'worldJournalsVerified': report['worldJournalsVerified'], 'concurrentRoster': report['concurrentRoster'],
+            **({'serverRelease': server_release} if server_release is not None else {}),
             **{key: report[key] for key in ('combatJournalsVerified', 'distinctRemoteRoster', 'windowsLinkCriteria', 'questLinkCriteria',
                                            'questLinkMetricsVerified',
                                            'windowsStationAddresses', 'venueNetworkPlan', 'reconnectSourcePlan',
@@ -3672,7 +3703,8 @@ def verify_venue_stages(plan_path, *, inspect=False):
     plan = read_json(raw_plan.decode('utf-8-sig'))
     required = {'version', 'topology', 'minimumConcurrentMilliseconds', 'venueManifests'}
     roster_options = ('requireTrackedRoster', 'requireConcurrentFire')
-    optional = {'expectedStages', 'requireDistinctRemoteRoster', 'requireVerifiedVenueStart', 'windowsLinkCriteria', 'questLinkCriteria', *roster_options}
+    optional = {'expectedStages', 'requireDistinctRemoteRoster', 'requireVerifiedVenueStart', 'requireServerRelease',
+                'windowsLinkCriteria', 'questLinkCriteria', *roster_options}
     require(type(plan) is dict and required <= plan.keys() <= required | optional,
             'Invalid staged venue plan fields')
     integer(plan['version'], 1, 1)
@@ -3688,6 +3720,9 @@ def verify_venue_stages(plan_path, *, inspect=False):
             'Distinct staged roster requires a boolean option and direct-lan topology')
     require_start = plan.get('requireVerifiedVenueStart', False)
     require(type(require_start) is bool, 'Staged verified Windows start option must be boolean')
+    require_server_release = plan.get('requireServerRelease', False)
+    require(type(require_server_release) is bool, 'Staged requireServerRelease must be a boolean')
+    server_release_policy = {'requireServerRelease': require_server_release} if 'requireServerRelease' in plan else {}
     requirements = {key: plan.get(key, False) for key in roster_options}
     require(all(type(value) is bool for value in requirements.values()), 'Staged tracked roster and concurrent fire options must be boolean')
     staged_roster = {'minimumConcurrentMilliseconds': minimum, **requirements} if any(requirements.values()) else None
@@ -3724,7 +3759,8 @@ def verify_venue_stages(plan_path, *, inspect=False):
             report, batch = verify_venue_batch(path, inspect_quest_logs=inspect, inspect_udp=inspect,
                                                inspect_missing=inspect, inspect_roster_minimum=minimum if inspect else None,
                                                staged_roster=staged_roster, staged_link_criteria=link_criteria,
-                                               expected_stage=expected_stage, staged=True, staged_quest_link_criteria=quest_link_criteria)
+                                               expected_stage=expected_stage, staged=True, staged_quest_link_criteria=quest_link_criteria,
+                                               staged_require_server_release=require_server_release)
             key = (report['mode'], report['players'])
             require(key in stage_keys, 'Staged venue evidence must cover each mode and seat count exactly once')
             require(report['declaredTopology'] == topology, 'Venue batch topology differs from the staged plan')
@@ -3759,7 +3795,7 @@ def verify_venue_stages(plan_path, *, inspect=False):
         except UdpPreflightIncomplete as error:
             reject(f'Venue manifest entry {index}: {error}', index, udpPreflight=error.reports)
             continue
-        except VerifiedStartDigestMismatch as error:
+        except (VerifiedStartDigestMismatch, ServerReleaseEvidenceError) as error:
             reject(f'Venue manifest entry {index}: {error}', index, evidenceMismatch=error.evidence)
             continue
         except EvidenceError as error:
@@ -3815,13 +3851,14 @@ def verify_venue_stages(plan_path, *, inspect=False):
             status = 'conflict' if index in affected else 'verified'
             results.append({**entry, 'status': status, **entries[index]})
         return {'version': 1, 'scope': 'staged-venue-inspection', 'complete': not issues,
-                'planSha256': hashlib.sha256(raw_plan).hexdigest(), **link_policy, 'entries': results, 'issues': issues,
+                'planSha256': hashlib.sha256(raw_plan).hexdigest(), **link_policy, **server_release_policy,
+                'entries': results, 'issues': issues,
                 'missingStages': [{'mode': mode, 'players': players} for mode, players in stage_keys if (mode, players) not in stages]}
     results = [entries[stages[key][0]] for key in stage_keys]
     return {'version': 1, 'consistent': True, 'declaredTopology': topology,
             'planSha256': hashlib.sha256(raw_plan).hexdigest(), 'venueReleaseSha256': next(iter(releases)),
             'minimumConcurrentMilliseconds': minimum, 'requireDistinctRemoteRoster': distinct,
-            **link_policy,
+            **link_policy, **server_release_policy,
             **({'requireVerifiedVenueStart': require_start} if 'requireVerifiedVenueStart' in plan else {}),
             **{key: requirements[key] for key in roster_options if key in plan}, 'stages': results,
             'serverAcknowledgements': sum(stage['serverAcknowledgements'] for stage in results),

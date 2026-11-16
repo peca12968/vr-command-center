@@ -614,13 +614,13 @@ python scripts/prepare-venue-field-manifest.py `
 ```powershell
 python scripts/prepare-venue-stages.py `
     --output .\stages.json --topology direct-lan --minimum-concurrent-ms 2000 `
-    --require-verified-venue-start --windows-minimum-replies 28 --windows-maximum-p95-ms 40 `
+    --require-server-release --require-verified-venue-start --windows-minimum-replies 28 --windows-maximum-p95-ms 40 `
     .\5-independent\venue.json .\5-linked\venue.json `
     .\10-independent\venue.json .\10-linked\venue.json `
     .\25-independent\venue.json .\25-linked\venue.json
 ```
 
-上例的啟動回條及 Windows 量測門檻可依場館規格選用。另可加上 `--require-tracked-roster`、`--require-concurrent-fire` 或 `--require-distinct-remote-roster`。使用同機封存時將拓撲改為 `same-host`。建立後用同一份總清單執行收件或正式驗收。
+上例的伺服器發行、啟動回條及 Windows 量測門檻可依場館規格選用。另可加上 `--require-tracked-roster`、`--require-concurrent-fire` 或 `--require-distinct-remote-roster`。使用同機封存時將拓撲改為 `same-host`。建立後用同一份總清單執行收件或正式驗收。
 
 ```json
 {
@@ -696,7 +696,13 @@ Quest 批次已設定 `questLinkCriteria` 時，`issues[].questLinkMetrics` 會�
 
 在 `stages.json` 加入 `"requireVerifiedVenueStart": true`，並在六份批次清單各自引用原 `verifiedVenueStart`。驗收會逐批核對原預檢、就緒及結束報告，並拒絕重複使用同一個啟動批次 ID。缺少回條時，錯誤會指出總清單中的項次。摘要會顯示各批已核對的回條及原啟動 ID。 [保存及引用回條](#核對-windows-五房啟動回條)
 
-用 `--inspect-venue-stages` 檢查待補資料。回條記載的 SHA-256 與所引用的檔案不符時，`issues[].evidenceMismatch` 會列出 `kind`、檔名 `name` 及 `sha256-mismatch`。`kind` 對應 `venueLauncherReport`（結束報告）、`udpPreflightBatch`（原 UDP 預檢）或 `windowsReadyReport`（就緒報告）。檔案不存在時，查看 `missingFile` 或 `udpPreflight` 的對應項目。這些欄位只列檔名，正式驗收仍會拒絕缺檔或雜湊不一致的批次。
+用 `--inspect-venue-stages` 檢查待補資料。回條記載的 SHA-256 與所引用的檔案不符時，`issues[].evidenceMismatch` 會列出 `kind`、檔名 `name` 及 `sha256-mismatch`。`kind` 對應 `venueLauncherReport`（結束報告）、`udpPreflightBatch`（原 UDP 預檢）、`windowsReadyReport`（就緒報告）或 `windowsLaunchPreview`（啟動預覽）。檔案不存在時，查看 `missingFile` 或 `udpPreflight` 的對應項目。這些欄位只列檔名，正式驗收仍會拒絕缺檔或雜湊不一致的批次。
+
+##### 六批核對同一份 Windows 伺服器發行
+
+準備總清單時指定 `--require-server-release`，或在 `stages.json` 加入 `"requireServerRelease": true`。六批都須引用同一份原場館發行報告，並各自提交原五房終止報告。驗收會核對兩者的 `serverManifestSha256`，在各批的 `serverRelease` 列出摘要和原場次數。提交啟動回條時，也會核對原就緒及預覽報告。各批在自己的 `venue.json` 設定的要求也會套用。 [五房伺服器發行證據](#核對五房伺服器發行版本)
+
+收件檢查的 `issues[].evidenceMismatch` 會指出報告種類及檔名。`missing-report` 表示清單缺少原報告引用，`missing-server-manifest` 表示原報告沒有伺服器清單摘要，`server-manifest-mismatch` 表示摘要不一致。若清單已列出報告、檔案仍未收齊，查看 `missingFile`。`missingStages` 列出尚未通過的模式及人數。
 
 ### 核對 25 席各自的直連來源
 

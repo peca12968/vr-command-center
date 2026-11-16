@@ -654,9 +654,10 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertNotIn('questLinkMetricsVerified', field.verify_venue(path))
 
     def staged_batch(self, root, mode, count, id_offset, minutes_after, *, remote=False, tracked_fire=False,
-                     missing_shot=False, runtime='Test OpenXR Runtime', windows_inbox=False, windows_links=False, quest_links=False):
+                     missing_shot=False, runtime='Test OpenXR Runtime', windows_inbox=False, windows_links=False,
+                     quest_links=False, server_digest=None):
         root.mkdir()
-        path, manifest, _ = venue_fixture(root, mode, remote=remote, with_journals=True, quest_per_room=int(quest_links),
+        path, manifest, closure = venue_fixture(root, mode, remote=remote, with_journals=True, quest_per_room=int(quest_links),
             room_sizes=(count,) * 5, id_offset=id_offset, minutes_after=minutes_after)
         offsets = [0] if mode == 'Linked' else [0, 100, 200, 300, 400]
         capture_start = datetime.fromisoformat('2026-11-09T08:00:00+08:00') + timedelta(minutes=minutes_after)
@@ -678,7 +679,7 @@ class FieldResultsTests(unittest.TestCase):
         else:
             self.concurrent_journals(root, manifest, offsets, capture_start=capture_start)
             manifest['minimumConcurrentMilliseconds'] = 1000
-        self.add_shared_release(root, manifest, int(quest_links))
+        release_path = self.add_shared_release(root, manifest, int(quest_links))
         if quest_links:
             for entry in manifest['sessions']:
                 port = json.loads((root / entry['launcherReport']).read_bytes())['udpBinding']['port']
@@ -690,6 +691,13 @@ class FieldResultsTests(unittest.TestCase):
                         path_to_log.write_text(insert_quest_link_metrics(log, pid, connection), encoding='utf-8')
         if windows_links:
             self.add_windows_links(root, manifest)
+        if server_digest is not None:
+            release = json.loads(release_path.read_bytes())
+            release['windows']['serverManifestSha256'] = server_digest
+            release_path.write_text(json.dumps(release), encoding='utf-8')
+            terminal_path, terminal, _ = self.terminal_venue_fixture(root, manifest, closure)
+            terminal['serverManifestSha256'] = server_digest
+            terminal_path.write_text(json.dumps(terminal), encoding='utf-8')
         if count != 5:
             manifest['expectedPlayersPerRoom'] = count
         if windows_inbox:
@@ -885,6 +893,60 @@ class FieldResultsTests(unittest.TestCase):
             self.assertEqual(1, result.returncode)
             self.assertIn(b'same original verified release', result.stderr)
             self.assertFalse(rejected.exists())
+
+    def test_staged_server_release_policy_reports_missing_and_different_originals(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            digest = 'a' * 64
+            names = [self.staged_batch(root / f'{size}-{mode}', mode, size // 5, index * 10000, index,
+                                       server_digest=digest)
+                     for index, (mode, size) in enumerate(field.VENUE_STAGE_KEYS, 1)]
+            manifests = [root / name for name in names]
+            plan_path = root / 'stages.json'
+            built = subprocess.run([sys.executable, str(SCRIPT.with_name('prepare-venue-stages.py')),
+                '--topology', 'same-host', '--minimum-concurrent-ms', '2000', '--require-server-release',
+                '--output', str(plan_path), *map(str, reversed(manifests))], capture_output=True, timeout=30)
+            self.assertEqual(0, built.returncode, built.stderr)
+            plan = json.loads(plan_path.read_bytes())
+            self.assertIs(plan['requireServerRelease'], True)
+            result = field.verify_venue_stages(plan_path)
+            self.assertIs(result['requireServerRelease'], True)
+            self.assertEqual(80, result['serverAcknowledgements'])
+            releases = [{'serverManifestSha256': digest, 'sessionsVerified': 5 if mode == 'Independent' else 1}
+                        for mode, _ in field.VENUE_STAGE_KEYS]
+            self.assertEqual(releases, [stage['serverRelease'] for stage in result['stages']])
+            inspected = field.verify_venue_stages(plan_path, inspect=True)
+            self.assertIs(inspected['complete'], True)
+            self.assertEqual(releases, [entry['serverRelease'] for entry in inspected['entries']])
+
+            terminals = [path.with_name('venue-launcher.json') for path in manifests]
+            missing, different = (json.loads(terminals[index].read_bytes()) for index in (1, 4))
+            missing.pop('serverManifestSha256')
+            terminals[1].write_text(json.dumps(missing), encoding='utf-8')
+            terminals[4].write_text(json.dumps(dict(different, serverManifestSha256='b' * 64)), encoding='utf-8')
+            command = [sys.executable, str(SCRIPT), '--venue-stages', str(plan_path)]
+            rejected = subprocess.run([*command, '--inspect-venue-stages'], capture_output=True, timeout=30)
+            self.assertEqual(1, rejected.returncode, rejected.stderr)
+            inspected = json.loads(rejected.stdout)
+            self.assertIs(inspected['requireServerRelease'], True)
+            self.assertEqual([[2], [5]], [row['entries'] for row in inspected['issues']])
+            self.assertEqual([{'kind': 'venueLauncherReport', 'name': 'venue-launcher.json', 'status': status}
+                              for status in ('missing-server-manifest', 'server-manifest-mismatch')],
+                             [row['evidenceMismatch'] for row in inspected['issues']])
+            self.assertEqual([plan['expectedStages'][index] for index in (1, 4)], inspected['missingStages'])
+            self.assertEqual(['verified', 'needs-evidence', 'verified', 'verified', 'needs-evidence', 'verified'],
+                             [entry['status'] for entry in inspected['entries']])
+            rejected = subprocess.run(command, capture_output=True, timeout=30)
+            self.assertEqual(1, rejected.returncode)
+            self.assertIn(b'original release-bound terminal venue launch report', rejected.stderr)
+
+            terminals[4].write_text(json.dumps(different), encoding='utf-8')
+            plan_path.write_text(json.dumps(dict(plan, requireServerRelease=False)), encoding='utf-8')
+            self.assertNotIn('serverRelease', field.verify_venue_stages(plan_path)['stages'][1])
+            single = json.loads(manifests[1].read_bytes())
+            manifests[1].write_text(json.dumps(dict(single, requireServerRelease=True)), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'original release-bound terminal venue launch report'):
+                field.verify_venue_stages(plan_path)
 
     def test_staged_inspection_reports_missing_bad_and_reused_evidence_in_one_run(self):
         with tempfile.TemporaryDirectory() as directory:

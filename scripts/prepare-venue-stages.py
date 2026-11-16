@@ -20,6 +20,7 @@ def prepare(args, output):
     for key, enabled in (
         ('requireDistinctRemoteRoster', args.require_distinct_remote_roster),
         ('requireVerifiedVenueStart', args.require_verified_venue_start),
+        ('requireServerRelease', args.require_server_release),
         ('requireTrackedRoster', args.require_tracked_roster),
         ('requireConcurrentFire', args.require_concurrent_fire),
     ):
@@ -72,6 +73,7 @@ def main():
     parser.add_argument('--minimum-concurrent-ms', required=True, type=int)
     parser.add_argument('--require-distinct-remote-roster', action='store_true')
     parser.add_argument('--require-verified-venue-start', action='store_true')
+    parser.add_argument('--require-server-release', action='store_true', help='Require the original server release in all six batches')
     parser.add_argument('--require-tracked-roster', action='store_true')
     parser.add_argument('--require-concurrent-fire', action='store_true')
     parser.add_argument('--windows-minimum-replies', type=int)
