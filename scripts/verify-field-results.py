@@ -717,7 +717,7 @@ def roster_periods(players, minimum_ms, applied_end, *, require_tracked=False, s
                    interruptions=None):
     expected = {pid: player['roomId'] for pid, player in players.items()}
     periods, fires, pending_fires = [], [], []
-    start = previous = previous_tick = None
+    start = last_advance = previous_tick = last_capture = None
     combat_sequence = 0
 
     def match_fires(packet):
@@ -737,7 +737,7 @@ def roster_periods(players, minimum_ms, applied_end, *, require_tracked=False, s
         return matched
 
     def observe(packet):
-        nonlocal start, previous, previous_tick
+        nonlocal start, last_advance, previous_tick, last_capture
         matched = match_fires(packet) if sealed_fires is not None else ()
         frame = packet['frame']
         if frame['phase'] != 'Running' or packet['suspended'] is not False or packet['observedSequence'] >= applied_end:
@@ -746,8 +746,9 @@ def roster_periods(players, minimum_ms, applied_end, *, require_tracked=False, s
                     interruptions.group('paused', packet)
                 elif frame['phase'] == 'Running':
                     interruptions.group('suspended', packet)
-            previous = None
+            last_advance = None
             previous_tick = None
+            last_capture = None
             pending_fires.clear()
             return
         rows = frame['players']
@@ -763,34 +764,33 @@ def roster_periods(players, minimum_ms, applied_end, *, require_tracked=False, s
                     interruptions.roster(packet, rows, require_tracked)
                 if not tick:
                     interruptions.group('tick-not-started', packet)
-            previous = None
+            last_advance = None
             previous_tick = None
+            last_capture = None
             pending_fires.clear()
             return
         elapsed = integer(packet['elapsedMilliseconds'])
-        if (sealed_fires is not None or require_living) and tick == previous_tick:
-            # Several packets may share a tick. Wait for actual advancement
-            # before crediting any fire or extending the window.
-            if previous is not None and elapsed - previous <= MAX_CONCURRENT_FRAME_GAP_MS:
+        advance_expired = last_advance is not None and elapsed - last_advance > MAX_CONCURRENT_FRAME_GAP_MS
+        rewound = previous_tick is not None and tick < previous_tick
+        if interruptions is not None and (advance_expired or rewound):
+            capture_gap = last_capture is not None and elapsed - last_capture > MAX_CONCURRENT_FRAME_GAP_MS
+            interruptions.group('frame-gap' if capture_gap else 'tick-not-advancing', packet)
+        last_capture = elapsed
+        if tick == previous_tick:
+            # Management can publish both sides of an update at the same tick.
+            # Only a later, advancing tick can extend the window or credit a shot.
+            if not advance_expired:
                 pending_fires.extend(pid for pid, event_tick in matched if event_tick == tick)
             else:
-                if previous is not None and interruptions is not None:
-                    interruptions.group('frame-gap', packet)
-                previous = None
                 pending_fires.clear()
             return
-        if previous is None or elapsed - previous > MAX_CONCURRENT_FRAME_GAP_MS or tick <= previous_tick:
-            if previous is not None and interruptions is not None:
-                if elapsed - previous > MAX_CONCURRENT_FRAME_GAP_MS:
-                    interruptions.group('frame-gap', packet)
-                if tick <= previous_tick:
-                    interruptions.group('tick-not-advancing', packet)
+        if last_advance is None or advance_expired or rewound:
             start = elapsed
         else:
-            fires.extend((previous, elapsed, pid) for pid in pending_fires)
-            fires.extend((previous, elapsed, pid) for pid, event_tick in matched if previous_tick <= event_tick <= tick)
+            fires.extend((last_advance, elapsed, pid) for pid in pending_fires)
+            fires.extend((last_advance, elapsed, pid) for pid, event_tick in matched if previous_tick <= event_tick <= tick)
         pending_fires.clear()
-        previous, previous_tick = elapsed, tick
+        last_advance, previous_tick = elapsed, tick
         if elapsed - start >= minimum_ms:
             if periods and periods[-1][0] == start:
                 periods[-1] = (start, elapsed)

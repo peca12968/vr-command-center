@@ -72,6 +72,8 @@ python scripts/check-desktop-exercise.py --api-dll <同次API0.31.0完整建置�
 
 基本輸入窗口後，生成器繼續移動；先等每人兩發接受，再逐場送SetEnvironment／SetEnemies。每房一個原敵軍、autoAttack=false；雨夜雷電Patrol後Fog Day Advance。使用每個原UUID與當下expectedSequence，接受回條先存；同session／非duplicate／原commandId／序號遞增後，另等真正來源observed fence、Running／非suspended、至少20tick及全員walking，原存活敵軍ID／room／health保留、每位至少移動1cm。仍受原60活動秒／240秒儀表窗口限制，沒有為測試延長或重設。正常命令不等於操作員UI或真人操作，沒有新增autoAttack傷害驗收。
 
+五房獨立時，同一階段平行送出各房命令並分房核對原回條。五房均確認雨夜巡邏後，才開始下一階段的白天濃霧與推進。每房各自保留來源序號及回放畫格。
+
 最終30項／6場／2909完整回放、50原結果／6CSV／雙seal與原server ACK成功；12階段24命令、24個before／applied參考packet和statistics在回放精確相同。Linked雨夜巡邏11幀、霧天推進12幀全部25位walking；五房各有5位walking。附加closed JSON讀回依每房每個已接受環境／AI序號逐幀核對2627 Running幀及敵軍身分，無跨房狀態不符；這不是第31項live檢查，沒有對齊獨立時鐘。預跑7／202、未選用新旗標5／179也成功，兩模式仍保留每人兩發0中0殺／health100精確斷言。
 
 新4／完整11項Python負向測試涵蓋原意圖／session／順序與回放參考不一致，原27 active及5 artifact通過。新C232／F與666來源snapshot保存核對，前輪C340／326history／666舊來源及原ZIP／APK保持；沒有新Editor／Unity／Quest／本機全browser／GUI／GPU／頭盔，原231 Editor及6098同源版本保持。精確CI另見[PROGRESS](PROGRESS.md)，完整11項與原長場反例保持active。

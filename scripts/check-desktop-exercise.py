@@ -777,9 +777,15 @@ def run(v):
         if v.args.operator_controls:
             for e in entries:
                 v.wait(lambda e=e:all(p['ammoUsed']==2 for p in v.request(f'/api/sessions/{e["id"]}/statistics')['players']),10,'all original generated shots accepted before operator controls')
-                for weather,night,behavior in [('Storm',True,'Patrol'),('Fog',False,'Advance')]:
-                    operator_phase(v,e,{'mode':'VR','weather':weather,'timeOfDay':'Night' if night else 'Day','lightning':weather=='Storm'},behavior)
-                    check(True,e['name']+': '+behavior+' and '+weather+' applied while every original client walked; original enemies retained and moved')
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(entries)) as pool:
+                for weather, night, behavior in [('Storm', True, 'Patrol'), ('Fog', False, 'Advance')]:
+                    environment = {'mode': 'VR', 'weather': weather, 'timeOfDay': 'Night' if night else 'Day',
+                                   'lightning': weather == 'Storm'}
+                    changes = [pool.submit(operator_phase, v, entry, environment, behavior) for entry in entries]
+                    for entry, completed in zip(entries, changes, strict=True):
+                        completed.result()
+                        check(True, entry['name'] + ': ' + behavior + ' and ' + weather
+                              + ' applied while every original client walked; original enemies retained and moved')
         for row in native:(v.exercise[row['name']]/'finish.request').write_text('',encoding='utf-8')
         v.wait(lambda:all((v.exercise[r['name']]/'report.json').exists() for r in native),15,'explicit exercise finish')
         reports=[]

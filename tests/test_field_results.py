@@ -2353,15 +2353,18 @@ class FieldResultsTests(unittest.TestCase):
             frame = packet['frame']
             if cause in ('gap', 'at-gap-limit') and number >= 40:
                 packet['elapsedMilliseconds'] += 401 if cause == 'gap' else 400
+            if cause == 'stalled-tick' and 40 <= number <= 44:
+                frame['tick'] = 39
             if number != 40:
                 return
             if cause == 'paused':
                 frame['phase'] = 'Paused'
             if cause == 'suspended':
                 packet['suspended'] = True
-            if cause == 'stalled-tick':
-                frame['tick'] -= 1
+            if cause == 'rewound-tick':
+                frame['tick'] -= 2
             if cause == 'missing-player':
+                frame['tick'] -= 1
                 frame['players'][-1]['connected'] = False
             if cause == 'wrong-room':
                 frame['players'][-1]['roomId'] = 1
@@ -2371,7 +2374,7 @@ class FieldResultsTests(unittest.TestCase):
             path, manifest, _ = venue_fixture(root, 'Linked', with_journals=True)
             manifest['minimumConcurrentMilliseconds'] = 6000
             path.write_text(json.dumps(manifest), encoding='utf-8')
-            for cause in ('paused', 'suspended', 'stalled-tick', 'missing-player', 'wrong-room', 'gap', 'at-gap-limit'):
+            for cause in ('paused', 'suspended', 'stalled-tick', 'rewound-tick', 'missing-player', 'wrong-room', 'gap', 'at-gap-limit'):
                 with self.subTest(cause=cause):
                     self.concurrent_journals(root, manifest, [0], interrupt)
                     if cause == 'at-gap-limit':
@@ -2382,11 +2385,12 @@ class FieldResultsTests(unittest.TestCase):
                         with self.assertRaises(field.ConcurrentRosterIncomplete) as rejected:
                             field.verify_venue_batch(path, inspect_roster_minimum=6000)
                         group, = rejected.exception.overlap['groups']
-                        reason = {'stalled-tick': 'tick-not-advancing', 'missing-player': 'roster-mismatch',
+                        reason = {'stalled-tick': 'tick-not-advancing', 'rewound-tick': 'tick-not-advancing', 'missing-player': 'roster-mismatch',
                                   'wrong-room': 'roster-mismatch', 'gap': 'frame-gap'}.get(cause, cause)
                         self.assertEqual(2, group['continuousWindows'])
                         issue, = group['interruptions']
-                        self.assertEqual((reason, 1, 40), (issue['reason'], issue['frameCount'], issue['first']['worldSequence']))
+                        sequence = 45 if cause == 'stalled-tick' else 40
+                        self.assertEqual((reason, 1, sequence), (issue['reason'], issue['frameCount'], issue['first']['worldSequence']))
                         self.assertEqual(issue['first'], issue['last'])
                         if cause in ('missing-player', 'wrong-room'):
                             row, = group['affectedSeats']
@@ -2395,6 +2399,43 @@ class FieldResultsTests(unittest.TestCase):
                             self.assertEqual(issue['first'], row['first'])
                         else:
                             self.assertEqual([], group['affectedSeats'])
+
+    def test_venue_concurrent_roster_same_tick_requires_a_later_advancing_frame(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Linked', with_journals=True)
+            manifest['minimumConcurrentMilliseconds'] = 7700
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+
+            def repeat_tick(packet):
+                if 40 <= packet['sequence'] <= 43:
+                    packet['frame']['tick'] = 39
+
+            self.concurrent_journals(root, manifest, [0], repeat_tick)
+            report = field.verify_venue(path)['concurrentRoster']
+            self.assertEqual(7700, report['longestMilliseconds'])
+
+            def one_ms_late(packet):
+                repeat_tick(packet)
+                if packet['sequence'] >= 44:
+                    packet['elapsedMilliseconds'] += 1
+
+            self.concurrent_journals(root, manifest, [0], one_ms_late)
+            with self.assertRaises(field.ConcurrentRosterIncomplete) as rejected:
+                field.verify_venue_batch(path, inspect_roster=True)
+            late, = rejected.exception.overlap['groups'][0]['interruptions']
+            self.assertEqual(('tick-not-advancing', 44), (late['reason'], late['first']['worldSequence']))
+
+            def repeat_at_tail(packet):
+                if packet['frame']['phase'] == 'Running' and packet['sequence'] >= 77:
+                    packet['frame']['tick'] = 76
+
+            self.concurrent_journals(root, manifest, [0], repeat_at_tail)
+            with self.assertRaises(field.ConcurrentRosterIncomplete) as rejected:
+                field.verify_venue_batch(path, inspect_roster=True)
+            overlap = rejected.exception.overlap
+            self.assertEqual(7400, overlap['longestMilliseconds'])
+            self.assertEqual('2026-11-09T00:00:07.600000+00:00', overlap['groups'][0]['longestWindow']['throughUtc'])
 
     def test_venue_concurrent_roster_requires_original_journals_and_bounded_integer(self):
         with tempfile.TemporaryDirectory() as directory:
