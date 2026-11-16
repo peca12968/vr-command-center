@@ -614,7 +614,7 @@ python scripts/prepare-venue-field-manifest.py `
 ```powershell
 python scripts/prepare-venue-stages.py `
     --output .\stages.json --topology direct-lan --minimum-concurrent-ms 2000 `
-    --require-server-release --require-verified-venue-start --windows-minimum-replies 28 --windows-maximum-p95-ms 40 `
+    --require-complete-venue-release --require-verified-venue-start --windows-minimum-replies 28 --windows-maximum-p95-ms 40 `
     .\5-independent\venue.json .\5-linked\venue.json `
     .\10-independent\venue.json .\10-linked\venue.json `
     .\25-independent\venue.json .\25-linked\venue.json
@@ -703,6 +703,12 @@ Quest 批次已設定 `questLinkCriteria` 時，`issues[].questLinkMetrics` 會�
 準備總清單時指定 `--require-server-release`，或在 `stages.json` 加入 `"requireServerRelease": true`。六批都須引用同一份原場館發行報告，並各自提交原五房終止報告。驗收會核對兩者的 `serverManifestSha256`，在各批的 `serverRelease` 列出摘要和原場次數。提交啟動回條時，也會核對原就緒及預覽報告。各批在自己的 `venue.json` 設定的要求也會套用。 [五房伺服器發行證據](#核對五房伺服器發行版本)
 
 收件檢查的 `issues[].evidenceMismatch` 會指出報告種類及檔名。`missing-report` 表示清單缺少原報告引用，`missing-server-manifest` 表示原報告沒有伺服器清單摘要，`server-manifest-mismatch` 表示伺服器清單摘要不一致。`venue-release-report-mismatch` 表示其中一份證據對應到不同的場館發行報告位元組。若清單已列出報告、檔案仍未收齊，查看 `missingFile`。`missingStages` 列出尚未通過的模式及人數。
+
+##### 六批核對伺服器和每席的完整發行證據
+
+用 `prepare-venue-stages.py --require-complete-venue-release` 建立總清單時，工具會將六批共用原發行 JSON 的 SHA-256 保存到 `venueReleaseReportSha256`。六批的發行 JSON、各自的 Windows 伺服器終止報告、每席 Windows 玩家退出報告或驗收 ZIP，以及每席 Quest 部署報告都須對應到該份原檔。若一個階段只使用其中一種玩家平台，驗收依該批實際提交的席位核對。開場回條、同時追蹤、連線量測與跨機驗收沿用各自條件。
+
+仍可先建立總清單再收件。`--inspect-venue-stages` 的 `issues[].venueReleaseCoverage` 會列出缺少完整摘要的伺服器房間組合及 Windows／Quest 房席。已附摘要但不同時，收件原樣指出不符的證據檔，Windows ZIP 收件則在 `windowsInbox.issues` 列出原檔名。更換整批發行時，用新的原發行報告及該版各批產生的證據建立新總清單。舊封存可沿用原有驗收選項。
 
 ### 核對 25 席各自的直連來源
 

@@ -102,6 +102,12 @@ class VenueReleaseEvidenceError(EvidenceError):
             self.evidence['name'] = path.name
 
 
+class VenueReleaseIncomplete(EvidenceError):
+    def __init__(self, coverage):
+        super().__init__('Original venue release report digest is missing from the server or one or more seats')
+        self.coverage = coverage
+
+
 class VenueStageMismatch(EvidenceError):
     def __init__(self, expected, observed):
         super().__init__(f"expected {expected['mode']} with {expected['players']} seats, "
@@ -2544,7 +2550,7 @@ def read_quest_readiness_reports(paths, mode, attempts, deployed, evidence_path)
 
 
 def read_quest_deployments(spec, mode, evidence_path, release=None, *, release_hash=None, capture_reports=(), capture_device_map=None,
-                           readiness_reports=None):
+                           readiness_reports=None, inspect_release_coverage=False):
     expected = {'releaseReport', 'reports'} if release is None else {'reports'}
     require(type(spec) is dict and set(spec) == expected,
             'Provide the original Quest deployment reports and exactly one release report for the selected mode')
@@ -2636,6 +2642,9 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, release_h
     bound_seats = sum(len(attempt['confirmed']) for attempt in leaves if attempt['release_hash'] is not None)
     if bound_seats:
         summary.update(venueReleaseReportSha256=release_hash, releaseReportSeatsVerified=bound_seats)
+    if inspect_release_coverage:
+        missing = sorted(chain.from_iterable(attempt['confirmed'] for attempt in leaves if attempt['release_hash'] is None))
+        summary['missingReleaseReportSeats'] = [{'roomId': room, 'seat': seat} for room, seat in missing]
     if matched_maps:
         summary['deviceMapsMatched'] = len(matched_maps)
     if linked:
@@ -2646,7 +2655,7 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, release_h
 
 
 def read_venue_quest_evidence(manifest, mode, expected, evidence_path, release, *, release_hash=None,
-                              venue_network=None, inspect_logs=False):
+                              venue_network=None, inspect_logs=False, inspect_release_coverage=False):
     captures, endpoints, summary, references = {}, {}, {}, []
     device_map = deployments = deployment_summary = None
     readiness = {}, None
@@ -2666,7 +2675,8 @@ def read_venue_quest_evidence(manifest, mode, expected, evidence_path, release, 
         require(manifest['topology'] == 'direct-lan', 'Quest deployment evidence requires direct LAN evidence')
         deployments, deployment_summary, readiness, openxr = read_quest_deployments(
             manifest['questDeployments'], mode, evidence_path, release, release_hash=release_hash, capture_reports=references,
-            capture_device_map=device_map, readiness_reports=manifest.get('questReadinessReports'))
+            capture_device_map=device_map, readiness_reports=manifest.get('questReadinessReports'),
+            inspect_release_coverage=inspect_release_coverage)
         if references:
             summary['questCaptureDeploymentReportsMatched'] = len(references)
             partial_deployments = {digest for digest, _, partial in references if partial}
@@ -3100,7 +3110,8 @@ def venue_final_room_counts(manifest):
 def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_logs=False, inspect_udp=False,
                        inspect_missing=False,
                        staged_roster=None, staged_link_criteria=None, expected_stage=None, inspect_roster_minimum=None,
-                       staged=False, staged_quest_link_criteria=None, staged_require_server_release=False):
+                       staged=False, staged_quest_link_criteria=None, staged_require_server_release=False,
+                       staged_release_sha256=None):
     manifest_path = manifest_path.resolve(strict=True)
     with manifest_path.open('rb') as stream:
         raw_manifest = limited_read(stream)
@@ -3157,6 +3168,10 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     release_path = (evidence_path(manifest['venueReleaseReport'], kind='venueReleaseReport')
                     if 'venueReleaseReport' in manifest else None)
     release, release_hash = read_venue_release(release_path) if release_path is not None else (None, None)
+    if staged_release_sha256 is not None and release_hash != staged_release_sha256:
+        raise VenueReleaseEvidenceError('Venue batch does not use the original release report pinned by the staged plan',
+                                        'venueReleaseReport', release_path,
+                                        'missing-report' if release_path is None else 'venue-release-report-mismatch')
     windows_release = release.get('windows') if release is not None else None
     windows_hash = windows_release.get('playerManifestSha256') if type(windows_release) is dict else None
 
@@ -3350,7 +3365,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     captures, capture_endpoints, capture_summary, quest_deployments, deployment_summary, readiness, quest_openxr = (
         ({}, {}, {}, None, None, ({}, None), {}) if inspect_windows else
         read_venue_quest_evidence(manifest, mode, expected, evidence_path, release, release_hash=release_hash,
-                                  venue_network=venue_network, inspect_logs=inspect_quest_logs))
+                                  venue_network=venue_network, inspect_logs=inspect_quest_logs,
+                                  inspect_release_coverage=staged_release_sha256 is not None))
     quest_readiness, readiness_summary = readiness
     observed_quest_addresses = set() if capture_summary.get('questCaptureAddressSource') == 'server-observed' else None
 
@@ -3676,6 +3692,22 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
                 'A planned reconnect source seat has no verified connection history')
     windows_bound = sum(row.get('releaseReportVerified', False) for session in summaries
                         for row in session.get('windowsReleaseSeats', ()))
+    if staged_release_sha256 is not None:
+        server_bound = (server_release or {}).get('venueReleaseReportSha256') == staged_release_sha256
+        quest_summary = deployment_summary or {}
+        quest_bound = quest_summary.get('releaseReportSeatsVerified', 0)
+        if not server_bound or windows_bound != windows_players or quest_bound != quest_players:
+            missing_windows = sorted((row for session in summaries for row in session.get('windowsReleaseSeats', ())
+                                      if not row.get('releaseReportVerified')), key=lambda row: (row['roomId'], row['seat']))
+            raise VenueReleaseIncomplete({
+                'venueReleaseReportSha256': staged_release_sha256,
+                'server': {'expectedSessions': len(summaries), 'verifiedSessions': len(summaries) if server_bound else 0,
+                           'missingRoomGroups': [] if server_bound else sorted(row['roomIds'] for row in summaries)},
+                'windows': {'expectedSeats': windows_players, 'verifiedSeats': windows_bound, 'missingSeats': missing_windows},
+                'quest': {'expectedSeats': quest_players, 'verifiedSeats': quest_bound,
+                          'missingSeats': quest_summary.get('missingReleaseReportSeats', [])},
+            })
+        quest_summary.pop('missingReleaseReportSeats', None)
     report = {'version': 1, 'consistent': True, 'declaredTopology': topology, 'mode': mode, 'players': len(player_ids),
             **({'expectedPlayersPerRoom': players_per_room} if 'expectedPlayersPerRoom' in manifest else {}),
             **({'expectedFinalPlayersByRoom': final_counts, 'departedScoresVerified': len(departed_admissions)} if final_counts is not None else {}),
@@ -3777,6 +3809,7 @@ def verify_venue_stages(plan_path, *, inspect=False):
     required = {'version', 'topology', 'minimumConcurrentMilliseconds', 'venueManifests'}
     roster_options = ('requireTrackedRoster', 'requireConcurrentFire')
     optional = {'expectedStages', 'requireDistinctRemoteRoster', 'requireVerifiedVenueStart', 'requireServerRelease',
+                'requireCompleteVenueRelease', 'venueReleaseReportSha256',
                 'windowsLinkCriteria', 'questLinkCriteria', *roster_options}
     require(type(plan) is dict and required <= plan.keys() <= required | optional,
             'Invalid staged venue plan fields')
@@ -3796,6 +3829,14 @@ def verify_venue_stages(plan_path, *, inspect=False):
     require_server_release = plan.get('requireServerRelease', False)
     require(type(require_server_release) is bool, 'Staged requireServerRelease must be a boolean')
     server_release_policy = {'requireServerRelease': require_server_release} if 'requireServerRelease' in plan else {}
+    complete_release = plan.get('requireCompleteVenueRelease', False)
+    require(type(complete_release) is bool, 'Staged requireCompleteVenueRelease must be a boolean')
+    release_pin = plan.get('venueReleaseReportSha256')
+    require((complete_release and type(release_pin) is str and re.fullmatch(r'[0-9a-f]{64}', release_pin))
+            or (not complete_release and 'venueReleaseReportSha256' not in plan),
+            'Complete staged venue release verification requires a pinned original release report digest')
+    complete_release_policy = ({'requireCompleteVenueRelease': True, 'venueReleaseReportSha256': release_pin}
+                               if complete_release else {})
     requirements = {key: plan.get(key, False) for key in roster_options}
     require(all(type(value) is bool for value in requirements.values()), 'Staged tracked roster and concurrent fire options must be boolean')
     staged_roster = {'minimumConcurrentMilliseconds': minimum, **requirements} if any(requirements.values()) else None
@@ -3833,7 +3874,8 @@ def verify_venue_stages(plan_path, *, inspect=False):
                                                inspect_missing=inspect, inspect_roster_minimum=minimum if inspect else None,
                                                staged_roster=staged_roster, staged_link_criteria=link_criteria,
                                                expected_stage=expected_stage, staged=True, staged_quest_link_criteria=quest_link_criteria,
-                                               staged_require_server_release=require_server_release)
+                                               staged_require_server_release=require_server_release and not complete_release,
+                                               staged_release_sha256=release_pin)
             key = (report['mode'], report['players'])
             require(key in stage_keys, 'Staged venue evidence must cover each mode and seat count exactly once')
             require(report['declaredTopology'] == topology, 'Venue batch topology differs from the staged plan')
@@ -3870,6 +3912,9 @@ def verify_venue_stages(plan_path, *, inspect=False):
             continue
         except (VerifiedStartDigestMismatch, VenueReleaseEvidenceError) as error:
             reject(f'Venue manifest entry {index}: {error}', index, evidenceMismatch=error.evidence)
+            continue
+        except VenueReleaseIncomplete as error:
+            reject(f'Venue manifest entry {index}: {error}', index, venueReleaseCoverage=error.coverage)
             continue
         except EvidenceError as error:
             reject(f'Venue manifest entry {index}: {error}', index)
@@ -3924,14 +3969,14 @@ def verify_venue_stages(plan_path, *, inspect=False):
             status = 'conflict' if index in affected else 'verified'
             results.append({**entry, 'status': status, **entries[index]})
         return {'version': 1, 'scope': 'staged-venue-inspection', 'complete': not issues,
-                'planSha256': hashlib.sha256(raw_plan).hexdigest(), **link_policy, **server_release_policy,
+                'planSha256': hashlib.sha256(raw_plan).hexdigest(), **link_policy, **server_release_policy, **complete_release_policy,
                 'entries': results, 'issues': issues,
                 'missingStages': [{'mode': mode, 'players': players} for mode, players in stage_keys if (mode, players) not in stages]}
     results = [entries[stages[key][0]] for key in stage_keys]
     return {'version': 1, 'consistent': True, 'declaredTopology': topology,
             'planSha256': hashlib.sha256(raw_plan).hexdigest(), 'venueReleaseSha256': next(iter(releases)),
             'minimumConcurrentMilliseconds': minimum, 'requireDistinctRemoteRoster': distinct,
-            **link_policy, **server_release_policy,
+            **link_policy, **server_release_policy, **complete_release_policy,
             **({'requireVerifiedVenueStart': require_start} if 'requireVerifiedVenueStart' in plan else {}),
             **{key: requirements[key] for key in roster_options if key in plan}, 'stages': results,
             'serverAcknowledgements': sum(stage['serverAcknowledgements'] for stage in results),

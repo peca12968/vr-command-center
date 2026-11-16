@@ -21,6 +21,7 @@ def prepare(args, output):
         ('requireDistinctRemoteRoster', args.require_distinct_remote_roster),
         ('requireVerifiedVenueStart', args.require_verified_venue_start),
         ('requireServerRelease', args.require_server_release),
+        ('requireCompleteVenueRelease', args.require_complete_venue_release),
         ('requireTrackedRoster', args.require_tracked_roster),
         ('requireConcurrentFire', args.require_concurrent_fire),
     ):
@@ -60,6 +61,8 @@ def prepare(args, output):
             raise field.EvidenceError(f'Batch input {index}: unreadable manifest or release report') from None
 
     field.require(len(release_digests) == 1, 'Every staged venue batch must use the same original verified release report')
+    if args.require_complete_venue_release:
+        plan['venueReleaseReportSha256'] = next(iter(release_digests))
     plan['venueManifests'] = [manifest_tool.path_reference(batches[key], output.parent) for key in field.VENUE_STAGE_KEYS]
     plan['expectedStages'] = [{'mode': mode, 'players': players} for mode, players in field.VENUE_STAGE_KEYS]
     return plan
@@ -74,6 +77,8 @@ def main():
     parser.add_argument('--require-distinct-remote-roster', action='store_true')
     parser.add_argument('--require-verified-venue-start', action='store_true')
     parser.add_argument('--require-server-release', action='store_true', help='Require the original server release in all six batches')
+    parser.add_argument('--require-complete-venue-release', action='store_true',
+                        help='Pin one original venue release report and require its digest from the server and every seat')
     parser.add_argument('--require-tracked-roster', action='store_true')
     parser.add_argument('--require-concurrent-fire', action='store_true')
     parser.add_argument('--windows-minimum-replies', type=int)

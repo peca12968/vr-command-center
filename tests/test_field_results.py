@@ -974,6 +974,75 @@ class FieldResultsTests(unittest.TestCase):
             with self.assertRaisesRegex(field.EvidenceError, 'original release-bound terminal venue launch report'):
                 field.verify_venue_stages(plan_path)
 
+    def test_complete_staged_venue_release_pins_the_report_and_requires_every_seat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = [root / self.staged_batch(root / f'{players}-{mode}', mode, players // 5, index * 10000, index,
+                                              remote=True, quest_links=True, server_digest='a' * 64)
+                     for index, (mode, players) in enumerate(field.VENUE_STAGE_KEYS, 1)]
+            release_paths, windows_reports = [], []
+            for path in paths:
+                batch = json.loads(path.read_bytes())
+                release = path.parent / batch['venueReleaseReport']
+                release_paths.append(release)
+                stamp = hashlib.sha256(release.read_bytes()).hexdigest()
+                seats = [*batch.get('windowsPlayers', ()), *(seat for row in batch['sessions']
+                         for seat in row.get('players', ()) if 'logcatPid' not in seat)]
+                windows_reports.append([path.parent / seat['launcherReport'] for seat in seats])
+                for report in [*windows_reports[-1], path.with_name('deployment.json')]:
+                    value = json.loads(report.read_bytes())
+                    report.write_text(json.dumps(dict(value, venueReleaseReportSha256=stamp)), encoding='utf-8')
+
+            path = root / 'stages.json'
+            built = subprocess.run([sys.executable, str(SCRIPT.with_name('prepare-venue-stages.py')),
+                '--topology', 'direct-lan', '--minimum-concurrent-ms', '2000', '--require-complete-venue-release',
+                '--output', str(path), *map(str, reversed(paths))], capture_output=True, timeout=30)
+            self.assertEqual(0, built.returncode, built.stderr)
+            plan = json.loads(path.read_bytes())
+            release_hash = hashlib.sha256(release_paths[0].read_bytes()).hexdigest()
+            self.assertIs(plan['requireCompleteVenueRelease'], True)
+            self.assertEqual(release_hash, plan['venueReleaseReportSha256'])
+            command = [sys.executable, str(SCRIPT), '--venue-stages', str(path)]
+            result = json.loads(subprocess.check_output(command, timeout=30))
+            self.assertEqual(80, result['serverAcknowledgements'])
+            self.assertEqual(release_hash, result['venueReleaseSha256'])
+            self.assertEqual(18, sum(stage['serverRelease']['sessionsVerified'] for stage in result['stages']))
+            self.assertEqual(30, sum(stage['questRelease']['releaseReportSeatsVerified'] for stage in result['stages']))
+            self.assertEqual(50, sum(stage.get('windowsRelease', {}).get('releaseReportSeatsVerified', 0)
+                                     for stage in result['stages']))
+
+            affected = paths[2]
+            originals = {source: source.read_bytes() for source in (affected.with_name('venue-launcher.json'),
+                         windows_reports[2][0], affected.with_name('deployment.json'))}
+            for source, raw in originals.items():
+                value = json.loads(raw)
+                value.pop('venueReleaseReportSha256')
+                source.write_text(json.dumps(value), encoding='utf-8')
+            intake = subprocess.run([*command, '--inspect-venue-stages'], capture_output=True, timeout=30)
+            self.assertEqual(1, intake.returncode, intake.stderr)
+            [issue] = json.loads(intake.stdout)['issues']
+            self.assertEqual([3], issue['entries'])
+            self.assertEqual({'venueReleaseReportSha256': release_hash,
+                'server': {'expectedSessions': 5, 'verifiedSessions': 0, 'missingRoomGroups': [[room] for room in range(1, 6)]},
+                'windows': {'expectedSeats': 5, 'verifiedSeats': 4, 'missingSeats': [{'roomId': 1, 'seat': 1}]},
+                'quest': {'expectedSeats': 5, 'verifiedSeats': 0, 'missingSeats': [{'roomId': room, 'seat': 2} for room in range(1, 6)]},
+            }, issue['venueReleaseCoverage'])
+            refused = subprocess.run(command, capture_output=True, timeout=30)
+            self.assertEqual(1, refused.returncode)
+            self.assertIn(b'Original venue release report digest is missing', refused.stderr)
+            for source, raw in originals.items():
+                source.write_bytes(raw)
+
+            for release in release_paths:
+                release.write_bytes(release.read_bytes() + b'\n')
+            changed = field.verify_venue_stages(path, inspect=True)
+            self.assertEqual([[index] for index in range(1, 7)], [issue['entries'] for issue in changed['issues']])
+            self.assertTrue(all(issue['evidenceMismatch'] == {'kind': 'venueReleaseReport', 'name': 'release.json',
+                'status': 'venue-release-report-mismatch'} for issue in changed['issues']))
+            path.write_text(json.dumps({**plan, 'venueReleaseReportSha256': None}), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'requires a pinned original release report digest'):
+                field.verify_venue_stages(path, inspect=True)
+
     def test_staged_inspection_reports_missing_bad_and_reused_evidence_in_one_run(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
