@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 從全館收尾下載離場玩家個人戰績
+
+- 控制台 0.31.206 在原批次的「離場玩家戰績」提供「下載 CSV」。沿用原場次的個人報表，下載前核對檔名、場次、房間、玩家、管理與戰鬥封存序號及七項戰績數值。關閉明細會取消下載。 [操作方式](SESSION_CLOSURE.md#離場玩家戰績) · [畫面](../artifacts/console-departed-csv-031206-package/venue-departed-players.png)
+- 解壓管理包後，以其中的 API 和控制台完成 157 項 Chromium 場次檢查。獨立與合併的個人 CSV 均與原 API 回覆逐位元組相符，並從同批驗收 ZIP 核對各欄及原來源。合併場變造成績遭拒，關閉時原請求確實取消，重新開啟後可下載並從個人回放找到原事件。首輪測試在已驗證取消後重複中止攔截路由而退出，修正測試清理後以解壓包重跑通過。另有 825 項 HTTP、9 項 Node 及 7 項封裝檢查通過。 [Chromium 結果](../artifacts/console-departed-csv-031206-package/checks.json) · [完整測試紀錄](../artifacts/console-departed-csv-031206-package.log)
+- Windows 管理包 ZIP 含 568 項清單，53,379,423 位元組，SHA-256 `b4640ef6f982f14d9b5077a67c3491bf56e8234615636d6cc46bf60355455fde`。功能提交 `3d920c8` 已推送。GitHub Actions 因帳務或支出上限未啟動，工作步驟數為零。實機、跨機與廠商硬體另待驗收。 [Windows 管理包](../artifacts/windows-control-departed-csv-031206.zip) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43781372040/job/133019091075)
+
 ## 2026-11-16 Quest 五房開場的追蹤中斷與封存順序
 
 - 五房全追蹤開場遇到單一已登記席位中斷時，管理服務仍拒絕整批開場，現在會回報實際受影響的房間。舊管理包在合併場針對同一個中斷案例回報五房。封存若同時核對 Quest 追蹤回條與原受理開始的見證，取樣畫格必須等於或早於伺服器當時使用的畫格。獨立與合併的反例均能各自驗證回條和見證，但新版會拒絕把順序相反的兩者組成開場證據。 [操作與錯誤回覆](PLAYER_READINESS.md#五房追蹤驗收開場) · [封存核對](EXTERNAL_CLIENTS.md#核對-quest-開場追蹤回條)
