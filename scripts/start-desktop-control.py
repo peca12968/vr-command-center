@@ -156,7 +156,7 @@ def run(venue):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--player-exe', type=Path, default=Path(os.environ.get('VR_COMMAND_UNITY_PLAYER', ROOT / 'artifacts/desktop/VrCommand.exe')))
-    parser.add_argument('--api-dll', type=Path, default=Path(os.environ.get('VR_COMMAND_API_DLL', ROOT / 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
+    venue_module.add_api_arguments(parser)
     parser.add_argument('--duration', type=int, choices=range(60,1801), default=900, metavar='60..1800')
     parser.add_argument('--visible-room', type=int, choices=range(0,6), default=1)
     parser.add_argument('--job-workers', type=int, choices=range(1,17), default=2)

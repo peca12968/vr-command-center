@@ -6,9 +6,13 @@ def module(name,file):
     spec=importlib.util.spec_from_file_location(name,ROOT/'scripts'/file);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);return m
 checks=module('control_gui_checks','check-control-package.py');venue=module('control_gui_venue','start-desktop-venue.py')
 def main():
+    from windows_firewall import require_silent_windows_launch
+
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('package',type=Path);p.add_argument('--runtime-root',type=Path,required=True);args=p.parse_args()
     if os.name!='nt':p.error('Windows GUI evidence only')
-    folder=args.package.resolve();checks.package.verify(folder);exe=folder/'Start-Control.exe';out=ROOT/'artifacts/control-gui'/('run-'+uuid.uuid4().hex);out.mkdir(parents=True,exist_ok=False);runtime=args.runtime_root.resolve()/out.name;runtime.mkdir(parents=True,exist_ok=False);data=runtime/'instance'
+    folder=args.package.resolve();checks.package.verify(folder);exe=folder/'Start-Control.exe'
+    require_silent_windows_launch(folder / 'Runtime/VrCommand.Api.exe')
+    out=ROOT/'artifacts/control-gui'/('run-'+uuid.uuid4().hex);out.mkdir(parents=True,exist_ok=False);runtime=args.runtime_root.resolve()/out.name;runtime.mkdir(parents=True,exist_ok=False);data=runtime/'instance'
     def save(name,value):(out/name).write_text(json.dumps(value,indent=2)+'\n',encoding='utf-8')
     def stage(value,**extra):save('stage.json',{'stage':value,**extra});print(json.dumps({'stage':value,'directory':str(out),**extra}),flush=True)
     (ROOT/'artifacts/control-gui-latest-path.txt').write_text(str(out),encoding='utf-8')

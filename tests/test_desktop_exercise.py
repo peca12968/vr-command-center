@@ -1,6 +1,24 @@
-import copy,importlib.util,unittest
+import copy,importlib.util,io,sys,unittest
+from contextlib import redirect_stderr
 from pathlib import Path
+from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('desktop_exercise_checks',Path(__file__).resolve().parents[1]/'scripts/check-desktop-exercise.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+
+class ExerciseLaunchTests(unittest.TestCase):
+    def test_each_relay_mode_checks_python_before_creating_the_venue(self):
+        for flag in ('--udp-traffic', '--udp-periodic-loss'):
+            with (self.subTest(flag=flag),
+                  patch.object(sys, 'argv', ['exercise', '--runtime-root', 'unused', '--seconds', '40', flag]),
+                  patch.object(m.vm, 'verify_player', side_effect=RuntimeError('Firewall preflight blocked the relay')) as verify,
+                  patch.object(m, 'ExerciseVenue') as create_venue,
+                  redirect_stderr(io.StringIO()) as output):
+                with self.assertRaises(SystemExit) as stopped:
+                    m.main()
+                self.assertEqual(stopped.exception.code, 2)
+                self.assertIn('Firewall preflight blocked the relay', output.getvalue())
+                self.assertIs(verify.call_args.kwargs['python_listener'], True)
+                create_venue.assert_not_called()
+
 
 class ExerciseEvidenceTests(unittest.TestCase):
     def test_authority_summary_bounds_output_and_omits_unrecognized_message_text(self):

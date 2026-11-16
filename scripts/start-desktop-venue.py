@@ -96,13 +96,15 @@ def api_command(args):
     return [str(Path(dotnet).resolve(strict=True)), str(assembly)], ROOT, assembly
 
 
-def verify_player(args):
+def verify_player(args, *, python_listener=False):
     from windows_firewall import require_silent_windows_launch
 
     if os.name != 'nt' or not args.player_exe.is_file():
         raise RuntimeError('Build the Windows player first')
     api_command(args)
     require_silent_windows_launch(args.player_exe)
+    if python_listener:
+        require_silent_windows_launch(sys.executable)
     spec = importlib.util.spec_from_file_location('native_admission', ROOT / 'scripts/check-unity-admission.py')
     checker = importlib.util.module_from_spec(spec); spec.loader.exec_module(checker)
     receipt = json.loads((args.player_exe.parent / 'build-receipt.json').read_text())

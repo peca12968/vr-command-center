@@ -874,7 +874,11 @@ def main():
     if args.udp_periodic_loss:
         args.udp_traffic = True
     if args.udp_traffic and (args.endurance or args.seconds!=40):p.error('UDP traffic measurement requires the 40-second short exercise')
-    vm.verify_player(args);v=ExerciseVenue(args)
+    try:
+        vm.verify_player(args, python_listener=args.udp_traffic)
+    except (OSError, RuntimeError, ValueError) as error:
+        p.error(str(error))
+    v=ExerciseVenue(args)
     try:run(v)
     except BaseException as error:
         v.stage('failed',errorType=type(error).__name__);forensics=[]

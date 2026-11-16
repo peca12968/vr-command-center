@@ -65,7 +65,7 @@ def main():
     parser.add_argument('--api-dll', type=Path, default=Path(os.environ.get('VR_COMMAND_API_DLL', ROOT / 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
     parser.add_argument('--mode', choices=['combat-seal', 'statistics'], default='combat-seal')
     args = parser.parse_args(); args.duration = 120; args.job_workers = 2; args.visible_room = 0; args.check = True
-    vm.verify_player(args); tool = fingerprint(); venue = SealVenue(args, artifact_family='desktop-seal-faults'); report = None; closed = False
+    vm.verify_player(args, python_listener=True); tool = fingerprint(); venue = SealVenue(args, artifact_family='desktop-seal-faults'); report = None; closed = False
     try:
         venue.start()
         mission = venue.request('/api/missions', {'name': 'PC final result outage', 'briefing': 'No final data before exact seals and server confirmation', 'durationSeconds': 60,

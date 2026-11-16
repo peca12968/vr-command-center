@@ -59,7 +59,7 @@ def main():
     parser.add_argument('--api-dll', type=Path, default=Path(os.environ.get('VR_COMMAND_API_DLL', ROOT / 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
     parser.add_argument('--player-exe', type=Path, default=ROOT / 'artifacts/desktop/VrCommand.exe')
     args = parser.parse_args(); args.duration = 180; args.visible_room = 0; args.job_workers = 2; args.check = True
-    vm.verify_player(args); v = StartupVenue(args); report = None
+    vm.verify_player(args, python_listener=True); v = StartupVenue(args); report = None
     tool = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     try:
         v.start(); results = []

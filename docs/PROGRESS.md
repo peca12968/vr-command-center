@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 Windows 無人值守啟動及五房丟包驗證
+
+- 桌面 UDP 轉送和 HTTP 故障測試在建立場次前查核 Python 的實際執行檔。伺服器套件和 GUI 驗證也核對啟動器、遊戲和管理程式。練習模式及操作員工具可直接選用已通過查核的管理包。實測新遊戲路徑在建立場次前回傳 2，未啟動程序。`start-local.ps1` 實測建置成功，啟動前回傳 2，未開啟監聽埠或寫入憑證檔。 [啟動驗證](../artifacts/firewall-guard-a48464df/validation.json)
+- Windows 0.50.11 和管理包 0.31.184 在同一台電腦完成合併及獨立各 25 席。兩輪各交付 50 份戰績及六份 CSV，活動場次及殘留程序均為零。每 20 個封包丟一個的測試通過 24 項檢查及 4,003 格回放，往返探測收到 1,339／1,500 次回覆。零注入對照通過 22 項及 3,966 格回放，收到 1,500／1,500 次回覆。兩輪 C 槽原件與 F 槽快照各 224 檔雜湊相符。 [測試方式](DESKTOP_EXERCISE.md#五房-udp-丟包驗證) · [原始丟包紀錄](../artifacts/native-05011-periodic-loss-07d9cf19.log) · [對照紀錄](../artifacts/native-05011-no-loss-ea5c0b5f.log)
+- 完整管理包測試要求控制台 0.31.206。首輪選用 0.31.184，停在控制台版本斷言並正常清理。版本檢查移到啟動前，原包重試已提前拒絕。新版管理介面與 GUI 留待實際路徑通過啟動前查核。 [首輪紀錄](../artifacts/firewall-guard-a48464df/control-package-check.log) · [啟動前拒絕](../artifacts/firewall-guard-a48464df/control-version-refused.log)
+
 ## 2026-11-16 Windows 0.50.11 五房完整戰績核對
 
 - 同一組已通過防火牆查核的 Windows 0.50.11 遊戲和 0.31.184 管理包，使用 `--marksmanship --incoming-fire --incoming-environment --check-frame-review --check-policy-frames` 完成合併與獨立各 25 席的同機操作。實際管理 PID 只監聽迴環位址，管理包 567 檔在場後重查通過。 [操作方式](DESKTOP_EXERCISE.md#同場驗證玩家射擊與敵軍傷害) · [監聽證據](../artifacts/desktop-exercise/20261116-101307-6338207f/actual-api-listeners.json)

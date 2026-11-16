@@ -5,11 +5,13 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
 import threading
 import time
 from types import SimpleNamespace
 import unittest
+from unittest.mock import call, patch
 
 ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('artifact_venue',ROOT/'scripts/start-desktop-venue.py')
@@ -32,6 +34,25 @@ class ArtifactTests(unittest.TestCase):
                 venue.api_command(args)
             dll.touch()
             self.assertEqual(([str(exe)], root, dll), venue.api_command(args))
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows launch preflight')
+    def test_blocked_relay_checks_the_actual_python_process_and_stops_validation(self):
+        firewall_spec = importlib.util.spec_from_file_location('windows_firewall', ROOT / 'scripts/windows_firewall.py')
+        windows_firewall = importlib.util.module_from_spec(firewall_spec)
+        firewall_spec.loader.exec_module(windows_firewall)
+
+        def check(program):
+            if program == sys.executable:
+                raise windows_firewall.WindowsFirewallLaunchError('Blocked relay')
+
+        args = SimpleNamespace(player_exe=Path(sys.executable))
+        with (patch.dict(sys.modules, windows_firewall=windows_firewall),
+              patch.object(venue, 'api_command'), patch.object(venue.subprocess, 'run') as run,
+              patch.object(windows_firewall, 'require_silent_windows_launch', side_effect=check) as verify):
+            with self.assertRaisesRegex(windows_firewall.WindowsFirewallLaunchError, 'Blocked relay'):
+                venue.verify_player(args, python_listener=True)
+            self.assertEqual(verify.call_args_list, [call(args.player_exe), call(sys.executable)])
+            run.assert_not_called()
 
     def test_concurrent_reader_sees_only_complete_json_and_no_temporary_files_remain(self):
         with self.directory() as temporary:

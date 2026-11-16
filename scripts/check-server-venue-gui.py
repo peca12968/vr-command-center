@@ -80,7 +80,9 @@ def main():
     executable = (folder / 'Runtime/VrCommand.exe').resolve(strict=True)
     if manifest['launcherSourceSha256'] != gui_check.package.digest(ROOT / 'tools/WindowsServerLauncher/ServerLauncher.cs'):
         raise RuntimeError('Launcher package does not match the repository source')
+    require_silent_windows_launch(folder / 'Launch-Server.exe')
     require_silent_windows_launch(executable)
+    require_silent_windows_launch(args.control_package / 'Runtime/VrCommand.Api.exe')
     out = ROOT / 'artifacts/server-venue-gui' / ('run-' + uuid.uuid4().hex)
     out.mkdir(parents=True)
     runtime = args.runtime_root.resolve() / out.name

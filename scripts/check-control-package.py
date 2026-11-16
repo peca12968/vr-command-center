@@ -1,5 +1,5 @@
 """Verify the actual compiled portable control launcher / self-contained API against fresh owned data."""
-import argparse,ctypes,hashlib,importlib.util,json,os,secrets,shutil,socket,subprocess,time,urllib.error,urllib.request,uuid
+import argparse,ctypes,hashlib,importlib.util,json,os,secrets,shutil,socket,subprocess,sys,time,urllib.error,urllib.request,uuid
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 def module(name,file):
@@ -31,9 +31,16 @@ class ChildWitness:
     def close(self):
         if self.handle:self.kernel.CloseHandle(self.handle);self.handle=None
 def main():
+    from windows_firewall import require_silent_windows_launch
+
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('package',type=Path);parser.add_argument('--runtime-root',type=Path,required=True);args=parser.parse_args()
     if os.name!='nt':parser.error('Run the actual Windows launcher on Windows')
     folder=args.package.resolve();manifest=package.verify(folder);exe=folder/'Start-Control.exe';assert manifest['launcherSourceSha256']==sha(ROOT/'tools/WindowsControlLauncher/ControlLauncher.cs')
+    expected_console = '0.31.206'
+    if manifest.get('consoleVersion') != expected_console:
+        parser.error(f'This check requires console {expected_console}. The selected package has {manifest.get("consoleVersion")}.')
+    require_silent_windows_launch(folder / 'Runtime/VrCommand.Api.exe')
+    require_silent_windows_launch(sys.executable)
     out=ROOT/'artifacts/control-package-checks'/('run-'+uuid.uuid4().hex);out.mkdir(parents=True,exist_ok=False);runtime=args.runtime_root.resolve()/out.name;runtime.mkdir(parents=True,exist_ok=False)
     print(json.dumps({'stage':'starting','directory':str(out)}),flush=True)
     checks=[];runs=[];all_secrets=[];records=[];cleanup_errors=[]
@@ -86,7 +93,7 @@ def main():
         for name,value in [('duration-low','0'),('duration-high','3601'),('duration-bool','true')]:call(name,['--run',data,'--seconds',value,'--ready-report',out/(name+'-ready.json')],False)
         alias=out/'alias-report.json';call('report-alias',['--run',data,'--seconds','1','--ready-report',str(alias).upper()],False,report=alias)
         entry=start(data,'first');check(request(entry,keys,'/')['version']=='0.31.0','actual portable API version');request(entry,keys,'/api/rooms',role=None,expected=401);check(True,'anonymous management requests rejected')
-        html,headers=request(entry,keys,'/console/',role=None);check(manifest.get('consoleVersion')=='0.31.206' and 'v0.31.206' in html and "script-src 'self'" in headers['Content-Security-Policy'],'published current console served with original CSP and explicit UI version')
+        html,headers=request(entry,keys,'/console/',role=None);check(f'v{expected_console}' in html and "script-src 'self'" in headers['Content-Security-Policy'],'published current console served with original CSP and explicit UI version')
         for role in package_roles:check(request(entry,keys,'/api/me',role=role)['role']==('RoomController' if role.startswith('Room') else role),'actual isolated role identity: '+role)
         markers = [{'room': {'x': x, 'z': z}, 'tracking': {'x': -z - 3, 'z': x - 1}} for x, z in [(-2, -2), (2, -2), (-2, 2)]]
         alignment_input = {'roomId': 5, 'markers': markers}

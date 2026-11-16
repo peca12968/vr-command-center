@@ -316,7 +316,7 @@ def main():
     five_room = args.five_room_isolation or args.five_room_linked
     if five_room and (not args.delay_management or args.seconds != 60):
         parser.error('Five-room modes require --delay-management --seconds 60')
-    vm.verify_player(args); original_fingerprint = fingerprint(); venue = FaultVenue(args, artifact_family='desktop-clock-faults')
+    vm.verify_player(args, python_listener=True); original_fingerprint = fingerprint(); venue = FaultVenue(args, artifact_family='desktop-clock-faults')
     report = None; proxy_closed = False
     try:
         venue.start()

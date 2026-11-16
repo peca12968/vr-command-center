@@ -4,7 +4,7 @@
 
 `check-desktop-exercise.py` 和 `start-desktop-venue.py` 支援 `--api-exe`，可直接選擇解壓後管理包的 `Runtime/VrCommand.Api.exe`。執行檔與同目錄的 `VrCommand.Api.dll` 保留在原包。`--api-dll` 也可用來指定交給 `dotnet` 的 API 組件。兩者擇一。
 
-管理程式及 Windows 遊戲啟動前各自核對實際執行檔的防火牆設定。測試使用新資料目錄、原套件執行環境及 `127.0.0.1`。`api-runtime.json` 保存管理執行檔路徑、組件 SHA-256、版本、程序識別和繫結位址。 [無人值守測試](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
+管理程式及 Windows 遊戲啟動前各自核對實際執行檔的防火牆設定。使用 UDP 轉送時，也會在建立測試場次前查核 `python.exe`。測試使用新資料目錄、原套件執行環境及 `127.0.0.1`。`api-runtime.json` 保存管理執行檔路徑、組件 SHA-256、版本、程序識別和繫結位址。 [無人值守測試](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
 
 ```powershell
 python scripts/check-desktop-exercise.py --api-exe <管理包-Runtime-VrCommand.Api.exe> `

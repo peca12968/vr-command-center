@@ -151,7 +151,7 @@ def main():
         args.player_exe = args.player_package / 'VrCommand.exe'
         spec = spec_from_file_location('race_control_check', ROOT/'scripts/check-control-package.py')
         control = module_from_spec(spec); spec.loader.exec_module(control)
-    vm.verify_player(args); fingerprint=tool_fingerprint(); gate = None; report = None
+    vm.verify_player(args, python_listener=True); fingerprint=tool_fingerprint(); gate = None; report = None
     v = PackagedRaceVenue(args, control.ChildWitness) if args.player_package else vm.Venue(args, artifact_family='desktop-end-race')
     try:
         v.start()

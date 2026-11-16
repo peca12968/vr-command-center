@@ -452,6 +452,7 @@ def main():
             if (release.get('verified') is not True or release.get('scope')!='offline-package-consistency'
                     or release.get('windows',{}).get('playerManifestSha256')!=windows_release_hash):
                 p.error('Release report must identify this original Windows player package')
+    require_silent_windows_launch(folder / 'Launch-Server.exe')
     require_silent_windows_launch(folder / 'Runtime/VrCommand.exe')
     if player_folder:
         require_silent_windows_launch(player_folder / 'VrCommand.exe')
@@ -467,7 +468,10 @@ def main():
         expected={'api_version':'1.0','name':'Unity Mock Runtime','library_path':r'.\windows\x64\mock_runtime.dll'}
         if not openxr_mock.is_file() or read(openxr_mock).get('runtime')!=expected or not runtime_file.is_file():
             p.error('The pinned Unity OpenXR package does not contain the expected Windows mock runtime')
-    control.package.verify(args.control_package);out=ROOT/'artifacts/server-package-checks'/('run-'+uuid.uuid4().hex);out.mkdir(parents=True,exist_ok=False);runtime=args.runtime_root.resolve()/out.name;runtime.mkdir(parents=True,exist_ok=False)
+    control.package.verify(args.control_package)
+    require_silent_windows_launch(args.control_package / 'Runtime/VrCommand.Api.exe')
+    require_silent_windows_launch(sys.executable)
+    out=ROOT/'artifacts/server-package-checks'/('run-'+uuid.uuid4().hex);out.mkdir(parents=True,exist_ok=False);runtime=args.runtime_root.resolve()/out.name;runtime.mkdir(parents=True,exist_ok=False)
     (ROOT/'artifacts/server-package-checks-latest-path.txt').write_text(str(out),encoding='utf-8');print(json.dumps({'stage':'starting','directory':str(out)}),flush=True)
     env=dict(os.environ);env.update(PATH=str(Path(os.environ['WINDIR'])/'System32'),DOTNET_ROOT=str(runtime/'absent-dotnet'),DOTNET_MULTILEVEL_LOOKUP='0');exe=folder/'Launch-Server.exe';control_exe=args.control_package.resolve()/'Start-Control.exe';data=runtime/'control';checks=[];runners=[];clients=[];cleanup=[];witnesses=[];api=None;api_witness=None;keys=None;sessions=[];rounds=[];observer=None;observer_log=None;observer_out=out/'closure-ui';observer_stop=out/'closure-ui-stop.request';observer_entry=None
     receipt_gates=[]
@@ -482,6 +486,7 @@ def main():
         if hardware_manifest['mode']!='OfflineAndLiveSimulation':p.error('Use a live hardware simulator package')
         dotnet=shutil.which('dotnet')
         if not dotnet:p.error('The hardware simulator requires .NET 10')
+        require_silent_windows_launch(dotnet)
         mock_env={key:value for key,value in os.environ.items() if not key.lower().startswith('operatorkeys__') and key.lower() not in
             ('operatorkeyfile','playerticketsigningkey','controlpipetoken','vr_command_room_key')}
     def save(name,value):(out/name).write_text(json.dumps(value,indent=2)+'\n',encoding='utf-8')
