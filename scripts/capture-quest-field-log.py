@@ -149,6 +149,18 @@ def check_device_identity(adb, expected, timeout):
                   'Quest device identity differs from the original deployment')
 
 
+def publish_capture_file(staged, output):
+    """Expose a closed capture file atomically and preserve an existing destination."""
+    try:
+        if os.name == 'nt':
+            staged.rename(output)  # Windows rename refuses an existing destination.
+            return
+        os.link(staged, output)
+    except FileExistsError:
+        raise field.EvidenceError('Capture output already exists; the staged file was preserved') from None
+    staged.unlink()
+
+
 async def capture(adb, port, admission, output, seconds, on_ready=report_capture_status, *,
                   device_identity=None, openxr=None, on_final=None, on_disconnected=None):
     partial = output.with_name(output.name + '.partial')
@@ -176,16 +188,7 @@ async def capture(adb, port, admission, output, seconds, on_ready=report_capture
             await asyncio.wait_for(child.communicate(), 5)
         if device_identity is not None:
             await asyncio.to_thread(check_device_identity, adb, device_identity, deadline - time.monotonic())
-        log.seek(0)
-        with output.open('xb') as ready:
-            try:
-                shutil.copyfileobj(log, ready)
-                ready.flush()
-            except OSError:
-                ready.close()
-                output.unlink()
-                raise
-    partial.unlink()
+    publish_capture_file(partial, output)
     return report
 
 
@@ -351,9 +354,12 @@ async def capture_venue(adb, plan, directory, seconds):
     summary['captureBinding'] = binding
     if 'deploymentSha256' in plan:
         summary['deploymentSha256'] = plan['deploymentSha256']
-    with (directory / 'capture-report.json').open('x', encoding='utf-8') as report:
+    report_path = directory / 'capture-report.json'
+    staged_report = report_path.with_suffix('.json.partial')
+    with staged_report.open('x', encoding='utf-8') as report:
         json.dump(dict(summary, seats=seats), report, indent=2)
         report.write('\n')
+    publish_capture_file(staged_report, report_path)
     return summary
 
 

@@ -618,6 +618,63 @@ if settings.get('keepRunning', True):
                 self.capture()
         self.assertFalse(self.output.exists())
 
+    def test_capture_never_opens_final_log_for_incremental_writing(self):
+        raw = quest_logcat(self.player_log).encode('utf-8')
+        self.prepare(raw)
+        open_path = Path.open
+        final_writes = []
+
+        def observe(path, mode='r', *args, **kwargs):
+            handle = open_path(path, mode, *args, **kwargs)
+            if path == self.output and any(flag in mode for flag in 'wx+a'):
+                final_writes.append(path.stat().st_size)
+            return handle
+
+        with patch.object(Path, 'open', observe):
+            self.assertTrue(self.capture()['complete'])
+        self.assertEqual([], final_writes, 'A consumer could see an incomplete file at the final path')
+        self.assertEqual(raw, self.output.read_bytes())
+        self.assertFalse(self.partial.exists())
+
+    def test_capture_preserves_competing_final_filename_and_complete_partial(self):
+        raw = quest_logcat(self.player_log).encode('utf-8')
+        self.prepare(raw)
+        port, admission = capture_tool.read_connection(self.original)
+
+        def already_published(_pid):
+            with self.output.open('xb') as existing:
+                existing.write(b'published by another writer')
+
+        with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'output already exists'):
+            asyncio.run(capture_tool.capture(self.adb, port, admission, self.output, 10, already_published))
+        self.assertEqual(b'published by another writer', self.output.read_bytes())
+        self.assertEqual(raw, self.partial.read_bytes())
+
+    def test_capture_venue_never_opens_final_report_for_incremental_writing(self):
+        raw = quest_logcat(self.player_log).encode('utf-8')
+        self.prepare(raw)
+        port, admission = capture_tool.read_connection(self.original)
+        directory = self.root / 'venue'
+        report_path = directory / 'capture-report.json'
+        plan = {'topology': 'Linked', 'venueSha256': 'a' * 64,
+                'seats': [dict(admission, seat=1, port=port, serial='fixture-device')]}
+        open_path = Path.open
+        final_writes = []
+
+        def observe(path, mode='r', *args, **kwargs):
+            handle = open_path(path, mode, *args, **kwargs)
+            if path == report_path and any(flag in mode for flag in 'wx+a'):
+                final_writes.append(path.stat().st_size)
+            return handle
+
+        with (patch.object(Path, 'open', observe), patch.object(capture_tool, 'read_adb_transports'),
+              patch.object(capture_tool, 'select_adb_transport', return_value=self.adb)):
+            summary = asyncio.run(capture_tool.capture_venue(self.adb, plan, directory, 10))
+        self.assertTrue(summary['complete'])
+        self.assertEqual([], final_writes, 'A consumer could see an incomplete report at the final path')
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), json.loads(report_path.read_bytes())['seats'][0]['sha256'])
+        self.assertFalse(list(directory.glob('*.partial')))
+
     def test_capture_cli_rejects_bad_ticket_without_echoing_private_inputs(self):
         self.original.write_text(json.dumps({'role': 'Client', 'port': 7777, 'joinTicket': 'private-test-ticket'}))
         run = subprocess.run([sys.executable, str(capture_spec.origin), '--adb', sys.executable, '--serial', 'fixture-device',

@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-17 Quest 擷取完成後一次發布日誌及總報告
+
+- 單席正式日誌與五房總報告都在暫存檔關閉後一次發布。舊版建立正式日誌時測得檔案大小為零。新版直接發布已核對的日誌，同名正式檔若在擷取期間出現，會保留原檔與本輪暫存。16 項單席及報告擷取專項通過。 [操作方式](QUEST3.md#收集-quest-場館驗收日誌) · [舊版反例](../artifacts/quest-capture-publish-20261117/before.log) · [擷取回歸](../artifacts/quest-capture-publish-20261117/capture-final.log)
+- 實際 Windows SDK ADB 用戶端連上同機模擬裝置，合併及獨立各擷取 25 席，在 F 槽逐份核對原位元組與 SHA-256。另一次三席排演刻意產生同名檔案，該席保留兩份檔案並在完整總報告中列為未完成，另外兩席通過。Windows 此時仍只偵測到 Quest 3 的檔案傳輸介面。 [ADB 回讀](../artifacts/quest-capture-publish-20261117/native-adb-readback.json) · [USB 快照](../artifacts/quest-capture-publish-20261117/usb-status.json)
+
 ## 2026-11-17 玩家分房回放核對實際座標
 
 - 管理台 0.31.221 的網頁及離線播放器會核對分房片段中場景物件與射線起點的座標。這兩項使用本房觀戰原有的單精度邊界。用同一份片段修改座標後，舊版能開啟兩份錯房檔，新版在顯示前分別指出錯房的物件或射線。原全場格式及射線的原方向、距離保持相容。 [播放器操作](WORLD_RECORDING.md#讓玩家開啟回放) · [舊版單元反例](../artifacts/player-replay-room-031221/model-before.log) · [離線瀏覽器驗證](../artifacts/player-replay-room-031221/chromium-offline.json)
