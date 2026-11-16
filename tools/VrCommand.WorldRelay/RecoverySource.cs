@@ -4,7 +4,7 @@ using VrCommand.Simulation;
 
 internal sealed class RecoveryRejected(string reason) : Exception(reason);
 
-internal sealed record RecoverySource(Guid SessionId, string Origin, Uri Api, string Key, string Directory)
+internal sealed record RecoverySource(Guid SessionId, string Origin, Uri Api, string Key, string Directory, string CertificatePin)
 {
     internal static RecoverySource Read(string configPath)
     {
@@ -25,7 +25,16 @@ internal sealed record RecoverySource(Guid SessionId, string Origin, Uri Api, st
             || config.GetProperty("telemetryOrigin").GetString() is not ("Simulation" or "GameServer")
             || config.GetProperty("telemetryDirectory").GetString() is not { } directory || !Path.IsPathFullyQualified(directory))
             throw new RecoveryRejected("invalid-server-config");
-        return new(id, config.GetProperty("telemetryOrigin").GetString()!, api, key, directory);
+
+        var pin = "";
+        if (config.TryGetProperty("managementCertificateSha256", out var value) && value.ValueKind != JsonValueKind.Null)
+        {
+            if (value.ValueKind != JsonValueKind.String) throw new RecoveryRejected("invalid-management-certificate-pin");
+            pin = value.GetString()!;
+        }
+        if (api.Scheme == "https" ? !ManagementCertificatePin.IsValid(pin) : pin != "")
+            throw new RecoveryRejected("invalid-management-certificate-pin");
+        return new(id, config.GetProperty("telemetryOrigin").GetString()!, api, key, directory, pin);
     }
 
     internal FileStream OpenOriginal(string suffix) =>

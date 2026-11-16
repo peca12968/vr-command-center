@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Net.Security;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -79,14 +80,15 @@ async Task Deliver(HttpClient client, TelemetryOutbox queue, int missionClockVer
         queue.MarkSealed();
     }
 }
-async Task PublishBinary(HttpClient client, TelemetryOutbox combat, WorldOutbox saved, WorldRecordingHeader header)
+async Task PublishBinary(HttpClient client, TelemetryOutbox combat, WorldOutbox saved, WorldRecordingHeader header, string certificatePin = "")
 {
     var session = await client.GetFromJsonAsync<SessionView>("/api/sessions/" + combat.SessionId.ToString("D"), JsonFormat.Options);
     if (session?.Id != combat.SessionId || session.CombatStream is { } source
         && (source.StreamId != combat.StreamId || source.Origin.ToString() != combat.Origin))
         throw new InvalidDataException("Server stream identity mismatch.");
     await Deliver(client, combat, header.missionClockVersion, session.CombatStream?.RoomEnemyPolicyVersion ?? 0, session.CombatStream);
-    using var publisher = new WorldPublisher(saved, codec, new WorldWebSocket(client.BaseAddress!.ToString(), combat.SessionId, client.DefaultRequestHeaders.Authorization!.Parameter!));
+    using var publisher = new WorldPublisher(saved, codec, new WorldWebSocket(client.BaseAddress!.ToString(),
+        combat.SessionId, client.DefaultRequestHeaders.Authorization!.Parameter!, certificatePin));
     while (saved.Pending != null || (saved.Complete && !saved.Sealed))
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -114,7 +116,15 @@ async Task RecoverServer(string configPath, string directory)
     var header = world.Header;
     source.CheckJournals(combat, world, header);
 
-    using var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+    var handler = new HttpClientHandler { AllowAutoRedirect = false };
+    if (source.CertificatePin.Length != 0)
+    {
+        handler.UseProxy = false;
+        handler.ServerCertificateCustomValidationCallback = (_, certificate, _, errors) =>
+            certificate is not null && (errors & ~SslPolicyErrors.RemoteCertificateChainErrors) == SslPolicyErrors.None
+            && ManagementCertificatePin.Matches(certificate.RawData, source.CertificatePin);
+    }
+    using var client = new HttpClient(handler)
     {
         BaseAddress = source.Api, Timeout = TimeSpan.FromSeconds(10), MaxResponseContentBufferSize = 2 * 1024 * 1024
     };
@@ -143,7 +153,7 @@ async Task RecoverServer(string configPath, string directory)
         || (accepted.complete && (!world.Complete || accepted.acceptedSequence != world.LastSequence)) || (world.Sealed && !accepted.complete))
         throw new RecoveryRejected("management-world-boundary-mismatch");
 
-    await PublishBinary(client, combat, world, header);
+    await PublishBinary(client, combat, world, header, source.CertificatePin);
     if (world.AcknowledgedSequence != world.LastSequence || world.Sealed != world.Complete
         || combat.AcknowledgedSequence != combat.LastSequence || combat.Sealed != combat.Complete)
         throw new RecoveryRejected("source-delivery-incomplete");

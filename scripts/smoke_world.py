@@ -1,6 +1,7 @@
 """Real WebSocket publisher, authenticated SSE observation and SQLite restart checks."""
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 import csv
 from decimal import Decimal
 import io
@@ -11,6 +12,7 @@ import secrets
 import sqlite3
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from types import SimpleNamespace
@@ -19,13 +21,15 @@ import urllib.error
 import urllib.request
 
 from world_test_socket import WebSocket
-from local_api import checked_api_command
+from local_api import api_command as resolve_api_command, checked_api_command
 from windows_firewall import WindowsFirewallLaunchError
 
 ROOT = Path(__file__).resolve().parents[1]
 api_exe = os.environ.get("VR_COMMAND_API_EXE")
+use_ipc = os.name == "nt" and os.environ.get("VR_COMMAND_WORLD_TEST_WINDOWS_IPC") == "1"
 try:
-    api_command, api_cwd, _ = checked_api_command(SimpleNamespace(api_exe=Path(api_exe) if api_exe else None))
+    resolve_api = resolve_api_command if use_ipc else checked_api_command
+    api_command, api_cwd, _ = resolve_api(SimpleNamespace(api_exe=Path(api_exe) if api_exe else None))
 except WindowsFirewallLaunchError as error:
     raise SystemExit(str(error)) from None
 RELAY = os.environ.get("VR_COMMAND_WORLD_RELAY_DLL", str(ROOT / "tools/VrCommand.WorldRelay/bin/Release/net10.0/VrCommand.WorldRelay.dll"))
@@ -41,16 +45,26 @@ def check(condition, message):
     print(f"PASS {count}: {message}")
 
 
-with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
+with tempfile.TemporaryDirectory(prefix="vr-world-") as directory, ExitStack() as listeners:
     directory = Path(directory)
     tokens = {role: secrets.token_hex(32) for role in ("Master", "Room1", "Room5", "GameServer")}
     keys = directory / "keys.json"
     keys.write_text(json.dumps({"OperatorKeys": tokens}), encoding="utf-8")
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
+    if use_ipc:
+        from windows_ipc_api import LoopbackIpcRelay, unix_address
+
+        ipc_endpoint = directory / "api.sock"
+        ipc_relay = LoopbackIpcRelay(unix_address(ipc_endpoint), sys.executable)
+        listeners.callback(ipc_relay.close)
+        port = ipc_relay.server_address[1]
+    else:
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
     base = f"http://127.0.0.1:{port}"
-    environment = {key: value for key, value in os.environ.items() if not key.lower().startswith("operatorkeys__") and key.lower() not in ("operatorkeyfile", "playerticketsigningkey")}
+    environment = {key: value for key, value in os.environ.items()
+                   if not key.lower().startswith(("operatorkeys__", "kestrel__", "vr_command_managed_tls_"))
+                   and key.lower() not in ("operatorkeyfile", "playerticketsigningkey")}
     environment.update({"DataDirectory": str(directory / "missions"), "SessionDataDirectory": str(directory / "sessions"), "OperatorKeyFile": str(keys), "Logging__LogLevel__Default": "Warning"})
     log = open(directory / "api.log", "wb")
     process = None
@@ -77,16 +91,36 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
             return json.load(response)
 
     def start():
-        process = subprocess.Popen([*api_command, "--urls", base], cwd=api_cwd, env=environment, stdout=log, stderr=log)
-        for _ in range(150):
-            try:
-                with urllib.request.urlopen(base + "/health", timeout=.5):
-                    return process
-            except (OSError, urllib.error.URLError):
-                if process.poll() is not None:
-                    raise AssertionError("Isolated world API exited before health")
-                time.sleep(.1)
-        raise AssertionError("Isolated world API startup timed out")
+        launch = [*api_command, "--urls", base]
+        if use_ipc:
+            ipc_endpoint.unlink(missing_ok=True)
+            launch = [*api_command, "--urls", "http://unix:/" + str(ipc_endpoint), "--preferHostingUrls", "true"]
+        flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        child = subprocess.Popen(launch, cwd=api_cwd, env=environment, stdout=log, stderr=log, creationflags=flags)
+        try:
+            for _ in range(150):
+                try:
+                    with urllib.request.urlopen(base + "/health", timeout=.5):
+                        break
+                except OSError:
+                    if child.poll() is not None:
+                        raise AssertionError("Isolated world API exited before health")
+                    time.sleep(.1)
+            else:
+                raise AssertionError("Isolated world API startup timed out")
+            if use_ipc:
+                inspect = (f"@(Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object OwningProcess -EQ {child.pid}).Count; "
+                           f"@(Get-NetUDPEndpoint -ErrorAction Stop | Where-Object OwningProcess -EQ {child.pid}).Count")
+                owned = subprocess.check_output(["pwsh", "-NoProfile", "-NonInteractive", "-Command", inspect],
+                                                text=True, timeout=15, creationflags=flags)
+                if owned.split() != ["0", "0"]:
+                    raise AssertionError("The isolated IPC API must have zero TCP listeners and zero UDP endpoints")
+            return child
+        except BaseException:
+            if child.poll() is None:
+                child.terminate()
+                child.wait(timeout=10)
+            raise
 
     def event(response):
         kind, data = "", ""
@@ -793,6 +827,15 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
             return work, result
 
         old_session = request(shared_route.rsplit("/", 1)[0])
+        for label, config in (
+            ("http-with-pin", {**recovery_draft, "managementCertificateSha256": "a" * 64}),
+            ("https-without-pin", {**recovery_draft, "managementApiUrl": base.replace("http:", "https:", 1)}),
+            ("https-invalid-pin", {**recovery_draft, "managementApiUrl": base.replace("http:", "https:", 1),
+                                   "managementCertificateSha256": "A" * 64}),
+        ):
+            work, bad_pin = recover(label, config)
+            check(bad_pin.returncode == 1 and json.loads(bad_pin.stderr)["reason"] == "invalid-management-certificate-pin"
+                  and not work.exists(), "Operational recovery rejects " + label + " before staging journals")
         work, denied = recover("wrong-role", {**recovery_draft, "gameServerKey": tokens["Master"]})
         check(denied.returncode == 1 and json.loads(denied.stderr)["reason"] == "require-original-game-server-role"
               and not (work / "recovery.json").exists() and request(shared_route.rsplit("/", 1)[0]) == old_session,

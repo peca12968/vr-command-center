@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 錄製補送沿用原管理 HTTPS 指紋
+
+- Windows 補送工具 0.1.1 從原伺服器設定讀取憑證指紋，HTTPS 戰鬥補送與 WSS 世界回放都核對原憑證。0.1.0 在本機私有測試憑證下無法連線。新版拒絕錯誤指紋、錯誤主機名稱、缺少指紋及 HTTP 帶有指紋，五種情況的管理錄製均維持原第 23 格。正確設定補回原第 24 格並完成雙封存，重送仍停在原第 24 格。 [HTTPS 與 WSS 驗證](../artifacts/recording-recovery-https-011/https-readback.json) · [操作方式](WINDOWS_SERVER_PACKAGE.md#遊戲程序退出後補送錄製)
+- 使用原 Windows 合併與獨立錄製的封存副本，核對六個場次的 1,364 格、50 份名冊及戰績和原確認回條。工作副本恢復的兩類日誌與各自原檔位元組相同，22 個原檔雜湊相同。Windows 補送包解壓查核 4 個檔案。 [兩種拓撲複驗](../artifacts/recording-recovery-https-011/https-and-archives-readback.json) · [補送工具](../artifacts/recording-recovery-https-011/Windows-Recording-Recovery-0.1.1.zip)
+- .NET 建置零警告零錯誤，1,115 項領域與 141 項串流回歸通過。串流複驗用同源管理 API、Windows 本機 IPC 和解壓補送工具。首輪較舊管理包停在事件搜尋斷言，首輪 IPC 在重啟時遇到測試變數名稱重複，兩份紀錄保留。Quest USB 偵錯介面仍為零。 [領域測試](../artifacts/recording-recovery-https-011/core.log) · [串流回歸](../artifacts/recording-recovery-https-011/smoke-world-ipc-final.log) · [USB 快照](../artifacts/recording-recovery-https-011/usb-status.json)
+
 ## 2026-11-17 Quest 擷取完成後一次發布日誌及總報告
 
 - 單席正式日誌與五房總報告都在暫存檔關閉後一次發布。舊版建立正式日誌時測得檔案大小為零。新版直接發布已核對的日誌，同名正式檔若在擷取期間出現，會保留原檔與本輪暫存。16 項單席及報告擷取專項通過。 [操作方式](QUEST3.md#收集-quest-場館驗收日誌) · [舊版反例](../artifacts/quest-capture-publish-20261117/before.log) · [擷取回歸](../artifacts/quest-capture-publish-20261117/capture-final.log)

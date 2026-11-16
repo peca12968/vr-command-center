@@ -283,7 +283,7 @@ python .\scripts\check-packaged-management-restart.py `
 
 ## 遊戲程序退出後補送錄製
 
-Windows 錄製補送工具 0.1.0 使用原遊戲伺服器工作資料夾中的 `server-config.json`，以及設定指向的 `telemetry` 下同一場次的 `.journal` 與 `.worldlog`。遊戲程序退出後，先在原管理實例結束該場次並釋放房間，再解壓補送工具。原設定檔含該伺服器的 GameServer 金鑰，請與日誌一併私下保管。
+Windows 錄製補送工具 0.1.1 使用原遊戲伺服器工作資料夾中的 `server-config.json`，以及設定指向的 `telemetry` 下同一場次的 `.journal` 與 `.worldlog`。遊戲程序退出後，先在原管理實例結束該場次並釋放房間，再解壓補送工具。原設定檔含該伺服器的 GameServer 金鑰，請與日誌一併私下保管。
 
 ```powershell
 .\Recover-Recording.exe --recover-server 'C:\private\server-work\server-config.json' `
@@ -291,6 +291,8 @@ Windows 錄製補送工具 0.1.0 使用原遊戲伺服器工作資料夾中的 `
 ```
 
 工作資料夾必須是新路徑，上層須已存在。工具在兩份原檔保持唯讀獨占的期間建立工作副本，核對原場次、原錄製來源及原管理端接受序號後補送。獨立五房可分別處理受影響的場次，合併場只需處理其原伺服器一次。
+
+HTTPS 場館沿用原設定中的 `managementCertificateSha256`，戰鬥補送與世界回放串流都要符合該憑證指紋。HTTPS 未提供指紋或 HTTP 帶有指紋時會在建立工作副本前拒絕。
 
 退出碼 0 會在工作資料夾留下 `recovery.json`，列出兩份日誌補送前後的接受序號與各自封存狀態。若原日誌未完成結尾，主控台可播放已保存片段，場次仍顯示未完整封存。只在有原完成紀錄且服務確認精確尾端時封存。補送之後可另行開新場次。 [回放保存片段](WORLD_RECORDING.md#回放未封存的已保存片段)
 
@@ -416,6 +418,8 @@ Unity 冒煙和入場測試會同時核對玩家程式與管理 API 的啟動程
 直接執行 `tests/browser/check.cjs` 或 `tests/browser/check-clock-native.cjs` 時，也會先查核負責測試連接埠的 Node 及實際啟動管理服務的 `dotnet.exe`。若要在新解壓路徑下測試管理服務，可以使用 [Windows 本機 IPC 測試流程](PLAYER_READINESS.md#windows-原生回歸)。本機 IPC 方式會檢查管理服務的 TCP 監聽與 UDP 端點均為零，迴環轉送使用已通過查核的 Python。
 
 `tests/browser/check-external-native.cjs` 在開啟瀏覽器及送出操作前，會核對這一輪實際使用的 `VrCommand.exe`。執行 `--launcher-status` 時也會核對負責 UDP 的 Node。管理服務 HTTPS 測試會核對負責連接埠的 Python，並查核測試選用的伺服器啟動器。管理服務重新啟動測試同樣會核對伺服器啟動器。
+
+Windows 的 `smoke_world.py` 可設定 `VR_COMMAND_WORLD_TEST_WINDOWS_IPC=1`，讓本機迴環流量由通過防火牆查核的 Python 轉送。腳本在每次啟動或重啟時核對管理程序沒有 TCP 監聽或 UDP 端點。
 
 直接執行 `check-lan-udp.ps1` 的 `Listen` 或 `Probe` 時，腳本在繫結埠前會檢查目前的 PowerShell 程序。配對報告及產生測試金鑰仍可離線執行。原生姿態測試、伺服器場次目錄測試和硬體模擬整合測試也會查核各自的迴環接收程式。硬體模擬的兩支整合測試皆可用 `--api-exe` 指向已通過查核的管理包。
 

@@ -13,12 +13,12 @@ ROOT = Path(__file__).resolve().parents[1]
 PROJECT = 'tools/VrCommand.WorldRelay/VrCommand.WorldRelay.csproj'
 INPUTS = ('global.json', 'Directory.Build.props', 'tools/VrCommand.WorldRelay',
           'src/VrCommand.Core', 'src/VrCommand.Simulation', 'clients/unity/Packages/com.vrcommand.simulation/Runtime')
-VERSION = '0.1.0'
+VERSION = '0.1.1'
 RUNTIME = '10.0.14'
 TOP = 'VRCommand-RecordingRecovery'
 NOTICE_FILES = ('LICENSE.TXT', 'THIRD-PARTY-NOTICES.TXT')
 FILES = {'Recover-Recording.exe', 'README.txt', *NOTICE_FILES}
-README = r"""VR Command Windows 場次錄製補送 0.1.0
+README = r"""VR Command Windows 場次錄製補送 0.1.1
 
 在原遊戲伺服器已退出後，由操作員結束原管理場次。保留原工作資料夾的 server-config.json 與 telemetry 裡的兩份原始日誌。
 請以原設定檔執行，另指定尚不存在的工作資料夾。上層資料夾須先存在。
@@ -26,6 +26,7 @@ README = r"""VR Command Windows 場次錄製補送 0.1.0
   .\Recover-Recording.exe --recover-server 'C:\private\server-work\server-config.json' --work 'C:\private\recovered-room1'
 
 工具以唯讀獨占方式開啟原日誌，在工作副本確認原伺服器、場次、來源及已接受邊界，再補送已落盤的紀錄。
+HTTPS 管理實例使用原設定中的 managementCertificateSha256，補送戰鬥及世界回放均須符合原站台憑證。
 成功後讀取工作資料夾的 recovery.json。worldSealed 與 combatSealed 各自表示該來源是否已封存。
 若原日誌未保存結尾，可在主控台播放補送後的保存片段。出現錯誤時保留原件，依狀況修正後用新的工作資料夾重試。
 遊戲程序不會由此工具啟動。原設定檔含 GameServer 金鑰，請與兩份日誌及補送資料私下保管。
@@ -44,7 +45,8 @@ def read(path):
 
 def verify(folder):
     manifest = read(folder / 'recovery-package.json')
-    if (manifest.get('schemaVersion'), manifest.get('version'), manifest.get('target'), manifest.get('runtime')) != (1, VERSION, 'win-x64', RUNTIME):
+    if ((manifest.get('schemaVersion'), manifest.get('target'), manifest.get('runtime')) != (1, 'win-x64', RUNTIME)
+            or manifest.get('version') not in ('0.1.0', VERSION)):
         raise ValueError('Unexpected Windows recovery package')
     if set(manifest['files']) != FILES or {path.name for path in folder.iterdir()} != FILES | {'recovery-package.json'}:
         raise ValueError('Unexpected recovery package payload')
