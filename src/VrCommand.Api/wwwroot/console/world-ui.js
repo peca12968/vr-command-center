@@ -60,7 +60,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     clearEventContext();
     if (frame) showEvents(frame);
     reviewControls();
-  }, value => filteredEvents(value).length);
+  }, value => filteredEvents(value));
   const policyFrames = mountWorldPolicyFrames(response, readFrame);
   const savedClips = mountSavedClips(response, canWriteClips, loadClip, download);
   const clipStatistics = mountWorldClipStatistics(response, download);
@@ -677,7 +677,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   function locateLiveEvent() {
     if (liveEventButton.disabled) return;
     pauseLiveReview('已暫停即時觀戰，可檢視保存的戰鬥事件。');
-    void eventSearch.fromLatest(liveEventKind.value, frame, value => filteredEvents(value).length);
+    void eventSearch.fromLatest(liveEventKind.value, frame);
   }
   function locateLivePolicy() {
     if (livePolicyButton.disabled) return;
@@ -1232,7 +1232,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
         if (playerReview) {
           reviewPlayer = { id: target.playerId, name: target.playerName };
           show(playerFrame, true);
-          if (target.latestDamage) void eventSearch.fromLatest('PlayerDamaged', playerFrame, value => filteredEvents(value).length);
+          if (target.latestDamage) void eventSearch.fromLatest('PlayerDamaged', playerFrame);
           else void eventSearch.fromStart();
         }
       }

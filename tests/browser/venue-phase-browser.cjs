@@ -1617,6 +1617,33 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
       check(await recording.inputValue() === first.running.id && await page.locator('#world-room').inputValue() === '1'
         && await page.locator('#venue-departed-players').isHidden(), `The ${mode} archived scores open the departed player in the original room and recording`);
       const savedShot = page.locator('#world-event-search-results button[data-frame-sequence="3"]');
+      if (mode === 'Linked') {
+        const frameRoute = url => url.pathname === `/api/sessions/${first.running.id}/world/frames/3`;
+        const changedEvent = async route => {
+          const response = await route.fetch(), body = await response.json();
+          const shot = body.packet.events.find(event => event.eventId === eventId);
+          assert.ok(shot);
+          shot.eventId = randomUUID();
+          await route.fulfill({ response, json: body });
+        };
+        const frameMessage = page.locator('#world-frame-message');
+        const canvas = page.locator('#world-canvas');
+        const originalTail = await canvas.getAttribute('data-sequence');
+        const jumps = [
+          [savedShot, 'search result', '#world-frame-message', '讀取快照失敗|已停在第 3 格'],
+          [page.locator('#world-event-previous'), 'previous event', '#world-event-search-status', '讀取事件快照失敗|已跳到第 3 格']
+        ];
+        for (const [button, action, selector, message] of jumps) {
+          await page.route(frameRoute, changedEvent, { times: 1 });
+          try {
+            await button.click();
+            await page.waitForFunction(({ selector, message }) => new RegExp(message).test(document.querySelector(selector).textContent),
+              { selector, message });
+            check((await frameMessage.innerText()).includes('讀取快照失敗') && await canvas.getAttribute('data-sequence') === originalTail,
+              `The ${action} rejects a substituted shot ID despite matching frame, time, player, kind and count`);
+          } finally { await page.unroute(frameRoute, changedEvent); }
+        }
+      }
       await savedShot.click();
       await page.locator('#world-events tr').first().filter({ hasText: departed.name }).waitFor();
       check(await savedShot.count() === 1, `The ${mode} personal replay finds the departed player's original saved shot`);

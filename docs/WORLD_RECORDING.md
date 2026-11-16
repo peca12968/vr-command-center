@@ -227,7 +227,7 @@ node scripts/package-player-replay.mjs artifacts/VRCommand-Player-Replay.html
 
 API 使用 `GET /api/sessions/{id}/world/event-frames`。必填 `throughFrame` 為已接受的保存尾端，選填 `afterFrame` 為不含在本頁的起始游標，預設為 0。可再加 `roomId` 與 `kind`，例如 `ShotFired` 或 `PlayerDamaged`。0.31.44 可加 `playerId`（玩家 UUID）與其他篩選同時使用，回應會帶回指定的 ID。每次讀取最多 128 格及 24 個相符格，`nextAfterFrame` 非空時可用同一組條件接續。服務沿用場次讀取權限，從既有保存快照讀取事件與玩家房間。 [從戰績開啟個人回放](REPORTS.md#從戰績開啟個人回放)
 
-控制台 0.31.144 在「僅接收本房資料」的觀戰或回放中，事件搜尋與前後跳轉會沿用相同範圍。選取搜尋結果後會核對本房畫格的時間和相符事件數。
+「僅接收本房資料」的觀戰與回放沿用本房的搜尋及跳轉範圍。自控制台 0.31.211 起，搜尋與前後跳轉的每個相符畫格均包含按原順序排列的 `eventIds`，搜尋回應也帶回套用的 `roomId` 和 `kind`。點選結果或前後跳轉時，控制台會核對畫格時間及符合篩選條件的事件識別。核對失敗時保留原畫格。
 
 `event-frames` 與 `event-neighbor` 接受選填的 `observerRoomId`，並在回應帶回此房號。事件按與畫格相同的規則核對玩家、敵軍、命中物件與射線。房控可指定自己的房間。同時傳送 `roomId` 時，兩個房號必須一致。共用觀戰沿用原查詢及權限。
 

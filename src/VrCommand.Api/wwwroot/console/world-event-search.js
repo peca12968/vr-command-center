@@ -1,4 +1,13 @@
-export function mountWorldEventSearch(response, jump, eventNames, filterChanged, countVisibleEvents) {
+const eventId = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+
+function validEventFrame(hit) {
+  return Number.isSafeInteger(hit?.frameSequence) && Number.isSafeInteger(hit.elapsedMilliseconds) && hit.elapsedMilliseconds >= 0
+    && Number.isSafeInteger(hit.matchCount) && hit.matchCount >= 1 && hit.matchCount <= 500
+    && Array.isArray(hit.eventIds) && hit.eventIds.length === hit.matchCount
+    && hit.eventIds.every(id => typeof id === 'string' && eventId.test(id)) && new Set(hit.eventIds).size === hit.eventIds.length;
+}
+
+export function mountWorldEventSearch(response, jump, eventNames, filterChanged, visibleEvents) {
   const kind = document.getElementById('world-event-kind');
   const start = document.getElementById('world-event-search-start');
   const here = document.getElementById('world-event-search-here');
@@ -10,6 +19,12 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged,
   let scope, scopeKey = '', revision = 0, page, pending;
 
   for (const [value, label] of Object.entries(eventNames)) kind.add(new Option(label, value));
+
+  function matchesHit(frame, hit) {
+    if (frame.packet.elapsedMilliseconds !== hit.elapsedMilliseconds) return false;
+    const events = visibleEvents(frame);
+    return events.length === hit.eventIds.length && events.every((event, index) => event.eventId === hit.eventIds[index]);
+  }
 
   function controls() {
     const idle = scope?.idle && !pending;
@@ -45,11 +60,12 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged,
   async function search(afterFrame) {
     if (!scope?.idle || pending) return;
     const { sessionId, streamId, throughFrame, room, observerRoomId, playerId } = scope;
+    const roomId = room === 'all' ? null : Number(room), filter = kind.value || null;
     const query = new URLSearchParams({ afterFrame, throughFrame });
     if (room !== 'all') query.set('roomId', room);
     if (observerRoomId !== null) query.set('observerRoomId', observerRoomId);
     if (playerId) query.set('playerId', playerId);
-    if (kind.value) query.set('kind', kind.value);
+    if (filter) query.set('kind', filter);
     const generation = revision, request = new AbortController();
     pending = request;
     controls();
@@ -59,7 +75,8 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged,
       const value = await (await response(`/api/sessions/${sessionId}/world/event-frames?${query}`, signal)).json();
       if (pending !== request) return;
       if (value.sessionId !== sessionId || value.streamId !== streamId || value.throughFrame !== throughFrame
-          || value.afterFrame !== afterFrame || (value.observerRoomId ?? null) !== observerRoomId || (value.playerId ?? null) !== playerId)
+          || value.afterFrame !== afterFrame || (value.observerRoomId ?? null) !== observerRoomId
+          || (value.roomId ?? null) !== (observerRoomId ?? roomId) || (value.kind ?? null) !== filter || (value.playerId ?? null) !== playerId)
         throw new Error('回應的錄製範圍不同。');
       const end = value.scannedThroughFrame;
       if (!Number.isSafeInteger(end) || end < afterFrame || (end === afterFrame && afterFrame < throughFrame)
@@ -67,9 +84,7 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged,
         || !Array.isArray(value.frames) || value.frames.length > 24) throw new Error('回應的搜尋游標不同。');
       let previous = afterFrame;
       for (const hit of value.frames) {
-        if (!Number.isSafeInteger(hit?.frameSequence) || hit.frameSequence <= previous || hit.frameSequence > end
-          || !Number.isSafeInteger(hit.elapsedMilliseconds) || hit.elapsedMilliseconds < 0
-          || !Number.isSafeInteger(hit.matchCount) || hit.matchCount < 1) throw new Error('回應的事件畫格不同。');
+        if (!validEventFrame(hit) || hit.frameSequence <= previous || hit.frameSequence > end) throw new Error('回應的事件畫格不同。');
         previous = hit.frameSequence;
       }
       page = value;
@@ -81,8 +96,7 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged,
         button.dataset.frameSequence = String(hit.frameSequence);
         button.textContent = `第 ${hit.frameSequence} 格 · ${(hit.elapsedMilliseconds / 1000).toFixed(2)} 秒 · ${hit.matchCount} 筆`;
         button.addEventListener('click', () => jump(hit.frameSequence, () => revision === generation,
-          frame => frame.packet.elapsedMilliseconds === hit.elapsedMilliseconds
-            && (observerRoomId === null || countVisibleEvents(frame) === hit.matchCount)));
+          frame => matchesHit(frame, hit)));
         row.append(button);
         return row;
       }));
@@ -95,7 +109,7 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged,
       if (pending === request) { pending = null; controls(); }
     }
   }
-  async function navigate(direction, countMatches) {
+  async function navigate(direction) {
     if (!scope?.idle || pending) return;
     const { sessionId, streamId, throughFrame, room, observerRoomId, playerId, frameSequence } = scope;
     const filter = kind.value || null, roomId = room === 'all' ? null : Number(room);
@@ -119,19 +133,17 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged,
         const end = direction === 'previous' ? 1 : throughFrame;
         const scanned = value.scannedToFrame;
         if (value.sessionId !== sessionId || value.streamId !== streamId || value.throughFrame !== throughFrame
-            || value.fromFrame !== cursor || value.direction !== direction || (value.roomId ?? null) !== roomId
+            || value.fromFrame !== cursor || value.direction !== direction || (value.roomId ?? null) !== (observerRoomId ?? roomId)
             || (value.observerRoomId ?? null) !== observerRoomId
             || (value.kind ?? null) !== filter || (value.playerId ?? null) !== playerId
             || !Number.isSafeInteger(scanned) || (direction === 'previous' ? scanned < end || scanned >= cursor : scanned > end || scanned <= cursor))
           throw new Error('回應的事件範圍不同。');
         if (value.frame) {
-          if (value.nextFromFrame != null || value.frame.frameSequence !== scanned || !Number.isSafeInteger(value.frame.matchCount)
-              || value.frame.matchCount < 1) throw new Error('回應的事件快照不同。');
+          if (value.nextFromFrame != null || !validEventFrame(value.frame) || value.frame.frameSequence !== scanned)
+            throw new Error('回應的事件快照不同。');
           pending = null;
-          const count = countMatches ?? (observerRoomId !== null ? countVisibleEvents : null);
-          const matches = frame => frame.packet.elapsedMilliseconds === value.frame.elapsedMilliseconds
-            && (!count || count(frame) === value.frame.matchCount);
-          const jumped = await jump(scanned, () => revision === generation && scope?.frameSequence === frameSequence, matches);
+          const jumped = await jump(scanned, () => revision === generation && scope?.frameSequence === frameSequence,
+            frame => matchesHit(frame, value.frame));
           if (revision === generation && !pending && scope?.frameSequence === (jumped ? scanned : frameSequence))
             status.textContent = jumped ? `已跳到第 ${scanned} 格，共 ${value.frame.matchCount} 筆符合事件。` : '讀取事件快照失敗，請再試一次。';
           return;
@@ -150,14 +162,14 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged,
     }
   }
 
-  function fromLatest(filter, frame, countMatches) {
+  function fromLatest(filter, frame) {
     if (!scope?.idle) return;
     kind.value = filter;
     update(scope);
     filterChanged();
-    const count = countMatches(frame);
+    const count = visibleEvents(frame).length;
     if (count) status.textContent = `已停在第 ${scope.frameSequence} 格，共 ${count} 筆符合事件。`;
-    else if (scope.frameSequence > 1) return navigate('previous', countMatches);
+    else if (scope.frameSequence > 1) return navigate('previous');
     else status.textContent = '保存範圍內沒有符合條件的事件。';
   }
   kind.addEventListener('change', () => { update(scope); filterChanged(); });

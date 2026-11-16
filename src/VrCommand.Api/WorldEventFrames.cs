@@ -5,10 +5,14 @@ using VrCommand.Simulation;
 
 namespace VrCommand.Api;
 
-public record WorldEventFrame(long FrameSequence, long ElapsedMilliseconds, int MatchCount);
+public record WorldEventFrame(long FrameSequence, long ElapsedMilliseconds, int MatchCount, IReadOnlyList<string> EventIds);
 public record WorldEventFramePage(string SessionId, string StreamId, long ThroughFrame, long AfterFrame,
     long ScannedThroughFrame, long? NextAfterFrame, Guid? PlayerId, IReadOnlyList<WorldEventFrame> Frames)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RoomId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Kind { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? ObserverRoomId { get; init; }
 }
@@ -39,15 +43,15 @@ public sealed partial class WorldRecordings
             cancellation.ThrowIfCancellationRequested();
             if (candidate.Sequence != scanned + 1) throw new InvalidDataException("Saved world frame sequence has a gap.");
             scanned = candidate.Sequence;
-            var count = observation is null ? CountEvents(candidate.Events, candidate.Statistics, room, kind, playerId)
-                : CountObservedEvents(id, scanned, candidate.Events, observation, kind, playerId, actor);
-            if (count == 0) continue;
-            frames.Add(new(scanned, candidate.Elapsed, count));
+            var ids = observation is null ? MatchingEventIds(candidate.Events, candidate.Statistics, room, kind, playerId)
+                : ObservedEventIds(id, scanned, candidate.Events, observation, kind, playerId, actor);
+            if (ids.Length == 0) continue;
+            frames.Add(new(scanned, candidate.Elapsed, ids.Length, ids));
             if (frames.Count == 24) break;
         }
         if (scanned == after && after < through) throw new InvalidDataException("Saved world frame sequence has a gap.");
         return new(info.Header.sessionId, info.Header.streamId, through, after, scanned, scanned < through ? scanned : null, playerId, frames)
-            { ObserverRoomId = observerRoomId };
+            { ObserverRoomId = observerRoomId, RoomId = observerRoomId ?? room, Kind = kind };
     }
 
     public WorldEventNeighbor EventNeighbor(Guid id, long from, long through, string direction, int? room, string? kind,
@@ -74,9 +78,9 @@ public sealed partial class WorldRecordings
                 cancellation.ThrowIfCancellationRequested();
                 if (candidate.Sequence != cursor + (reverse ? -1 : 1)) throw new InvalidDataException("Saved world frame sequence has a gap.");
                 cursor = candidate.Sequence;
-                var count = observation is null ? CountEvents(candidate.Events, candidate.Statistics, room, kind, playerId)
-                    : CountObservedEvents(id, cursor, candidate.Events, observation, kind, playerId, actor);
-                if (count > 0) return Result(new(cursor, candidate.Elapsed, count), null);
+                var ids = observation is null ? MatchingEventIds(candidate.Events, candidate.Statistics, room, kind, playerId)
+                    : ObservedEventIds(id, cursor, candidate.Events, observation, kind, playerId, actor);
+                if (ids.Length > 0) return Result(new(cursor, candidate.Elapsed, ids.Length, ids), null);
             }
         }
         return Result(null, cursor == end ? null : cursor);
@@ -91,14 +95,15 @@ public sealed partial class WorldRecordings
         return new(observer, info.Header.props.ToDictionary(prop => prop.id, prop => prop.roomId));
     }
 
-    private int CountObservedEvents(Guid id, long sequence, string events, EventObservation observation, string? kind,
+    private string[] ObservedEventIds(Guid id, long sequence, string events, EventObservation observation, string? kind,
         Guid? playerId, OperatorIdentity actor)
     {
-        if (events == "[]") return 0;
+        if (events == "[]") return [];
         var frame = Frame(id, sequence, actor) ?? throw new InvalidDataException("Saved world frame sequence has a gap.");
         var projected = ObservationFrame(id, frame, observation.RoomId, observation.PropRooms, actor);
         var player = playerId?.ToString("D");
-        return projected.Packet.events.Count(entry => (kind is null || entry.kind == kind) && (player is null || entry.playerId == player));
+        return projected.Packet.events.Where(entry => (kind is null || entry.kind == kind) && (player is null || entry.playerId == player))
+            .Select(entry => entry.eventId).ToArray();
     }
 
     private static void ValidateEventScope(WorldRecordingInfo info, long through, int? room, string? kind, Guid? playerId)
@@ -141,13 +146,13 @@ public sealed partial class WorldRecordings
         return candidates;
     }
 
-    private static int CountEvents(string events, string? statistics, int? room, string? kind, Guid? playerId)
+    private static string[] MatchingEventIds(string events, string? statistics, int? room, string? kind, Guid? playerId)
     {
-        if (events == "[]") return 0;
+        if (events == "[]") return [];
         using var json = JsonDocument.Parse(events);
         var players = statistics is null ? null : WorldJson.Read<PlayerStatistics[]>(statistics)
             .Where(player => player.RoomId == room).Select(player => player.PlayerId).ToHashSet();
-        var count = 0;
+        var ids = new List<string>();
         foreach (var entry in json.RootElement.EnumerateArray())
         {
             if (kind is not null && !entry.GetProperty("kind").ValueEquals(kind)) continue;
@@ -155,8 +160,8 @@ public sealed partial class WorldRecordings
                 && (!entry.GetProperty("playerId").TryGetGuid(out var player)
                     || (playerId.HasValue && player != playerId.Value)
                     || (players is not null && !players.Contains(player)))) continue;
-            count++;
+            ids.Add(entry.GetProperty("eventId").GetString()!);
         }
-        return count;
+        return [.. ids];
     }
 }

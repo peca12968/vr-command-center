@@ -383,12 +383,13 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         search = route + "/event-frames"
         boundary = combat_packet["sequence"]
         page = request(f"{search}?throughFrame={boundary}&roomId=5&kind=PlayerDamaged", "Room5")
+        damage_ids = [event["eventId"] for event in combat_packet["events"] if event["kind"] == "PlayerDamaged"]
         check(page == {"sessionId": session, "streamId": info["header"]["streamId"], "throughFrame": boundary,
                        "afterFrame": 0, "scannedThroughFrame": boundary, "nextAfterFrame": None,
-                       "playerId": None,
+                       "playerId": None, "roomId": 5, "kind": "PlayerDamaged",
                        "frames": [{"frameSequence": boundary, "elapsedMilliseconds": combat_packet["elapsedMilliseconds"],
-                                   "matchCount": sum(e["kind"] == "PlayerDamaged" for e in combat_packet["events"])}]},
-              "Room and kind search returns the exact saved damage frame at an inclusive prefix limit")
+                                   "matchCount": len(damage_ids), "eventIds": damage_ids}]},
+              "Room and kind search returns the exact saved damage frame and event IDs at an inclusive prefix limit")
         earlier = request(f"{search}?throughFrame={boundary - 1}&kind=PlayerDamaged")
         exhausted = request(f"{search}?throughFrame={boundary}&afterFrame={boundary}")
         check(not earlier["frames"] and earlier["scannedThroughFrame"] == boundary - 1 and not exhausted["frames"]
@@ -708,6 +709,9 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         check([row["frameSequence"] for row in legacy_search["frames"]] == [2, 3]
               and request(overkill_world + "/frames/2?observerRoomId=5", "Room5")["packet"]["events"] == []
               and scoped_search["frames"] == legacy_search["frames"][1:] and scoped_search.get("observerRoomId") == 5
+              and scoped_search["roomId"] == 5 and scoped_search["kind"] == "PlayerDamaged"
+              and scoped_search["frames"][0]["eventIds"] == [entry["eventId"] for entry in damage_view["packet"]["events"]
+                                                             if entry["kind"] == "PlayerDamaged"]
               and request(event_path + "&observerRoomId=1", "Room1")["frames"] == [],
               "Projected event search omits an event that belongs to the room player but is absent from the projected frame")
         neighbor_path = overkill_world + "/event-neighbor?throughFrame=4&kind=PlayerDamaged"
