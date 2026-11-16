@@ -1,13 +1,17 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.ExceptionServices;
 using NUnit.Framework;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.Controls;
 using UnityEngine.InputSystem.Layouts;
 using UnityEngine.InputSystem.LowLevel;
 using UnityEngine.InputSystem.XR;
+using UnityEngine.TestTools;
 using UnityEngine.XR.OpenXR.Features.Interactions;
 using HapticControl = UnityEngine.XR.OpenXR.Input.HapticControl;
 using OpenXRPoseControl = UnityEngine.XR.OpenXR.Input.PoseControl;
@@ -82,22 +86,36 @@ namespace VrCommand.Unity.Tests
             }
         }
 
-        [TestCase(false)]
-        [TestCase(true)]
-        public void NativeDescriptorsKeepBothHandsAndReadIndependentState(bool useOpenXRPose)
+        [UnityTearDown]
+        public IEnumerator LeavePlayMode()
         {
-            WithPoseLayout(useOpenXRPose ? typeof(OpenXRPoseControl) : typeof(PoseControl), VerifyNativeDescriptors);
+            if (Application.isPlaying) yield return new ExitPlayMode();
         }
 
-        private static void VerifyNativeDescriptors()
+        [UnityTest]
+        public IEnumerator NativeDescriptorsWithInputSystemPose() => VerifyNativeDescriptors(typeof(PoseControl));
+
+        [UnityTest]
+        public IEnumerator NativeDescriptorsWithOpenXRPose() => VerifyNativeDescriptors(typeof(OpenXRPoseControl));
+
+        private static IEnumerator VerifyNativeDescriptors(Type poseType)
         {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode();
+
             const string layout = nameof(ViveFocus3ControllerProfile.ViveFocus3Controller);
-            InputSystem.RegisterLayout<ViveController>(layout, matches: new InputDeviceMatcher()
-                .WithInterface(XRUtilities.InterfaceMatchAnyVersion).WithProduct(ViveFocus3ControllerProfile.Product));
+            var originalPose = InputSystem.LoadLayout("Pose")?.type;
+            var background = InputSystem.settings.backgroundBehavior;
+            var routing = InputSystem.settings.editorInputBehaviorInPlayMode;
             var leftId = 0;
             var rightId = 0;
             try
             {
+                InputSystem.settings.backgroundBehavior = InputSettings.BackgroundBehavior.IgnoreFocus;
+                InputSystem.settings.editorInputBehaviorInPlayMode = InputSettings.EditorInputBehaviorInPlayMode.AllDeviceInputAlwaysGoesToGameView;
+                if (poseType != originalPose) InputSystem.RegisterLayout(poseType, "Pose");
+                InputSystem.RegisterLayout<ViveController>(layout, matches: new InputDeviceMatcher()
+                    .WithInterface(XRUtilities.InterfaceMatchAnyVersion).WithProduct(ViveFocus3ControllerProfile.Product));
                 leftId = AddDescribedController(InputDeviceCharacteristics.Left).deviceId;
                 rightId = AddDescribedController(InputDeviceCharacteristics.Right).deviceId;
                 // A second descriptor can recreate an existing device when Unity updates their shared generated layout.
@@ -121,65 +139,95 @@ namespace VrCommand.Unity.Tests
                 gripTracked.Enable();
                 aimTracking.Enable();
                 aimTracked.Enable();
-                using (StateEvent.From(left, out var state))
+                yield return CheckDynamicState(left, state =>
                 {
                     WriteGrip(left, grip, state);
                     left.primaryButton.WriteValueIntoEvent(1f, state);
-                    InputState.Change(left, state, InputUpdateType.Editor);
-                }
-                using (StateEvent.From(right, out var state))
+                }, () => Assert.IsTrue(left.isTracked.isPressed));
+                yield return CheckDynamicState(right, state =>
                 {
                     WriteGrip(right, grip, state);
-                    right.pointer.GetChildControl<Vector3Control>("position").WriteValueIntoEvent(aim, state);
-                    right.pointer.GetChildControl<QuaternionControl>("rotation").WriteValueIntoEvent(rotation, state);
+                    WritePose(right.pointer, aim, rotation, false, 0, state);
                     right.triggerPressed.WriteValueIntoEvent(1f, state);
                     right.secondaryButton.WriteValueIntoEvent(1f, state);
-                    InputState.Change(right, state, InputUpdateType.Editor);
-                }
-
-                Assert.IsTrue(left.isTracked.isPressed && right.isTracked.isPressed);
-                Assert.AreEqual(3, left.trackingState.ReadValue());
-                Assert.AreEqual(3, right.trackingState.ReadValue());
-                Assert.AreEqual(grip, left.devicePosition.ReadValue());
-                Assert.AreEqual(Quaternion.identity, left.deviceRotation.ReadValue());
-                Assert.AreEqual(grip, right.devicePosition.ReadValue());
-                Assert.AreEqual(aim, right.pointerPosition.ReadValue());
-                Assert.AreEqual(rotation, right.pointerRotation.ReadValue());
-                Assert.IsTrue(left.primaryButton.isPressed && !right.primaryButton.isPressed);
-                Assert.IsTrue(right.triggerPressed.isPressed && !left.triggerPressed.isPressed);
-                Assert.IsTrue(right.secondaryButton.isPressed && !left.secondaryButton.isPressed);
-                // The last position and rotation can remain finite even when the aim is unavailable.
-                Assert.IsTrue(NetworkAvatar.HasTracking(gripTracking, gripTracked));
-                Assert.IsFalse(NetworkAvatar.HasTracking(aimTracking, aimTracked));
-                using (StateEvent.From(right, out var state))
+                }, () =>
                 {
-                    WriteTrackingState(right.pointer, true, 3, state);
-                    InputState.Change(right, state, InputUpdateType.Editor);
-                }
-                Assert.IsTrue(NetworkAvatar.HasTracking(aimTracking, aimTracked));
-                using (StateEvent.From(right, out var state))
+                    Assert.IsTrue(left.isTracked.isPressed && right.isTracked.isPressed);
+                    Assert.AreEqual(3, left.trackingState.ReadValue());
+                    Assert.AreEqual(3, right.trackingState.ReadValue());
+                    Assert.AreEqual(grip, left.devicePosition.ReadValue());
+                    Assert.AreEqual(Quaternion.identity, left.deviceRotation.ReadValue());
+                    Assert.AreEqual(grip, right.devicePosition.ReadValue());
+                    Assert.AreEqual(aim, right.pointerPosition.ReadValue(), "Initial invalid aim retains the supplied coordinates.");
+                    Assert.AreEqual(rotation, right.pointerRotation.ReadValue());
+                    Assert.IsTrue(left.primaryButton.isPressed && !right.primaryButton.isPressed);
+                    Assert.IsTrue(right.triggerPressed.isPressed && !left.triggerPressed.isPressed);
+                    Assert.IsTrue(right.secondaryButton.isPressed && !left.secondaryButton.isPressed);
+                    Assert.IsTrue(NetworkAvatar.HasTracking(gripTracking, gripTracked));
+                    Assert.IsFalse(NetworkAvatar.HasTracking(aimTracking, aimTracked));
+                });
+                yield return CheckDynamicState(right, state =>
                 {
-                    WriteTrackingState(right.pointer, true, 1, state);
-                    InputState.Change(right, state, InputUpdateType.Editor);
-                }
-                Assert.IsFalse(NetworkAvatar.HasTracking(aimTracking, aimTracked));
-                Assert.AreEqual(aim, right.pointerPosition.ReadValue());
-                Assert.IsTrue(right.isTracked.isPressed && left.isTracked.isPressed);
-                using (StateEvent.From(right, out var state))
+                    WriteGrip(right, grip, state);
+                    WritePose(right.pointer, aim, rotation, true, 3, state);
+                }, () => Assert.IsTrue(NetworkAvatar.HasTracking(aimTracking, aimTracked)));
+                yield return CheckDynamicState(right, state =>
                 {
-                    WriteTrackingState(right.devicePose, false, 0, state);
-                    InputState.Change(right, state, InputUpdateType.Editor);
-                }
-                Assert.IsFalse(right.isTracked.isPressed);
-                Assert.AreEqual(0, right.trackingState.ReadValue());
-                Assert.IsTrue(left.isTracked.isPressed);
+                    WriteGrip(right, grip, state);
+                    WritePose(right.pointer, aim, rotation, true, 1, state);
+                }, () =>
+                {
+                    Assert.IsFalse(NetworkAvatar.HasTracking(aimTracking, aimTracked));
+                    Assert.AreEqual(aim, right.pointerPosition.ReadValue(), "Partial aim tracking retains the supplied coordinates.");
+                    Assert.IsTrue(right.isTracked.isPressed && left.isTracked.isPressed);
+                });
+                yield return CheckDynamicState(right, state =>
+                {
+                    WritePose(right.devicePose, grip, Quaternion.identity, false, 0, state);
+                    WritePose(right.pointer, aim, rotation, false, 0, state);
+                }, () =>
+                {
+                    Assert.IsFalse(right.isTracked.isPressed);
+                    Assert.AreEqual(0, right.trackingState.ReadValue());
+                    Assert.IsTrue(left.isTracked.isPressed);
+                });
             }
             finally
             {
                 if (InputSystem.GetDeviceById(leftId) is InputDevice left) InputSystem.RemoveDevice(left);
                 if (InputSystem.GetDeviceById(rightId) is InputDevice right) InputSystem.RemoveDevice(right);
                 InputSystem.RemoveLayout(layout);
+                RestorePoseLayout(poseType, originalPose);
+                InputSystem.settings.backgroundBehavior = background;
+                InputSystem.settings.editorInputBehaviorInPlayMode = routing;
             }
+        }
+
+        private static IEnumerator CheckDynamicState(ViveController device, Action<InputEventPtr> write, Action check)
+        {
+            Assert.IsTrue(device.enabled);
+            var sampled = false;
+            Exception failure = null;
+            void Sample()
+            {
+                if (sampled || InputState.currentUpdateType != InputUpdateType.Dynamic) return;
+                sampled = true;
+                try { check(); }
+                catch (Exception error) { failure = error; }
+            }
+            InputSystem.onAfterUpdate += Sample;
+            try
+            {
+                using (StateEvent.From(device, out var state))
+                {
+                    write(state);
+                    InputSystem.QueueEvent(state);
+                }
+                for (var frame = 0; !sampled && frame < 120; frame++) yield return null;
+            }
+            finally { InputSystem.onAfterUpdate -= Sample; }
+            Assert.IsTrue(sampled, "A Dynamic player update must consume the controller state.");
+            if (failure != null) ExceptionDispatchInfo.Capture(failure).Throw();
         }
 
         private static InputDevice AddDescribedController(InputDeviceCharacteristics hand)
@@ -216,15 +264,15 @@ namespace VrCommand.Unity.Tests
 
         private static void WriteGrip(ViveController controller, Vector3 position, InputEventPtr state)
         {
-            WriteTrackingState(controller.devicePose, true, 3, state);
-            controller.devicePose.GetChildControl<Vector3Control>("position").WriteValueIntoEvent(position, state);
-            controller.devicePose.GetChildControl<QuaternionControl>("rotation").WriteValueIntoEvent(Quaternion.identity, state);
+            WritePose(controller.devicePose, position, Quaternion.identity, true, 3, state);
         }
 
-        private static void WriteTrackingState(InputControl pose, bool tracked, int flags, InputEventPtr state)
+        private static void WritePose(InputControl pose, Vector3 position, Quaternion rotation, bool tracked, int flags, InputEventPtr state)
         {
             pose.GetChildControl<ButtonControl>("isTracked").WriteValueIntoEvent(tracked ? 1f : 0f, state);
             pose.GetChildControl<IntegerControl>("trackingState").WriteValueIntoEvent(flags, state);
+            pose.GetChildControl<Vector3Control>("position").WriteValueIntoEvent(position, state);
+            pose.GetChildControl<QuaternionControl>("rotation").WriteValueIntoEvent(rotation, state);
         }
 
         private static void AssertAlias(InputControl alias, InputControl source)
@@ -272,14 +320,14 @@ namespace VrCommand.Unity.Tests
             var original = InputSystem.LoadLayout("Pose")?.type;
             if (type != original) InputSystem.RegisterLayout(type, "Pose");
             try { run(); }
-            finally
-            {
-                if (type != original)
-                {
-                    if (original == null) InputSystem.RemoveLayout("Pose");
-                    else InputSystem.RegisterLayout(original, "Pose");
-                }
-            }
+            finally { RestorePoseLayout(type, original); }
+        }
+
+        private static void RestorePoseLayout(Type current, Type original)
+        {
+            if (current == original) return;
+            if (original == null) InputSystem.RemoveLayout("Pose");
+            else InputSystem.RegisterLayout(original, "Pose");
         }
     }
 }

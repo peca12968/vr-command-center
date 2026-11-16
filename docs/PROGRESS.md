@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 Windows 與 Quest 0.50.12 同源發行
+
+- Unity 套件管理器透過本機 IPC 連接 Editor。本輪抽查該程序時，TCP 監聽與 UDP 端點均為零。走完整套件流程後，八項 VIVE 專項和全部 285 項 EditMode 測試通過，失敗和跳過均為零。前兩輪各有兩項失敗，分別停在 Editor 緩衝區的動作讀值及部分姿態事件的座標檢查。最後於 Dynamic 更新核對完整姿態事件。 [IPC 紀錄](../artifacts/vive-release-05012-fb9bcabe/upm-ipc-readback.json) · [完整測試](../artifacts/vive-release-05012-fb9bcabe/complete-pose-events/full.xml)
+- Windows 與 Quest 皆由 Unity 6000.3.27f1 完成建置，來源雜湊 `5bf482ee12cf98ce723a93dfa7ee8e82b233de2223b7e59378ca76346548a37b` 及兩個網路物件識別相符。Windows 成品含已序列化的 VIVE Focus 3 設定，玩家和伺服器包各核對 331 檔，共用遊戲檔 324 項相符。Quest APK 為 0.50.12／77，ARM64 且 v2 簽章有效。整組另與管理台 0.31.206 完成離線核對。 [共同發行報告](../artifacts/vive-release-05012-fb9bcabe/venue-release.json) · [Windows 玩家包](../artifacts/vive-release-05012-fb9bcabe/VRCommand-Player-0.50.12-win-x64.zip) · [Windows 伺服器包](../artifacts/vive-release-05012-fb9bcabe/VRCommand-GameServer-0.50.12-win-x64.zip) · [Quest APK](../artifacts/quest/VrCommand.apk)
+- 新版 Windows 原生程式在單機各跑完 25 席合併與五房獨立，使用已通過防火牆查核的管理包 0.31.184。通過 43 項檢查、六場雙封存、50 份戰績確認、六份 CSV 及 2,991 格回放。C 槽原始紀錄與 F 槽快照各 174 檔相符，無活躍場次及遺留程序。舊 Windows 和 Quest 建置共 329 檔保存並重驗雜湊。跨機 25 人、實體頭盔和廠商硬體待驗，Quest USB 仍只有檔案傳輸介面。 [同機驗證](../artifacts/vive-release-05012-fb9bcabe/native-verification.json) · [Windows 程序紀錄](../artifacts/vive-release-05012-fb9bcabe/native-05012.log)
+
 ## 2026-11-16 右手指向姿態追蹤核對
 
 - 玩家端以提交的右手指向姿態判定追蹤是否可用。只要指向缺位置或旋轉追蹤，就會暫停姿態發布與武器輸入，即使握把仍追蹤且舊座標可讀。恢復時沿用既有放開再按下的流程。VIVE Focus 3 設定可讀取 Input System 和 OpenXR 的兩種 `Pose` 配置。[Windows 玩家操作](WINDOWS_PLAYER_PACKAGE.md#windows-openxr-啟動) · [Quest 玩家操作](QUEST3.md#追蹤恢復後的武器輸入)

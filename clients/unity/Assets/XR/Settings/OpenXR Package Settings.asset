@@ -480,6 +480,28 @@ MonoBehaviour:
   required: 0
   customRuntimeLoaderName: 
   m_SuppressVisibility: 0
+--- !u!114 &-2625723443923136702
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 29065fa797b640d9bd5e9ab0afe916bd, type: 3}
+  m_Name: ViveFocus3ControllerProfile Standalone
+  m_EditorClassIdentifier: VrCommand.Runtime::VrCommand.Unity.ViveFocus3ControllerProfile
+  m_enabled: 1
+  nameUi: HTC Vive Focus 3 Controller Profile
+  version: 1.0.0
+  featureIdInternal: vrcommand.openxr.interaction.vive-focus3
+  openxrExtensionStrings: XR_HTC_vive_focus3_controller_interaction
+  company: VR Command
+  priority: 0
+  targetOpenXRApiVersion: 
+  required: 0
+  customRuntimeLoaderName: 
 --- !u!114 &-2602852917739027482
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -593,6 +615,7 @@ MonoBehaviour:
   - {fileID: 2124739208375304483}
   - {fileID: -1749535729568070702}
   - {fileID: 464089781542670848}
+  - {fileID: -2625723443923136702}
   customLoaderName: 
   m_renderMode: 1
   m_latencyOptimization: 0
