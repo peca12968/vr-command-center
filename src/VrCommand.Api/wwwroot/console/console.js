@@ -10,6 +10,7 @@ import { mountVrVenueTickets } from './vr-venue-tickets-ui.js';
 import { mountVenueServerPlan } from './venue-server-plan-ui.js';
 import { mountVenueLaunchReview } from './venue-launch-review-ui.js';
 import { mountVenueRoster } from './venue-roster-ui.js';
+import { mountVenueClimateScope } from './venue-climate-scope-ui.js';
 import { mountOperatorNetwork } from './operator-network-ui.js';
 import { mountReport, mountVenueReport, venueScoreFields } from './report-ui.js';
 import { matchesDebriefCsv } from './report-csv.js';
@@ -61,6 +62,7 @@ const venueRoster = mountVenueRoster({ getState: () => state, canRegister: maste
   state.pending = { kind: 'venue-roster-join', path: '/venue/roster-admissions', method: 'POST', body: { seats } };
   await sendPending();
 }) });
+const venueClimateScope = mountVenueClimateScope(applyVenuePermissions);
 const operatorNetwork = mountOperatorNetwork(() => state, api, download, uuid);
 const alignmentPins = mountAlignmentPins({ state: () => state,
   checkFile: file => api('/room-alignment/check-file', 'POST', file),
@@ -302,6 +304,7 @@ function logout() {
   $('statistics-scope').hidden = true; $('statistics-scope-status').textContent = '';
   $('ticket-room').replaceChildren(); delete $('ticket-room').dataset.session;
   $('venue-environment-form').reset();
+  venueClimateScope.reset();
   $('venue-enemies-form').reset();
   $('mission-form').reset(); $('launch-mission').replaceChildren(); $('edit-mission').replaceChildren(); renderLaunchPreview(launchPlan()); renderHistory(); renderProps(); $('draft-status').textContent = '尚未儲存的草稿'; $('session-panel').hidden = true; notify('');
 }
@@ -1170,12 +1173,13 @@ function applyVenuePermissions() {
   $('venue-resume').disabled = locked || !resume.length || !!waiting.length;
   $('venue-end').disabled = locked || !end.length;
   for (const [panel, action] of [['venue-environment', 'SetEnvironment'], ['venue-enemies', 'SetEnemies']]) {
-    const targets = venueTargets(action);
+    const allTargets = venueTargets(action);
+    const { targets, reason } = action === 'SetEnvironment' ? venueClimateScope.update(allTargets, locked) : { targets: allTargets };
     $(panel).hidden = !master();
-    $(panel + '-fields').disabled = locked || !targets.length;
+    $(panel + '-fields').disabled = locked || !allTargets.length;
     const overridden = action === 'SetEnemies' ? venueEnemyOverrides(targets) : '';
     const targetText = targets.length ? `適用房間 ${venueRoomText(targets)} · ${targets.length} 個執行中場次。`
-      + (overridden ? `套用時會清除房間 ${overridden} 的分房策略。` : '') : '等待執行中場次。';
+      + (overridden ? `套用時會清除房間 ${overridden} 的分房策略。` : '') : reason ?? '等待執行中場次。';
     if ($(panel + '-targets').textContent !== targetText) $(panel + '-targets').textContent = targetText;
   }
   renderVenueSettingBatch(locked, 'environment');
@@ -1207,7 +1211,8 @@ function applyVenuePermissions() {
 async function venuePhase(action, { environment, enemyPolicy } = {}) {
   if (!master() || state.pending) return;
   const epoch = state.epoch;
-  const targets = venueTargets(action);
+  const allTargets = venueTargets(action);
+  const { targets, roomIds } = action === 'SetEnvironment' ? venueClimateScope.selection(allTargets) : { targets: allTargets };
   const policy = action === 'Begin' ? venueBeginPolicy() : 'normal';
   if (!targets.length || (policy !== 'normal' && targets.flatMap(target => target.roomIds).length !== 5)
     || (['Begin', 'Resume'].includes(action) && targets.some(target => !roomReadiness.venueReady(target, action, policy)))) return;
@@ -1234,6 +1239,7 @@ async function venuePhase(action, { environment, enemyPolicy } = {}) {
     body: { action, targets: targets.map(({ sessionId, phaseSinceSequence, sessionSequence, environmentSinceSequence, enemiesSinceSequence,
       roomEnemiesSinceSequence }) => ({ sessionId, phaseSinceSequence, sessionSequence, environmentSinceSequence, enemiesSinceSequence,
       roomEnemiesSinceSequence })), environment, enemyPolicy,
+      ...(roomIds ? { roomIds } : {}),
       ...(policy === 'tracking' ? { requireFullTracking: true } : {}),
       ...(policy === 'participation' ? { requireFullParticipation: true } : {}) } };
   await sendPending();

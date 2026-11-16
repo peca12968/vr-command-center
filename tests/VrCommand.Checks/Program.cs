@@ -87,6 +87,7 @@ try
     IndependentSetChecks.Run(Check, directory, mission);
     VenueRosterChecks.Run(Check, directory, mission);
     VenuePhaseChecks.Run(Check, directory, mission);
+    VenueClimateScopeChecks.Run(Check, directory);
     SimulationChecks.Run(Check);
     NavigationChecks.Run(Check);
     for (var targetingCase = 0; targetingCase < VrCommand.Unity.Tests.AiTargetingCases.Names.Length; targetingCase++)

@@ -202,7 +202,7 @@ public sealed partial class SessionManager
 
     public VenuePhaseReceipt ExecuteVenuePhase(ControlAction action, VenuePhaseFence?[]? fences, Guid requestId,
         OperatorIdentity actor, IReadOnlyDictionary<Guid, VenuePhaseWitness>? witnesses = null, VenueClimate? climate = null,
-        VenueEnemyPolicy? enemyPolicy = null, bool requireFullTracking = false, bool requireFullParticipation = false)
+        VenueEnemyPolicy? enemyPolicy = null, bool requireFullTracking = false, bool requireFullParticipation = false, int[]? roomIds = null)
     {
         RequireVenueMaster(actor);
         ValidateRequestId(requestId);
@@ -212,6 +212,10 @@ public sealed partial class SessionManager
             throw new ArgumentException("Use at most one full venue readiness policy, only for Begin.");
         var environment = action == ControlAction.SetEnvironment;
         var enemies = action == ControlAction.SetEnemies;
+        if (roomIds is not null && (!environment || roomIds.Length is < 1 or > RoomCount
+            || roomIds.Any(room => room is < 1 or > RoomCount) || roomIds.Distinct().Count() != roomIds.Length))
+            throw new ArgumentException("Select distinct rooms 1–5 only for a venue environment change.");
+        var selectedRooms = roomIds?.ToHashSet();
         if (environment ? climate is not { Weather: { } weather, TimeOfDay: { } time, Lightning: not null }
             || !Enum.IsDefined(weather) || !Enum.IsDefined(time) : climate is not null)
             throw new ArgumentException("Provide weather, time of day and lightning for a venue environment change.");
@@ -235,6 +239,7 @@ public sealed partial class SessionManager
                 var original = existing[0].Read<ControlCommand>();
                 if (existing[0].Actor != actor || original.Action != action || existing[0].Venue!.RequireFullTracking != requireFullTracking
                     || existing[0].Venue!.RequireFullParticipation != requireFullParticipation
+                    || (selectedRooms is not null && !selectedRooms.SetEquals(existing.SelectMany(entry => Find(entry.SessionId).View.RoomIds)))
                     || ClimateOf(original) != climate || EnemyPolicyOf(original) != enemyPolicy
                     || !existing.Select(entry => new VenuePhaseFence(entry.SessionId, entry.Venue!.PhaseSinceSequence,
                         begin ? entry.Sequence - 1 : null, entry.Venue.EnvironmentSinceSequence, entry.Venue.EnemiesSinceSequence,
@@ -243,6 +248,12 @@ public sealed partial class SessionManager
                 return Receipt(requestId, action, existing, true);
             }
             var targets = Targets(action);
+            if (selectedRooms is not null)
+            {
+                targets = targets.Where(history => history.View.RoomIds.Any(selectedRooms.Contains)).ToArray();
+                if (!selectedRooms.SetEquals(targets.SelectMany(history => history.View.RoomIds)))
+                    throw new VenuePhaseChangedException(selectedRooms.Order().ToArray());
+            }
             var current = targets.Select(history => new VenuePhaseFence(history.View.Id, history.PhaseSinceSequence,
                 begin ? history.View.Sequence : null, environment ? history.EnvironmentSinceSequence : null,
                 enemies ? history.EnemiesSinceSequence : null, enemies ? history.RoomEnemiesSinceSequence : null)).ToArray();

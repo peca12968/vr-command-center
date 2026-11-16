@@ -124,16 +124,17 @@ public sealed partial class WorldRecordings
     }
 
     public VenuePhaseReceipt ExecuteVenuePhase(ControlAction action, VenuePhaseFence?[]? fences, Guid requestId, OperatorIdentity actor,
-        VenueClimate? climate = null, VenueEnemyPolicy? enemyPolicy = null, bool requireFullTracking = false, bool requireFullParticipation = false)
+        VenueClimate? climate = null, VenueEnemyPolicy? enemyPolicy = null, bool requireFullTracking = false, bool requireFullParticipation = false,
+        int[]? roomIds = null)
     {
         if (action is not (ControlAction.Begin or ControlAction.Resume or ControlAction.End))
             return manager.ExecuteVenuePhase(action, fences, requestId, actor, climate: climate, enemyPolicy: enemyPolicy,
-                requireFullTracking: requireFullTracking, requireFullParticipation: requireFullParticipation);
+                requireFullTracking: requireFullTracking, requireFullParticipation: requireFullParticipation, roomIds: roomIds);
         lock (gate)
         {
             if (action == ControlAction.End)
                 return manager.ExecuteVenuePhase(action, fences, requestId, actor, climate: climate, enemyPolicy: enemyPolicy,
-                    requireFullTracking: requireFullTracking, requireFullParticipation: requireFullParticipation);
+                    requireFullTracking: requireFullTracking, requireFullParticipation: requireFullParticipation, roomIds: roomIds);
             var plan = manager.ReadVenuePhase(actor);
             var begin = action == ControlAction.Begin;
             var requireFullRoster = requireFullTracking || requireFullParticipation;
@@ -162,7 +163,7 @@ public sealed partial class WorldRecordings
                 .ToDictionary(row => row.Report.SessionId, row => row.Witness);
             try
             {
-                return manager.ExecuteVenuePhase(action, fences, requestId, actor, ready, climate, enemyPolicy, requireFullTracking, requireFullParticipation);
+                return manager.ExecuteVenuePhase(action, fences, requestId, actor, ready, climate, enemyPolicy, requireFullTracking, requireFullParticipation, roomIds);
             }
             catch (VenueBeginNotReadyException rejection) when (requireFullRoster)
             {
