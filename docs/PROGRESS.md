@@ -1,9 +1,16 @@
 # 開發進度
 
+## 2026-11-17 每次啟動原生遊戲前查核 Windows 防火牆
+
+- 桌面場館、入場、套件及瀏覽器操作等自動測試在各次原生遊戲啟動前重新查核 `VrCommand.exe` 的實際路徑及目前的網路設定檔。伺服器啟動器 1.27.2 在建立原生子程序前也會查核。Windows 現行設定拒絕新路徑的測試執行檔。Python 及 .NET Framework 啟動器皆回傳 2，子程序未執行。 [拒絕路徑驗證](../artifacts/windows-unattended-launch-20261117/live-firewall-rejection.json) · [無人值守操作](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
+- 129 項桌面回歸通過，其中包括第一個子程序通過查核、第二個子程序因情境變更而未啟動。既有固定路徑通過一台 Unity 伺服器、兩台桌面玩家及 114 幀的迴環測試。 [回歸](../artifacts/windows-unattended-launch-20261117/desktop-tests.log) · [同機連線](../artifacts/unity-player-smoke/20261117-033616-5ee4fa2d/summary.json)
+- Windows 伺服器包 0.50.12／1.27.2 解壓後核對 331 項，新啟動器的離線查核也通過。這次原生連線使用既有固定路徑，新解壓包完成離線驗證。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.12-1.27.2-win-x64.zip) · [啟動器核對](../artifacts/windows-unattended-launch-20261117/launcher-offline-verification.json)
+
 ## 2026-11-17 Windows 模擬閘道狀態檔競用
 
 - 0.2.21 讓 Windows 活動中的狀態檔短暫被鎖時，保留上一份完整狀態並於下一次更新補寫。停止時先保存房間報告，再限時等待終止狀態可寫入。受控測試持有不允許替換的讀取控制代碼時，0.2.20 提前退出。0.2.21 在同一連線確認第七筆模擬回饋，解鎖後更新同一執行識別碼的終止狀態。 [舊版反例](../artifacts/hardware-status-sharing-0221/baseline-locked-status.json) · [狀態讀取驗證](../artifacts/hardware-status-sharing-0221/read-probe.jsonl) · [終止狀態](../artifacts/hardware-status-sharing-0221/extracted-f/run-22bd494f11a84cb789997fae8fe1975a/linked-locked-status-stop.json)
 - 房間狀態檔在 F 槽的編譯版與解壓版各完成 98 項即時排演，程序均已清理。38 項離線檢查通過，解壓版範例報告位元組相同，發行包執行後仍可核對 10 個檔案。廠商協議與實體設備待驗。 [編譯版](../artifacts/hardware-status-sharing-0221/compiled-f/run-00e5cc66a6d04673873d43f8456914db/checks.json) · [解壓版](../artifacts/hardware-status-sharing-0221/extracted-f/run-22bd494f11a84cb789997fae8fe1975a/checks.json) · [套件](../artifacts/hardware-packages/hardware-simulator-0.2.21-net10.zip)
+- GitHub Actions 對 `22da62d` 回報帳務或用量限制，工作未啟動。 [GitHub Actions 工作](https://github.com/peca12968/vr-command-center/actions/runs/43941636536/job/133560396844)
 
 ## 2026-11-17 模擬閘道的戰鬥串流序號與發行包
 

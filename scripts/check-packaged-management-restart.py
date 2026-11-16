@@ -29,7 +29,7 @@ def free_ports(count, kind):
 
 
 def main():
-    from windows_firewall import require_silent_windows_launch
+    from windows_firewall import require_silent_windows_launch, start_checked_windows_process
 
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('control-package', 'server-package', 'runtime-root'):
@@ -102,8 +102,9 @@ def main():
     def read(path):
         return json.loads(path.read_text(encoding='utf-8'))
 
-    def spawn(name, command):
-        child = subprocess.Popen(list(map(str, command)), cwd=runtime, env=env,
+    def spawn(name, command, *, game=False):
+        start = start_checked_windows_process if game else subprocess.Popen
+        child = start(list(map(str, command)), cwd=runtime, env=env,
                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                  creationflags=subprocess.CREATE_NO_WINDOW)
         children[name] = child
@@ -222,7 +223,7 @@ def main():
             config, path = runtime / (name + '.json'), runtime / (name + '.log')
             save(config, {'role': 'Client', 'address': '127.0.0.1', 'port': entry['port'], 'joinTicket': ticket})
             process = spawn(name, [server_root / 'Runtime/VrCommand.exe', '-batchmode', '-nographics', '-job-worker-count', '2',
-                                   '-logFile', path, '--vr-config', config])
+                                   '-logFile', path, '--vr-config', config], game=True)
             entry['clients'].append({'player': player, 'process': process, 'log': path})
 
     def phase(action):

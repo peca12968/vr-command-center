@@ -177,9 +177,11 @@ class Venue:
                                       'version': version, 'processId': self.processes['api'].pid, 'bind': self.base})
 
     def launch(self, name, config, visible=False, *, extra_args=(), environment=None):
+        from windows_firewall import start_checked_windows_process
+
         self.save(name + '.json', config)
         flags = ['-screen-fullscreen', '0', '-screen-width', '1100', '-screen-height', '760'] if visible else ['-batchmode', '-nographics']
-        self.processes[name] = subprocess.Popen([str(self.args.player_exe.resolve()), *flags, '-job-worker-count', str(self.args.job_workers), '-logFile', str(self.directory / (name + '.log')),
+        self.processes[name] = start_checked_windows_process([self.args.player_exe, *flags, '-job-worker-count', str(self.args.job_workers), '-logFile', str(self.directory / (name + '.log')),
             '--vr-config', str(self.directory / (name + '.json')), *extra_args], cwd=self.args.player_exe.resolve().parent,
             env=environment, creationflags=subprocess.CREATE_NO_WINDOW)
 

@@ -28,6 +28,8 @@ def free_port(address):
 
 
 def verify_native(server_folder, runtime, output, keys, tls, request, mission, management_uri, check, game_pin=None, debrief_receipts=False):
+    from windows_firewall import start_checked_windows_process
+
     state = request(tls, '/api/sessions', keys['Master'], status=201,
                     body={'missionId': mission['id'], 'mode': 'Independent', 'roomIds': [1]})
     route = '/api/sessions/' + state['id']
@@ -87,7 +89,7 @@ def verify_native(server_folder, runtime, output, keys, tls, request, mission, m
         player_config.write_text(json.dumps({'role': 'Client', 'address': '127.0.0.1', 'port': udp_port,
                                              'joinTicket': ticket['ticket']}), encoding='utf-8')
         log = runtime / 'player.log'
-        client = subprocess.Popen([str(server_folder / 'Runtime/VrCommand.exe'), '-batchmode', '-nographics',
+        client = start_checked_windows_process([server_folder / 'Runtime/VrCommand.exe', '-batchmode', '-nographics',
                                    '-job-worker-count', '2', '-logFile', str(log), '--vr-config', str(player_config)],
                                   cwd=runtime, creationflags=subprocess.CREATE_NO_WINDOW)
         wait_until(lambda: log.exists() and 'VR_CLIENT_CONNECTED id=' in log.read_text(encoding='utf-8', errors='replace'),

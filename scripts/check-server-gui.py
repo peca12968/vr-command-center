@@ -9,7 +9,7 @@ def read(p):return json.loads(p.read_text(encoding='utf-8'))
 def free(kind=socket.SOCK_STREAM):
     with socket.socket(socket.AF_INET,kind) as s:s.bind(('127.0.0.1',0));return s.getsockname()[1]
 def main():
-    from windows_firewall import require_silent_windows_launch
+    from windows_firewall import require_silent_windows_launch, start_checked_windows_process
 
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('package',type=Path);p.add_argument('--control-package',type=Path,required=True);p.add_argument('--runtime-root',type=Path,required=True);p.add_argument('--check-peer-diagnostics',action='store_true',help='Join one native player and reconcile the GUI-enabled UDP evidence');args=p.parse_args()
     folder=args.package.resolve();manifest=package.verify(folder);assert manifest['launcherSourceSha256']==package.digest(ROOT/'tools/WindowsServerLauncher/ServerLauncher.cs')
@@ -67,7 +67,7 @@ def main():
                     invite=request(f'/api/sessions/{session}/players/{player["id"]}/join-ticket',{},admission=player['admissionId'])
                     config=runtime/'fixture-client.json'
                     config.write_text(json.dumps({'role':'Client','address':'127.0.0.1','port':port,'joinTicket':invite['ticket']}),encoding='utf-8')
-                    client=subprocess.Popen([str(folder/'Runtime/VrCommand.exe'),'-batchmode','-nographics','-job-worker-count','2',
+                    client=start_checked_windows_process([folder/'Runtime/VrCommand.exe','-batchmode','-nographics','-job-worker-count','2',
                                              '-logFile',str(client_log),'--vr-config',str(config)],cwd=runtime,creationflags=subprocess.CREATE_NO_WINDOW)
                     join_deadline=time.monotonic()+40
                     while not client_log.exists() or 'VR_CLIENT_CONNECTED id=' not in client_log.read_text(encoding='utf-8',errors='replace'):

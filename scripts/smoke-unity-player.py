@@ -10,7 +10,7 @@ from pathlib import Path
 import sys
 from live_world_frame import read_live_frame
 from local_api import add_api_arguments, checked_api_command
-from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
+from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch, start_checked_windows_process
 
 root=Path(__file__).resolve().parent.parent
 parser=argparse.ArgumentParser(description=__doc__)
@@ -70,7 +70,7 @@ def live_frame():
     return frame
 def launch(name,config):
     path=directory/(name+'.json'); path.write_text(json.dumps(config),encoding='utf-8')
-    process=subprocess.Popen([str(args.player_exe.resolve()),'-batchmode','-nographics','-logFile',str(directory/(name+'.log')),'--vr-config',str(path)],cwd=args.player_exe.resolve().parent,creationflags=subprocess.CREATE_NO_WINDOW)
+    process=start_checked_windows_process([args.player_exe,'-batchmode','-nographics','-logFile',str(directory/(name+'.log')),'--vr-config',str(path)],cwd=args.player_exe.resolve().parent,creationflags=subprocess.CREATE_NO_WINDOW)
     processes.append(process)
     return process
 def wait_for(predicate,timeout,label):

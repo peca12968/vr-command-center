@@ -143,7 +143,7 @@ def reconcile_ai_damage(frames, owners, enabled_sequence, disabled_sequence):
     return {'damageEvents':damage_events,'players':totals}
 
 def main():
-    from windows_firewall import require_silent_windows_launch
+    from windows_firewall import require_silent_windows_launch, start_checked_windows_process
 
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('package',type=Path);p.add_argument('--control-package',type=Path,required=True);p.add_argument('--runtime-root',type=Path,required=True);p.add_argument('--observe-closure-ui',action='store_true')
     p.add_argument('--player-package',type=Path,help='Launch five players per room from the API room ZIP, using this extracted player package')
@@ -1364,7 +1364,7 @@ def main():
     def player(entry,room):
         state=request('/api/sessions/'+entry['sessionId']+'/players',{'playerId':str(uuid.uuid4()),'roomId':room,'name':'Portable server room '+str(room),'headset':'Quest3'},role='Room'+str(room));person=next(x for x in state['players'] if x['roomId']==room)
         invitation=request('/api/sessions/'+state['id']+'/players/'+person['id']+'/join-ticket',{},role='Room'+str(room),admission=person['admissionId']);file=runtime/(entry['label']+'-client-'+str(room)+'.json');file.write_text(json.dumps({'role':'Client','address':address,'port':entry['ready']['port'],'joinTicket':invitation['ticket']}),encoding='utf-8');log=runtime/(file.stem+'.log')
-        child=subprocess.Popen([str(folder/'Runtime/VrCommand.exe'),'-batchmode','-nographics','-job-worker-count','2','-logFile',str(log),'--vr-config',str(file)],cwd=runtime,env=env,creationflags=subprocess.CREATE_NO_WINDOW);client={'process':child,'log':log,'player':person,'sessionId':state['id']};clients.append(client);return client
+        child=start_checked_windows_process([folder/'Runtime/VrCommand.exe','-batchmode','-nographics','-job-worker-count','2','-logFile',str(log),'--vr-config',str(file)],cwd=runtime,env=env,creationflags=subprocess.CREATE_NO_WINDOW);client={'process':child,'log':log,'player':person,'sessionId':state['id']};clients.append(client);return client
     def prepare_room_roster(entry,room,count=5):
         path='/api/sessions/'+entry['sessionId']
         role='Room'+str(room)
@@ -1697,7 +1697,7 @@ def main():
         log=file.with_suffix('.log')
         if args.check_venue_concurrent_fire:
             exercise=file.with_suffix('.exercise')
-            child=subprocess.Popen([str(player_folder/'VrCommand.exe'), '-batchmode', '-nographics',
+            child=start_checked_windows_process([player_folder/'VrCommand.exe', '-batchmode', '-nographics',
                 '-job-worker-count', '2', '-logFile', str(log), '--vr-config', str(file),
                 '--vr-desktop-exercise', str(exercise)], cwd=runtime, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
             client={'process':child,'log':log,'player':person,'sessionId':entry['sessionId'],
@@ -5289,7 +5289,7 @@ def main():
             unpinned_file=runtime/'mr-unpinned.json';unpinned_log=runtime/'mr-unpinned.log'
             telemetry=runtime/'mr-unpinned-telemetry'
             unpinned_file.write_text(json.dumps(config(state['id'],telemetryOrigin='GameServer',telemetryDirectory=str(telemetry))),encoding='utf-8')
-            child=subprocess.Popen([str(folder/'Runtime/VrCommand.exe'),'-batchmode','-nographics','-job-worker-count','2',
+            child=start_checked_windows_process([folder/'Runtime/VrCommand.exe','-batchmode','-nographics','-job-worker-count','2',
                 '-logFile',str(unpinned_log),'--vr-config',str(unpinned_file)],cwd=runtime,env=env,creationflags=subprocess.CREATE_NO_WINDOW)
             try:
                 wait(lambda: unpinned_log.exists() and 'MR REQUIRES PINNED ROOM ALIGNMENT FILES' in unpinned_log.read_text(encoding='utf-8',errors='replace'),30,'MR startup refuses missing pins')

@@ -407,6 +407,8 @@ Windows 依執行檔的完整路徑套用程式規則。即使只有同機測試
 
 桌面場館、Unity 啟動與入場測試，以及會啟動原生遊戲的套件和 GUI 驗證，會在開啟遊戲或啟動器前，自動核對執行檔路徑與所有啟用中的防火牆設定檔。`start-verified-venue.py` 在啟動五房前會檢查解壓包內的 `Launch-Server.exe` 與 `Runtime/VrCommand.exe`。離線 `--verify-only` 可直接執行。Unity Editor 建置、Quest 的 ADB 部署及擷取、Quest 單席與五房 UDP 探測也有啟動前檢查。使用 PowerShell 接收入站 UDP 的場館探測會檢查該 PowerShell 執行檔。
 
+每次啟動原生遊戲時會再用當時有效的設定檔查核該次執行的 `VrCommand.exe`。若這次查核失敗，腳本會在終端機留下原因，並執行該測試的清理流程。伺服器啟動器 1.27.2 也會在建立各房遊戲程序前重新查核。
+
 Unity 冒煙和入場測試會同時核對玩家程式與管理 API 的啟動程式。若 `dotnet.exe` 的路徑未通過查核，可以給 `smoke-unity-player.py` 和 `check-unity-admission.py` 加上 `--api-exe`，指定已通過查核的管理包 `Runtime/VrCommand.Api.exe`。HTTP、回放及管理服務程序測試可使用 `VR_COMMAND_API_EXE` 指向同一執行檔。測試用獨立資料與 `127.0.0.1`。
 
 同機 UDP 轉送及管理 API 故障測試也會在啟動前檢查實際執行的 `python.exe`。桌面姿態追蹤、姿態連續性及世界日誌復原診斷在建立測試場次前即執行這項查核。`start-local.ps1` 先完成 Release 建置，再查核 Windows 管理程式。桌面場館、練習模式與操作員工具可用 `--api-exe` 指向已通過查核的管理包 `Runtime/VrCommand.Api.exe`。

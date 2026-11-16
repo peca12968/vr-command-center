@@ -59,7 +59,7 @@ async function main() {
   assert.equal(ready.source, 'Simulation'); assert.equal(ready.clientMode, 'External'); assert.equal(ready.headsets, null);
   assert.equal(base.hostname, '127.0.0.1'); assert.equal(base.protocol, 'http:'); assert.notEqual(base.port, '5080');
   assert.ok(!base.username && !base.password && !base.search && !base.hash && base.pathname === '/');
-  const playerExecutable = packageRoot ? path.join(packageRoot, 'VrCommand.exe') : ready.playerBuildReceipt.outputPath;
+  const playerExecutable = await fs.realpath(packageRoot ? path.join(packageRoot, 'VrCommand.exe') : ready.playerBuildReceipt.outputPath);
   const launcherExecutable = packageRoot ? path.join(packageRoot, 'Launch-Player.exe') : playerExecutable;
   const tokens = JSON.parse(await fs.readFile(path.join(directory, 'keys.json'), 'utf8')).OperatorKeys;
   const children = [], findings = [], errors = [], socketsToClose = []; let checks = 0, page, browser, outcome;
@@ -151,6 +151,7 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
       const statusPath = path.join(evidence, 'connection-' + (index + 1) + '.json');
       const args = packageRoot ? [...gui && packagePathInput ? [] : ['--config', file], ...gui ? [] : ['--launch', '--headless', '--wait'], '--log', log, '--report', report, ...launcherStatus ? ['--status-report', statusPath] : []]
         : ['-batchmode', '-nographics', '-job-worker-count', '2', '-logFile', log, '--vr-config', file];
+      requireSilentWindowsLaunch(root, playerExecutable);
       const child = spawn(executable, args, { cwd: path.dirname(executable), windowsHide: !gui, stdio: 'ignore' });
       child.on('error', error => { errors.push(error.message); }); const owned = { child, log, player, gui, statusPath, report }; children.push(owned);
       if (packageRoot) {
@@ -213,6 +214,7 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
         ['no-gameserver', { ...config, port: socket.address().port }, ['Unconfirmed', 'Disconnected']]]) {
         const file = path.join(evidence, label + '.json'), log = path.join(evidence, label + '.log'), report = path.join(evidence, label + '-launch.json'), statusPath = path.join(evidence, label + '-status.json');
         await fs.writeFile(file, JSON.stringify(value), { flag: 'wx' });
+        requireSilentWindowsLaunch(root, playerExecutable);
         const child = spawn(launcherExecutable, ['--config', file, '--launch', '--headless', '--wait', '--log', log, '--report', report, '--status-report', statusPath], { cwd: packageRoot, windowsHide: true, stdio: 'ignore' });
         child.on('error', error => errors.push(error.message)); const owned = { child, log, gui: false, statusPath }; children.push(owned);
         const started = await until(async () => { const r = JSON.parse(await fs.readFile(report, 'utf8').catch(() => '{}')); return r.status === 'started' && r; }, 'status probe child'); owned.nativeId = started.processId;

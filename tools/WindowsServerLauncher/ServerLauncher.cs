@@ -525,7 +525,9 @@ internal static class ServerLauncher
         internal uint ExitCode { get { uint code; Need(Exited && GetExitCodeProcess(process, out code), "無法確認原始遊戲程序已停止。"); GetExitCodeProcess(process, out code); return code; } }
         internal Native(string config, string log, bool peerDiagnostics)
         {
-            var exe = Path.Combine(Root, "Runtime/VrCommand.exe"); job = CreateJobObject(IntPtr.Zero, null); Need(job != IntPtr.Zero, "無法建立程序群組。");
+            var exe = Path.Combine(Root, "Runtime/VrCommand.exe");
+            WindowsFirewallPreflight.Require(exe);
+            job = CreateJobObject(IntPtr.Zero, null); Need(job != IntPtr.Zero, "無法建立程序群組。");
             var limits = new Limits(); limits.basic.flags = 0x2000; if (!SetInformationJobObject(job, 9, ref limits, Marshal.SizeOf(limits))) { Dispose(); throw new IOException("無法設定程序群組。"); }
             var startup = new Startup(); startup.size = Marshal.SizeOf(startup); Info info;
             var command = new StringBuilder(Quote(exe) + " -batchmode -nographics -job-worker-count 2 -logFile " + Quote(log) + " --vr-config " + Quote(config));

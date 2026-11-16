@@ -30,3 +30,10 @@ def require_silent_windows_launch(executable):
     if result.returncode:
         detail = result.stderr.strip() or f'Firewall check exited with code {result.returncode}.'
         raise WindowsFirewallLaunchError(f'Startup skipped for {executable.name}. {detail}')
+
+
+def start_checked_windows_process(command, **options):
+    """Recheck the exact image at each native launch."""
+    executable = Path(command[0]).resolve(strict=True)
+    require_silent_windows_launch(executable)
+    return subprocess.Popen([str(executable), *command[1:]], executable=str(executable), **options)

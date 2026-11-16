@@ -63,7 +63,7 @@ def child_servers(pid, executable):
 
 
 def main():
-    from windows_firewall import require_silent_windows_launch
+    from windows_firewall import require_silent_windows_launch, start_checked_windows_process
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('package', type=Path)
@@ -241,7 +241,7 @@ def main():
                 config = log.with_suffix('.private.json')
                 write_json(config, {'role': 'Client', 'address': LOOPBACK, 'port': bindings[sid]['port'],
                                     'joinTicket': invite['ticket']})
-                player_process = subprocess.Popen([str(executable), '-batchmode', '-nographics', '-job-worker-count', '2',
+                player_process = start_checked_windows_process([executable, '-batchmode', '-nographics', '-job-worker-count', '2',
                     '-logFile', str(log), '--vr-config', str(config)], cwd=runtime, creationflags=subprocess.CREATE_NO_WINDOW)
                 clients.append((sid, player_process, log, config))
                 time.sleep(.12)

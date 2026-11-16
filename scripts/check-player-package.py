@@ -127,11 +127,13 @@ def check_openxr_unavailable(folder, directory, base, release=None, manifest_has
 
 
 def check_local_profiler(folder, directory):
+    from windows_firewall import start_checked_windows_process
+
     log = directory / 'local-profiler.log'
     command = [str(folder / 'VrCommand.exe'), '-batchmode', '-nographics', '-job-worker-count', '2',
                '-logFile', str(log), '--vr-config', str(directory / 'absent-player-config.json')]
     powershell = Path(os.environ['WINDIR']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
-    with subprocess.Popen(command, cwd=directory, creationflags=subprocess.CREATE_NO_WINDOW) as process:
+    with start_checked_windows_process(command, cwd=directory, creationflags=subprocess.CREATE_NO_WINDOW) as process:
         try:
             deadline = time.monotonic() + 30
             while process.poll() is None and time.monotonic() < deadline:

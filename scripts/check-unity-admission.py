@@ -48,7 +48,7 @@ def source_fingerprint():
 def main():
     from admission_witness import BeginWitness, observer_fingerprint
     from local_api import add_api_arguments, checked_api_command
-    from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
+    from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch, start_checked_windows_process
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--interactive', action='store_true')
     parser.add_argument('--server-trace', action='store_true', help='Opt in to the existing bounded Windows server timing trace; explicitly finish it before stopping its process')
@@ -160,7 +160,7 @@ def main():
         flags = ['-screen-fullscreen', '0', '-screen-width', '1100', '-screen-height', '760'] if visible else ['-batchmode', '-nographics']
         if name == 'server' and server_trace_directory: flags += ['--vr-pose-trace', str(server_trace_directory)]
         if name == 'server' and journal_trace_directory: flags += ['--vr-journal-trace', str(journal_trace_directory)]
-        process = subprocess.Popen([str(args.player_exe.resolve()), *flags, '-logFile', str(directory / (name + '.log')), '--vr-config', str(path)],
+        process = start_checked_windows_process([args.player_exe, *flags, '-logFile', str(directory / (name + '.log')), '--vr-config', str(path)],
                                    cwd=args.player_exe.resolve().parent, creationflags=subprocess.CREATE_NO_WINDOW)
         live[name] = process; all_processes.append(process); return process
 

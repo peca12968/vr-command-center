@@ -1,12 +1,16 @@
 import importlib.util
 from pathlib import Path
 import sys
+import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest.mock import Mock, call, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 spec = importlib.util.spec_from_file_location('startup', ROOT / 'scripts/check-desktop-startup.py')
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+import windows_firewall
 
 
 class StartupWitnessTests(unittest.TestCase):
@@ -28,6 +32,28 @@ class StartupWitnessTests(unittest.TestCase):
     def test_witness_has_no_actors_ticket_or_raw_payload(self):
         packet = self.packet(); packet['joinTicket'] = 'private'; packet['frame']['players'] = [{'id': 'private'}]
         self.assertEqual({'sequence', 'observedSequence', 'elapsedMilliseconds', 'suspended', 'phase', 'tick'}, set(m.witness(packet)))
+
+
+class NativeLaunchTests(unittest.TestCase):
+    def test_venue_rechecks_before_each_child_and_stops_on_policy_change(self):
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory).resolve() / 'VrCommand.exe'
+            image.touch()
+            venue = SimpleNamespace(args=SimpleNamespace(player_exe=image, job_workers=2),
+                                    directory=image.parent, save=Mock(), processes={})
+            error = windows_firewall.WindowsFirewallLaunchError('Firewall profile changed.')
+            with patch.object(m.vm.subprocess, 'CREATE_NO_WINDOW', 0, create=True), \
+                    patch.object(windows_firewall, 'require_silent_windows_launch', side_effect=[None, error]) as check, \
+                    patch.object(windows_firewall.subprocess, 'Popen') as launch:
+                m.vm.Venue.launch(venue, 'server', {})
+                with self.assertRaisesRegex(windows_firewall.WindowsFirewallLaunchError, 'Firewall profile changed'):
+                    m.vm.Venue.launch(venue, 'client', {})
+
+            self.assertEqual(check.call_args_list, [call(image), call(image)])
+            launch.assert_called_once()
+            self.assertEqual(launch.call_args.args[0][0], str(image))
+            self.assertEqual(launch.call_args.kwargs['executable'], str(image))
+            self.assertEqual(venue.processes, {'server': launch.return_value})
 
 
 if __name__ == '__main__': unittest.main()
