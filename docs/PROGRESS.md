@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 封存後結束即時觀戰
+
+- 管理台 0.31.233 在全景及分房收到最後一格後核對原錄製封存，保留畫格與鏡頭、更新錄製清單並提供從頭回放。若只有封存狀態，串流中斷時沿用原錄製重連。封存事件若先於對應畫格，保留現在畫面並提示。 [觀戰操作](WORLD_RECORDING.md#即時觀戰斷線後重新連接)
+- 透過本機 IPC 的實際 SSE，分房觀戰收到 Ended 畫格時仍持續等待，續收到同來源封存後正常關閉。已封存的全景串流依序回傳標頭、最後畫格及封存後關閉。舊版比較組在封存後仍收到兩筆心跳，瀏覽器也接受封存事件但顯示前一格。最終解壓包通過 5 項 Chromium 專項和 11 項重連回歸，Node 133 項通過。瀏覽器專項以實際 API 畫格模擬缺格與中斷。實際管理程序 TCP 監聽及 UDP 端點均為零。 [封存專項](../artifacts/venue-live-seal-031233/package-final/checks.json) · [舊版對照](../artifacts/venue-live-seal-031233/before-v2/checks.json) · [觀戰回歸](../artifacts/venue-live-boundary-031232/package-031233-regression/checks.json)
+- Windows 管理包逐檔核對 589 檔，和既有 Windows 及 Quest 0.50.12 通過離線發行核對。GitHub Actions 對 `7a14356` 回報帳務或支出上限，工作未啟動。Quest USB 仍無 ADB 介面，實機、場館跨機與硬體待驗。 [下載管理包](../artifacts/venue-live-seal-031233/final/VRCommand-ControlServer-0.31.233.zip) · [發行核對](../artifacts/venue-live-seal-031233/final/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43982568174)
+
 ## 2026-11-17 避免 Windows 背景啟動跳出防火牆視窗
 
 - 開發版遊戲的文件指令改走 `start-windows-vr.ps1`，Windows 玩家包的量測指令改走 `Launch-Player.exe`。開發版入口以實際 EXE 路徑強制查核無人值守條件。現行網域、私人和公用設定檔均開啟入站通知，實測開發版、解壓伺服器版和玩家版三個路徑均回傳 2，前後皆無 `VrCommand` 程序。以不接收網路連線的測試程式核對查核通過時的參數傳遞及退出碼。 [無人值守操作](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
