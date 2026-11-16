@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import base64
+from collections import Counter
 import hashlib
 import importlib.util
 import json
@@ -38,6 +39,43 @@ def read_connection(path):
     expected = {key: field.identity(str(uuid.UUID(bytes_le=payload[offset:offset + 16])))
                 for key, offset in (('sessionId', 1), ('playerId', 17), ('admissionId', 33))}
     return port, dict(expected, roomId=payload[49])
+
+
+def read_adb_transports(adb, timeout):
+    field.require(timeout > 0, 'Capture timed out before reading ADB transports')
+    try:
+        result = subprocess.run([*adb, 'devices', '-l'], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, timeout=min(5, timeout),
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    except subprocess.TimeoutExpired:
+        raise field.EvidenceError('Quest ADB transport inventory timed out') from None
+    field.require(result.returncode == 0 and len(result.stdout) <= 65536, 'Could not read Quest ADB transports')
+    rows = result.stdout.decode('utf-8').splitlines()
+    field.require(rows and rows[0] == 'List of devices attached', 'Invalid Quest ADB transport inventory')
+    aliases, ids = Counter(), Counter()
+    candidates = {}
+    for line in rows[1:]:
+        if not line.strip():
+            continue
+        row = re.fullmatch(r'(\(no serial number\)|\S+)[ \t]+(\S+)(?:[ \t]+(.*))?', line)
+        field.require(row is not None, 'Invalid Quest ADB transport inventory row')
+        serial, state, metadata = row.groups()
+        aliases[serial] += 1
+        transport_fields = [token for token in (metadata or '').split() if token.startswith('transport_id:')]
+        valid_ids = [int(token.removeprefix('transport_id:')) for token in transport_fields
+                     if re.fullmatch(r'transport_id:[1-9][0-9]{0,18}', token)]
+        ids.update(valid_ids)
+        if (state == 'device' and len(transport_fields) == len(valid_ids) == 1
+                and valid_ids[0] <= 2**63 - 1):
+            candidates[serial] = valid_ids[0]
+    return {serial: str(transport) for serial, transport in candidates.items()
+            if aliases[serial] == 1 and ids[transport] == 1}
+
+
+def select_adb_transport(adb, transports, serial):
+    transport = transports.get(serial)
+    field.require(transport is not None, 'Expected one authorized Quest ADB transport for this seat')
+    return [*adb, '-t', transport]
 
 
 def quest_pid(adb, timeout):
@@ -139,7 +177,7 @@ async def capture(adb, port, admission, output, seconds, on_ready=report_ready, 
     deadline = time.monotonic() + seconds
     if device_identity is not None:
         await asyncio.to_thread(check_device_identity, adb, device_identity, deadline - time.monotonic())
-    remaining = deadline - time.monotonic() if device_identity is not None else seconds
+    remaining = deadline - time.monotonic()
     field.require(remaining > 0, 'Capture timed out before checking the Quest process')
     pid = await asyncio.to_thread(quest_pid, adb, min(5, remaining))
     field.require(openxr is None or pid == openxr[0], 'Quest process differs from the original OpenXR launch')
@@ -280,6 +318,9 @@ async def capture_venue(adb, plan, directory, seconds):
     binding = plan.get('captureBinding')
     if binding is None:
         binding = capture_binding(plan, uuid.uuid4().hex)
+    field.require(not os.path.lexists(directory), 'Choose a new capture output path')
+    deadline = time.monotonic() + seconds
+    transports = await asyncio.to_thread(read_adb_transports, adb, seconds)
     directory.mkdir()
     ready = 0
     can_announce_ready = True
@@ -304,7 +345,10 @@ async def capture_venue(adb, plan, directory, seconds):
                       file=sys.stderr, flush=True)
 
         try:
-            report = await capture([*adb, '-s', row['serial']], source['port'], admission, log, seconds, on_ready,
+            target = select_adb_transport(adb, transports, row['serial'])
+            remaining = deadline - time.monotonic()
+            field.require(remaining > 0, 'Capture timed out before checking the Quest process')
+            report = await capture(target, source['port'], admission, log, remaining, on_ready,
                                    device_identity=row.get('deviceIdentity'), openxr=row.get('openXR'),
                                    on_final=close_readiness)
         except (field.EvidenceError, OSError, UnicodeError, ValueError, TimeoutError, RecursionError) as error:
@@ -380,7 +424,11 @@ def main():
             field.require(re.fullmatch(r'[A-Za-z0-9\[][A-Za-z0-9._:%\[\]-]{0,127}', args.serial), 'Use a valid explicit ADB serial')
             port, admission = read_connection(args.connection_file)
             check_adb_startup()
-            report = asyncio.run(capture([*adb, '-s', args.serial], port, admission, args.output, args.seconds))
+            deadline = time.monotonic() + args.seconds
+            target = select_adb_transport(adb, read_adb_transports(adb, args.seconds), args.serial)
+            remaining = deadline - time.monotonic()
+            field.require(remaining > 0, 'Capture timed out before checking the Quest process')
+            report = asyncio.run(capture(target, port, admission, args.output, remaining))
     except field.EvidenceError as error:
         parser.exit(1, f'Quest capture incomplete. {error}.\n')
     except (OSError, UnicodeError, ValueError, KeyError, TypeError, TimeoutError, RecursionError, KeyboardInterrupt):

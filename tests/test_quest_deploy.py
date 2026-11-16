@@ -23,6 +23,7 @@ import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CAPTURE_FIXTURE = ROOT / 'tests/fixtures/run-quest-capture.py'
 ADB_FIXTURE = r"""
 $remote = Join-Path $env:QUEST_TEST_ROOT 'remote'
 $installedApp = Join-Path $env:QUEST_TEST_ROOT 'installed-app'
@@ -1342,8 +1343,12 @@ class QuestVenueTests(unittest.TestCase):
                 server.shutdown()
                 thread.join(timeout=5)
 
-    def mock_capture_devices(self, rows, topology, *, held=False, wrong_seat=None, startup_gates=None):
+    def mock_capture_devices(self, rows, topology, *, held=False, wrong_seat=None, startup_gates=None,
+                             rebind_seat=None, transport_base=0):
         expected = {}
+        transports = {serial: transport_base + index
+                      for index, serial in enumerate(sorted(row['serial'] for row in rows), 1)}
+        self.root.joinpath('adb-transports.json').write_text(json.dumps(transports), encoding='utf-8')
         for row in rows:
             room, seat, serial = row['roomId'], row['seat'], row['serial']
             index = (room - 1) * 5 + seat - 1
@@ -1356,8 +1361,7 @@ class QuestVenueTests(unittest.TestCase):
             startup = line(f'VR_NETWORK_STARTED role=Client started=True background=False port={port}')
             ending = line(f'VR_CLIENT_CONNECTED id={index+1}') + line('VR_CLIENT_DEBRIEF_FINAL ' + json.dumps(result)) + line('VR_CLIENT_DISCONNECTED')
             gate = (startup_gates or {}).get((room, seat))
-            # Python's -s flag makes this relative filename stand in for the ADB serial.
-            (self.root / serial).write_text(f'''import sys, time
+            (self.root / serial).write_text(f'''import json, sys, time
 from pathlib import Path
 if sys.argv[1:] == ['shell', 'pidof', 'com.vrcommand.quest']:
     print(7342)
@@ -1371,6 +1375,13 @@ else:
         assert gate.is_file()
     sys.stdout.buffer.write({startup!r})
     sys.stdout.buffer.flush()
+    if {(room, seat) == rebind_seat!r}:
+        inventory = Path('adb-transports.json')
+        current = json.loads(inventory.read_bytes())
+        current[{serial!r}] += 100
+        update = inventory.with_suffix('.tmp')
+        update.write_text(json.dumps(current), encoding='utf-8')
+        update.replace(inventory)
     until = time.monotonic() + 25
     while {held!r} and not Path('release').exists() and time.monotonic() < until:
         time.sleep(.05)
@@ -1382,9 +1393,47 @@ else:
         return expected
 
     def capture_command(self, files, mapping, output, *flags):
-        return [sys.executable, str(ROOT/'scripts/capture-quest-field-log.py'), '--adb', sys.executable,
+        return [sys.executable, str(CAPTURE_FIXTURE), '--adb', sys.executable,
                 '--venue-bundle', str(self.write_bundle(files)), '--device-map', str(mapping),
                 '--output-directory', str(output), '--seconds', '35', *flags]
+
+    def test_capture_rejects_rebound_transport_with_equal_process_id_and_retries_only_failed_seat(self):
+        files, _ = self.vr_bundle('Linked')
+        mapping, document = self.device_map()
+        rows = [row for row in document['seats'] if row['roomId'] == 1 and row['seat'] in (1, 2)]
+        mapping.write_text(json.dumps(dict(document, seats=rows)), encoding='utf-8')
+        expected = self.mock_capture_devices(rows, 'Linked', rebind_seat=(1, 1))
+        first = self.root / 'first capture'
+        command = self.capture_command(files, mapping, first, '--allow-partial-map')
+        result = subprocess.run(command, cwd=self.root, capture_output=True, encoding='utf-8', timeout=20)
+        self.assertEqual(1, result.returncode, result.stderr + result.stdout)
+        report_path = first / 'capture-report.json'
+        report = json.loads(report_path.read_bytes())
+        self.assertEqual((False, 1), (report['complete'], report['capturedSeats']))
+        failed, healthy = report['seats']
+        self.assertFalse(failed['complete'])
+        self.assertIn('Expected one running Quest game process', failed['reason'])
+        self.assertEqual(expected[1, 1][2], (first / failed['partial']).read_bytes())
+        self.assertFalse((first / 'room-01-seat-01-logcat.txt').exists())
+        self.assertEqual(expected[1, 2][2], (first / healthy['log']).read_bytes())
+        before = {path.name: path.read_bytes() for path in first.iterdir()}
+        calls = [json.loads(line) for line in (self.root / 'adb-calls.jsonl').read_text().splitlines()]
+        self.assertEqual(['devices', '-l'], calls[0])
+        self.assertTrue(all(call[0] == '-t' and call[1] in ('1', '2') for call in calls[1:]))
+
+        (self.root / 'adb-calls.jsonl').unlink()
+        self.mock_capture_devices(rows, 'Linked', transport_base=200)
+        second = self.root / 'recovered capture'
+        command[command.index('--output-directory') + 1] = str(second)
+        recovered = subprocess.run([*command, '--retry-incomplete', str(report_path)], cwd=self.root,
+                                   capture_output=True, encoding='utf-8', timeout=20)
+        self.assertEqual(0, recovered.returncode, recovered.stderr)
+        self.assertEqual(expected[1, 1][2], (second / 'room-01-seat-01-logcat.txt').read_bytes())
+        self.assertEqual(before, {path.name: path.read_bytes() for path in first.iterdir()})
+        calls = [json.loads(line) for line in (self.root / 'adb-calls.jsonl').read_text().splitlines()]
+        self.assertEqual(['devices', '-l'], calls[0])
+        self.assertTrue(all(call[:2] == ['-t', '201'] for call in calls[1:]))
+        self.assertTrue(any(call[2] == 'logcat' for call in calls[1:]))
 
     def test_venue_capture_starts_all_25_before_end_and_preserves_original_logs(self):
         self.expiry = int(time.time()) - 1
@@ -2627,7 +2676,8 @@ else:
     assert args == ["logcat", "-b", "main", "--pid=4301", "-v", "threadtime", "-s", "Unity:I"]
     sys.stdout.buffer.write({raw!r})
 ''', encoding='utf-8')
-                capture_command = [sys.executable, str(ROOT / 'scripts/capture-quest-field-log.py'), '--adb', sys.executable,
+                (scripts / 'adb-transports.json').write_text(json.dumps({'fixture-01': 41}), encoding='utf-8')
+                capture_command = [sys.executable, str(CAPTURE_FIXTURE), '--adb', sys.executable,
                                    '--venue-bundle', str(bundle), '--device-map', str(mapping), '--allow-partial-map',
                                    '--deployment-report', str(failed_report), '--output-directory', str(captured), '--seconds', '8']
                 skipped = subprocess.run(capture_command, cwd=scripts, capture_output=True, encoding='utf-8', timeout=12)
@@ -2804,8 +2854,15 @@ else:
                 adb_capture = self.root / 'capture-adb.py'
                 adb_capture.write_text('''from pathlib import Path
 import sys
-serial, command = sys.argv[2], sys.argv[3:]
-assert sys.argv[1] == '-s'
+root = Path(__file__).parent
+transports = {str(index): path.stem for index, path in enumerate(sorted(root.glob('fixture-*.logcat')), 1)}
+if sys.argv[1:] == ['devices', '-l']:
+    print('List of devices attached')
+    for transport, serial in transports.items():
+        print(f'{serial} device transport_id:{transport}')
+    sys.exit(0)
+assert sys.argv[1] == '-t'
+serial, command = transports[sys.argv[2]], sys.argv[3:]
 if command == ['shell', 'getprop', 'ro.serialno']:
     print('HARDWARE-SERIAL-' + serial)
 elif command == ['shell', 'pidof', 'com.vrcommand.quest']:

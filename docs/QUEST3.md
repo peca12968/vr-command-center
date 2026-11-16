@@ -764,9 +764,9 @@ python .\scripts\capture-quest-field-log.py --adb $adb --serial $serial `
     --connection-file .\room-01-seat-01.json --output .\room-01-seat-01-logcat.txt
 ```
 
-連線檔使用該席部署時的原 JSON。每席使用自己的序號和新輸出路徑，可分開開啟擷取程序。工具鎖定遊戲 PID，持續保存原 `threadtime` 行，保留同一程序的重連。主控結束場次後，保持頭盔遊戲開啟，讓工具收完戰績和斷線記錄。工具核對戰績與原場次、玩家、房號及入場名額，確認 PID 一致後，會寫出完整日誌及 `logcatPid` 和 SHA-256 摘要。 [Android Logcat](https://developer.android.com/tools/logcat) · [PID 篩選](https://android.googlesource.com/platform/system/logging/+/f3568188d89e74f1202d4266c587ecb4cf027df4/logcat/logcat.cpp)
+連線檔使用該席部署時的原 JSON。每席使用自己的序號和新輸出路徑，可分開開啟擷取程序。單席與五房工具都從 `adb devices -l` 取得當次連線識別，沿用該連線查詢 PID、讀取原 `threadtime` 日誌及確認結束時的 PID。主控結束場次後，保持頭盔遊戲開啟，讓工具收完戰績和斷線記錄。工具核對戰績與原場次、玩家、房號及入場名額，確認 PID 一致後，會寫出完整日誌及 `logcatPid` 和 SHA-256 摘要。 [ADB 連線選擇](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/docs/user/adb.1.md) · [Android Logcat](https://developer.android.com/tools/logcat)
 
-擷取預設最多 1,800 秒及 16 MiB，可用 `--seconds` 指定 1 至 7,200 秒。若原啟動記錄已被覆蓋、PID 更換、ADB 中斷或逾時，工具以退出碼 1 結束，保留已寫入的 `.partial` 供診斷。擷取只使用 ADB 讀取遊戲程序與日誌。
+擷取預設最多 1,800 秒及 16 MiB，可用 `--seconds` 指定 1 至 7,200 秒。若原啟動記錄已被覆蓋、PID 更換、ADB 中斷或逾時，工具以退出碼 1 結束，保留該席已寫入的 `.partial`。ADB 連線重建後，即使序號與 PID 相同，仍須開始新一輪擷取。五房使用新資料夾補讀失敗席位。擷取只讀取 ADB 裝置清單、原遊戲程序與日誌。
 
 把成功輸出的日誌與 IPv4、`logcatPid` 交給單場或五房驗收工具，逐席核對原 UDP 來源、伺服器確認與封存序號。票券和原日誌存放在私人資料夾。 [單場及五房驗收](EXTERNAL_CLIENTS.md#核對封存戰績與-udp-來源)
 

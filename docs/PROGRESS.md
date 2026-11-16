@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-16 Quest 日誌擷取固定在原 ADB 連線
+
+- 單席與五房擷取先讀一次授權裝置及連線識別。接著用同一條連線讀取遊戲 PID、原 logcat 與結束時的 PID。缺少唯一連線識別的席位會回報失敗。原部署入場、OpenXR 及裝置身分核對依原選項執行。 [擷取方式](QUEST3.md#收集-quest-場館驗收日誌)
+- 重現原連線失效後，同一 ADB 名稱由相同 PID 的替代連線接手。舊版仍將兩席都標記為完整。新版只完成未受影響的一席，另一席保留逐位元相同的 `.partial`。用原 ZIP、映射與報告重試時重新取得連線識別，只補失敗席位，原報告與日誌逐位元相同。七項場館擷取回歸通過，含 25 席並行、混合 VR／MR 與原 OpenXR 啟動核對。 [舊版反例](../artifacts/quest-capture-transport-20261116-1538/before.log) · [場館回歸](../artifacts/quest-capture-transport-20261116-1538/capture-venue-tests.log)
+- 138 項封存驗收與擷取回歸通過。另通過裝置清單測試，核對重複名稱、重複連線識別、未授權及格式錯誤的裝置均無法被選取。 [封存驗收](../artifacts/quest-capture-transport-20261116-1538/field-suite.log) · [裝置清單測試](../artifacts/quest-capture-transport-20261116-1538/inventory-tests.log)
+- 以本機 Android SDK 的 `adb.exe` 連至隔離的迴環測試服務。原連線中斷時只發布部分檔，新一輪用新連線讀取相同入場與 PID 後發布完整檔。兩檔都與本機 ADB 直接輸出的 495 bytes 逐位元相同。原取證程式先用服務端 LF 比對，因 Windows ADB 實際輸出 CRLF 而失敗，後改核對直接 ADB 輸出。Windows 被動 USB 快照仍為 1 個檔案傳輸介面、0 個 ADB 介面，頭盔實機與跨機待驗。 [ADB 核對](../artifacts/quest-capture-transport-20261116-1538/native-adb-capture.json) · [USB 快照](../artifacts/quest-capture-transport-20261116-1538/usb-status.json)
+
 ## 2026-11-16 Quest 單席安裝與票券更新沿用原 ADB 連線
 
 - 首次安裝與續測、單席 VR／MR 部署及票券更新改用同一套 ADB 連線選擇。先確認指定序號或唯一已授權裝置及其連線識別，再沿用該連線核對型號、安裝、傳檔、切換設定及觀察啟動。預檢會拒絕缺少或重複的連線識別。 [首次安裝](QUEST3.md#首次安裝與啟動檢查) · [票券更新](QUEST_RECONNECT.md#保留遊戲程序並更新票券)

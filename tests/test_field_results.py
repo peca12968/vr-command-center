@@ -305,13 +305,19 @@ def quest_capture_venue_fixture(root, mode, *, quest_per_room=2, batches=2, use_
         adb = root / 'mock-adb.py'
         adb.write_text("""from pathlib import Path
 import sys
-assert sys.argv[1] == '-s'
-serial = sys.argv[2]
+root = Path(__file__).parent
+transports = {str(index): path.stem for index, path in enumerate(sorted(root.glob('mock-*.log')), 1)}
+if sys.argv[1:] == ['devices', '-l']:
+    print('List of devices attached')
+    for transport, serial in transports.items():
+        print(f'{serial} device transport_id:{transport}')
+    sys.exit(0)
+assert sys.argv[1] == '-t'
+serial = transports[sys.argv[2]]
 if sys.argv[3:] == ['shell', 'pidof', 'com.vrcommand.quest']:
     print(7342)
 else:
     assert sys.argv[3:] == ['logcat', '-b', 'main', '--pid=7342', '-v', 'threadtime', '-s', 'Unity:I']
-    root = Path(__file__).parent
     raw = (root / (serial + '.log')).read_bytes()
     if (root / (serial + '.interrupt')).exists():
         for line in raw.splitlines(keepends=True):
@@ -374,6 +380,24 @@ def observed_quest_capture_spec(root, spec):
 
 
 class QuestCaptureTests(unittest.TestCase):
+    def test_inventory_uses_only_unique_authorized_adb_transports(self):
+        output = (b'List of devices attached\r\n'
+                  b'good device product:quest3 transport_id:41\r\n'
+                  b'offline offline transport_id:42\r\n'
+                  b'pair device transport_id:43\r\n'
+                  b'other unauthorized transport_id:43\r\n'
+                  b'twice device transport_id:44\r\n'
+                  b'twice device transport_id:45\r\n'
+                  b'no-id device\r\n'
+                  b'bad-fields device transport_id:47 transport_id:broken\r\n'
+                  b'huge device transport_id:9223372036854775808\r\n')
+        response = subprocess.CompletedProcess(['adb', 'devices', '-l'], 0, stdout=output)
+        with patch.object(capture_tool.subprocess, 'run', return_value=response) as run:
+            transports = capture_tool.read_adb_transports(['adb'], 2)
+        self.assertEqual({'good': '41'}, transports)
+        self.assertEqual(['adb', 'devices', '-l'], run.call_args.args[0])
+        self.assertEqual(2, run.call_args.kwargs['timeout'])
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix='quest-live-capture-')
         self.addCleanup(temporary.cleanup)
