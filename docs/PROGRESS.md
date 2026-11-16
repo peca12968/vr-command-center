@@ -5,6 +5,7 @@
 - 場館發行工具直接核對已簽章 APK 裡的 AndroidManifest。確認同一啟動篩選器宣告 Android 與 Meta VR、Quest 3 裝置、頭部追蹤、MR 透視及 Internet 權限。用真正 AAPT2 與 APK v2 簽章建立六個測試包，舊版均接受，新版拒絕五個缺少宣告的版本。十項發行回歸通過。 [操作方式](EXTERNAL_CLIENTS.md#發送前離線核對交付套件) · [簽章測試](../artifacts/quest-apk-manifest-20261117/signed-fixtures-final-results.json) · [單元測試](../artifacts/quest-apk-manifest-20261117/release-tests-final.log)
 - 既有 Quest 0.50.12／77 與管理包 0.31.221、Windows 0.50.12 伺服器及玩家包通過共同發行核對。三份 Windows 包解壓後核對 571、331、331 個檔案，其中 324 個遊戲檔案相符。APK 雜湊與原發行相符。新版發行報告另外以測試連線檔通過合併 25 席和獨立 25 席的部署離線預檢。 [發行報告](../artifacts/quest-apk-manifest-20261117/venue-release-final.json) · [逐席預檢](../artifacts/quest-apk-manifest-20261117/deployment-preflight-readback.json)
 - Android 工具首輪測試的 Windows 本地化診斷產生解碼錯誤，第二輪發現只讀標準輸出時須保留換行正規化，兩輪日誌保留。最終以 Android SDK 36.0.0 重驗。Quest USB 還只有檔案傳輸介面，實機啟動、透視與跨機連線待驗。 [首輪](../artifacts/quest-apk-manifest-20261117/signed-fixtures.log) · [第二輪](../artifacts/quest-apk-manifest-20261117/signed-fixtures-repeat.log) · [USB 快照](../artifacts/quest-apk-manifest-20261117/usb-status.json)
+- GitHub Actions 對 `81b4c8b` 回報帳務或用量限制，工作未啟動。 [GitHub Actions 工作](https://github.com/peca12968/vr-command-center/actions/runs/43954626816/job/133605790367)
 
 ## 2026-11-17 合併場分房敵軍策略封存核對
 
