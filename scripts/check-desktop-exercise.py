@@ -860,7 +860,8 @@ def main():
     p.add_argument('--link-metrics', action='store_true', help='Collect 30 opt-in native link measurements per client during the 40-second short exercise')
     p.add_argument('--udp-traffic', action='store_true', help='Measure forwarded UDP payload bytes per original client in the 40-second short exercise')
     p.add_argument('--udp-periodic-loss', action='store_true', help='Measure and drop every twentieth datagram per player and direction after admission in the 40-second short exercise')
-    p.add_argument('--api-dll',type=Path,default=Path(os.environ.get('VR_COMMAND_API_DLL',ROOT/'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')));p.add_argument('--player-exe',type=Path,default=ROOT/'artifacts/desktop/VrCommand.exe');args=p.parse_args();args.duration=600;args.visible_room=0;args.job_workers=2;args.check=False
+    vm.add_api_arguments(p)
+    p.add_argument('--player-exe',type=Path,default=ROOT/'artifacts/desktop/VrCommand.exe');args=p.parse_args();args.duration=600;args.visible_room=0;args.job_workers=2;args.check=False
     if args.endurance and (args.seconds not in (60,900) or args.operator_controls) or not args.endurance and args.seconds not in range(12,41):p.error('Short seconds must be 12..40; endurance requires 60 or 900 and no operator-controls')
     if args.replay_workers!=1 and not args.endurance:p.error('Parallel replay readers require the explicit endurance profile')
     if args.pose_continuity and (not args.endurance or args.mode != 'linked'):p.error('Pose continuity requires the Linked endurance profile')

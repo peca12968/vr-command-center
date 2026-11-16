@@ -6,6 +6,7 @@ owned by this isolated fixture; the existing preview service is never touched.
 import argparse
 from contextlib import ExitStack
 from datetime import datetime, timezone
+import hashlib
 import importlib.util
 import json
 import os
@@ -71,11 +72,36 @@ def snapshot_runtime(source,destination):
     with readers:shutil.copytree(source,destination)
 
 
+def add_api_arguments(parser):
+    api = parser.add_mutually_exclusive_group()
+    api.add_argument('--api-dll', type=Path, help='Managed API assembly to run with the installed dotnet host')
+    api.add_argument('--api-exe', type=Path, help='VrCommand.Api.exe in an extracted Windows management package')
+
+
+def api_command(args):
+    executable = getattr(args, 'api_exe', None)
+    if executable is not None:
+        executable = executable.resolve(strict=True)
+        assembly = executable.with_suffix('.dll')
+        if executable.name.lower() != 'vrcommand.api.exe' or not executable.is_file() or not assembly.is_file():
+            raise ValueError('Use VrCommand.Api.exe alongside VrCommand.Api.dll from the Windows management package')
+        return [str(executable)], executable.parent, assembly
+
+    assembly = getattr(args, 'api_dll', None) or Path(os.environ.get('VR_COMMAND_API_DLL',
+        ROOT / 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll'))
+    dotnet = shutil.which('dotnet')
+    if not dotnet or not assembly.is_file():
+        raise RuntimeError('Build the API and install dotnet, or specify --api-exe')
+    assembly = assembly.resolve(strict=True)
+    return [str(Path(dotnet).resolve(strict=True)), str(assembly)], ROOT, assembly
+
+
 def verify_player(args):
     from windows_firewall import require_silent_windows_launch
 
-    if os.name != 'nt' or not args.player_exe.is_file() or not args.api_dll.is_file():
-        raise RuntimeError('Build the Windows player and API first')
+    if os.name != 'nt' or not args.player_exe.is_file():
+        raise RuntimeError('Build the Windows player first')
+    api_command(args)
     require_silent_windows_launch(args.player_exe)
     spec = importlib.util.spec_from_file_location('native_admission', ROOT / 'scripts/check-unity-admission.py')
     checker = importlib.util.module_from_spec(spec); spec.loader.exec_module(checker)
@@ -151,14 +177,24 @@ class Venue:
         raise RuntimeError('Timed out: ' + label)
 
     def start(self):
+        from windows_firewall import require_silent_windows_launch
+
+        command, cwd, assembly = api_command(self.args)
+        require_silent_windows_launch(command[0])
+        with assembly.open('rb') as binary:
+            assembly_sha256 = hashlib.file_digest(binary, 'sha256').hexdigest()
         environment = {k: v for k, v in os.environ.items() if not k.lower().startswith('operatorkeys__') and k.lower() not in ['operatorkeyfile', 'playerticketsigningkey']}
         environment.update(DataDirectory=str(self.runtime_directory / 'missions'), SessionDataDirectory=str(self.runtime_directory / 'sessions'),
                            OperatorKeyFile=str(self.directory / 'keys.json'), Logging__LogLevel__Default='Warning')
         self.api_log = (self.directory / 'api.log').open('wb')
-        self.processes['api'] = subprocess.Popen(['dotnet', str(self.args.api_dll.resolve()), '--urls', self.base], cwd=ROOT,
+        self.processes['api'] = subprocess.Popen([*command, '--urls', self.base], cwd=cwd,
             env=environment, stdout=self.api_log, stderr=self.api_log, creationflags=subprocess.CREATE_NO_WINDOW)
         self.wait(lambda: self.request('/health'), 30, 'API startup')
-        if self.request('/').get('version') != '0.31.0': raise RuntimeError('Build API 0.31.0 before provisioning the report-capable venue')
+        version = self.request('/').get('version')
+        if version != '0.31.0':
+            raise RuntimeError('Build API 0.31.0 before provisioning the report-capable venue')
+        self.save('api-runtime.json', {'program': command[0], 'assembly': str(assembly), 'assemblySha256': assembly_sha256,
+                                      'version': version, 'processId': self.processes['api'].pid, 'bind': self.base})
 
     def launch(self, name, config, visible=False, *, extra_args=()):
         self.save(name + '.json', config)
@@ -514,7 +550,7 @@ def check_venue(venue, rooms):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--player-exe', type=Path, default=Path(os.environ.get('VR_COMMAND_UNITY_PLAYER', ROOT / 'artifacts/desktop/VrCommand.exe')))
-    parser.add_argument('--api-dll', type=Path, default=Path(os.environ.get('VR_COMMAND_API_DLL', ROOT / 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
+    add_api_arguments(parser)
     parser.add_argument('--duration', type=int, choices=range(60,1801), default=900, metavar='60..1800')
     parser.add_argument('--visible-room', type=int, choices=range(0,6), default=1, help='One playable PC room; 0 makes all clients headless')
     parser.add_argument('--check', action='store_true', help='Headless native five-room isolation, room reuse and later Linked validation')

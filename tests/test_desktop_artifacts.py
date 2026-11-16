@@ -8,6 +8,7 @@ from pathlib import Path
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 import unittest
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -19,6 +20,18 @@ class ArtifactTests(unittest.TestCase):
     def directory(self):return tempfile.TemporaryDirectory(prefix='vr-artifacts-')
     def guard(self,path):
         self.assertEqual(path.parent,Path(tempfile.gettempdir()).resolve());self.assertTrue(path.name.startswith('vr-artifacts-'))
+
+    def test_packaged_api_uses_the_approved_program_and_its_original_assembly(self):
+        with self.directory() as temporary:
+            root = Path(temporary).resolve()
+            exe = root / 'VrCommand.Api.exe'
+            dll = root / 'VrCommand.Api.dll'
+            exe.touch()
+            args = SimpleNamespace(api_exe=exe)
+            with self.assertRaisesRegex(ValueError, 'alongside VrCommand.Api.dll'):
+                venue.api_command(args)
+            dll.touch()
+            self.assertEqual(([str(exe)], root, dll), venue.api_command(args))
 
     def test_concurrent_reader_sees_only_complete_json_and_no_temporary_files_remain(self):
         with self.directory() as temporary:

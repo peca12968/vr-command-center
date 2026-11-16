@@ -1,5 +1,17 @@
 # 原生多客戶端自動化動態驗證
 
+## 使用 Windows 管理包執行無人值守測試
+
+`check-desktop-exercise.py` 和 `start-desktop-venue.py` 支援 `--api-exe`，可直接選擇解壓後管理包的 `Runtime/VrCommand.Api.exe`。執行檔與同目錄的 `VrCommand.Api.dll` 保留在原包。`--api-dll` 也可用來指定交給 `dotnet` 的 API 組件。兩者擇一。
+
+管理程式及 Windows 遊戲啟動前各自核對實際執行檔的防火牆設定。測試使用新資料目錄、原套件執行環境及 `127.0.0.1`。`api-runtime.json` 保存管理執行檔路徑、組件 SHA-256、版本、程序識別和繫結位址。 [無人值守測試](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
+
+```powershell
+python scripts/check-desktop-exercise.py --api-exe <管理包-Runtime-VrCommand.Api.exe> `
+  --runtime-root <本機測試目錄> --mode both --players-per-room 5 --seconds 40 `
+  --link-metrics --operator-controls --check-policy-frames
+```
+
 ## 五房 UDP 丟包驗證
 
 ```powershell
