@@ -563,6 +563,9 @@ function renderVenueMissionFileReview() {
 }
 function renderVenueMissionFileMaps(review, current, mode) {
   const panel = $('venue-missions-maps'), grid = $('venue-missions-maps-grid'), picker = $('venue-missions-map-room');
+  const applyRoom = $('use-venue-mission-room');
+  applyRoom.hidden = review?.mode !== 'IndependentSet' || mode !== 'IndependentSet';
+  applyRoom.disabled = true;
   panel.hidden = !review;
   if (!review) {
     venueMissionFileMaps = null;
@@ -571,6 +574,10 @@ function renderVenueMissionFileMaps(review, current, mode) {
   }
   const room = Number(picker.value);
   const original = current[room - 1], incoming = review.revisions[room - 1];
+  if (!applyRoom.hidden) {
+    applyRoom.textContent = `套用房間 ${room} 的檔案版本`;
+    applyRoom.disabled = state.busy || !!state.pending || original?.mission.id === incoming.mission.id;
+  }
   const key = `${room}/${mode}/${original?.mission?.id ?? ''}`;
   if (venueMissionFileMaps?.review === review && venueMissionFileMaps.key === key) return;
   const comparison = venueMissionFileMaps = { review, key };
@@ -702,7 +709,7 @@ async function loadVenueMissionFile(previewOnly) {
       const layouts = await Promise.allSettled(ids.map(id => placement.inspectSaved({ id, mode,
         experienceMode: revisions.get(id).mission.definition.environment.mode })));
       if (!current()) return;
-      venueMissionFileReview = { mode: plan.mode, revisions: assigned, layouts: new Map(ids.map((id, index) =>
+      venueMissionFileReview = { file, mode: plan.mode, revisions: assigned, layouts: new Map(ids.map((id, index) =>
         [id, layouts[index].status === 'fulfilled' ? layouts[index].value : null])) };
       status.textContent = '已核對檔案版本。確認後可載入配置。';
       return;
@@ -710,6 +717,18 @@ async function loadVenueMissionFile(previewOnly) {
     applyVenueMissionRevisions(plan.mode, assigned);
     status.textContent = '已載入五房任務配置。請核對場地，再建立準備場次。';
   }, true);
+}
+function useVenueMissionFileRoom() {
+  const review = venueMissionFileReview;
+  const button = $('use-venue-mission-room');
+  if (!master() || state.busy || state.pending || button.disabled || button.hidden
+    || review?.mode !== 'IndependentSet' || $('launch-mode').value !== 'IndependentSet'
+    || review.file !== $('venue-missions-file').files[0]) return;
+  const room = Number($('venue-missions-map-room').value);
+  const revision = review.revisions[room - 1];
+  roomPlan.restoreRoom(room, revision);
+  $('venue-missions-file-status').textContent = `已套用房間 ${room} 的任務版本。請核對場地，再建立準備場次。`;
+  $('venue-missions-map-room').focus();
 }
 function launchPlan() {
   const mode = $('launch-mode').value, mixed = roomPlan.enabled();
@@ -2281,6 +2300,7 @@ $('venue-missions-file').addEventListener('change', () => {
 $('preview-venue-missions').addEventListener('click', () => loadVenueMissionFile(true));
 $('venue-missions-map-room').addEventListener('change', renderVenueMissionFileReview);
 $('load-venue-missions').addEventListener('click', () => loadVenueMissionFile(false));
+$('use-venue-mission-room').addEventListener('click', useVenueMissionFileRoom);
 $('download-venue-missions').addEventListener('click', () => {
   const plan = venueMissionSelection();
   if ($('download-venue-missions').disabled || !plan) return;

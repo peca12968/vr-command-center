@@ -10,6 +10,7 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
   const panel = page.locator('#launch-mission-file-panel'), input = page.locator('#venue-missions-file');
   const save = page.locator('#download-venue-missions'), load = page.locator('#load-venue-missions');
   const preview = page.locator('#preview-venue-missions'), review = page.locator('#venue-missions-review');
+  const applyRoom = page.locator('#use-venue-mission-room');
   const reviewRows = review.locator('tbody tr');
   const maps = page.locator('#venue-missions-maps'), mapRoom = page.locator('#venue-missions-map-room');
   const currentMap = maps.locator('[data-source=current]'), fileMap = maps.locator('[data-source=file]');
@@ -138,6 +139,23 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
     check(await maps.locator('article').evaluateAll(([before, after]) => before.offsetTop < after.offsetTop
       && before.offsetWidth === after.offsetWidth), 'Narrow comparison stacks both maps at equal width');
     await page.setViewportSize({ width: 1440, height: 1080 });
+    check(await applyRoom.isHidden(), 'A linked preparation cannot apply individual file rooms');
+    await mode.selectOption('IndependentSet');
+    const toggle = page.locator('#launch-room-missions-toggle');
+    assert.equal(await toggle.isChecked(), false);
+    await applyRoom.click();
+    await status.filter({ hasText: '已套用房間 2' }).waitFor();
+    assert.deepEqual(await selected(), [head.id, b.id, head.id, head.id, head.id]);
+    check(await toggle.isChecked() && await applyRoom.isDisabled() && await mapRoom.inputValue() === '2'
+      && await page.locator('#launch-review-room').inputValue() === '2' && await draft.inputValue() === '691',
+      'Applying room 2 keeps the common version in the other four rooms and preserves the draft');
+    await mapRoom.selectOption('1');
+    await applyRoom.click();
+    assert.deepEqual(await selected(), [a.id, b.id, head.id, head.id, head.id]);
+    check(await page.locator('#launch-review-room').inputValue() === '1' && await create.isDisabled()
+      && (await api('/sessions')).map(session => session.id).join() === blocker.id,
+      'Applying a second room keeps earlier selections and creates no sessions');
+    await mode.selectOption('Linked');
     const withInvalidLayout = structuredClone(independent.value);
     withInvalidLayout.rooms[4].missionId = invalidLayout.id;
     const waitingLayout = url => url.pathname === `/api/missions/${invalidLayout.id}/layout` && url.searchParams.get('mode') === 'Linked';

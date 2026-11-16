@@ -111,6 +111,19 @@ export function mountIndependentPlan({ available, catalog, pinned, common, clima
   overview.addEventListener('toggle', renderMaps);
   return {
     render, enabled, setRevision,
+    restoreRoom(roomId, revision) {
+      if (!available()) return;
+      const target = rows[roomId - 1];
+      if (!enabled()) {
+        const shared = common();
+        toggle.checked = true;
+        for (const row of rows) if (row !== target) assign(row, shared);
+      }
+      preview.value = String(roomId);
+      invalidate(revision.mission.id);
+      assign(target, revision);
+      changed();
+    },
     restore(revisions) {
       toggle.checked = true;
       preview.value = '1';
