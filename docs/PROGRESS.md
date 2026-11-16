@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 Windows 玩家戰績與全館發行報告
+
+- Windows 玩家啟動器 1.17 的套件核對、啟動與退出報告加入 `venueReleaseReportSha256`。驗收 ZIP 內的退出報告保留啟動時所讀取的原發行檔摘要。全館驗收會用同一份原檔核對 Windows、Quest 與伺服器。Windows 收件指出摘要不符的 ZIP 並列出完成核對的席數。舊收件繼續核對原套件清單、日誌及戰績。 [玩家包操作](WINDOWS_PLAYER_PACKAGE.md#依場館發行報告核對玩家包) · [全館驗收](EXTERNAL_CLIENTS.md#核對全館共用的發行報告)
+- 解壓 1.17 玩家包後，與伺服器 1.26、Quest 0.50.11／76 APK 及管理包 0.31.206 重新核對共用發行。兩支 Windows 啟動器的離線核對和 Quest 獨立、合併各 25 席的模擬預檢回傳相同摘要。實際玩家啟動器通過 44 項套件檢查，另以不使用網路的模擬子程序驗證三個戰績 ZIP 案例。修改已開場的發行檔後仍使用原摘要，缺少最終戰績時不產生 ZIP。 [玩家包](../artifacts/windows-player-release-report-1170-05011.zip) · [共用發行核對](../artifacts/windows-player-release-report-check-b9da7b7b/common-release.json) · [戰績 ZIP 排演](../artifacts/windows-launch-release-fixture-f76d5980/validation.json)
+- 本機 136 項封存、9 項發行及 7 項玩家封裝測試通過，符號連結一項因 Windows 權限跳過。混合封存排演在兩種拓撲各核對 15 席 Windows 及 10 席 Quest，原 0.50.7 六批摘要仍逐位元組相符。新解壓遊戲路徑有防火牆提示風險，Unity 和 WinForms 實際開場未執行。Quest USB 仍未提供 ADB 偵錯介面。功能提交 `3e3af8b` 已推送，GitHub Actions 未執行測試步驟。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43789021879/job/133043000559)
+
 ## 2026-11-16 Quest 部署與重試核對整份發行報告
 
 - `deploy-quest.ps1` 會以 `venueReleaseReportSha256` 記錄選用的原發行檔。重試若換用內容或換行不同的檔案，會在呼叫 ADB 前拒絕。合併追蹤檢查會比對各筆已有的發行摘要，封存和六批收件則比對原發行檔並列出完成核對的席數。舊部署回條及其累計重試沿用原 APK 證據。 [Quest 部署](QUEST3.md#核對頭盔內已安裝的發行-apk) · [封存核對](EXTERNAL_CLIENTS.md#核對封存席位的-quest-發行-apk)
