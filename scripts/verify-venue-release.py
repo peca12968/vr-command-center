@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import struct
 import subprocess
 from xml.etree.ElementTree import Element
 import zipfile
@@ -25,6 +26,15 @@ digest = player_package.digest
 IDENTITY = ('unityVersion', 'sourceFingerprint', 'sceneNetworkId', 'playerPrefabId')
 HASH = r'[0-9a-f]{64}'
 ABI = 'arm64-v8a'
+QUEST_LIBRARIES = ('libmain.so', 'libunity.so', 'libil2cpp.so', 'libopenxr_loader.so',
+                   'libUnityOpenXR.so', 'libUnityARFoundationMeta.so')
+ELF64_HEADER = struct.Struct('<16sHHIQQQIHHHHHH')
+ELF64_PROGRAM_HEADER = struct.Struct('<IIQQQQQQ')
+ELF64_LITTLE_ENDIAN = b'\x7fELF\x02\x01\x01'
+ELF_SHARED_OBJECT = 3
+ELF_AARCH64 = 183
+ELF_LOAD = 1
+ELF_DYNAMIC = 2
 QUEST_APP = 'com.vrcommand.quest'
 QUEST_VR_CATEGORY = 'com.oculus.intent.category.VR'
 
@@ -187,6 +197,49 @@ def quest_manifest_metadata(badging, dump):
             'headTrackingVersion': 1, 'passthroughDeclared': True, 'internetPermission': True}
 
 
+def verify_quest_library(file, size, name):
+    header = file.read(ELF64_HEADER.size)
+    error = f'Quest APK native library {name}: expected a little-endian ARM64 ELF shared object'
+    require(len(header) == ELF64_HEADER.size and header.startswith(ELF64_LITTLE_ENDIAN), error)
+    (_, kind, machine, version, _, table_offset, _, _, header_size, entry_size, entry_count,
+     _, _, _) = ELF64_HEADER.unpack(header)
+    require((kind, machine, version) == (ELF_SHARED_OBJECT, ELF_AARCH64, 1), error)
+    error = f'Quest APK native library {name}: invalid ELF program headers'
+    table_size = entry_size * entry_count
+    require(header_size == ELF64_HEADER.size and table_offset >= header_size
+            and entry_size == ELF64_PROGRAM_HEADER.size and 0 < entry_count < 0xffff
+            and table_offset + table_size <= size, error)
+    file.seek(table_offset)
+    table = file.read(table_size)
+    require(len(table) == table_size, error)
+    file_backed = set()
+    for kind, _, offset, _, _, file_size, memory_size, _ in ELF64_PROGRAM_HEADER.iter_unpack(table):
+        if kind in (ELF_LOAD, ELF_DYNAMIC):
+            require(file_size <= memory_size and offset + file_size <= size, error)
+            if file_size:
+                file_backed.add(kind)
+    require({ELF_LOAD, ELF_DYNAMIC} <= file_backed, error)
+
+
+def quest_native_libraries(archive):
+    libraries = {}
+    for info in archive.infolist():
+        path = info.filename
+        if not (path.startswith('lib/') and path.endswith('.so')):
+            continue
+        require(path.startswith(f'lib/{ABI}/') and path.count('/') == 2,
+                f'Quest APK has a native library outside its ARM64 ABI directory: {path}')
+        name = path.rsplit('/', 1)[1]
+        require(name not in libraries, f'Quest APK contains a duplicate native library: {name}')
+        libraries[name] = info
+    missing = [name for name in QUEST_LIBRARIES if name not in libraries]
+    require(not missing, f'Quest APK is missing required native libraries: {", ".join(missing)}')
+    for name, info in libraries.items():
+        with archive.open(info) as file:
+            verify_quest_library(file, info.file_size, name)
+    return {'arm64ElfLibrariesVerified': len(libraries), 'requiredLibraries': list(QUEST_LIBRARIES)}
+
+
 def verify_quest(apk, sdk, jdk, game):
     require(apk.is_file() and apk.suffix.lower() == '.apk', 'Choose the original Quest APK')
     receipt = read(apk.with_suffix('.receipt.json'))
@@ -213,11 +266,11 @@ def verify_quest(apk, sdk, jdk, game):
             require(type(receipt[field]) is type(meta[field]) and receipt[field] == meta[field],
                     f'Quest APK {field} differs from the release receipt')
     with zipfile.ZipFile(apk) as archive:
-        natives = {f'lib/{ABI}/{name}' for name in ('libil2cpp.so', 'libUnityOpenXR.so', 'libopenxr_loader.so')}
-        require(natives <= set(archive.namelist()), 'Quest APK is missing the required OpenXR or game libraries')
+        native_libraries = quest_native_libraries(archive)
     android_manifest = quest_manifest_metadata(badging, run(aapt, 'dump', 'xmltree', apk, '--file', 'AndroidManifest.xml'))
     require(digest(apk) == receipt['sha256'], 'Quest APK changed during verification')
-    return {**meta, 'bytes': receipt['bytes'], 'sha256': receipt['sha256'], 'androidManifest': android_manifest}
+    return {**meta, 'bytes': receipt['bytes'], 'sha256': receipt['sha256'], 'androidManifest': android_manifest,
+            'nativeLibraries': native_libraries}
 
 
 def main():

@@ -1,6 +1,6 @@
 # Quest 3 接入與工具鏈
 
-目前 Quest 開發 APK 為 `0.50.12`／77，61,046,094 bytes，SHA-256 `f2ff7f1ce8cd9a89864a8a6f245d168d64457869cb1e812d9582399eef098873`。2026-11-17 重新核對同一份 APK 的 ARM64、SDK 32／35、v2 簽章及內附 AndroidManifest 的 VR 啟動與 MR 透視宣告。 [APK](../artifacts/quest/VrCommand.apk) · [發行報告](../artifacts/quest-apk-manifest-20261117/venue-release-final.json)
+目前 Quest 開發 APK 為 `0.50.12`／77，61,046,094 bytes，SHA-256 `f2ff7f1ce8cd9a89864a8a6f245d168d64457869cb1e812d9582399eef098873`。2026-11-17 重新核對同一份 APK 的 7 個 ARM64 ELF、SDK 32／35、v2 簽章及內附 AndroidManifest 的 VR 啟動與 MR 透視宣告。已用新版報告通過獨立與合併場的 VR／MR 離線部署前檢查。 [APK](../artifacts/quest/VrCommand.apk) · [發行報告](../artifacts/quest-native-elf-20261117/venue-release.json)
 
 2026-11-16 Quest 開發 APK `0.50.11`／76 為 61,044,650 bytes，SHA-256 `06cec1ccf61c867038a05ff89acdd476ce24766dc146b3a325f6327455cf493c`。通過 ARM64、SDK 32／35、OpenXR 程式庫、APK v2 簽章及同版 Windows 來源核對。開啟遊戲內量測後，每條新連線可獨立採樣。 [發行報告](../artifacts/venue-release-quest-reconnect-0511.json) · [前版原件](../artifacts/history/unity-0510-before-reconnect-fd0b4f27/quest/VrCommand.apk)
 

@@ -3,6 +3,7 @@ import importlib.util
 import hashlib
 import json
 from pathlib import Path
+import struct
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -48,6 +49,21 @@ class VenueReleaseTests(unittest.TestCase):
         rows = [{'path': file.relative_to(folder).as_posix(), 'bytes': file.stat().st_size, 'sha256': release.digest(file)}
                 for file in sorted(folder.rglob('*')) if file.is_file() and file.name != name]
         self.write(folder, name, dict(fields, files=rows))
+
+    def write_native_apk(self, apk, *, replacement=None, omit=None, extra=None):
+        # Minimal structural ELF fixture. Each program header points to file-backed data.
+        header = struct.pack('<16sHHIQQQIHHHHHH', b'\x7fELF\x02\x01\x01', 3, 183, 1, 0, 64, 0, 0, 64, 56, 2, 0, 0, 0)
+        load = struct.pack('<IIQQQQQQ', 1, 5, 0, 0, 0, 192, 192, 4096)
+        dynamic = struct.pack('<IIQQQQQQ', 2, 6, 176, 176, 176, 16, 16, 8)
+        library = header + load + dynamic + bytes(16)
+        with zipfile.ZipFile(apk, 'w') as archive:
+            for name in ('libmain.so', 'libunity.so', 'libil2cpp.so', 'libopenxr_loader.so', 'libUnityOpenXR.so',
+                         'libUnityARFoundationMeta.so', 'lib_burst_generated.so'):
+                if name != omit:
+                    data = replacement(library) if name == 'libUnityOpenXR.so' and replacement is not None else library
+                    archive.writestr(f'lib/arm64-v8a/{name}', data)
+            if extra is not None:
+                archive.writestr(extra, library)
 
     def test_same_windows_game_runtime_and_management_publication(self):
         identity, summary = release.verify_windows(self.control, self.server, self.player)
@@ -113,9 +129,7 @@ class VenueReleaseTests(unittest.TestCase):
 
     def test_quest_uses_original_receipt_bytes_and_build_identity(self):
         apk = self.root / 'game.apk'
-        with zipfile.ZipFile(apk, 'w') as archive:
-            for name in ('libil2cpp.so', 'libUnityOpenXR.so', 'libopenxr_loader.so'):
-                archive.writestr('lib/arm64-v8a/' + name, b'fixture')
+        self.write_native_apk(apk)
         receipt = {'artifact': apk.name, 'bytes': apk.stat().st_size, 'sha256': release.digest(apk),
                    'version': '0.49.0', 'versionCode': 63, 'architecture': 'arm64-v8a',
                    'source': dict(self.source, target='Android')}
@@ -129,9 +143,7 @@ class VenueReleaseTests(unittest.TestCase):
 
     def test_verified_quest_metadata_must_match_fields_in_original_receipt(self):
         apk = self.root / 'game.apk'
-        with zipfile.ZipFile(apk, 'w') as archive:
-            for name in ('libil2cpp.so', 'libUnityOpenXR.so', 'libopenxr_loader.so'):
-                archive.writestr('lib/arm64-v8a/' + name, b'fixture')
+        self.write_native_apk(apk)
         for name in ('build-tools/36.0.0/aapt2', 'build-tools/36.0.0/aapt2.exe', 'build-tools/36.0.0/lib/apksigner.jar', 'bin/java', 'bin/java.exe'):
             self.write(self.root, name, 'fixture')
         meta = {'applicationId': release.QUEST_APP, 'version': '0.49.0', 'versionCode': 63, 'architecture': 'arm64-v8a',
@@ -148,6 +160,7 @@ class VenueReleaseTests(unittest.TestCase):
                 result = release.verify_quest(apk, self.root, self.root, game)
                 self.assertEqual(result['signerSha256'], 'e' * 64)
                 self.assertTrue(result['androidManifest']['immersiveLauncher'])
+                self.assertEqual(result['nativeLibraries']['arm64ElfLibrariesVerified'], 7)
             for field, value in [('signerSha256', 'f' * 64), ('signatureV2', 1), ('minSdk', 31),
                                  ('targetSdk', 34), ('applicationId', 'com.example.other')]:
                 with self.subTest(field=field), self.assertRaisesRegex(ValueError, f'Quest APK {field} differs'):
@@ -162,6 +175,28 @@ class VenueReleaseTests(unittest.TestCase):
             with patch.object(release, 'quest_manifest_metadata', side_effect=replace_apk), \
                     self.assertRaisesRegex(ValueError, 'changed during verification'):
                 release.verify_quest(apk, self.root, self.root, game)
+
+    def test_native_abi_is_checked_against_library_contents(self):
+        apk = self.root / 'game.apk'
+        cases = (
+            ({'replacement': lambda data: data[:18] + struct.pack('<H', 62) + data[20:]}, 'ARM64 ELF shared object'),
+            ({'replacement': lambda data: data[:16] + struct.pack('<H', 2) + data[18:]}, 'ELF shared object'),
+            ({'replacement': lambda data: data[:63]}, 'ARM64 ELF shared object'),
+            ({'replacement': lambda data: data[:120]}, 'invalid ELF program headers'),
+            ({'replacement': lambda data: data[:-1]}, 'invalid ELF program headers'),
+            ({'replacement': lambda data: data[:120] + bytes(4) + data[124:]}, 'invalid ELF program headers'),
+            ({'omit': 'libUnityARFoundationMeta.so'}, r'missing required native libraries: libUnityARFoundationMeta\.so'),
+            ({'extra': 'lib/x86_64/libExtra.so'}, 'outside its ARM64 ABI directory'),
+        )
+        for options, diagnostic in cases:
+            with self.subTest(options=options):
+                self.write_native_apk(apk, **options)
+                with zipfile.ZipFile(apk) as archive, self.assertRaisesRegex(ValueError, diagnostic):
+                    release.quest_native_libraries(archive)
+        with self.assertWarnsRegex(UserWarning, 'Duplicate name'):
+            self.write_native_apk(apk, extra='lib/arm64-v8a/libUnityOpenXR.so')
+        with zipfile.ZipFile(apk) as archive, self.assertRaisesRegex(ValueError, 'duplicate native library'):
+            release.quest_native_libraries(archive)
 
     def test_quest_metadata_accepts_arm64_and_verified_v2_only(self):
         badging = ("package: name='com.vrcommand.quest' versionCode='63' versionName='0.49.0'\n"

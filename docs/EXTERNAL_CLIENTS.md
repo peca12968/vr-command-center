@@ -2,7 +2,7 @@
 
 ## 遊戲版本相容性
 
-遊戲 0.50.2 使用 NGO 協定 31。Windows 遊戲伺服器、Windows 玩家與 Quest APK 請使用同版。升級時先結束現有場次，再一併更新遊戲伺服器及玩家端。API 0.31.0 供應玩家票券及世界回放，戰績回條搭配管理包 0.31.109。MR 伺服器須搭配支援 `SetRoomAlignment` 的管理服務。 [玩家戰績回條](SESSION_CLOSURE.md#玩家戰績回條) · [鎖定房間校正檔](QUEST3.md#啟動-mr-伺服器前鎖定校正檔)
+遊戲 0.50.12 使用 NGO 協定 31。Windows 遊戲伺服器、Windows 玩家與 Quest APK 請使用同版。升級時先結束現有場次，再一併更新遊戲伺服器及玩家端。API 0.31.0 供應玩家票券及世界回放，戰績回條搭配管理包 0.31.109 以上。MR 伺服器須搭配支援 `SetRoomAlignment` 的管理服務。 [玩家戰績回條](SESSION_CLOSURE.md#玩家戰績回條) · [鎖定房間校正檔](QUEST3.md#啟動-mr-伺服器前鎖定校正檔)
 
 新版以二進位 UUID、打包整數與欄位旗標傳送角色狀態。連線房間同步完整角色清單，以完整浮點精度傳送位置、面向與射擊向量。
 
@@ -17,7 +17,7 @@ $release = python scripts/verify-venue-release.py `
   --control 'C:\Delivery\VRCommand-ControlServer' `
   --server 'C:\Delivery\VRCommand-GameServer' `
   --player 'C:\Delivery\VRCommand-Player' `
-  --quest-apk 'C:\Delivery\vr-command-quest-0.50.2-arm64-debug.apk' `
+  --quest-apk 'C:\Delivery\VrCommand.apk' `
   --sdk 'F:\Unity\AndroidPlayer\SDK' --jdk 'F:\Unity\AndroidPlayer\OpenJDK'
 if ($LASTEXITCODE -eq 0) {
     $release | Set-Content -LiteralPath .\venue-release.json -Encoding utf8
@@ -27,6 +27,8 @@ if ($LASTEXITCODE -eq 0) {
 通過時輸出一行 `verified: true` 的 JSON，列出管理版本、Windows 共同遊戲檔案數，以及 Quest 版本、雜湊和簽章憑證摘要。工具逐檔核對 Windows 清單與兩包的共用遊戲檔案，再比對 Quest 與 Windows 的建置來源及場景網路識別。APK 會另查驗套件 ID、ARM64、OpenXR 函式庫及 v2 簽章。若拒絕，請保留錯誤與原檔，重新取得配套交付物後再核對。這項唯讀檢查的範圍是交付物一致性，實際連線及頭盔運行請依後文驗收。
 
 `quest.androidManifest` 來自已簽章 APK 內合併後的 AndroidManifest。工具核對同一個可啟動 Activity 是否在同一個 `MAIN` 篩選器宣告 Android 啟動與 Meta VR 分類，以及是否宣告 Quest 3、必要的第 1 版頭部追蹤、MR 透視與多人連線的 Internet 權限。Quest 3 可用 Meta 文件中的 `quest3`，或本專案既有 Unity OpenXR 開發包所產生的 `eureka`。 [Meta Android 開發清單](https://developers.meta.com/vr/documentation/native/android/mobile-native-manifest/) · [AAPT2 說明](https://developer.android.com/tools/aapt2)
+
+`quest.nativeLibraries` 記錄已核對的程式庫數量及 Unity、IL2CPP、OpenXR 與 Meta MR 所需的檔名。工具讀取 APK 裡每個原生程式庫的 ELF 標頭，確認為 ARM64 共用程式庫，並核對程式標頭及載入、動態連結區段的檔案範圍。缺件、重複檔名、錯誤架構或區段超出檔案時會拒絕發行。 [Arm AArch64 ELF 規格](https://github.com/ARM-software/abi-aa/blob/main/aaelf64/aaelf64.rst)
 
 若兩包的建置來源或網路識別不同，錯誤會列出相異欄位，例如 `sourceFingerprint`。Windows 共用遊戲檔案不同時，會列出差異檔案總數及最多三個套件內相對路徑。APK 回條若已記錄套件 ID、SDK 版本、v2 簽章或簽署憑證 SHA-256，工具也會逐欄對照 Android 工具實測結果。較早的回條若省略這些欄位，仍依原 APK 雜湊與簽章檢查驗證。
 
