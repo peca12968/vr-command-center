@@ -98,6 +98,15 @@
           <p id="venue-live-tracking-sample" class="hint" hidden>共同取樣時間 <time></time></p>
           <ul id="venue-live-tracking-rooms" class="event-list" aria-label="各房最新追蹤狀態"></ul>
         </section>
+        <details id="venue-roster-admissions" class="panel" hidden>
+          <summary>批次加入場館名冊</summary>
+          <p class="hint">先建立準備場次，再填寫要登記的空席。空白席位略過。</p>
+          <div class="table-scroll">
+            <table><caption class="sr-only">場館名冊登記</caption><thead><tr><th scope="col">房間與席位</th><th scope="col">玩家名稱</th><th scope="col">頭盔</th><th scope="col">狀態</th></tr></thead>
+              <tbody id="venue-roster-seats"></tbody></table>
+          </div>
+          <div class="button-row"><button id="venue-roster-register" type="button" class="secondary" disabled>登記已填寫的席位</button><span id="venue-roster-status" class="hint" role="status"></span></div>
+        </details>
         <section id="venue-phase" class="panel" aria-labelledby="venue-phase-title" hidden>
           <h3 id="venue-phase-title" tabindex="-1">全館場次控制</h3>
           <label class="check"><input id="venue-full-tracking" type="checkbox">五房開場須各有 5 席追蹤就緒</label>
@@ -593,7 +602,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.226 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.227 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

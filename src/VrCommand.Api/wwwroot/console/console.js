@@ -9,6 +9,7 @@ import { mountMrVenueBundle } from './mr-venue-bundle-ui.js';
 import { mountVrVenueTickets } from './vr-venue-tickets-ui.js';
 import { mountVenueServerPlan } from './venue-server-plan-ui.js';
 import { mountVenueLaunchReview } from './venue-launch-review-ui.js';
+import { mountVenueRoster } from './venue-roster-ui.js';
 import { mountOperatorNetwork } from './operator-network-ui.js';
 import { mountReport, mountVenueReport, venueScoreFields } from './report-ui.js';
 import { matchesDebriefCsv } from './report-csv.js';
@@ -56,6 +57,10 @@ const vrVenue = mountVrVenueTickets(() => state, api, download, roomReadiness.ti
 const venueServerPlan = mountVenueServerPlan(() => state, api, download);
 const venueLaunchReview = mountVenueLaunchReview(() => state, api, selectSession, focusRoster, roomReadiness.reviewedBegin,
   target => tab('world', target), openReviewedVenueClosure);
+const venueRoster = mountVenueRoster({ getState: () => state, canRegister: master, uuid, register: seats => run(async () => {
+  state.pending = { kind: 'venue-roster-join', path: '/venue/roster-admissions', method: 'POST', body: { seats } };
+  await sendPending();
+}) });
 const operatorNetwork = mountOperatorNetwork(() => state, api, download, uuid);
 const alignmentPins = mountAlignmentPins({ state: () => state,
   checkFile: file => api('/room-alignment/check-file', 'POST', file),
@@ -171,8 +176,8 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
       : responseType === 'blob' && response.ok ? await response.blob() : await response.text();
     if (epoch !== state.epoch) throw new Error('登入狀態已變更，已忽略舊回應。');
     if (!response.ok) {
-      let message = '操作未完成，請重新整理後確認。', layout, code, maxCount, roomIds, roomId, workstationIssues, blockedRooms, reviews;
-      try { const data = JSON.parse(content); message = data.error || message; layout = data.layout; code = data.code; maxCount = data.maxCount; roomIds = data.roomIds; roomId = data.roomId;
+      let message = '操作未完成，請重新整理後確認。', layout, code, maxCount, roomIds, roomId, seat, workstationIssues, blockedRooms, reviews;
+      try { const data = JSON.parse(content); message = data.error || message; layout = data.layout; code = data.code; maxCount = data.maxCount; roomIds = data.roomIds; roomId = data.roomId; seat = data.seat;
         if (code === 'operator-network-witnesses-rejected') workstationIssues = data.issues;
         if (code === 'venue-begin-not-ready') blockedRooms = data.blockedRooms;
       } catch { /* Non-domain errors have no stable JSON contract. */ }
@@ -180,6 +185,11 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
       if (response.status === 403) message = '目前身分沒有此操作權限。';
       if (response.status === 409) {
         if (code === 'mr-readiness-required') message = 'MR 場次尚未就緒。請查看「MR 開場檢查」，並確認等候中的 Quest 3 玩家已完成場地對位。';
+        else if (code === 'venue-roster-seat-conflict') {
+          const scope = venueMissionRooms.includes(roomId) && Number.isInteger(seat) && seat >= 0 && seat < 5
+            ? `房間 ${roomId} 的第 ${seat + 1} 席` : '原選定的席位';
+          message = `${scope}已變更，本批皆未登記。請重新整理並核對。`;
+        }
         else if (code === 'mr-resume-readiness-required') message = 'MR 場次尚未符合繼續條件。請查看「MR 繼續檢查」。';
         else if (code === 'mr-tracking-pause-no-witness') message = '目前未確認本房仍有追蹤中斷。請查看最新追蹤狀態。';
         else if (code === 'vr-participation-pause-no-witness') message = '目前未確認本房仍有姿態中斷。請查看最新參戰狀態。';
@@ -279,6 +289,7 @@ function logout() {
   state.props = []; state.prop = -1; clearPropHistory(); propMove.reset();
   roomPlan.reset(); placement.reset();
   clearVenueMissionFile();
+  venueRoster.reset();
   savedVenuePlans = null;
   $('saved-venue-mission-plans').open = false;
   $('venue-plan-name').value = $('venue-plan-status').textContent = '';
@@ -839,6 +850,7 @@ function applyPermissions() {
   prepare.hidden = !ended || !manages(session);
   prepare.disabled = locked || prepare.hidden;
   applyVenuePermissions();
+  venueRoster.render();
   $('create-fields').disabled = locked || state.actor.role === 'GameServer';
   $('launch-room').disabled = $('launch-mode').value !== 'Independent';
   roomPlan.render();
@@ -1861,6 +1873,23 @@ async function sendPending() {
       notify('已確認五房配置保存。');
       return;
     }
+    if (pending.kind === 'venue-roster-join') {
+      const { seats } = pending.body, rows = response?.admissions;
+      if (typeof response?.duplicate !== 'boolean' || !Array.isArray(rows) || rows.length !== seats.length
+          || rows.some((row, index) => {
+            const seat = seats[index], player = row?.player;
+            return row?.sessionId !== seat.sessionId || row?.requestId !== seat.requestId
+              || !Number.isSafeInteger(row.appliedAtSequence) || row.appliedAtSequence < 2
+              || player?.id !== seat.playerId || player?.name !== seat.name || player?.roomId !== seat.roomId
+              || player?.seat !== seat.seat || player?.headset !== seat.headset || !archiveId.test(player?.admissionId);
+          }) || new Set(rows.map(row => row.player.admissionId)).size !== rows.length)
+        throw new MissionVersionMismatch('無法核對名冊登記回條。可使用「重試確認結果」確認原席位。');
+      venueRoster.accepted(seats);
+      state.pending = null;
+      await refresh();
+      if (state.epoch === epoch) notify(`已確認登記 ${seats.length} 位玩家。`);
+      return;
+    }
     if (pending.kind === 'create-set') {
       const sessions = response?.sessions;
       if (!Array.isArray(sessions) || sessions.length !== 5 || new Set(sessions.map(session => session?.id)).size !== 5
@@ -2367,6 +2396,10 @@ $('venue-departed-close').addEventListener('click', closeVenueDepartures);
 $('login-form').addEventListener('submit', login);
 $('logout').addEventListener('click', () => {
   const pendingMission = state.pending?.kind === 'mission-create' || state.pending?.kind === 'mission-revise';
+  if (state.pending?.kind === 'venue-roster-join') {
+    if (confirm('名冊登記結果尚未確認。登出會清除重試資料，確定登出？')) logout();
+    return;
+  }
   if (state.pending?.kind === 'venue-plan-save') {
     if (confirm('五房配置的保存結果尚未確認。登出會清除目前的草稿和重試資料。確定登出？')) logout();
     return;

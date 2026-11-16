@@ -85,6 +85,7 @@ try
     AdmissionChecks.Run(Check, directory, mission);
     RequestRetryChecks.Run(Check, directory, mission);
     IndependentSetChecks.Run(Check, directory, mission);
+    VenueRosterChecks.Run(Check, directory, mission);
     VenuePhaseChecks.Run(Check, directory, mission);
     SimulationChecks.Run(Check);
     NavigationChecks.Run(Check);

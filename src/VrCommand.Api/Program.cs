@@ -132,6 +132,8 @@ app.Use(async (context, next) =>
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "mr-alignment-required" });
         else if (ex is IndependentRoomsOccupiedException occupied)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "independent-rooms-occupied", roomIds = occupied.RoomIds });
+        else if (ex is VenueRosterSeatConflict seat)
+            await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "venue-roster-seat-conflict", roomId = seat.RoomId, seat = seat.Seat });
         else if (ex is MrVenueBundleConflict venue)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = venue.Code, roomId = venue.RoomId });
         else if (ex is VrVenueTicketConflict vrVenue)
@@ -517,6 +519,11 @@ app.MapPost("/api/sessions/{id:guid}/combat-stream/seal", (Guid id, SealCombatSt
     manager.SealStream(id, request, Actor(context)));
 app.MapPost("/api/sessions/{id:guid}/players", (Guid id, JoinPlayer request, SessionManager manager, HttpContext context) =>
     manager.Join(id, request.PlayerId, request.Name, request.RoomId, request.Headset, Actor(context), RequestId(context)));
+app.MapPost("/api/venue/roster-admissions", (VenueRosterRequest request, SessionManager manager, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    return manager.JoinVenueRoster(request.Seats, Actor(context));
+});
 app.MapPost("/api/sessions/{id:guid}/players/{playerId:guid}/join-ticket", (Guid id, Guid playerId, SessionManager manager,
     WorldRecordings worlds, HttpContext context) =>
 {
@@ -686,6 +693,7 @@ record CreateIndependentSet(Guid? MissionId, IndependentRoomMission[]? Rooms);
 record VenuePhaseRequest(ControlAction Action, VenuePhaseFence?[]? Targets, VenueClimate? Environment, VenueEnemyPolicy? EnemyPolicy,
     bool RequireFullTracking = false, bool RequireFullParticipation = false);
 record JoinPlayer(Guid PlayerId, string Name, int RoomId, HeadsetKind Headset);
+record VenueRosterRequest(VenueRosterSeat[] Seats);
 record SeatTicketResponse(string Ticket, DateTimeOffset ExpiresAtUtc,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RoomAlignmentSha256,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TicketEndpoint? Endpoint);

@@ -121,8 +121,7 @@ public sealed class SqliteSessionEventStore : IAtomicSessionEventStore, IDisposa
     public void AppendBatch(SessionEvent[] entries)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        if (entries.Length == 0 || entries.Select(entry => entry.SessionId).Distinct().Count() != entries.Length)
-            throw new InvalidOperationException("The batch requires the next event of each distinct session.");
+        if (entries.Length == 0) throw new InvalidOperationException("An atomic batch requires events.");
         using var transaction = connection.BeginTransaction();
         foreach (var entry in entries) AppendNext(transaction, entry);
         transaction.Commit();

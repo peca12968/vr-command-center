@@ -29,9 +29,14 @@ public sealed class MemorySessionEventStore : IAtomicSessionEventStore
 
     public void AppendBatch(SessionEvent[] entries)
     {
-        if (entries.Length == 0 || entries.Select(entry => entry.SessionId).Distinct().Count() != entries.Length
-            || entries.Any(entry => entry.Sequence != (streams.GetValueOrDefault(entry.SessionId)?.Count ?? 0) + 1))
-            throw new InvalidOperationException("The batch requires the next event of each distinct session.");
+        if (entries.Length == 0) throw new InvalidOperationException("An atomic batch requires events.");
+        var through = new Dictionary<Guid, long>();
+        foreach (var entry in entries)
+        {
+            var prior = through.GetValueOrDefault(entry.SessionId, streams.GetValueOrDefault(entry.SessionId)?.Count ?? 0);
+            if (entry.Sequence != prior + 1) throw new InvalidOperationException("Unexpected storage sequence in the batch.");
+            through[entry.SessionId] = entry.Sequence;
+        }
         foreach (var entry in entries) Append(entry);
     }
 }
