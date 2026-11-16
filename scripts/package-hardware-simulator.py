@@ -14,7 +14,7 @@ dotnet VrCommand.HardwareSimulator.dll --input example.json --output <新的包�
 
 即時模式使用 Windows 管理包 0.31.27 以上與同房房控憑證。Python 3.12 可啟動本機模擬設備：
 python mock-device.py --room 1 --port 19101
-Windows 無人值守排演先設定 VR_COMMAND_UNATTENDED=1。模擬設備會在 Windows 入站通知仍啟用時顯示終端原因並略過啟動。
+Windows 預設採用無人值守查核。任一啟用中的防火牆設定檔仍會顯示入站通知時，模擬設備會在終端機記錄原因並略過啟動。
 在另一個終端設定 VR_COMMAND_ROOM_KEY，再執行：
 dotnet VrCommand.HardwareSimulator.dll --live <包外room-config.json> --output <新的包外report.json>
 加上 --status 可在終端查看逐行 JSON 狀態，例如暫停、握手、等待 ACK 及模擬設備失聯。每行只包含房號、狀態和累計數字，stopped 表示報告已寫出並關閉。

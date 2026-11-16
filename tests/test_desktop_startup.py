@@ -39,18 +39,25 @@ class StartupWitnessTests(unittest.TestCase):
 
 class NativeLaunchTests(unittest.TestCase):
     @unittest.skipUnless(os.name == 'nt', 'Windows Firewall preflight uses PowerShell and Windows executable paths')
-    def test_unattended_preflight_rejects_notifications_on_an_inactive_profile(self):
+    def test_firewall_preflight_defaults_to_unattended(self):
         checker = ROOT / 'scripts/check-windows-firewall-notifications.ps1'
         with tempfile.TemporaryDirectory() as directory:
             image = Path(directory) / 'VrCommand.exe'
             image.touch()
             fixture = image.with_suffix('.ps1')
             fixture.write_text('''
-param($Checker, $Image, [int]$Enabled, [int]$Notifying)
+param($Checker, $Image, [int]$Enabled, [int]$Notifying, [int]$RuleProfiles)
 function New-Object {
     param([string]$ComObject)
     if ($ComObject -ne 'HNetCfg.FwPolicy2') { throw 'Unexpected COM request' }
-    $policy = [pscustomobject]@{ CurrentProfileTypes = 2; Enabled = $Enabled; Notifying = $Notifying }
+    $rules = @()
+    if ($RuleProfiles) {
+        $rules += [pscustomobject]@{
+            Enabled = $true; Direction = 1; ApplicationName = $Image; Protocol = 256
+            Profiles = $RuleProfiles; LocalAddresses = '*'; RemoteAddresses = '*'; InterfaceTypes = 'All'
+        }
+    }
+    $policy = [pscustomobject]@{ CurrentProfileTypes = 2; Enabled = $Enabled; Notifying = $Notifying; Rules = $rules }
     $policy | Add-Member ScriptMethod FirewallEnabled { param($mask) ($this.Enabled -band $mask) -ne 0 }
     $policy | Add-Member ScriptMethod NotificationsDisabled { param($mask) ($this.Notifying -band $mask) -eq 0 }
     $policy
@@ -60,15 +67,33 @@ exit $LASTEXITCODE
 ''', encoding='utf-8')
             power_shell = shutil.which('pwsh') or 'powershell.exe'
             cmd = [power_shell, '-NoProfile', '-NonInteractive', '-File', str(fixture), str(checker), str(image)]
-            for enabled, notifying, expected in [('7', '4', 2), ('7', '0', 0), ('3', '4', 0)]:
-                with self.subTest(enabled=enabled, notifying=notifying):
-                    result = subprocess.run([*cmd, enabled, notifying],
-                                            env={**os.environ, 'VR_COMMAND_UNATTENDED': '1'},
+            environment = os.environ.copy()
+            environment.pop('VR_COMMAND_UNATTENDED', None)
+            cases = [
+                (None, '7', '4', '0', 2),
+                ('1', '7', '4', '0', 2),
+                ('unexpected', '7', '4', '0', 2),
+                (None, '7', '4', '7', 2),
+                (None, '7', '0', '0', 0),
+                (None, '3', '4', '0', 0),
+                ('0', '7', '4', '0', 0),
+                ('0', '7', '2', '0', 2),
+                ('0', '7', '2', '2', 0),
+            ]
+            for mode, enabled, notifying, rules, expected in cases:
+                with self.subTest(mode=mode, enabled=enabled, notifying=notifying, rules=rules):
+                    env = environment.copy()
+                    if mode is not None:
+                        env['VR_COMMAND_UNATTENDED'] = mode
+                    result = subprocess.run([*cmd, enabled, notifying, rules],
+                                            env=env,
                                             capture_output=True, text=True, timeout=15,
                                             creationflags=subprocess.CREATE_NO_WINDOW)
                     self.assertEqual(result.returncode, expected, result.stderr)
                     if expected == 2:
-                        self.assertIn('notifications are enabled on: Public.', result.stderr)
+                        message = ('may prompt on the Private profile.' if mode == '0'
+                                   else 'notifications are enabled on: Public.')
+                        self.assertIn(message, result.stderr)
 
     def test_venue_rechecks_before_each_child_and_stops_on_policy_change(self):
         with tempfile.TemporaryDirectory() as directory:
