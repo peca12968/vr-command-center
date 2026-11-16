@@ -1940,6 +1940,80 @@ class FieldResultsTests(unittest.TestCase):
                 with self.assertRaisesRegex(field.EvidenceError, 'lacks an exact Running frame'):
                     field.verify_venue(path)
 
+    def test_independent_environment_batch_witnesses_exactly_the_selected_rooms(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, closure = venue_fixture(root, 'Independent', with_journals=True)
+            reference = {'action': 'SetEnvironment', 'phaseReport': 'weather.json', 'roomIds': [4, 1]}
+            manifest['venueControlBatches'] = [reference]
+            policy = {'weather': 'Storm', 'timeOfDay': 'Night', 'lightning': True}
+            targets = [dict(sessionId=row['sessionId'], roomIds=row['roomIds'], appliedAtSequence=sequence, state=state)
+                       for row, sequence, state in ((closure['sessions'][0], 4, 'Ended'), (closure['sessions'][3], 6, 'Superseded'))]
+            batch = {'requestId': id_for(2019), 'recordedAtUtc': '2026-11-09T00:00:01+00:00', 'sessions': targets, **policy}
+            phase = root / reference['phaseReport']
+
+            def write_report(value=batch):
+                phase.write_text(json.dumps({'latestEnvironment': value, 'latestEnemies': value}), encoding='utf-8')
+
+            def write_reference(value=reference):
+                path.write_text(json.dumps(dict(manifest, venueControlBatches=[value])), encoding='utf-8')
+
+            for room in (1, 4):
+                entry = manifest['sessions'][room - 1]
+                world = json.loads((root / entry['launcherReport']).read_text(encoding='utf-8'))['finalWorld']
+
+                def apply_weather(packet):
+                    if packet['frame']['phase'] == 'Running':
+                        packet.update(weather='Storm', lightning=True, observedSequence=4 if room == 1 else 6)
+                        packet['frame']['night'] = True
+
+                world_journal(root / entry['worldJournal'], world, preparing_sequence=3, edit_packet=apply_weather)
+
+            write_report()
+            write_reference()
+            result = field.verify_venue(path)
+            self.assertEqual(result['venueControlBatches'], [dict(requestId=batch['requestId'], action='SetEnvironment',
+                                                                 sessionsVerified=2, roomIds=[1, 4], **policy)])
+            frames = {row['roomIds'][0]: row['worldJournal'].get('venueControlFrames') for row in result['sessions']}
+            self.assertEqual({room: [(frame['appliedAtSequence'], frame['worldSequence']) for frame in rows]
+                              for room, rows in frames.items() if rows}, {1: [(4, 2)], 4: [(6, 2)]})
+            self.assertEqual(result['players'], 25)
+
+            for updated, error in (
+                ({'action': 'SetEnemies'}, 'requires an Independent environment batch'),
+                ({'roomIds': []}, 'distinct room numbers'),
+                ({'roomIds': [1, 1]}, 'distinct room numbers'),
+                ({'roomIds': [True, 4]}, 'distinct room numbers'),
+                ({'roomIds': [1, 6]}, 'distinct room numbers'),
+                ({'roomIds': [1, 2]}, 'differs from the original room or session'),
+                ({'roomIds': [1, 2, 4]}, 'cover exactly the selected rooms'),
+            ):
+                with self.subTest(reference=updated):
+                    write_reference(reference | updated)
+                    with self.assertRaisesRegex(field.EvidenceError, error):
+                        field.verify_venue(path)
+            write_reference({key: value for key, value in reference.items() if key != 'roomIds'})
+            with self.assertRaisesRegex(field.EvidenceError, 'cover every original session'):
+                field.verify_venue(path)
+            write_reference()
+            for rows, error in (
+                (targets[:1], 'cover exactly the selected rooms'),
+                (targets + targets[:1], 'cover exactly the selected rooms'),
+                ([targets[0], targets[0]], 'differs from the original room or session'),
+                ([targets[0], dict(targets[1], roomIds=[2])], 'differs from the original room or session'),
+                ([targets[0], dict(targets[1], appliedAtSequence=5)], 'lacks an exact Running frame'),
+            ):
+                with self.subTest(targets=rows):
+                    write_report(dict(batch, sessions=rows))
+                    with self.assertRaisesRegex(field.EvidenceError, error):
+                        field.verify_venue(path)
+
+            _, _, linked = venue_fixture(root, 'Linked')
+            linked_time = datetime.fromisoformat(linked['recordedAtUtc'])
+            with self.assertRaisesRegex(field.EvidenceError, 'requires an Independent environment batch'):
+                field.read_venue_control_batches([reference], {row['sessionId']: row for row in linked['sessions']},
+                                                 linked, linked_time, root.joinpath, mode='Linked')
+
     def test_linked_room_enemy_policy_checks_use_the_exact_original_running_frame(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

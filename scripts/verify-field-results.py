@@ -2947,15 +2947,28 @@ def verify_venue_debrief_session(receipts, session, stream, report):
     require(confirmed == roster, 'Management debrief receipts differ from the original admissions')
 
 
-def read_venue_control_batches(references, expected, closure, recorded_at, evidence_path):
+def read_venue_control_batches(references, expected, closure, recorded_at, evidence_path, *, mode):
     require(type(references) is list and 1 <= len(references) <= 32,
             'Provide 1 to 32 original venue phase reports')
     batches = {}
     by_session = {sid: {} for sid in expected}
     for reference in references:
-        require(type(reference) is dict and set(reference) == {'action', 'phaseReport'}
+        fields = {'action', 'phaseReport'}
+        require(type(reference) is dict and set(reference) in (fields, fields | {'roomIds'})
                 and reference['action'] in ('SetEnvironment', 'SetEnemies'), 'Invalid venue control batch reference')
         action = reference['action']
+        scope = {}
+        original = expected
+        if 'roomIds' in reference:
+            require(mode == 'Independent' and action == 'SetEnvironment',
+                    'Venue control roomIds requires an Independent environment batch')
+            rooms = reference['roomIds']
+            require(type(rooms) is list and 1 <= len(rooms) <= 5
+                    and all(type(room) is int and 1 <= room <= 5 for room in rooms) and len(set(rooms)) == len(rooms),
+                    'Venue environment roomIds must contain distinct room numbers from 1 to 5')
+            original = {sid: row for sid, row in expected.items() if row['roomIds'][0] in rooms}
+            require(len(original) == len(rooms), 'Venue environment roomIds differ from the original closure')
+            scope = {'roomIds': sorted(rooms)}
         phase = read_json(content(evidence_path(reference['phaseReport'])))
         require(type(phase) is dict, 'Invalid venue phase report')
         batch = phase.get('latestEnvironment' if action == 'SetEnvironment' else 'latestEnemies')
@@ -2973,18 +2986,20 @@ def read_venue_control_batches(references, expected, closure, recorded_at, evide
             require(policy['behavior'] in ('Hold', 'Patrol', 'Advance') and type(policy['autoAttack']) is bool,
                     'Invalid venue enemy batch policy')
         targets = batch['sessions']
-        require(type(targets) is list and len(targets) == len(expected), 'Venue control batch must cover every original session')
+        require(type(targets) is list and len(targets) == len(original),
+                'Venue environment batch must cover exactly the selected rooms' if scope
+                else 'Venue control batch must cover every original session')
         seen = set()
         for target in targets:
             sid = identity(target['sessionId'])
-            require(sid in expected and sid not in seen and target['roomIds'] == expected[sid]['roomIds']
+            require(sid in original and sid not in seen and target['roomIds'] == original[sid]['roomIds']
                     and all(type(room) is int for room in target['roomIds'])
                     and target['state'] in ('Current', 'Superseded', 'Ended'), 'Venue control target differs from the original room or session')
-            sequence = integer(target['appliedAtSequence'], 1, expected[sid]['appliedAtSequence'] - 1)
+            sequence = integer(target['appliedAtSequence'], 1, original[sid]['appliedAtSequence'] - 1)
             require(sequence not in by_session[sid], 'Venue control batches reuse an applied sequence')
             seen.add(sid)
             by_session[sid][sequence] = {'requestId': request, 'action': action, 'appliedAtSequence': sequence, **policy}
-        batches[request] = {'requestId': request, 'action': action, 'sessionsVerified': len(expected), **policy}
+        batches[request] = {'requestId': request, 'action': action, 'sessionsVerified': len(original), **scope, **policy}
     return list(batches.values()), {sid: targets.values() for sid, targets in by_session.items()}
 
 
@@ -3521,7 +3536,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     control_summary, controls = [], {}
     if 'venueControlBatches' in manifest and not inspect_windows:
         require(journals, 'Venue control batch verification requires the original world journals for the full batch')
-        control_summary, controls = read_venue_control_batches(manifest['venueControlBatches'], expected, closure, recorded_at, evidence_path)
+        control_summary, controls = read_venue_control_batches(manifest['venueControlBatches'], expected, closure, recorded_at,
+                                                               evidence_path, mode=mode)
     room_enemy_policy_checks = None
     if 'roomEnemyPolicyChecks' in manifest and not inspect_windows:
         require(mode == 'Linked' and journals, 'Room enemy policy checks require a Linked venue with its original world journal')

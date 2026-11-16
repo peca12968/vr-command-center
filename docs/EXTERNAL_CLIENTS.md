@@ -810,6 +810,16 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json --inspect-c
 
 工具依原場次、房間及管理序號逐場找出有效的執行畫格。環境核對天氣、日夜及閃電；敵軍策略核對行為與自動攻擊開關。可用逐場 `worldJournal.venueControlFrames` 的 `worldSequence` 定位回放。需要確認的批次應在下一個管理變更前取得畫格。僅有較晚序號的相同設定，或只有暫停、暫緩及結束畫格時，該批驗收會失敗。
 
+#### 核對指定獨立房間的環境批次
+
+使用主控台 0.31.229 或更新版本選取獨立房間時，把當時勾選的房號填入該項 `roomIds`，並附上原下載的環境批次 JSON。例如：
+
+```json
+{"action": "SetEnvironment", "phaseReport": "rooms-1-and-4.json", "roomIds": [1, 4]}
+```
+
+工具核對原批次恰好包含所列房間的原場次，並從各自的錄製找出對應的執行畫格。結果中的 `roomIds` 和 `sessionsVerified` 列出此項已確認的房間及場次數。整批驗收仍使用原五房收尾資料及各場錄製。未指定 `roomIds` 時，批次須涵蓋原收尾的所有場次。合併場及敵軍批次請使用全館格式。
+
 ### 核對合併場的分房敵軍策略
 
 合併場可在 `venue.json` 填入 `roomEnemyPolicyChecks`，並照常保留原 `worldJournal`。`appliedAtSequence` 填入管理 API 套用或恢復策略回條上的序號。`inherited` 表示該房是否沿用全場策略，`behavior` 與 `autoAttack` 則填入預期的實際設定。可在同一序號列出其他房間，確認房間間的策略隔離。 [房控操作](LAYOUT.md#合併場分房敵軍策略)
