@@ -128,10 +128,18 @@ module.exports = async function reportBrowser({ context, tokens, base, api, sess
       'Master downloads the exact linked ZIP from any CSV scope without changing that selection');
     await fs.writeFile(path.join(screenshots, 'linked-reports.zip'), archive);
     const beforeWrongMime = downloads.length;
-    await page.route(bundleEndpoint, route => route.fulfill({ status: 200, contentType: 'application/zip-fake', body: 'fixture' }));
+    const zipMethods = [];
+    await page.route(bundleEndpoint, async route => {
+      const method = route.request().method();
+      zipMethods.push(method);
+      if (method !== 'HEAD') return route.continue();
+      const original = await route.fetch();
+      await route.fulfill({ response: original, headers: { ...original.headers(), 'content-type': 'application/zip-fake' } });
+    });
     await bundleButton.click();
-    await page.waitForFunction(() => document.querySelector('#report-status').textContent.includes('格式不符'));
-    check(downloads.length === beforeWrongMime && await bundleButton.isEnabled(), 'ZIP export rejects an incorrect MIME and permits retry');
+    await page.locator('#report-status').filter({ hasText: '無法核對戰績 ZIP 的原始內容' }).waitFor();
+    check(zipMethods.join() === 'HEAD' && downloads.length === beforeWrongMime && await bundleButton.isEnabled(),
+      'ZIP export rejects an incorrect MIME at HEAD before downloading and permits retry');
     await page.unroute(bundleEndpoint);
     await scope.selectOption('5');
     check(await page.locator('#statistics .empty-cell').innerText() === '此房尚無玩家戰績'

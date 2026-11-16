@@ -880,7 +880,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
       const suffix = observerRoom === null ? '' : `?observerRoomId=${observerRoom}`;
       const value = await (await response(`/api/sessions/${id}/world/frames/${sequence}${suffix}`, signal)).json();
       if (request !== epoch || !active || id !== $('world-recording').value || !stillCurrent()) return false;
-      if ((value.observerRoomId ?? null) !== observerRoom || value.packet.sequence !== sequence || !matches(value)) throw new Error('回應的快照不同。');
+      if ((value.observerRoomId ?? null) !== observerRoom || value.packet.sequence !== sequence
+        || (observerRoom !== null && !matchesRoomFrame(value, observerRoom)) || !matches(value)) throw new Error('回應的快照不同。');
       clearVenueAnchor(); show(value, true); $('world-frame-message').textContent = `已停在第 ${sequence} 格。`;
       return true;
     } catch (error) {

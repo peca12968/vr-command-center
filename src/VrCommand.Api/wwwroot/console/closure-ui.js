@@ -136,8 +136,9 @@ export function mountClosure(getState, unauthorized, openReview, report) {
     renderReview(state, view.complete);
   }
   function renderReview(state, complete) {
-    const { session } = state;
+    const { session, actor } = state;
     const players = report.players(), roomId = report.roomId();
+    const observerRoomId = actor?.role === 'RoomController' ? actor.roomId : null;
     const shown = active && session?.state === 'Ended' && players.length > 0;
     const options = JSON.stringify(shown ? [session.id, players.map(player => [player.playerId, player.name, player.roomId])] : null);
     if (options !== reviewOptions) {
@@ -151,7 +152,7 @@ export function mountClosure(getState, unauthorized, openReview, report) {
     const player = players.find(player => player.playerId === reviewPlayer.value);
     reviewTarget = complete && player ? { mode: 'replay', sessionId: session.id, streamId: session.combatStream.streamId,
       throughSequence: world.acceptedSequence, throughCombatSequence: session.combatStream.acceptedSequence, complete: true,
-      playerId: player.playerId, playerName: player.name, playerScore: player, roomId } : null;
+      playerId: player.playerId, playerName: player.name, playerScore: player, roomId: observerRoomId ?? roomId, observerRoomId } : null;
     const reportVisible = shown && !refreshFailed && !!context() && document.visibilityState === 'visible';
     reviewPanel.hidden = !shown;
     reviewPlayer.disabled = !shown || (!complete && !(reportVisible && report.canExportPlayer()));

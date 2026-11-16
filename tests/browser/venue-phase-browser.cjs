@@ -285,6 +285,50 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     check(searchQuery.get('roomId') === '2' && searchQuery.get('playerId') === subject
       && await page.locator('#world-room').inputValue() === '2' && await page.locator('#world-review-player-scope').isVisible(),
       'The linked personal review opens the exact sealed source and starts its first search in the selected room');
+    const roomPage = await context.newPage();
+    captureErrors(roomPage);
+    try {
+      await roomPage.goto(base + '/console/');
+      await roomPage.locator('#login-key').fill(tokens.Room2);
+      await roomPage.locator('#login-form button').click();
+      await roomPage.locator('#include-ended').check();
+      await roomPage.locator('#session-select').selectOption(linked.id);
+      const roomReview = roomPage.locator('#player-review-select');
+      await roomReview.selectOption(subject);
+      const worldRoute = `/api/sessions/${linked.id}/world/`;
+      const observe = suffix => roomPage.waitForRequest(request => new URL(request.url()).pathname.startsWith(worldRoute + suffix));
+      const [watched, searched] = await Promise.all([observe('watch'), observe('event-frames'),
+        roomPage.locator('#open-player-review').click()]);
+      const watchQuery = new URL(watched.url()).searchParams, eventQuery = new URL(searched.url()).searchParams;
+      const roomPicker = roomPage.locator('#world-room');
+      check(watchQuery.get('observerRoomId') === '2' && eventQuery.get('observerRoomId') === '2'
+        && eventQuery.get('roomId') === '2' && eventQuery.get('playerId') === subject
+        && (await roomPicker.locator('option').allTextContents()).join() === '房間 2'
+        && await roomPage.locator('#world-review-player-scope').isVisible(),
+      'A room controller personal review uses only the original room, player and sealed recording');
+      await roomPage.locator('#world-review-clear-player').click();
+      const canvas = roomPage.locator('#world-canvas');
+      const tail = await canvas.getAttribute('data-sequence');
+      const back = Number(tail) - 1;
+      await roomPage.route(url => url.pathname === `${worldRoute}frames/${back}`, async route => {
+        const original = await route.fetch(), data = await original.json();
+        assert.ok(data.statistics.length > 0);
+        data.statistics[0].roomId = 1;
+        await route.fulfill({ response: original, json: data });
+      }, { times: 1 });
+      await roomPage.locator('#world-frame-back').click();
+      await roomPage.locator('#world-frame-message').filter({ hasText: '讀取快照失敗' }).waitFor();
+      check(await canvas.getAttribute('data-sequence') === tail,
+        'A frame carrying another room score keeps the last verified picture');
+      const [previous] = await Promise.all([observe('frames/'), roomPage.locator('#world-frame-back').click()]);
+      await roomPage.locator('#world-frame-message').filter({ hasText: `已停在第 ${back} 格` }).waitFor();
+      check(new URL(previous.url()).searchParams.get('observerRoomId') === '2'
+        && await canvas.getAttribute('data-sequence') === String(back)
+        && await roomPicker.locator('option').count() === 1 && await roomPicker.inputValue() === '2',
+      'Clearing the player filter and stepping back keeps the room controller in the original room');
+    } finally {
+      await roomPage.close();
+    }
     await page.locator('#tab-operations').click();
     await page.locator('#include-ended').uncheck();
 
