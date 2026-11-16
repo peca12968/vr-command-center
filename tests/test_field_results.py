@@ -3399,6 +3399,56 @@ class FieldResultsTests(unittest.TestCase):
                 with self.assertRaisesRegex(field.EvidenceError, 'one original sample with per-seat deployment references'):
                     field.verify_venue(path)
 
+                closure_path = root / manifest['closure']
+                original_closure = json.loads(closure_path.read_bytes())
+                original_worlds = {server['result']['sessionId']: server['result']['finalWorld']
+                                   for server in json.loads(terminal.read_bytes())['servers']}
+                for entry, row in zip(manifest['sessions'], original_closure['batch']['sessions'], strict=True):
+                    session, _, _ = field.management_zip(root / entry['evidenceZip'])
+                    source = original_worlds[session['id']]
+                    tracked = [{'id': owner['id'], 'roomId': owner['roomId'], 'connected': True, 'health': 100,
+                                'rig': {'kind': 'Tracked'}} for owner in session['players']]
+
+                    def second_preparing_frame(packet):
+                        if packet['sequence'] == 2:
+                            packet['observedSequence'] = 6
+                            packet['frame'].update(phase='Preparing', tick=0)
+
+                    world_journal(root / entry['worldJournal'], source, capture_start=source['header']['captureStartedAtUtc'],
+                                  players=lambda _, __: tracked, preparing_sequence=6, edit_packet=second_preparing_frame)
+                    row['trackingBegin'] = {'requestId': id_for(996), 'appliedAtSequence': 7, 'frame': {
+                        'streamId': source['header']['streamId'], 'worldSequence': 2, 'elapsedMilliseconds': 200}}
+
+                combined['sampledAtUtc'] = (captured + timedelta(milliseconds=150)).isoformat()
+                for seat in combined['seats']:
+                    seat['observedSequence'] = 6
+                joint_manifest = dict(manifest, questReadinessReports=[combined_path.name], verifyTrackingBegin=True)
+                closure_path.write_text(json.dumps(original_closure), encoding='utf-8')
+                combined_path.write_text(json.dumps(combined), encoding='utf-8')
+                path.write_text(json.dumps(joint_manifest), encoding='utf-8')
+                both = field.verify_venue(path)
+                self.assertEqual(expected, both['questReadiness'])
+                self.assertTrue(all(row['worldJournal']['trackingBegin']['firstRunningFrame'] == 3 for row in both['sessions']))
+
+                target = next(row for row in original_closure['batch']['sessions'] if 3 in row['roomIds'])
+                for seat in combined['seats']:
+                    if seat['sessionId'] == target['sessionId']:
+                        seat.update(worldSequence=2, capturedAtUtc=(captured + timedelta(milliseconds=100)).isoformat())
+                combined_path.write_text(json.dumps(combined), encoding='utf-8')
+                self.assertEqual(expected, field.verify_venue(path)['questReadiness'])
+
+                target['trackingBegin']['frame'].update(worldSequence=1, elapsedMilliseconds=100)
+                closure_path.write_text(json.dumps(original_closure), encoding='utf-8')
+                path.write_text(json.dumps(dict(joint_manifest, verifyTrackingBegin=False)), encoding='utf-8')
+                self.assertEqual(expected, field.verify_venue(path)['questReadiness'])
+                guard_only = joint_manifest.copy()
+                del guard_only['questReadinessReports']
+                path.write_text(json.dumps(guard_only), encoding='utf-8')
+                self.assertEqual(25, field.verify_venue(path)['trackingBegin']['trackedPlayers'])
+                path.write_text(json.dumps(joint_manifest), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'Quest readiness frame is later than the guarded Begin frame'):
+                    field.verify_venue(path)
+
     def test_prepare_mixed_venue_keeps_original_quest_and_windows_evidence(self):
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:

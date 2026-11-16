@@ -767,6 +767,8 @@ Quest 批次已設定 `questLinkCriteria` 時，`issues[].questLinkMetrics` 會�
 
 成功時摘要列出 `questReadiness` 的回條數、場次數及席位數。各場的 `worldJournal.questReadinessFrames` 提供可定位回放的世界序號。全館同時開場、持續操作及實機驗收沿用各自的檢查。 [五房追蹤驗收開場](PLAYER_READINESS.md#五房追蹤驗收開場) · [核對同時連線區間](#核對-25-席同時連線的區間)
 
+若同時啟用 `verifyTrackingBegin` 或 `verifyParticipationBegin`，會逐場比對 Quest 取樣和伺服器受理開始時使用的原準備畫格。取樣可以引用同一格或較早的準備畫格。引用較晚的畫格會使本次驗收失敗。
+
 若用 `-DeploymentReportsFile` 產生同輪取樣的第 2 版回條，`questReadinessReports` 只填這一份。工具逐席比對原部署報告摘要、成功啟動席位和原準備畫格，並在 `questReadiness.deploymentReportsMatched` 列出核對的原部署報告數。未完成的原報告可提供先前已啟動席位的證據，整份取樣回條仍須涵蓋五房驗收中所有已部署的 Quest 席位。 [同輪取樣操作](QUEST3.md#同一輪核對分批部署的追蹤)
 
 ### 直接使用 Quest 批次擷取報告

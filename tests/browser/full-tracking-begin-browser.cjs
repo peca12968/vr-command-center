@@ -334,6 +334,14 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         && (await page.locator('#venue-begin-evidence').innerText()).includes('目標場次已就緒')
         && await page.locator('[data-begin-seat][data-seat-state="Tracked"]').count() === 25,
       `${mode} shows all five rooms ready after receiving all 25 tracked poses`);
+      const fullTargets = await getFences();
+      for (const source of sources) source.publish(source.snapshot, true, true);
+      const lostPose = await api('/venue/phase', 'POST', { action: 'Begin', targets: fullTargets, requireFullTracking: true },
+        'Master', 409, undefined, randomUUID());
+      assert.deepEqual(await getFences(), fullTargets);
+      check(lostPose.code === 'venue-begin-not-ready' && lostPose.roomIds.join() === '5',
+        `${mode} rejects the whole Begin and reports only the room that lost a registered player's pose`);
+      await publishUntil(sources, true, () => start.isEnabled());
       const responsePromise = page.waitForResponse(response => response.url().endsWith('/api/venue/phase') && response.request().method() === 'POST');
       const confirmation = page.waitForEvent('dialog').then(async dialog => { assert.match(dialog.message(), /25 席追蹤就緒/); await dialog.accept(); });
       await start.click();

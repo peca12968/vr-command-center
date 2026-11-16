@@ -912,6 +912,8 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
                 'Quest readiness requires the original GameServer capture clock')
         capture_start = quest_readiness_time(expected['captureStartedAtUtc'])
         for seat in quest_readiness:
+            require(begin is None or seat['worldSequence'] <= begin['frame']['worldSequence'],
+                    'Quest readiness frame is later than the guarded Begin frame')
             readiness_frames.setdefault(seat['worldSequence'], []).append(seat)
     if concurrency is not None:
         observe_roster, periods, fires = roster_periods(players, concurrency.sample_minimum_ms, applied_end,

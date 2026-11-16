@@ -134,7 +134,7 @@ public sealed partial class WorldRecordings
             {
                 var (report, _, phase, beginState, _, _, _, _, beginFrame, _, _, _) = ReadReadinessSnapshot(target.SessionId, actor,
                     includeBeginFrame: requireFullRoster);
-                if (begin ? beginState == "Ready" || requireFullParticipation && beginState == "WaitingPlayers"
+                if (begin ? beginState == "Ready" || requireFullRoster && beginState == "WaitingPlayers"
                     : phase is { Action: ControlAction.Pause, WorldSequence: not null }
                     && phase.AppliedAtSequence == target.PhaseSinceSequence)
                 {
