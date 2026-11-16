@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 直接帶入五房環境與敵軍批次報告
+
+- `prepare-venue-field-manifest.py` 可直接帶入全館環境、全館敵軍及指定獨立房間的環境批次。輸出前會核對報告房號、原場次、原管理序號及有效執行畫格。建立清單後可沿用既有玩家收件與封存驗收流程。 [操作方式](EXTERNAL_CLIENTS.md#核對指定獨立房間的環境批次)
+- 用管理包 0.31.230，透過本機 IPC 為五間模擬場批次附掛來源、公告端點、開始及結束。清單工具核對第 1、4 房的第 3 格環境變更，以及五房第 4 格敵軍策略，共查驗 25 格封存錄製。玩家與啟動器證據使用測試夾具。錯房與錯管理序號皆退出且未寫出清單，原資料 SHA-256 一致。沒有啟動 Unity 或 TCP／UDP 監聽。 [生成清單](../artifacts/venue-manifest-control-batches-20261117/api-fixture-03/prepared-checked.json) · [驗收結果](../artifacts/venue-manifest-control-batches-20261117/api-fixture-03/verified.json) · [拒絕紀錄](../artifacts/venue-manifest-control-batches-20261117/api-fixture-03/verification-proof.json)
+- 148 項 Python 封存測試通過。用既有 Windows 0.50.7 原生的獨立與合併封存重查預設流程，兩份清單與舊工具產出逐位元一致。GitHub Actions 對 `448a027` 回報帳務或用量限制，工作未啟動。Quest USB 仍無 ADB 介面，實機與跨機驗收待完成。 [舊封存重查](../artifacts/venue-manifest-control-batches-20261117/legacy-preparation-checks.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43978054184)
+
 ## 2026-11-17 核對 Quest APK 原生程式庫的載入方式
 
 - 場館發行工具讀取已簽署 APK 的 `extractNativeLibs` 設定。直接載入時逐庫核對未壓縮格式及 ZIP 資料起點的 4 KiB 對齊。現行 Quest 0.50.12／77 APK 使用安裝時解出原生程式庫，七個 ARM64 程式庫及原 SHA-256 通過。管理包 0.31.230 與原 Windows 玩家、伺服器也通過共同發行核對。 [操作方式](EXTERNAL_CLIENTS.md#發送前離線核對交付套件) · [發行報告](../artifacts/quest-native-layout-20261117/venue-release.json)
