@@ -1,8 +1,10 @@
 [CmdletBinding(DefaultParameterSetName = 'Network')]
 param(
     [Parameter(Mandatory, ParameterSetName = 'Key')][switch]$NewKey,
-    [Parameter(Mandatory, ParameterSetName = 'Network')][ValidateSet('Listen', 'Probe')][string]$Mode,
-    [Parameter(Mandatory, ParameterSetName = 'Key')][Parameter(Mandatory, ParameterSetName = 'Network')][string]$KeyFile,
+    [Parameter(Mandatory, ParameterSetName = 'Network')]
+    [Parameter(Mandatory, ParameterSetName = 'PlannedNetwork')][ValidateSet('Listen', 'Probe')][string]$Mode,
+    [Parameter(Mandatory, ParameterSetName = 'Key')][Parameter(Mandatory, ParameterSetName = 'Network')]
+    [Parameter(Mandatory, ParameterSetName = 'PlannedNetwork')][string]$KeyFile,
     [Parameter(Mandatory, ParameterSetName = 'Pair')][string]$ListenerReport,
     [Parameter(Mandatory, ParameterSetName = 'Pair')][string]$ProbeReport,
     [Parameter(ParameterSetName = 'Pair')][string]$ExpectedServerAddress,
@@ -13,9 +15,10 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'Network')][string]$LocalAddress,
     [Parameter(Mandatory, ParameterSetName = 'Network')][string]$PeerAddress,
     [Parameter(Mandatory, ParameterSetName = 'Network')][ValidateRange(1024, 65535)][int]$Port,
-    [Parameter(ParameterSetName = 'Network')][ValidateRange(1, 20)][int]$Count = 5,
-    [Parameter(ParameterSetName = 'Network')][ValidateRange(5, 180)][int]$Seconds = 60,
-    [Parameter(ParameterSetName = 'Network')][ValidateRange(200, 3000)][int]$TimeoutMs = 900
+    [Parameter(Mandatory, ParameterSetName = 'PlannedNetwork')][string]$EndpointFile,
+    [Parameter(ParameterSetName = 'Network')][Parameter(ParameterSetName = 'PlannedNetwork')][ValidateRange(1, 20)][int]$Count = 5,
+    [Parameter(ParameterSetName = 'Network')][Parameter(ParameterSetName = 'PlannedNetwork')][ValidateRange(5, 180)][int]$Seconds = 60,
+    [Parameter(ParameterSetName = 'Network')][Parameter(ParameterSetName = 'PlannedNetwork')][ValidateRange(200, 3000)][int]$TimeoutMs = 900
 )
 
 Set-StrictMode -Version Latest
@@ -59,6 +62,30 @@ function Get-ExchangeHash([string]$Listener, [string]$Probe, [string[]]$Nonces) 
 }
 
 function Test-ReportInteger($Value) { return $Value -is [int] -or $Value -is [long] }
+
+function Read-EndpointFile([string]$Path) {
+    $file = [IO.File]::OpenRead((Resolve-Path -LiteralPath $Path).ProviderPath)
+    try {
+        if ($file.Length -lt 1 -or $file.Length -gt 4096) { throw 'Invalid endpoint file size.' }
+        $reader = [IO.StreamReader]::new($file)
+        try { $raw = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    } finally { $file.Dispose() }
+    if (!$raw.TrimStart().StartsWith('{')) { throw 'Expected a Windows UDP retest endpoint object.' }
+    $settings = ConvertFrom-Json -InputObject $raw
+    $fields = @($settings.PSObject.Properties.Name)
+    if ($fields.Count -ne 5 -or @($fields | Where-Object { $_ -cnotin 'version','scope','serverAddress','peerAddress','port' }).Count -ne 0 -or
+        !(Test-ReportInteger $settings.version) -or $settings.version -ne 1 -or $settings.scope -cne 'windows-udp-retest-endpoint' -or
+        $settings.serverAddress -isnot [string] -or $settings.peerAddress -isnot [string] -or
+        !(Test-ReportInteger $settings.port) -or $settings.port -lt 1024 -or $settings.port -gt 65535) {
+        throw 'Invalid Windows UDP retest endpoint.'
+    }
+    $server = Read-Address $settings.serverAddress
+    $peer = Read-Address $settings.peerAddress
+    if ([Net.IPAddress]::IsLoopback($server) -ne [Net.IPAddress]::IsLoopback($peer)) {
+        throw 'Use either two loopback or two private LAN addresses.'
+    }
+    return $settings
+}
 
 function Read-UtcTime($Value) {
     if ($Value -is [DateTime] -and $Value.Kind -eq [DateTimeKind]::Utc) { return [DateTimeOffset]$Value }
@@ -190,6 +217,19 @@ try {
         exit 0
     }
 
+    if ($PSCmdlet.ParameterSetName -eq 'PlannedNetwork') {
+        $step = 'endpoint-file'
+        $endpoint = Read-EndpointFile $EndpointFile
+        $Port = [int]$endpoint.port
+        if ($Mode -eq 'Listen') {
+            $LocalAddress = $endpoint.serverAddress
+            $PeerAddress = $endpoint.peerAddress
+        } else {
+            $LocalAddress = $endpoint.peerAddress
+            $PeerAddress = $endpoint.serverAddress
+        }
+        $step = 'key'
+    }
     $file = [IO.File]::OpenRead($KeyFile)
     try {
         if ($file.Length -lt 44 -or $file.Length -gt 46) { throw 'Invalid probe key size.' }

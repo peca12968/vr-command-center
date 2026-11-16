@@ -448,6 +448,22 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
             **({'launchBinding': binding} if binding is not None else {})}
 
 
+def windows_retest_endpoint(plan_path, report, room, seat):
+    room, seat = field.integer(room, 1, 5), field.integer(seat, 1, 5)
+    document, raw = field.read_quest_document(plan_path)
+    field.require(report['networkPlanSha256'] == hashlib.sha256(raw).hexdigest(), 'The original venue network plan changed during recheck')
+    _, endpoints, sources = field.parse_quest_network_plan(document, allow_shared_sources=True)
+    field.require((room, seat) in sources, 'The Windows retest seat is not in the original venue network plan')
+    group = next(group for group in report['groups'] if room in group['roomIds'])
+    source = next(row for row in group['sources'] if {'roomId': room, 'seat': seat} in row['seats'])
+    if source['status'] == 'verified':
+        return None, {'status': 'no-windows-retest', 'coveredSeats': source['seats']}
+    server, port = endpoints[tuple(group['roomIds'])]
+    endpoint = {'version': 1, 'scope': 'windows-udp-retest-endpoint', 'serverAddress': server,
+                'peerAddress': sources[room, seat], 'port': port}
+    return endpoint, {'status': 'windows-retest-endpoint', 'coveredSeats': source['seats']}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--network-plan', required=True, type=Path)
@@ -456,26 +472,38 @@ def main():
     parser.add_argument('--batch', type=Path, action='append', default=[],
                         help='Original completed UDP batch or incomplete Quest batch with verified seats')
     parser.add_argument('--retry-report', type=Path, help='Incomplete venue report whose verified sources should be checked again')
+    parser.add_argument('--windows-retest-seat', nargs=2, type=int, metavar=('ROOM', 'SEAT'),
+                        help='Export the currently pending Windows source for this seat using --retry-report')
     parser.add_argument('--launcher-preview', type=Path, help='Original successful Launch-Server.exe --venue-check report')
     parser.add_argument('--launch-plan', type=Path, help='Original revision-guarded Windows launch plan for the provided preview')
     parser.add_argument('--require-distinct-remote-roster', action='store_true',
                         help='Require each planned seat to have its own private IPv4 outside the server endpoints')
-    parser.add_argument('--output', required=True, type=Path, help='New readiness report (also usable for sealed verification)')
+    parser.add_argument('--output', required=True, type=Path, help='New readiness report or Windows retest endpoint file')
     args = parser.parse_args()
     if len(args.batch) > 25:
         parser.error('At most 25 existing batch reports are supported.')
+    export_retest = args.windows_retest_seat is not None
+    if export_retest and (args.retry_report is None or args.pairs is not None or args.inbox is not None or args.batch):
+        parser.error('--windows-retest-seat needs --retry-report and the original inputs only')
     try:
         field.require(not args.output.exists(), 'Use a new output file')
         result = check_venue(args.network_plan, args.pairs, args.batch, args.output.resolve(), args.launcher_preview,
                              args.launch_plan, args.retry_report, args.inbox,
-                             require_distinct_remote_roster=args.require_distinct_remote_roster)
-        with args.output.open('x', encoding='utf-8', newline='\n') as stream:
-            json.dump(result, stream, indent=2)
-            stream.write('\n')
+                             require_distinct_remote_roster=args.require_distinct_remote_roster, inspect_retry=export_retest)
+        output = result
+        if export_retest:
+            output, retest_summary = windows_retest_endpoint(args.network_plan, result, *args.windows_retest_seat)
+        if output is not None:
+            with args.output.open('x', encoding='utf-8', newline='\n') as stream:
+                json.dump(output, stream, indent=2)
+                stream.write('\n')
     except field.EvidenceError as error:
         parser.exit(1, f'UDP venue preflight rejected. {error}.\n')
     except (OSError, ValueError, KeyError, TypeError, RecursionError):
         parser.exit(1, 'UDP venue preflight could not read its inputs or save the report. Check the plan, inbox, launcher preview and output path.\n')
+    if export_retest:
+        print(json.dumps(retest_summary))
+        return 0
     summary = {key: result[key] for key in ('complete', 'expectedSources', 'verifiedSources', 'unmatchedPairs', 'unreadablePairs')}
     if 'requireDistinctRemoteRoster' in result:
         summary['requireDistinctRemoteRoster'] = result['requireDistinctRemoteRoster']

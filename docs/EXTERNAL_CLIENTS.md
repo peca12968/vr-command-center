@@ -324,6 +324,29 @@ python .\scripts\check-venue-udp-preflight.py `
 
 逐席直連預檢會在報告保存 `requireDistinctRemoteRoster`。補測、併入完整報告及驗證啟動都會沿用此條件，並重新核對原網路清單。啟動時可省略已記錄在報告的旗標。
 
+#### 依全館報告補測 Windows 席位
+
+從全館報告選定待補測的 Windows 房號與席號。以下是第 5 房第 4 席的例子。工具重驗原始證據後，輸出這一組的伺服器 IPv4、玩家來源 IPv4 與 UDP 埠。若同一端點上的多個席位共用來源，`coveredSeats` 會列出一組探測涵蓋的席位。若原交換仍有效，工具會顯示 `no-windows-retest` 並結束。
+
+```powershell
+python .\scripts\check-venue-udp-preflight.py `
+  --network-plan .\venue-network.json --retry-report .\venue-readiness.json `
+  --launch-plan .\venue-plan.json --launcher-preview .\venue-preview.json `
+  --windows-retest-seat 5 4 --output .\windows-r5-s4.json
+```
+
+按原本的兩端 UDP 流程產生探測金鑰，將同一份端點檔與金鑰交給這組的伺服器及 Windows 玩家電腦。先在伺服器執行第一條指令，再在玩家電腦執行第二條。兩端的樣本數相同。
+
+```powershell
+pwsh -NoProfile -NonInteractive -File .\scripts\check-lan-udp.ps1 -Mode Listen `
+  -EndpointFile .\windows-r5-s4.json -KeyFile .\probe.key -Count 5 > .\listener.ndjson
+
+pwsh -NoProfile -NonInteractive -File .\scripts\check-lan-udp.ps1 -Mode Probe `
+  -EndpointFile .\windows-r5-s4.json -KeyFile .\probe.key -Count 5 > .\probe.json
+```
+
+將新雙端檔加到補測清單，沿用上節的 `--retry-report` 合併。端點檔只用於帶入參數，完成仍以原雙端報告為準。 [金鑰與雙端操作](#開場前核對兩端-udp)
+
 #### 核對 Windows 五房啟動回條
 
 使用 `start-verified-venue.py --start-receipt` 完成封存後，產生全館清單時加上 `--verified-start-receipt .\venue-start.json`。同時保留原 `--launcher-report` 與唯一一份 `--udp-preflight-batch`。若已有清單，可填入 `"verifiedVenueStart": "venue-start.json"`，並沿用原 `venueLauncherReport` 和 `udpPreflightBatch`。回條引用的就緒檔路徑以回條所在目錄為準。

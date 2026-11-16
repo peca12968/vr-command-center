@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 依全館報告補測 Windows 席位
+
+- `check-venue-udp-preflight.py --windows-retest-seat` 重新核對原始報告、網路清單及已保存的證據，依房席匯出一組待測端點。共用來源列出涵蓋的全部席位。Windows 監聽端和玩家端用相同的 `-EndpointFile` 帶入各自的位址和埠。已通過的來源會回報略過。 [雙端補測操作](EXTERNAL_CLIENTS.md#依全館報告補測-windows-席位)
+- 沿用先前 Windows 與模擬 Quest 混合的本機 UDP 來源，獨立與合併模式各補測一組。獨立恢復 4 個共用來源席位並沿用 9 組，合併恢復 20 個共用來源席位並沿用 5 組。兩場各有 25 席，72 份先前原檔的雜湊相同，合併後通過開場離線重驗。 [實際雙端測試](../artifacts/windows-venue-retest-20261116-1715/native-retest-readback.json)
+- 23 項 LAN 與 13 項 Quest UDP 回歸通過，實際 UDP 用 Windows PowerShell 5.1 執行。PowerShell 7 通過兩種角色的四項離線輸入核對，該路徑的網路執行及 Java 測試組因防火牆啟動前查核而略過。實體頭盔和跨機遊戲仍待驗。 [LAN 回歸](../artifacts/windows-venue-retest-20261116-1715/lan.log) · [Quest 回歸](../artifacts/windows-venue-retest-20261116-1715/quest.log) · [PowerShell 7](../artifacts/windows-venue-retest-20261116-1715/ps7-offline.log)
+
 ## 2026-11-16 依全館 UDP 報告補測未通過的 Quest 席位
 
 - `probe-quest-venue.py --venue-retry-report` 核對原網路清單、啟動計畫、預覽及仍有效的雙端證據，再選出原裝置對照表內待補測的 Quest 席位。若該對照表沒有待補席位，工具會在存取 ADB 前結束，並保留其他待補席位的數量。 [操作說明](QUEST3.md#從全館報告選出-quest-補測席位)

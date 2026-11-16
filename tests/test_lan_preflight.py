@@ -386,10 +386,12 @@ class LanPreflightTests(unittest.TestCase):
                 '-KeyFile', str(key or self.key)]
 
     @contextmanager
-    def listener(self, port, count, *, peer=LOOPBACK, seconds=10, filename='listener.ndjson'):
+    def listener(self, port, count, *, peer=LOOPBACK, seconds=10, filename='listener.ndjson', endpoint=None):
         path = self.root / filename
+        options = self.options(port, count, peer=peer) if endpoint is None else [
+            '-EndpointFile', str(endpoint), '-Count', str(count), '-KeyFile', str(self.key)]
         with path.open('xb') as output:
-            with subprocess.Popen(self.shell + ['-Mode', 'Listen', '-Seconds', str(seconds), *self.options(port, count, peer=peer)],
+            with subprocess.Popen(self.shell + ['-Mode', 'Listen', '-Seconds', str(seconds), *options],
                                   stdout=output, stderr=subprocess.STDOUT) as process:
                 try:
                     end = time.monotonic() + 8
@@ -410,9 +412,11 @@ class LanPreflightTests(unittest.TestCase):
                     if process.poll() is None:
                         process.kill()
 
-    def venue_pair(self, port, peer, label, *, encoding='utf-8'):
-        with self.listener(port, 2, peer=peer, filename=f'{label}-listener.ndjson') as (listener, path):
-            result = self.run_script('-Mode', 'Probe', *self.options(port, 2, local=peer))
+    def venue_pair(self, port, peer, label, *, encoding='utf-8', endpoint=None):
+        with self.listener(port, 2, peer=peer, filename=f'{label}-listener.ndjson', endpoint=endpoint) as (listener, path):
+            options = self.options(port, 2, local=peer) if endpoint is None else [
+                '-EndpointFile', str(endpoint), '-Count', '2', '-KeyFile', str(self.key)]
+            result = self.run_script('-Mode', 'Probe', *options)
             self.assertEqual(0, result.returncode, result.stderr or result.stdout)
             self.assertEqual(0, listener.wait(timeout=5))
         probe = self.root / f'{label}-probe.json'
@@ -434,6 +438,58 @@ class LanPreflightTests(unittest.TestCase):
         self.assertNotIn(str(self.root), result.stdout + result.stderr)
         self.assertTrue(report.is_file(), result.stderr)
         return json.loads(report.read_text(encoding='utf-8'))
+
+    def test_windows_retest_exports_one_pending_source_for_both_probe_roles(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reserve:
+            reserve.bind((LOOPBACK, 0))
+            port = reserve.getsockname()[1]
+        launch_value, preview_value = guarded_documents('Linked', [port])
+        launch = self.venue_json('windows-launch.json', launch_value)
+        preview = self.venue_json('windows-preview.json', preview_value)
+        rooms = list(range(1, 6))
+        roster = [{'roomId': room, 'seat': seat, 'address': '127.0.0.3' if (room, seat) in ((4, 5), (5, 5)) else '127.0.0.2'}
+                  for room in rooms for seat in rooms]
+        network = self.venue_json('windows-network.json', {'version': 1, 'mode': 'Linked',
+            'endpoints': [{'roomIds': rooms, 'address': LOOPBACK, 'port': port}], 'sources': roster})
+        first_pair = self.venue_pair(port, '127.0.0.2', 'try-1', encoding='utf-16')
+        first_paths = self.venue_json('first-pairs.json', {'version': 1, 'pairs': [first_pair]})
+        original = self.root / 'incomplete.json'
+        guard = ('--launch-plan', launch, '--launcher-preview', preview)
+        first = self.venue_check(network, original.name, '--pairs', first_paths, *guard, status=1)
+        self.assertEqual((1, 2), (first['verifiedSources'], first['expectedSources']))
+        before = {path: path.read_bytes() for path in (network, original, launch, preview, *(self.root / name for name in first_pair.values()))}
+
+        def export(room, seat, output):
+            return subprocess.run([sys.executable, str(ROOT / 'scripts/check-venue-udp-preflight.py'), '--network-plan', str(network),
+                '--retry-report', str(original), '--windows-retest-seat', str(room), str(seat), '--output', str(output), *map(str, guard)],
+                capture_output=True, text=True, timeout=20)
+
+        skipped = self.root / 'skipped.json'
+        success = export(1, 1, skipped)
+        self.assertEqual(0, success.returncode, success.stderr)
+        self.assertEqual('no-windows-retest', json.loads(success.stdout)['status'])
+        self.assertFalse(skipped.exists())
+        endpoint = self.root / 'endpoint.json'
+        result = export(5, 5, endpoint)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertNotIn(LOOPBACK, result.stdout)
+        self.assertEqual({'status': 'windows-retest-endpoint', 'coveredSeats': [
+            {'roomId': 4, 'seat': 5}, {'roomId': 5, 'seat': 5}]}, json.loads(result.stdout))
+        plan = json.loads(endpoint.read_bytes())
+        self.assertEqual({'version': 1, 'scope': 'windows-udp-retest-endpoint', 'serverAddress': LOOPBACK,
+                          'peerAddress': '127.0.0.3', 'port': port}, plan)
+        invalid = self.venue_json('wrong-endpoint.json', {**plan, 'scope': 'venue-udp-preflight-only'})
+        refused = self.run_script('-Mode', 'Probe', '-EndpointFile', invalid, '-KeyFile', self.key, '-Count', 1)
+        self.assertEqual(1, refused.returncode, refused.stderr)
+        self.assertEqual({'version': 1, 'stage': 'failed', 'step': 'endpoint-file', 'complete': False}, json.loads(refused.stdout))
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as port_check:
+            port_check.bind((LOOPBACK, port))
+        second = self.venue_pair(port, '127.0.0.3', 'try-2', endpoint=endpoint)
+        second_paths = self.venue_json('second-pairs.json', {'version': 1, 'pairs': [second]})
+        merged = self.venue_check(network, 'complete.json', '--retry-report', original, '--pairs', second_paths, *guard)
+        self.assertEqual((2, 1), (merged['verifiedSources'], merged['retainedSources']))
+        self.assertEqual(25, sum(len(row['seats']) for group in merged['groups'] for row in group['sources']))
+        self.assertEqual(before, {path: path.read_bytes() for path in before})
 
     def test_quest_retry_targets_only_current_pending_seats_from_a_full_venue_report(self):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reserve:
