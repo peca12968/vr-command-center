@@ -135,6 +135,7 @@ switch ($args[2]) {
                 if (($args[4..13] -join ' ') -ceq 'resolve-activity --brief --user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p com.vrcommand.quest') {
                     if ($env:QUEST_TEST_FAIL -eq 'missing-activity') { 'No activity found'; exit 0 }
                     'priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=false'
+                    if ($env:QUEST_TEST_FAIL -eq 'launch-short') { 'com.vrcommand.quest/com.vrcommand.quest.MainActivity'; exit 0 }
                     'com.vrcommand.quest/com.unity3d.player.UnityPlayerActivity'
                     exit 0
                 }
@@ -179,7 +180,9 @@ switch ($args[2]) {
                     [IO.File]::AppendAllText($staging.FullName, "`n")
                 }
                 if ($args[4] -ceq 'start') {
-                    $target = '--user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n com.vrcommand.quest/com.unity3d.player.UnityPlayerActivity'
+                    $activity = if ($env:QUEST_TEST_FAIL -eq 'launch-short') { 'com.vrcommand.quest/com.vrcommand.quest.MainActivity' }
+                        else { 'com.vrcommand.quest/com.unity3d.player.UnityPlayerActivity' }
+                    $target = "--user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n $activity"
                     $last = $args.Count - 1
                     if ($args[$last - 2] -ceq '--es') {
                         if ($args[$last - 1] -cne 'com.vrcommand.quest.OPENXR_PROBE' -or $args[$last] -cnotmatch '\A[a-f0-9]{32}\z') { exit 98 }
@@ -187,12 +190,20 @@ switch ($args[2]) {
                         $last -= 3
                     }
                     if (($args[5..$last] -join ' ') -cnotin @("-W $target", "-W -S $target")) { exit 98 }
+                    if ($env:QUEST_TEST_FAIL -eq 'launch-empty') { exit 0 }
+                    if ($env:QUEST_TEST_FAIL -eq 'launch-reused') { 'Warning: Activity not started, intent delivered to the top-most instance.' }
                     if ($env:QUEST_TEST_FAIL -eq 'launch-timeout') { 'Status: timeout' } else { 'Status: ok' }
-                    'Activity: com.vrcommand.quest/com.unity3d.player.UnityPlayerActivity'
+                    if ($env:QUEST_TEST_FAIL -eq 'launch-conflicting') { 'Activity: com.vrcommand.quest/.UnexpectedActivity' }
+                    if ($env:QUEST_TEST_FAIL -eq 'launch-short') { 'Activity: com.vrcommand.quest/.MainActivity' }
+                    else { "Activity: $activity" }
                 }
                 exit 0
             }
-            { $_ -in @('mkdir', 'monkey') } { exit 0 }
+            'monkey' {
+                if ($env:QUEST_TEST_FAIL -eq 'launch-empty') { 'Events injected: 0' }
+                exit 0
+            }
+            'mkdir' { exit 0 }
         }
     }
     'logcat' {
@@ -415,7 +426,7 @@ class QuestDeployTests(unittest.TestCase):
         commands = self.commands.read_text(encoding='utf-8').splitlines()
         self.assertEqual('devices -l', commands[0])
         self.assertTrue(all(line.startswith('-t 41 ') for line in commands[1:]))
-        self.assertIn(' shell monkey ', commands[-1])
+        self.assertIn(' shell am start ', commands[-1])
 
     @contextmanager
     def live_quest_check(self, config):
@@ -500,7 +511,7 @@ class QuestDeployTests(unittest.TestCase):
                     commands = self.commands.read_text(encoding='utf-8')
                     self.assertIn(' install ', commands)
                     self.assertNotIn(' force-stop ', commands)
-                    self.assertNotIn(' monkey ', commands)
+                    self.assertNotIn(' am start ', commands)
                     self.assertEqual(b'previous connection', active.read_bytes())
                     self.assertFalse(list(self.remote.glob('*.tmp')))
 
@@ -512,7 +523,7 @@ class QuestDeployTests(unittest.TestCase):
                     self.assertEqual([original_request] * 3, requests)
                     commands = self.commands.read_text(encoding='utf-8')
                     self.assertIn(' force-stop ', commands)
-                    self.assertIn(' monkey ', commands)
+                    self.assertIn(' am start ', commands)
                     saved = json.loads(active.read_bytes())
                     self.assertEqual(ticket, saved['joinTicket'])
                     self.assertEqual(mode == 'MR', saved.get('requestMixedReality', False))
@@ -555,7 +566,7 @@ class QuestDeployTests(unittest.TestCase):
         commands = self.commands.read_text(encoding='utf-8').splitlines()
         self.assertLess(next(i for i, command in enumerate(commands) if 'base.apk' in command),
                         next(i for i, command in enumerate(commands) if ' push ' in command))
-        self.assertIn(' shell monkey ', commands[-1])
+        self.assertIn(' shell am start ', commands[-1])
         self.assertEqual(self.player, json.loads((self.remote/'vr-connection.json').read_bytes()))
         self.assertEqual(expected, hashlib.sha256(apk.read_bytes()).hexdigest())
 
@@ -604,6 +615,21 @@ class QuestDeployTests(unittest.TestCase):
                         commands.index(' am start -W '))
         self.assertNotIn('shell monkey', commands)
         self.assertEqual(self.player, json.loads((self.remote / 'vr-connection.json').read_bytes()))
+
+    def test_player_deployment_requires_android_launcher_confirmation(self):
+        self.provision_apk()
+        for failure in ('launch-empty', 'launch-reused', 'launch-conflicting'):
+            with self.subTest(failure=failure):
+                self.commands.unlink(missing_ok=True)
+                result = self.run_script('-Serial', 'fixture', failure=failure)
+                self.assert_rejected(result, 'did not confirm that the Quest launcher activity started')
+                commands = self.commands.read_text(encoding='utf-8')
+                self.assertIn(' am start -W ', commands)
+                self.assertNotIn(' --es com.vrcommand.quest.OPENXR_PROBE ', commands)
+                self.assertEqual(self.player, json.loads((self.remote / 'vr-connection.json').read_bytes()))
+        result = self.run_script('-Serial', 'fixture', failure='launch-short')
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn('Quest client installed and launched.', result.stdout)
 
     def run_smoke(self, serial='fixture', failure='', *, resume=False, require_openxr=False, version_code=72):
         apk = self.root / 'sample.apk'
@@ -864,7 +890,7 @@ class QuestDeployTests(unittest.TestCase):
                     self.assertEqual(alignment_bytes, alignment.read_bytes())
                     commands = self.commands.read_text(encoding='utf-8')
                     self.assertEqual(mode == 'MR', f' pull /sdcard/Android/data/com.vrcommand.quest/files/{alignment.name}' in commands)
-                    for operation in (' install ', ' force-stop ', ' monkey '):
+                    for operation in (' install ', ' force-stop ', ' am start '):
                         self.assertNotIn(operation, commands)
                     for private in (key, fresh['joinTicket'], installed['joinTicket']):
                         self.assertNotIn(private, refreshed.stdout + refreshed.stderr + commands)
@@ -945,7 +971,7 @@ class QuestDeployTests(unittest.TestCase):
         verified = next(i for i, line in enumerate(commands) if 'shell sha256sum' in line and line.endswith('/vr-connection.json'))
         self.assertEqual(sorted({alignment_readback, staged_config, stop, activate, verified}),
                          [alignment_readback, staged_config, stop, activate, verified])
-        self.assertIn('shell monkey', commands[-1])
+        self.assertIn('shell am start', commands[-1])
         self.assertNotIn(self.player['joinTicket'], result.stdout + result.stderr + ''.join(commands))
         self.assertFalse(list(self.remote.glob('*.tmp')))
 
@@ -999,7 +1025,7 @@ class QuestDeployTests(unittest.TestCase):
                 self.assertFalse(list(self.remote.glob('*.tmp')))
                 commands = self.commands.read_text(encoding='utf-8').splitlines()
                 self.assertTrue(any('shell rm -f' in line for line in commands))
-                self.assertFalse(any('shell monkey' in line for line in commands))
+                self.assertFalse(any('shell am start' in line for line in commands))
                 if fault == 'force-stop':
                     self.assertTrue(any('shell sha256sum' in line and '/vr-connection-' in line for line in commands))
                     self.assertFalse(any('shell staged=$(sha256sum ' in line and line.endswith("/vr-connection.json'") for line in commands))
@@ -1032,7 +1058,7 @@ class QuestDeployTests(unittest.TestCase):
                     self.assertNotIn('shell am force-stop', commands)
                 self.assertEqual(original_alignment, alignment.read_bytes())
                 self.assertFalse(list(self.remote.glob('*.tmp')))
-                self.assertNotIn('shell monkey', commands)
+                self.assertNotIn('shell am start', commands)
 
     def test_connection_changed_after_staged_verification_preserves_active_file(self):
         self.provision_apk()
@@ -1048,7 +1074,7 @@ class QuestDeployTests(unittest.TestCase):
                 self.assertFalse(list(self.remote.glob('*.tmp')))
                 commands = self.commands.read_text(encoding='utf-8')
                 self.assertIn('-t 41 shell am force-stop com.vrcommand.quest', commands)
-                self.assertNotIn('shell monkey', commands)
+                self.assertNotIn('shell am start', commands)
 
 
 class QuestVenueTests(unittest.TestCase):
@@ -2052,7 +2078,7 @@ else:
                                      json.loads((self.root / row['serial'] / 'vr-connection.json').read_bytes()))
                 commands = (self.root / 'adb.log').read_text(encoding='utf-8').splitlines()
                 self.assertEqual({'fixture-01','fixture-13','fixture-24'}, {line.split()[1] for line in commands if line.startswith('-s ')})
-                self.assertEqual(3, sum(' shell monkey ' in line for line in commands))
+                self.assertEqual(3, sum(' shell am start ' in line for line in commands))
                 self.assertNotIn('private-fixture-master', partial.stdout)
                 self.assertNotIn('v2.', partial.stdout)
                 mapping.write_text(json.dumps(document), encoding='utf-8')
@@ -2866,7 +2892,7 @@ else:
                 transport_commands = transport_log.read_text(encoding='utf-8').splitlines()
                 self.assertEqual('devices -l', transport_commands[0])
                 self.assertTrue(all(line.startswith('-t 203 ') for line in transport_commands[1:]))
-                self.assertTrue(any(line.startswith('-t 203 shell monkey ') for line in transport_commands))
+                self.assertTrue(any(line.startswith('-t 203 shell am start ') for line in transport_commands))
                 final = json.loads(resumed.stdout)
                 self.assertEqual((True, 3, 22), (final['complete'], final['mappedSeats'], final['unmappedSeats']))
                 self.assertEqual(hashlib.sha256(report.read_bytes()).hexdigest(), final['previousDeploymentSha256'])
@@ -2939,7 +2965,7 @@ else:
                 self.assertEqual(done_bytes, done_config.read_bytes())
                 commands = log.read_text(encoding='utf-8').splitlines()
                 self.assertEqual({'fixture-03'}, {line.split()[1] for line in commands if line.startswith('-s ')})
-                self.assertEqual(1, sum(' shell monkey ' in line for line in commands))
+                self.assertEqual(1, sum(' shell am start ' in line for line in commands))
                 self.assertTrue(all(len(call['rooms']) == 5 for call in calls))
                 for text in (first.stdout, retry_again.stdout, resumed.stdout):
                     for secret in ('PRIVATE_MASTER_CANARY', 'HARDWARE-SERIAL-', 'fixture-01', 'v2.'):
@@ -3015,7 +3041,7 @@ else:
             self.assertFalse((fleet / 'replacement-device.log').exists(), 'No commands may be sent to a replacement ADB transport')
             transport_commands = (fleet / 'transport.log').read_text(encoding='utf-8').splitlines()
             self.assertIn('-t 104 shell am force-stop com.vrcommand.quest', transport_commands)
-            self.assertFalse(any(line.startswith('-t 104 shell monkey ') for line in transport_commands))
+            self.assertFalse(any(line.startswith('-t 104 shell am start ') for line in transport_commands))
         self.assertEqual(('deployment', False, True), (report['phase'], report['complete'], report['managementVerified']))
         self.assertEqual(['launch-requested'] * 3 + [expected_status] + ['not-attempted'] * (count - 4),
                          [row['status'] for row in report['devices']])
@@ -3042,7 +3068,7 @@ else:
             self.assertEqual(seats[1][f'room-01-seat-{seat:02}.json']['joinTicket'], actual['joinTicket'])
         commands = (fleet / 'adb.log').read_text(encoding='utf-8').splitlines()
         first_write = next(index for index, line in enumerate(commands) if 'shell mkdir -p' in line)
-        self.assertEqual(3 * count + 2 + (2 * count + 2 if check_release else 0), first_write)
+        self.assertEqual(3 * count + 3 + (2 * count + 2 if check_release else 0), first_write)
         self.assertEqual(count + 4, sum(line.endswith(' shell getprop ro.serialno') for line in commands))
         if check_release:
             self.assertEqual([True] * 3 + [None] * (count - 3), [row.get('apkVerified') for row in report['devices']])
@@ -3064,7 +3090,7 @@ else:
                               '-s fixture-04 shell getprop ro.serialno',
                               '-s fixture-04 shell getprop ro.serialno'],
                              [line for line in commands if line.startswith('-s fixture-04 ') and not line.endswith('ro.product.model')])
-        self.assertEqual(4 if fault == 'launch' else 3, sum(' shell monkey ' in line for line in commands))
+        self.assertEqual(4 if fault == 'launch' else 3, sum(' shell am start ' in line for line in commands))
         self.assertNotIn('v2.', result.stdout + result.stderr)
         self.assertNotIn('HARDWARE-SERIAL-', result.stdout + result.stderr)
         self.assertNotIn('PRIVATE_MASTER_CANARY', result.stdout + result.stderr)
@@ -3108,7 +3134,7 @@ else:
         self.assertEqual('devices -l', commands[0])
         self.assertTrue(all(command.startswith('-t 41 ') for command in commands[1:]))
         self.assertEqual(2, sum(' push ' in command for command in commands))
-        self.assertIn('shell monkey', commands[-1])
+        self.assertIn('shell am start', commands[-1])
         self.assertNotIn(config['joinTicket'], result.stdout + result.stderr + ''.join(commands))
 
     def test_live_bundle_checks_the_published_endpoint_before_deployment(self):
@@ -3225,7 +3251,7 @@ else:
         if after_staging:
             expected.append((True, True, True))
             self.assertTrue(any(' shell rm -f ' in line and '/vr-connection-' in line for line in commands))
-            self.assertFalse(any(' force-stop ' in line or ' monkey ' in line for line in commands))
+            self.assertFalse(any(' force-stop ' in line or ' am start ' in line for line in commands))
             self.assertFalse(list(remote.glob('*.tmp')))
             self.assertEqual(b'previous connection', (remote / 'vr-connection.json').read_bytes())
         else:

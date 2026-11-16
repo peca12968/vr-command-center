@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-17 Quest 部署等待 Android 確認啟動
+
+- 單席與批次部署先解析遊戲的啟動活動，正式連線檔核對通過後以 `am start -W` 啟動。舊版單席只接受指令退出碼，未送出活動也可能回報成功。新版會核對 Android 回傳的成功狀態及原活動名稱，拒絕缺少確認、逾時、互相衝突或沿用已啟動活動的結果。批次啟動失敗仍保存原成功席位及失敗步驟。 [部署操作](QUEST3.md#啟動前核對裝置檔案) · [舊版反例](../artifacts/quest-launch-confirmation-20261117/before.log)
+- 部署套件執行 79 項回歸，1 個 Windows PowerShell 子案例因指令碼政策略過。以實際 Windows Android SDK ADB 連接同機模擬回覆，在 PowerShell 7 與 Windows PowerShell 5.1 通過共 12 個啟動回覆案例，重現舊版誤收的對照。USB 仍僅列出檔案傳輸介面，無 ADB 介面。Quest 版碼 77 的 APK 雜湊、ARM64 和 v2 簽章已複核，安裝、追蹤及入場待實機。 [回歸結果](../artifacts/quest-launch-confirmation-20261117/full.log) · [ADB 結果](../artifacts/quest-launch-confirmation-20261117/native-adb-readback.json) · [USB 診斷](../artifacts/quest-launch-confirmation-20261117/usb-status.json)
+
 ## 2026-11-16 全館與合併場戰績 ZIP 下載核對
 
 - 管理台 0.31.215 用 `HEAD` 取得原封存戰績 ZIP 的附件檔名與 SHA-256，下載時再用摘要核對內容。舊版會下載同批次的另一個匯出版本。新版在本機 IPC API 與 Chromium 通過 34 項檢查，包含拒絕同批次的另一個匯出版本、拒絕變動一個位元組的合併場 ZIP、成功重試及主控權限。另通過 119 項 Node 與 7 項封裝檢查。 [舊版反例](../artifacts/report-zip-verification-031215/before.log) · [新版瀏覽器](../artifacts/desktop-guarded-openxr/20261116-184519-ed467169/browser.log) · [Windows 管理包](../artifacts/report-zip-verification-031215/VRCommand-ControlServer-0.31.215.zip)

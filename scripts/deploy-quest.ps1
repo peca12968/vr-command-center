@@ -1503,11 +1503,9 @@ function Update-QuestPlayerTicket($ConnectionFile, $Ticket, $Target) {
 
 function Set-QuestConnection([string[]]$Target, $Config, $Ticket, $Alignment, [switch]$UsePassthrough, [switch]$RequestMixedReality,
     [hashtable]$Deployment = @{}, $LiveVenue, $LiveSeat) {
-    if ($RequireOpenXR) {
-        $Deployment.Step = 'resolve-launcher'
-        $activity = Get-QuestLauncherActivity $Target
-        $nonce = [Guid]::NewGuid().ToString('N')
-    }
+    $Deployment.Step = 'resolve-launcher'
+    $activity = Get-QuestLauncherActivity $Target
+    $nonce = if ($RequireOpenXR) { [Guid]::NewGuid().ToString('N') }
     $Deployment.Step = 'prepare-device'
     $remoteDirectory = '/sdcard/Android/data/com.vrcommand.quest/files'
     Invoke-QuestAdb ($Target + @('shell', 'mkdir', '-p', $remoteDirectory)) | Out-Null
@@ -1557,14 +1555,11 @@ function Set-QuestConnection([string[]]$Target, $Config, $Ticket, $Alignment, [s
     $Deployment.Step = 'check-expiry-before-launch'
     if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired before launch. Download a fresh connection file.' }
     $Deployment.Step = 'launch-game'
+    Start-QuestCheckedActivity $Target $activity $nonce
     if ($RequireOpenXR) {
-        Start-QuestCheckedActivity $Target $activity $nonce
         $Deployment.Step = 'observe-openxr'
         $observation = Read-QuestLaunchedProcess $Target $nonce
         $Deployment.OpenXR = [ordered]@{ processId = $observation.processId; nonce = $nonce }
-    } else {
-        Invoke-QuestAdb ($Target + @('shell', 'monkey', '-p', 'com.vrcommand.quest', '-c', 'android.intent.category.LAUNCHER', '1')) | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'Quest app launch failed.' }
     }
 }
 
@@ -1626,8 +1621,14 @@ function Start-QuestCheckedActivity([string[]]$Target, [string]$Activity, [strin
     $launchArguments = $Target + @('shell', 'am', 'start') + $launchOptions + @('--user', 'current',
         '-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.LAUNCHER', '-n', $Activity) + $extras
     $startup = @(Invoke-QuestAdb $launchArguments 2>$null)
-    if ($LASTEXITCODE -ne 0 -or $startup -cnotcontains 'Status: ok' -or
-        $startup -cnotcontains "Activity: $Activity") {
+    $exitCode = $LASTEXITCODE
+    $statuses = @($startup -cmatch '\AStatus:')
+    $activities = @($startup -cmatch '\AActivity:')
+    $shortClass = '\AActivity: com\.vrcommand\.quest/\.'
+    $fullClass = 'Activity: com.vrcommand.quest/com.vrcommand.quest.'
+    if ($exitCode -ne 0 -or ($startup -cmatch '\A(?:Warning: Activity not started|Error:)') -or
+        $statuses.Count -ne 1 -or $statuses[0] -cne 'Status: ok' -or $activities.Count -ne 1 -or
+        ($activities[0] -creplace $shortClass, $fullClass) -cne ("Activity: $Activity" -creplace $shortClass, $fullClass)) {
         throw 'Android did not confirm that the Quest launcher activity started.'
     }
 }

@@ -496,7 +496,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.z
 
 各模式的 `venue-check` 接受 `requireLiveSource: true`，並在回條明確傳回 `liveSourceVerified`。來源缺少近期有效畫格時，該房席位會回報 `source-stale`。預設請求省略此欄，沿用只讀核對回條。
 
-中途失敗會停止並以非零結束碼回報。`launch-requested` 表示該席的檔案已核對，並已送出啟動指令。`file-verification-failed` 表示該席無法確認裝置檔案與預期內容相同，且尚未送出啟動。`deployment-failed` 表示其他部署步驟失敗。這兩種部署錯誤另附 `failedStep`，可辨別遊戲是否已經過停止指令與正式檔案切換。`not-attempted` 表示該席未進入寫入階段。 [核對頭盔追蹤席位](#核對頭盔追蹤席位)
+中途失敗會停止並以非零結束碼回報。`launch-requested` 表示該席的檔案已核對，且 Android 已確認啟動指定的遊戲活動。`file-verification-failed` 表示該席無法確認裝置檔案與預期內容相同，且尚未送出啟動。`deployment-failed` 表示其他部署步驟失敗。這兩種部署錯誤另附 `failedStep`，可辨別遊戲是否已經過停止指令與正式檔案切換。`not-attempted` 表示該席未進入寫入階段。 [核對頭盔追蹤席位](#核對頭盔追蹤席位)
 
 #### 核對頭盔內已安裝的發行 APK
 
@@ -520,9 +520,12 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 
 線上部署會在暫存連線檔通過 SHA-256 核對後，再向管理服務核對原五房來源、端點及入場。核對失敗時會嘗試移除該席暫存連線檔。部署工具會保留正式連線檔，並略過該席的停止及啟動指令。整批回報 `venue-check-failed`，已完成席位保留，後續席位維持 `not-attempted`。來源恢復後可依原報告重試。 [重試操作](#從原部署報告重試未完成席位)
 
+單席及批次部署在寫入前解析目前 Android 使用者的遊戲啟動活動，正式連線檔核對通過後才以 `am start -W` 啟動。Android 必須回傳一筆成功狀態及相符的活動名稱。逾時、缺少確認、回覆互相衝突或 Android 回報沿用已在執行的活動時，該席回報啟動失敗。 [ADB 啟動選項](https://developer.android.com/tools/adb#am)
+
 | `failedStep` | 操作員可確認的部署進度 |
 | --- | --- |
 | `verify-live-venue` | 服務未確認原來源、端點及名冊。該席尚未開始寫入。 |
+| `resolve-launcher` | 找不到目前 Android 使用者的遊戲啟動活動。尚未寫入連線檔或停止遊戲。 |
 | `prepare-device`、`stage-alignment`、`stage-connection` | 尚未送出停止指令或切換連線檔。工具會嘗試清理傳輸中的暫存檔。 |
 | `verify-live-venue-before-stop` | 暫存檔已驗證，但最新線上核對失敗。正式連線檔仍為原檔，尚未送出停止或啟動指令。 |
 | `check-expiry-before-staging`、`check-expiry-before-stop` | 票券已過期，尚未送出停止指令或切換連線檔。請下載目前部署包。 |
@@ -530,9 +533,9 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 | `activate-connection` | 停止指令已成功。若回報檔案驗證失敗，暫存檔在更名前的核對未通過，原正式檔仍在。其他切換錯誤須查驗裝置目前的正式檔。 |
 | `verify-active-connection` | 新連線檔已切換，正式路徑的最終驗證失敗。 |
 | `clean-local-connection`、`check-expiry-before-launch` | 新連線檔已切換並通過驗證，尚未送出啟動。後者須取得新票券。 |
-| `launch-game` | 新連線檔已通過驗證，啟動指令未成功。請確認裝置和入場狀態。 |
+| `launch-game` | 新連線檔已通過驗證，Android 未確認啟動指定的遊戲活動。 |
 
-整批回報以 `filesVerified: true` 標示已完成檔案核對並送出啟動的席位。遊戲是否完成入場及追蹤，請用同一部署 ZIP 再核對。 [追蹤操作](#核對頭盔追蹤席位) · [Android 檔案傳輸](https://developer.android.com/tools/adb) · [Android 校驗工具](https://android.googlesource.com/platform/external/toybox/%2B/40d21c59f76a9388b0ebb5c4c706732c2d034a67/toys/lsb/md5sum.c)
+整批回報以 `filesVerified: true` 標示已完成檔案核對的席位。搭配 `launch-requested` 可確認 Android 已回報遊戲活動啟動。遊戲是否完成入場及追蹤，請用同一部署 ZIP 再核對。 [追蹤操作](#核對頭盔追蹤席位) · [Android 檔案傳輸](https://developer.android.com/tools/adb) · [Android 校驗工具](https://android.googlesource.com/platform/external/toybox/%2B/40d21c59f76a9388b0ebb5c4c706732c2d034a67/toys/lsb/md5sum.c)
 
 #### 部署時核對每席 OpenXR
 

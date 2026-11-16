@@ -164,26 +164,27 @@ switch -CaseSensitive ($args[3]) {
         }
         if ($args[4] -ceq 'start') {
             $activity = 'com.vrcommand.quest/com.unity3d.player.UnityPlayerActivity'
-            $expected = "-W --user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n $activity --es com.vrcommand.quest.OPENXR_PROBE"
-            if (($args[5..15] -join ' ') -cne $expected -or $args[16] -cnotmatch '\A[a-f0-9]{32}\z') { exit 98 }
-            [IO.File]::WriteAllText($openxrProbe, $args[16])
+            $expected = "-W --user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n $activity"
+            if (($args[5..13] -join ' ') -cne $expected) { exit 98 }
+            if ($args.Count -gt 14) {
+                if ($args.Count -ne 17 -or ($args[14..15] -join ' ') -cne '--es com.vrcommand.quest.OPENXR_PROBE' -or
+                    $args[16] -cnotmatch '\A[a-f0-9]{32}\z') { exit 98 }
+                [IO.File]::WriteAllText($openxrProbe, $args[16])
+            }
+            if ($fault -ceq 'launch') { 'Status: timeout'; exit 0 }
+            if ($serial -ceq $env:VR_QUEST_FLEET_HOLD_AFTER_LAUNCH) {
+                [IO.File]::WriteAllText((Join-Path $root 'first-launch.request'), 'original mock launch')
+                $deadline = [DateTimeOffset]::UtcNow.AddSeconds(25)
+                while (-not [IO.File]::Exists((Join-Path $root 'continue.request'))) {
+                    if ([DateTimeOffset]::UtcNow -ge $deadline) { exit 96 }
+                    Start-Sleep -Milliseconds 50
+                }
+            }
             'Status: ok'
             "Activity: $activity"
         }
         exit 0
     }
     'mkdir' { if ($fault -ceq 'directory') { exit 1 }; exit 0 }
-    'monkey' {
-        if ($fault -ceq 'launch') { exit 1 }
-        if ($serial -ceq $env:VR_QUEST_FLEET_HOLD_AFTER_LAUNCH) {
-            [IO.File]::WriteAllText((Join-Path $root 'first-launch.request'), 'original mock launch')
-            $deadline = [DateTimeOffset]::UtcNow.AddSeconds(25)
-            while (-not [IO.File]::Exists((Join-Path $root 'continue.request'))) {
-                if ([DateTimeOffset]::UtcNow -ge $deadline) { exit 96 }
-                Start-Sleep -Milliseconds 50
-            }
-        }
-        exit 0
-    }
 }
 exit 98
