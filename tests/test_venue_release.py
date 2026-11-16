@@ -50,18 +50,24 @@ class VenueReleaseTests(unittest.TestCase):
                 for file in sorted(folder.rglob('*')) if file.is_file() and file.name != name]
         self.write(folder, name, dict(fields, files=rows))
 
-    def write_native_apk(self, apk, *, replacement=None, omit=None, extra=None):
+    def write_native_apk(self, apk, *, replacement=None, omit=None, extra=None,
+                         compression=zipfile.ZIP_STORED, alignment=None):
         # Minimal structural ELF fixture. Each program header points to file-backed data.
         header = struct.pack('<16sHHIQQQIHHHHHH', b'\x7fELF\x02\x01\x01', 3, 183, 1, 0, 64, 0, 0, 64, 56, 2, 0, 0, 0)
         load = struct.pack('<IIQQQQQQ', 1, 5, 0, 0, 0, 192, 192, 4096)
         dynamic = struct.pack('<IIQQQQQQ', 2, 6, 176, 176, 176, 16, 16, 8)
         library = header + load + dynamic + bytes(16)
-        with zipfile.ZipFile(apk, 'w') as archive:
+        with apk.open('wb') as raw, zipfile.ZipFile(raw, 'w') as archive:
+            archive.writestr('assets/fixture', b'non-native file')
             for name in ('libmain.so', 'libunity.so', 'libil2cpp.so', 'libopenxr_loader.so', 'libUnityOpenXR.so',
                          'libUnityARFoundationMeta.so', 'lib_burst_generated.so'):
                 if name != omit:
                     data = replacement(library) if name == 'libUnityOpenXR.so' and replacement is not None else library
-                    archive.writestr(f'lib/arm64-v8a/{name}', data)
+                    entry = zipfile.ZipInfo(f'lib/arm64-v8a/{name}')
+                    if alignment is not None:
+                        padding = -(raw.tell() + 30 + len(entry.filename) + 4) % alignment
+                        entry.extra = struct.pack('<HH', 0xcafe, padding) + bytes(padding)
+                    archive.writestr(entry, data, compress_type=compression)
             if extra is not None:
                 archive.writestr(extra, library)
 
@@ -154,7 +160,7 @@ class VenueReleaseTests(unittest.TestCase):
         game = release.identity(self.source, 'StandaloneWindows64')
         with (patch.object(release.subprocess, 'run', **{'return_value.stdout': b''}),
               patch.object(release, 'quest_metadata', return_value=meta),
-              patch.object(release, 'quest_manifest_metadata', return_value={'immersiveLauncher': True})):
+              patch.object(release, 'quest_manifest_metadata', return_value={'immersiveLauncher': True, 'extractNativeLibs': True})):
             for accepted in (receipt, dict(receipt, **meta)):
                 self.write(self.root, 'game.receipt.json', accepted)
                 result = release.verify_quest(apk, self.root, self.root, game)
@@ -167,12 +173,15 @@ class VenueReleaseTests(unittest.TestCase):
                     self.write(self.root, 'game.receipt.json', {**receipt, **meta, field: value})
                     release.verify_quest(apk, self.root, self.root, game)
 
-            def replace_apk(_badging, _manifest):
-                apk.write_bytes(b'replaced after the manifest was read')
-                return {'immersiveLauncher': True}
+            original_native_check = release.quest_native_libraries
+
+            def replace_apk(*args, **kwargs):
+                result = original_native_check(*args, **kwargs)
+                apk.write_bytes(b'replaced after verification')
+                return result
 
             self.write(self.root, 'game.receipt.json', receipt)
-            with patch.object(release, 'quest_manifest_metadata', side_effect=replace_apk), \
+            with patch.object(release, 'quest_native_libraries', side_effect=replace_apk), \
                     self.assertRaisesRegex(ValueError, 'changed during verification'):
                 release.verify_quest(apk, self.root, self.root, game)
 
@@ -191,12 +200,37 @@ class VenueReleaseTests(unittest.TestCase):
         for options, diagnostic in cases:
             with self.subTest(options=options):
                 self.write_native_apk(apk, **options)
-                with zipfile.ZipFile(apk) as archive, self.assertRaisesRegex(ValueError, diagnostic):
-                    release.quest_native_libraries(archive)
+                with self.assertRaisesRegex(ValueError, diagnostic):
+                    release.quest_native_libraries(apk, extract_native_libs=True)
         with self.assertWarnsRegex(UserWarning, 'Duplicate name'):
             self.write_native_apk(apk, extra='lib/arm64-v8a/libUnityOpenXR.so')
-        with zipfile.ZipFile(apk) as archive, self.assertRaisesRegex(ValueError, 'duplicate native library'):
-            release.quest_native_libraries(archive)
+        with self.assertRaisesRegex(ValueError, 'duplicate native library'):
+            release.quest_native_libraries(apk, extract_native_libs=True)
+
+    def test_native_libraries_match_extraction_or_direct_loading(self):
+        apk = self.root / 'game.apk'
+        self.write_native_apk(apk, compression=zipfile.ZIP_DEFLATED)
+        self.assertEqual(release.quest_native_libraries(apk, extract_native_libs=True)['arm64ElfLibrariesVerified'], 7)
+        with self.assertRaisesRegex(ValueError, 'directly loaded native library is compressed'):
+            release.quest_native_libraries(apk, extract_native_libs=False)
+
+        self.write_native_apk(apk)
+        with self.assertRaisesRegex(ValueError, 'not aligned to 4 KiB'):
+            release.quest_native_libraries(apk, extract_native_libs=False)
+        for alignment in (4096, 16384):
+            with self.subTest(alignment=alignment):
+                self.write_native_apk(apk, alignment=alignment)
+                summary = release.quest_native_libraries(apk, extract_native_libs=False)
+                self.assertEqual(summary['arm64ElfLibrariesVerified'], 7)
+                self.assertEqual(summary['directLoadAlignmentBytes'], 4096)
+
+        with zipfile.ZipFile(apk) as archive:
+            offset = archive.getinfo('lib/arm64-v8a/libmain.so').header_offset
+        with apk.open('r+b') as data:
+            data.seek(offset + 8)
+            data.write(struct.pack('<H', zipfile.ZIP_DEFLATED))
+        with self.assertRaisesRegex(ValueError, 'invalid local ZIP header'):
+            release.quest_native_libraries(apk, extract_native_libs=False)
 
     def test_quest_metadata_accepts_arm64_and_verified_v2_only(self):
         badging = ("package: name='com.vrcommand.quest' versionCode='63' versionName='0.49.0'\n"
@@ -243,6 +277,9 @@ class VenueReleaseTests(unittest.TestCase):
         summary = release.quest_manifest_metadata(badging, tree)
         self.assertEqual(summary['launchActivity'], 'com.vrcommand.quest.PlayerActivity')
         self.assertEqual(summary['quest3DeviceIdentifier'], 'eureka')
+        self.assertTrue(summary['extractNativeLibs'])
+        direct = tree.replace('    E: application (line=10)', '    E: application (line=10)\n      A: android:extractNativeLibs=false')
+        self.assertFalse(release.quest_manifest_metadata(badging, direct)['extractNativeLibs'])
         self.assertEqual(release.quest_manifest_metadata(badging, tree.replace('eureka', 'quest3'))['quest3DeviceIdentifier'], 'quest3')
         split_vr_filter = tree.replace('          E: category (line=21)', '        E: intent-filter (line=21)\n          E: category (line=22)')
         for candidate, error in (
@@ -253,6 +290,7 @@ class VenueReleaseTests(unittest.TestCase):
             (tree.replace('quest2|eureka|quest3s', 'quest2|quest3s'), 'declare Quest 3 support'),
             (tree.replace('com.oculus.feature.PASSTHROUGH', 'com.oculus.feature.OTHER'), 'passthrough feature declaration'),
             (tree.replace('android.permission.INTERNET', 'android.permission.ACCESS_NETWORK_STATE'), 'Internet permission'),
+            (direct.replace('extractNativeLibs=false', 'extractNativeLibs=@0x7f010024'), 'readable extractNativeLibs'),
         ):
             with self.subTest(error=error), self.assertRaisesRegex(ValueError, error):
                 release.quest_manifest_metadata(badging, candidate)

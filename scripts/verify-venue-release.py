@@ -35,6 +35,8 @@ ELF_SHARED_OBJECT = 3
 ELF_AARCH64 = 183
 ELF_LOAD = 1
 ELF_DYNAMIC = 2
+ZIP_LOCAL_HEADER = struct.Struct('<4s5H3I2H')
+NATIVE_PAGE_BYTES = 4096
 QUEST_APP = 'com.vrcommand.quest'
 QUEST_VR_CATEGORY = 'com.oculus.intent.category.VR'
 
@@ -165,6 +167,8 @@ def quest_manifest_metadata(badging, dump):
     require(len(launchers) == len(applications) == 1, 'Quest APK needs one launchable activity and application')
     launcher, = launchers
     application, = applications
+    extract_native_libs = application.get('extractNativeLibs', 'true')
+    require(extract_native_libs in ('true', 'false'), 'Quest APK must declare a readable extractNativeLibs setting')
     names = {launcher}
     if launcher.startswith(QUEST_APP + '.'):
         relative = launcher[len(QUEST_APP):]
@@ -194,7 +198,8 @@ def quest_manifest_metadata(badging, dump):
     require(manifest.find("uses-permission[@name='android.permission.INTERNET']") is not None,
             'Quest APK lacks the Android Internet permission for multiplayer')
     return {'launchActivity': launcher, 'immersiveLauncher': True, 'quest3DeviceIdentifier': quest3,
-            'headTrackingVersion': 1, 'passthroughDeclared': True, 'internetPermission': True}
+            'headTrackingVersion': 1, 'passthroughDeclared': True, 'internetPermission': True,
+            'extractNativeLibs': extract_native_libs == 'true'}
 
 
 def verify_quest_library(file, size, name):
@@ -221,23 +226,44 @@ def verify_quest_library(file, size, name):
     require({ELF_LOAD, ELF_DYNAMIC} <= file_backed, error)
 
 
-def quest_native_libraries(archive):
-    libraries = {}
-    for info in archive.infolist():
-        path = info.filename
-        if not (path.startswith('lib/') and path.endswith('.so')):
-            continue
-        require(path.startswith(f'lib/{ABI}/') and path.count('/') == 2,
-                f'Quest APK has a native library outside its ARM64 ABI directory: {path}')
-        name = path.rsplit('/', 1)[1]
-        require(name not in libraries, f'Quest APK contains a duplicate native library: {name}')
-        libraries[name] = info
-    missing = [name for name in QUEST_LIBRARIES if name not in libraries]
-    require(not missing, f'Quest APK is missing required native libraries: {", ".join(missing)}')
-    for name, info in libraries.items():
-        with archive.open(info) as file:
-            verify_quest_library(file, info.file_size, name)
-    return {'arm64ElfLibrariesVerified': len(libraries), 'requiredLibraries': list(QUEST_LIBRARIES)}
+def verify_direct_library(apk, info):
+    require(info.compress_type == zipfile.ZIP_STORED,
+            f'Quest APK directly loaded native library is compressed: {info.filename}')
+    apk.seek(info.header_offset)
+    header = apk.read(ZIP_LOCAL_HEADER.size)
+    error = f'Quest APK native library has an invalid local ZIP header: {info.filename}'
+    require(len(header) == ZIP_LOCAL_HEADER.size, error)
+    signature, _, flags, method, _, _, _, _, _, name_bytes, extra_bytes = ZIP_LOCAL_HEADER.unpack(header)
+    require(signature == b'PK\x03\x04' and method == zipfile.ZIP_STORED and not (flags | info.flag_bits) & 1
+            and info.file_size == info.compress_size, error)
+    data_offset = info.header_offset + ZIP_LOCAL_HEADER.size + name_bytes + extra_bytes
+    require(data_offset % NATIVE_PAGE_BYTES == 0,
+            f'Quest APK directly loaded native library is not aligned to 4 KiB: {info.filename}')
+
+
+def quest_native_libraries(apk, *, extract_native_libs):
+    with apk.open('rb') as raw, zipfile.ZipFile(raw) as archive:
+        libraries = {}
+        for info in archive.infolist():
+            path = info.filename
+            if not (path.startswith('lib/') and path.endswith('.so')):
+                continue
+            require(path.startswith(f'lib/{ABI}/') and path.count('/') == 2,
+                    f'Quest APK has a native library outside its ARM64 ABI directory: {path}')
+            name = path.rsplit('/', 1)[1]
+            require(name not in libraries, f'Quest APK contains a duplicate native library: {name}')
+            libraries[name] = info
+        missing = [name for name in QUEST_LIBRARIES if name not in libraries]
+        require(not missing, f'Quest APK is missing required native libraries: {", ".join(missing)}')
+        for name, info in libraries.items():
+            if not extract_native_libs:
+                verify_direct_library(raw, info)
+            with archive.open(info) as file:
+                verify_quest_library(file, info.file_size, name)
+    summary = {'arm64ElfLibrariesVerified': len(libraries), 'requiredLibraries': list(QUEST_LIBRARIES)}
+    if not extract_native_libs:
+        summary['directLoadAlignmentBytes'] = NATIVE_PAGE_BYTES
+    return summary
 
 
 def verify_quest(apk, sdk, jdk, game):
@@ -265,9 +291,8 @@ def verify_quest(apk, sdk, jdk, game):
         if field in receipt:
             require(type(receipt[field]) is type(meta[field]) and receipt[field] == meta[field],
                     f'Quest APK {field} differs from the release receipt')
-    with zipfile.ZipFile(apk) as archive:
-        native_libraries = quest_native_libraries(archive)
     android_manifest = quest_manifest_metadata(badging, run(aapt, 'dump', 'xmltree', apk, '--file', 'AndroidManifest.xml'))
+    native_libraries = quest_native_libraries(apk, extract_native_libs=android_manifest['extractNativeLibs'])
     require(digest(apk) == receipt['sha256'], 'Quest APK changed during verification')
     return {**meta, 'bytes': receipt['bytes'], 'sha256': receipt['sha256'], 'androidManifest': android_manifest,
             'nativeLibraries': native_libraries}

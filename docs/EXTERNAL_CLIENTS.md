@@ -30,6 +30,8 @@ if ($LASTEXITCODE -eq 0) {
 
 `quest.nativeLibraries` 記錄已核對的程式庫數量及 Unity、IL2CPP、OpenXR 與 Meta MR 所需的檔名。工具讀取 APK 裡每個原生程式庫的 ELF 標頭，確認為 ARM64 共用程式庫，並核對程式標頭及載入、動態連結區段的檔案範圍。缺件、重複檔名、錯誤架構或區段超出檔案時會拒絕發行。 [Arm AArch64 ELF 規格](https://github.com/ARM-software/abi-aa/blob/main/aaelf64/aaelf64.rst)
 
+報告也會記錄 `quest.androidManifest.extractNativeLibs`。若 APK 設為從檔案內直接載入，程式庫必須以未壓縮方式存放，資料起點須符合 4 KiB 對齊，核對通過後會列出 `quest.nativeLibraries.directLoadAlignmentBytes`。現行開發 APK 由安裝程式解出原生程式庫，可使用壓縮。 [Android manifest 屬性](https://developer.android.com/guide/topics/manifest/application-element#extractNativeLibs) · [Android APK 對齊](https://developer.android.com/tools/zipalign)
+
 若兩包的建置來源或網路識別不同，錯誤會列出相異欄位，例如 `sourceFingerprint`。Windows 共用遊戲檔案不同時，會列出差異檔案總數及最多三個套件內相對路徑。APK 回條若已記錄套件 ID、SDK 版本、v2 簽章或簽署憑證 SHA-256，工具也會逐欄對照 Android 工具實測結果。較早的回條若省略這些欄位，仍依原 APK 雜湊與簽章檢查驗證。
 
 成功的 `venue-release.json` 可供 Quest 部署工具逐席核對裝置上已安裝的 APK。重新產生的報告也含 `windows.playerManifestSha256`，可供 Windows 玩家啟動器 1.6 在每台電腦核對主控交付的原套件。主控將同一份報告交給各 Windows 席位，玩家連線檔仍按席位個別交付。 [Quest 部署](QUEST3.md#核對頭盔內已安裝的發行-apk) · [Windows 核對](WINDOWS_PLAYER_PACKAGE.md#依場館發行報告核對玩家包)
