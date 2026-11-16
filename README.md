@@ -76,7 +76,7 @@ API／UI0.30.1修正[任務版本讀取恢復](docs/MISSION_READ_RECOVERY.md)：
 
 依 2026-10-29 的使用者指示，**優先開發 Meta Quest 3**，暫以 Android 獨立執行為工作假設；VIVE 延後接入，共用架構與原始雙平台目標保留。
 
-目前為 **API v0.31.0／Unity 遊戲端 v0.39.0 原型**。真正 Editor 已完成 Prepare、224 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 29，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人完整驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
+目前為 **API 0.31.0、Windows 管理台 0.31.208、遊戲 0.50.12**。同源 Windows 玩家、伺服器及 Quest ARM64 APK 已建置，最終 Unity Editor 測試 285 項通過。Windows 已在同機分別驗證 25 席合併與五房獨立、逐席戰績及回放。Windows 玩家包內含 VIVE Focus 3 控制器設定，實際 VIVE 型號與串流仍待確認。Quest 3 在本機已列出 USB 檔案傳輸介面，ADB 待接通。實體頭盔、跨機 25 人、MR 場地及廠商硬體仍待現地驗收。 [發行與驗證紀錄](docs/PROGRESS.md#2026-11-16-windows-與-quest-05012-同源發行) · [電腦練習場](docs/DESKTOP.md) · [Quest 3 接入](docs/QUEST3.md) · [Windows 串流玩家包](docs/WINDOWS_PLAYER_PACKAGE.md)
 
 新增[外部玩家流程](docs/EXTERNAL_CLIENTS.md)：操作員模式可只啟動server，來源公告場次地址／port，兩個PC已用實際UI下載的短票券檔另行入場、結算與封存。真正loopback UDP綁定已核對，原local模式49項回歸；跨機與頭盔仍另驗。
 

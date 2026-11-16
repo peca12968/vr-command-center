@@ -1269,7 +1269,7 @@ class QuestVenueTests(unittest.TestCase):
                 server.shutdown()
                 thread.join(timeout=5)
 
-    def mock_capture_devices(self, rows, topology, *, held=False, wrong_seat=None):
+    def mock_capture_devices(self, rows, topology, *, held=False, wrong_seat=None, startup_gates=None):
         expected = {}
         for row in rows:
             room, seat, serial = row['roomId'], row['seat'], row['serial']
@@ -1282,6 +1282,7 @@ class QuestVenueTests(unittest.TestCase):
                 return f'11-09 14:30:00.000 7342 14325 I Unity   : {message}\r\n'.encode()
             startup = line(f'VR_NETWORK_STARTED role=Client started=True background=False port={port}')
             ending = line(f'VR_CLIENT_CONNECTED id={index+1}') + line('VR_CLIENT_DEBRIEF_FINAL ' + json.dumps(result)) + line('VR_CLIENT_DISCONNECTED')
+            gate = (startup_gates or {}).get((room, seat))
             # Python's -s flag makes this relative filename stand in for the ADB serial.
             (self.root / serial).write_text(f'''import sys, time
 from pathlib import Path
@@ -1289,6 +1290,12 @@ if sys.argv[1:] == ['shell', 'pidof', 'com.vrcommand.quest']:
     print(7342)
 else:
     assert sys.argv[1:] == ['logcat', '-b', 'main', '--pid=7342', '-v', 'threadtime', '-s', 'Unity:I']
+    if {gate is not None!r}:
+        gate = Path({str(gate)!r})
+        until = time.monotonic() + 15
+        while not gate.is_file() and time.monotonic() < until:
+            time.sleep(.05)
+        assert gate.is_file()
     sys.stdout.buffer.write({startup!r})
     sys.stdout.buffer.flush()
     until = time.monotonic() + 25
@@ -1345,6 +1352,27 @@ else:
         self.assertEqual(25, json.loads(stdout)['capturedSeats'])
         for private in (configs[1]['room-01-seat-01.json']['joinTicket'], 'fixture-01', str(self.root)):
             self.assertNotIn(private, stdout + ''.join(lines) + json.dumps(report))
+
+    def test_venue_capture_does_not_announce_ready_after_a_seat_already_finished(self):
+        files, _ = self.vr_bundle('Linked')
+        mapping, document = self.device_map()
+        output = self.root / 'nonoverlapping capture'
+        first_log = output / 'room-01-seat-01-logcat.txt'
+        expected = self.mock_capture_devices(document['seats'], 'Linked', startup_gates={(5, 5): first_log})
+
+        result = subprocess.run(self.capture_command(files, mapping, output), cwd=self.root,
+                                capture_output=True, encoding='utf-8', timeout=25)
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        report = json.loads((output / 'capture-report.json').read_bytes())
+        self.assertEqual((True, 25, 25), (report['complete'], report['expectedSeats'], report['capturedSeats']))
+        for row in report['seats']:
+            _, _, original = expected[row['roomId'], row['seat']]
+            self.assertEqual(original, (output / row['log']).read_bytes())
+            self.assertEqual(hashlib.sha256(original).hexdigest(), row['sha256'])
+        stages = [json.loads(line) for line in result.stderr.splitlines()]
+        self.assertEqual(25, sum(row['stage'] == 'capture-ready' for row in stages))
+        self.assertNotIn('venue-capture-ready', [row['stage'] for row in stages])
 
     def test_partial_mixed_capture_keeps_success_and_rejects_wrong_admission(self):
         files, _ = self.mixed_bundle()

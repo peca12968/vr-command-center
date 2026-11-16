@@ -778,7 +778,7 @@ python .\scripts\capture-quest-field-log.py --adb $adb `
     --output-directory .\quest-capture --seconds 1800
 ```
 
-預設要求完整 25 席。若名冊混有 VIVE，使用只列 Quest 席位的部署清單並加上 `--allow-partial-map`。擷取並行執行。看到 `venue-capture-ready` 代表清單各席都已讀到對應程序的啟動記錄，再依管理台確認入場及追蹤後開場。已入場玩家可沿用原部署包的票券資料核對日誌，包含擷取時已過期的原票券。需要重新入場時仍依遊戲伺服器的票券規則。
+預設要求完整 25 席。若名冊混有 VIVE，使用只列 Quest 席位的部署清單並加上 `--allow-partial-map`。擷取並行執行。所有選取席位都讀到原程序的啟動記錄，且此前沒有席位讀到最終戰績或發生擷取失敗時，工具才顯示 `venue-capture-ready`。主控再依管理台確認入場及追蹤後開場。若有席位先讀到最終戰績，工具仍繼續保存可核對的完整日誌。已入場玩家可沿用原部署包的票券資料核對日誌，包含擷取時已過期的原票券。需要重新入場時仍依遊戲伺服器的票券規則。
 
 場次結束後，`capture-report.json` 依房號、席位及場次列出完整日誌、`logcatPid` 和 SHA-256。任一席失敗時，整批回傳退出碼 1，已完成的日誌與可用的 `.partial` 各自保留。
 

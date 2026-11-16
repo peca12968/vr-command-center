@@ -56,7 +56,7 @@ def report_ready(pid, **seat):
     print(json.dumps({'stage': 'capture-ready', 'logcatPid': pid, **seat}), file=sys.stderr, flush=True)
 
 
-async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready, openxr=None):
+async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready, openxr=None, *, on_final=None):
     startup_deadline = min(deadline, time.monotonic() + STARTUP_SECONDS)
     next_pid_check = time.monotonic() + PID_CHECK_SECONDS
     started = ready = final_seen = False
@@ -96,6 +96,8 @@ async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready
             field.require(process == str(pid) and started, 'Player marker is outside the original Quest startup or process')
             if message.startswith('VR_CLIENT_DEBRIEF_FINAL '):
                 field.require(ready, 'Original Quest OpenXR launch marker is unavailable')
+                if not final_seen and on_final is not None:
+                    on_final()
                 final_seen = True
             if final_seen and message == 'VR_CLIENT_DISCONNECTED':
                 log.seek(0)
@@ -130,7 +132,8 @@ def check_device_identity(adb, expected, timeout):
                   'Quest device identity differs from the original deployment')
 
 
-async def capture(adb, port, admission, output, seconds, on_ready=report_ready, *, device_identity=None, openxr=None):
+async def capture(adb, port, admission, output, seconds, on_ready=report_ready, *,
+                  device_identity=None, openxr=None, on_final=None):
     partial = output.with_name(output.name + '.partial')
     field.require(not os.path.lexists(output) and not os.path.lexists(partial), 'Choose a new capture output path')
     deadline = time.monotonic() + seconds
@@ -145,7 +148,7 @@ async def capture(adb, port, admission, output, seconds, on_ready=report_ready, 
                                                     '-v', 'threadtime', '-s', 'Unity:I',
                                                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
         try:
-            report = await read_capture(child, adb, pid, port, admission, log, deadline, on_ready, openxr)
+            report = await read_capture(child, adb, pid, port, admission, log, deadline, on_ready, openxr, on_final=on_final)
         finally:
             if child.returncode is None:
                 try:
@@ -262,11 +265,14 @@ def bind_deployment(plan, path, *, completed_only=False, after=None):
 async def capture_venue(adb, plan, directory, seconds):
     directory.mkdir()
     ready = 0
-    failed = False
+    can_announce_ready = True
     partial_deployment = {'partialDeployment': True} if plan.get('partialDeployment') else {}
 
+    def close_readiness():
+        nonlocal can_announce_ready
+        can_announce_ready = False
+
     async def capture_seat(row):
-        nonlocal ready, failed
         seat = {'roomId': row['roomId'], 'seat': row['seat']}
         source = dict(seat, sessionId=row['sessionId'], port=row['port'])
         admission = {key: row[key] for key in ('sessionId', 'playerId', 'admissionId', 'roomId')}
@@ -276,15 +282,16 @@ async def capture_venue(adb, plan, directory, seconds):
             nonlocal ready
             report_ready(pid, **seat)
             ready += 1
-            if ready == len(plan['seats']) and not failed:
+            if ready == len(plan['seats']) and can_announce_ready:
                 print(json.dumps({'stage': 'venue-capture-ready', 'seats': ready, **partial_deployment}),
                       file=sys.stderr, flush=True)
 
         try:
             report = await capture([*adb, '-s', row['serial']], source['port'], admission, log, seconds, on_ready,
-                                   device_identity=row.get('deviceIdentity'), openxr=row.get('openXR'))
+                                   device_identity=row.get('deviceIdentity'), openxr=row.get('openXR'),
+                                   on_final=close_readiness)
         except (field.EvidenceError, OSError, UnicodeError, ValueError, TimeoutError, RecursionError) as error:
-            failed = True
+            close_readiness()
             reason = str(error) if isinstance(error, field.EvidenceError) else 'Check ADB and the capture directory'
             print(json.dumps({'stage': 'capture-failed', **seat, 'reason': reason}), file=sys.stderr, flush=True)
             partial = log.with_name(log.name + '.partial')

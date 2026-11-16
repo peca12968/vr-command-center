@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 五房 Quest 擷取就緒提示
+
+- 在五房合併的 25 席替身排演中，讓第 5 房第 5 席等到第 1 房第 1 席已保存最終戰績與斷線日誌，再回報啟動。舊版仍輸出 `venue-capture-ready`。新版在讀到任何選定席位的最終戰績時停止播報整批就緒，後續日誌照常收錄。回歸核對 25 份原文與各自 SHA-256。另一次正常等候收尾的 25 席仍收到整批就緒提示。 [舊版反例](../artifacts/quest-capture-ready-20261116-141408/before.log) · [新舊情境複驗](../artifacts/quest-capture-ready-20261116-141408/targeted.log) · [操作說明](QUEST3.md#一次擷取五房-quest-日誌)
+- 完整部署與擷取回歸執行 71 項，無失敗，Windows PowerShell 5.1 的參數子測試因本機執行原則略過。 [測試紀錄](../artifacts/quest-capture-ready-20261116-141408/tests.log)
+- 管理台 0.31.208、Windows 0.50.12 玩家及伺服器原 ZIP 與 Quest 0.50.12／77 通過同一次離線發行核對。管理套件核對 568 檔，玩家及伺服器各 331 檔，324 個共用遊戲檔相符。APK 的來源、網路識別、ARM64 和 v2 簽章通過。Quest 3 本機 USB 回報 1 個檔案傳輸介面、0 個 ADB 介面，實機及跨機場館仍待驗。 [離線發行報告](../artifacts/quest-capture-ready-20261116-141408/venue-release.json) · [USB 報告](../artifacts/quest-capture-ready-20261116-141408/usb-status.json)
+
 ## 2026-11-16 Quest 無人值守部署期限
 
 - Quest 部署的原生 ADB 指令會在背景執行，安裝期限 180 秒，檔案傳輸及活動啟動 30 秒，其他查詢通常 10 秒。首次啟動的日誌與 PID 重查共用 20 秒觀測期限。ADB 用戶端逾時時停止自己的程序，保留其他程序及原服務。每席預檢記錄 `adb-timeout`，寫入中途失敗保留原部署步驟。 [部署說明](QUEST3.md#首次安裝與啟動檢查)
