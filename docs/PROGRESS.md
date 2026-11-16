@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-16 VIVE XR Elite 與 Focus 3 Windows 控制器接入
+
+- Windows OpenXR 新增 `htc/vive_focus3_controller`。HTC 將這組設定用於 Focus 3、XR Elite 和 Focus Vision 的 Windows 串流模式。專案將六個動作接到原追蹤與遊戲輸入，並依執行環境是否支援該設定決定是否註冊。準備工程時於 Windows 啟用，Android 繼續採用 Quest 設定。 [操作說明](WINDOWS_PLAYER_PACKAGE.md#windows-openxr-啟動)
+- 使用 Unity 6000.3.27f1 的本機組件成功編譯 Runtime、Editor 和兩個測試組件。透過已編譯的設定讀回兩個手部路徑、八個 OpenXR 綁定和四個版本／擴充條件。真正 Editor 嘗試使用 `-noUpm`，因無法載入專案套件而以代碼 1 結束，未產生測試結果。既有 0.50.11 二進位維持當前發行，新版玩家包、真實 OpenXR 載入與實體控制器仍待驗。Quest USB 本輪仍沒有 ADB 偵錯介面。 [編譯設定讀回](../artifacts/vive-focus3-editmode-8646d93d/managed-action-map.json) · [Editor 紀錄](../artifacts/vive-focus3-editmode-8646d93d/editor.log)
+
 ## 2026-11-16 Windows 無人值守啟動及五房丟包驗證
 
 - 桌面 UDP 轉送和 HTTP 故障測試在建立場次前查核 Python 的實際執行檔。伺服器套件和 GUI 驗證也核對啟動器、遊戲和管理程式。練習模式及操作員工具可直接選用已通過查核的管理包。實測新遊戲路徑在建立場次前回傳 2，未啟動程序。`start-local.ps1` 實測建置成功，啟動前回傳 2，未開啟監聽埠或寫入憑證檔。 [啟動驗證](../artifacts/firewall-guard-a48464df/validation.json)

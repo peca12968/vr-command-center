@@ -147,12 +147,15 @@ namespace VrCommand.Unity.Editor
             var desktop = ConfigureOpenXR(xr, BuildTargetGroup.Standalone, initializeOnStart: false);
             var touch = desktop.GetFeature<OculusTouchControllerProfile>();
             var vive = desktop.GetFeature<HTCViveControllerProfile>();
-            if (touch == null || vive == null) throw new BuildFailedException("Windows OpenXR controller profiles are missing.");
+            var focus3 = desktop.GetFeature<ViveFocus3ControllerProfile>();
+            if (touch == null || vive == null || focus3 == null) throw new BuildFailedException("Windows OpenXR controller profiles are missing.");
             touch.enabled = true;
             vive.enabled = true;
+            focus3.enabled = true;
             desktop.renderMode = OpenXRSettings.RenderMode.SinglePassInstanced;
             EditorUtility.SetDirty(touch);
             EditorUtility.SetDirty(vive);
+            EditorUtility.SetDirty(focus3);
             EditorUtility.SetDirty(xr);
         }
 

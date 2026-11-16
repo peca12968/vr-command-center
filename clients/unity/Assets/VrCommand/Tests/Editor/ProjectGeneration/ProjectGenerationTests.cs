@@ -72,7 +72,10 @@ namespace VrCommand.Unity.Tests
             var openXR = OpenXRSettings.GetSettingsForBuildTargetGroup(BuildTargetGroup.Standalone);
             Assert.IsTrue(openXR.GetFeature<OculusTouchControllerProfile>().enabled);
             Assert.IsTrue(openXR.GetFeature<HTCViveControllerProfile>().enabled);
+            Assert.IsTrue(openXR.GetFeature<ViveFocus3ControllerProfile>().enabled);
             Assert.IsFalse(openXR.GetFeature<MetaQuestFeature>()?.enabled ?? false);
+            var android = OpenXRSettings.GetSettingsForBuildTargetGroup(BuildTargetGroup.Android);
+            Assert.IsFalse(android.GetFeature<ViveFocus3ControllerProfile>()?.enabled ?? false);
         }
     }
 }
