@@ -148,13 +148,17 @@ async function checkLiveWatch({ page, base, live, api, canvas, screenshots, chec
     const serviceUnavailable = route => route.fulfill({ status: 503, contentType: 'application/json', body: '{}' });
     await page.route(pattern, serviceUnavailable);
     try {
+      const initialRequests = watches.requests.length, retryStarted = Date.now();
       await cutLiveWatch(page);
-      await message.filter({ hasText: '觀戰服務回應 503；可重新連接' }).waitFor();
-      check(watches.requests.length === 10 && (await page.locator('#world-freshness').innerText()).includes('過期'),
-        'Three consecutive transient failures exhaust the retry budget and leave the frame stale');
+      await message.filter({ hasText: '可重新連接。' }).waitFor({ timeout: 24000 });
+      const attempts = watches.requests.length - initialRequests;
+      check(attempts >= 6 && attempts <= 8 && Date.now() - retryStarted >= 12000
+        && (await page.locator('#world-freshness').innerText()).includes('過期'),
+        'Persistent transient failures exhaust the bounded retry window and leave the frame stale');
     } finally { await page.unroute(pattern, serviceUnavailable); }
 
     await openFaultedWatch(page, sessionId, 'eof');
+    const beforeLeaving = watches.requests.length;
     await page.evaluate(() => {
       const note = document.querySelector('#world-message');
       const leave = new MutationObserver(() => {
@@ -167,7 +171,7 @@ async function checkLiveWatch({ page, base, live, api, canvas, screenshots, chec
     });
     await page.locator('#world-player').waitFor({ state: 'hidden' });
     await page.waitForTimeout(1100);
-    check(watches.requests.length === 11, 'Leaving observation cancels the queued reconnect');
+    check(watches.requests.length === beforeLeaving, 'Leaving observation cancels the queued reconnect');
   } finally { watches.dispose(); }
 }
 

@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import socket
 import subprocess
 import sys
@@ -38,6 +39,8 @@ def main():
                         help='Exercise one room, five separate servers, or a shared five-room server')
     parser.add_argument('--players-per-room', type=int, choices=range(1, 6), default=1,
                         help='Connect this many actual Windows clients in each room')
+    parser.add_argument('--observer-console', type=Path,
+                        help='Use these published console assets to observe room 4 across the real API outage')
     args = parser.parse_args()
     if os.name != 'nt':
         parser.error('Actual packaged Windows processes are required')
@@ -45,6 +48,10 @@ def main():
         parser.error('Five-room topologies require --expect recover')
     if args.topology == 'single' and args.players_per_room != 1:
         parser.error('--players-per-room above one requires a five-room topology')
+    if args.observer_console and args.topology == 'single':
+        parser.error('--observer-console requires a five-room topology')
+    if args.observer_console and (not (args.observer_console / 'world-ui.js').is_file() or not shutil.which('node')):
+        parser.error('--observer-console requires a published console directory and Node')
     rooms = [1] if args.topology == 'single' else list(range(1, 6))
     groups = [rooms] if args.topology == 'linked' else [[room] for room in rooms]
 
@@ -80,6 +87,7 @@ def main():
     udp_ports = free_ports(len(groups), socket.SOCK_DGRAM)
     base = f'http://127.0.0.1:{api_port}'
     children, api_runs, checks, entries = {}, [], [], []
+    observer = None
     errors = []
 
     def check(condition, label):
@@ -352,6 +360,15 @@ def main():
         return {'sessionId': entry['id'], 'rooms': entry['rooms'], 'recovery': recovery, 'replay': outcome['replay'],
                 'acknowledgements': len(results)}
 
+    def start_observer(entry):
+        output = out / 'observer'
+        output.mkdir()
+        driver = ROOT / 'tests/browser/check-observer-management-restart.cjs'
+        with (output / 'browser.log').open('xb') as trace:
+            process = subprocess.Popen([shutil.which('node'), str(driver)], stdout=trace, stderr=subprocess.STDOUT,
+                                       stdin=subprocess.PIPE, creationflags=subprocess.CREATE_NO_WINDOW)
+        return process, output
+
     print(json.dumps({'run': run, 'expect': args.expect, 'topology': args.topology, 'playersPerRoom': args.players_per_room,
                       'directory': str(out)}), flush=True)
     try:
@@ -384,6 +401,16 @@ def main():
         phase('Begin')
         for entry in entries:
             entry['before'], entry['before_frame'] = capture_before(entry)
+        if args.observer_console:
+            room, = [entry for entry in entries if 4 in entry['rooms']]
+            observer, observation = start_observer(room)
+            with observer.stdin as configuration:
+                configuration.write(json.dumps({'base': base, 'output': str(observation),
+                    'consoleDirectory': str(args.observer_console.resolve()), 'sessionId': room['id'],
+                    'streamId': room['receipt']['streamId'], 'key': keys['Room4' if args.topology == 'linked' else 'Master'],
+                    'observerRoomId': 4 if args.topology == 'linked' else None,
+                    'playerIds': [player['id'] for player in room['players'] if player['roomId'] == 4]}).encode('utf-8'))
+            wait(lambda: (observation / 'ready.json').is_file(), 35, 'the original browser observation', observer, *game_processes)
         if any(process.poll() is not None for process in game_processes):
             raise RuntimeError('An original game process exited before the outage')
         first['witness'].terminate()
@@ -431,6 +458,8 @@ def main():
         for entry in entries:
             session, world = resume(entry)
             save(entry['evidence'] / 'after-restart.json', {'outageSeconds': outage_seconds, 'session': session, 'world': world})
+        if observer:
+            observer.wait(timeout=30)
         ended = phase('End')
         summaries = [finish(entry) for entry in entries] if args.expect == 'recover' else []
         if args.topology != 'single':
@@ -442,7 +471,18 @@ def main():
                   'The original venue End receipt identifies every recovered double seal')
             save(out / 'venue-closure.json', closed)
         check(request('/api/sessions') == [], 'No active management sessions remain')
+        if observer:
+            check(observer.returncode == 0 and read(observation / 'checks.json')['complete'],
+                  'Original console automatically resumes the same recording, Room 4 view and camera')
     finally:
+        if observer and observer.poll() is None:
+            try:
+                taskkill = Path(os.environ['WINDIR']) / 'System32/taskkill.exe'
+                subprocess.run([str(taskkill), '/PID', str(observer.pid), '/T', '/F'], check=True, timeout=5,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
+                observer.wait(timeout=5)
+            except (OSError, subprocess.SubprocessError) as error:
+                errors.append(type(error).__name__)
         for child in reversed([process for label, process in children.items() if not label.startswith('control-')]):
             try:
                 if child.poll() is None:

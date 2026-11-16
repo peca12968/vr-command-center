@@ -14,7 +14,8 @@ const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫�
 const eventNames = { ShotFired: '玩家射擊', ShotHit: '命中敵軍', EnemyEliminated: '擊殺敵軍', EnemyShot: '敵軍射擊', PlayerDamaged: '玩家受傷', ReloadStarted: '開始換彈', ReloadCompleted: '完成換彈' };
 const shortId = id => id && id !== '00000000-0000-0000-0000-000000000000' ? id.slice(0, 8) : '—';
 const roomName = room => room === 'all' ? '全部房間' : '房間 ' + room;
-const LIVE_RETRY_DELAYS = [500, 1000, 2000];
+const LIVE_RETRY_DELAYS = [500, 1000, 2000, 3000, 3000, 3000, 3000, 3000];
+const LIVE_RETRY_WINDOW_MILLISECONDS = 20000;
 const LIVE_IDLE_MILLISECONDS = 6000;
 const CLIP_LOOP_DELAY = 500;
 const RECORDING_PAGE_SIZE = 30;
@@ -647,12 +648,18 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     bindVenueReview(null);
     return connect('live', 0, null, null, target);
   }
-  function retryLive(id, key, sourceKey, request, attempt) {
-    if (!sourceKey || info?.complete || attempt >= LIVE_RETRY_DELAYS.length) return false;
+  function retryLive(id, key, sourceKey, request, previous) {
+    const attempt = previous?.attempt ?? 0, delay = LIVE_RETRY_DELAYS[attempt];
+    const deadline = previous?.deadline ?? performance.now() + LIVE_RETRY_WINDOW_MILLISECONDS;
+    if (!sourceKey || info?.complete || delay === undefined || performance.now() + delay >= deadline) return false;
     liveRetryTimer = setTimeout(() => {
-      if (request === epoch && active && getKey() === key && $('world-recording').value === id)
-        void connect('live', 0, null, null, { mode: 'live', sessionId: id, sourceKey }, false, attempt + 1);
-    }, LIVE_RETRY_DELAYS[attempt]);
+      if (request !== epoch || !active || getKey() !== key || $('world-recording').value !== id) return;
+      if (performance.now() >= deadline) {
+        message('觀戰已中斷：等待即時資料逾時；可重新連接。', true);
+        return;
+      }
+      void connect('live', 0, null, null, { mode: 'live', sessionId: id, sourceKey }, false, { attempt: attempt + 1, deadline });
+    }, delay);
     message(`即時觀戰中斷，正在重新連接（${attempt + 1}/${LIVE_RETRY_DELAYS.length}）。`, true);
     return true;
   }
@@ -1071,7 +1078,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     message(`${info.header.origin} · ${info.header.rulesVersion} · ${info.header.assetSet === 'player-fire-v1' ? '軍事掩體／玩家及敵軍射擊效果 v1（依保存射線）' : info.header.assetSet === 'combat-effects-v1' ? '軍事掩體／敵軍射擊閃光及後座 v1（依保存射線）' : info.header.assetSet === 'armed-combatants-v1' ? '軍事掩體／敵軍雙手持槍／換彈 v1（合成姿勢）' : info.header.assetSet === 'weapon-actions-v1' ? '軍事掩體／人形敵軍／換彈動作 v1（合成手套非追蹤）' : info.header.assetSet === 'combatants-v1' ? '軍事掩體／步槍／人形敵軍 v1（命中採粗略包圍盒）' : info.header.assetSet === 'service-rifle-v1' ? '軍事掩體／玩家步槍 v1（命中／碰撞採包圍盒）' : info.header.assetSet === 'field-props-v1' ? '軍事掩體 v1（命中／碰撞採包圍盒）' : '基本幾何素材'} · ${info.header.calibration === 'quest-room-mr-v1' ? 'Quest 3 MR 錄製設定。' : 'VR 未校正。'}頭手來源請見角色資訊。${info.header.environmentVersion === 1 ? '環境聲光 v1 依保存的模擬時間重建，非原始音軌。' : '舊錄製沒有聲光效果版本，僅保留原有光霧顯示。'}`);
     status();
   }
-  async function connect(nextMode, milliseconds = 0, sequence = null, replayLimit = savedLimit, target = null, clip = false, liveAttempt = 0) {
+  async function connect(nextMode, milliseconds = 0, sequence = null, replayLimit = savedLimit, target = null, clip = false, liveRetry = null) {
     const id = $('world-recording').value, key = getKey(); if (!active || !id || !key) return;
     stop(); mode = nextMode; clearVenueAnchor();
     const expectedGeometry = target?.sourceKey ?? returnLiveSource ?? (clip ? geometry : null);
@@ -1087,17 +1094,18 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     let recentJump = Boolean(target?.sourceKey || returnLiveSource || (clip && sequence < frame?.packet.sequence));
     let playerFrame = null, playerComplete = false, witnessFrame = null;
     const initialLiveSequence = target?.initialFrame ?? 0;
-    let lastLiveSequence = liveAttempt ? frame?.packet.sequence ?? initialLiveSequence : initialLiveSequence;
+    let lastLiveSequence = liveRetry ? frame?.packet.sequence ?? initialLiveSequence : initialLiveSequence;
     let announcedLiveSequence = 0, announcedLiveComplete = false;
     let idleTimer, idleExpired = false, transportFailure = false;
     function watchLive() {
       if (nextMode !== 'live') return;
       clearTimeout(idleTimer);
       if (hasHeader && info?.complete) return;
+      const remaining = liveRetry ? liveRetry.deadline - performance.now() : LIVE_IDLE_MILLISECONDS;
       idleTimer = setTimeout(() => {
         if (request !== epoch || own.signal.aborted || (hasHeader && info?.complete)) return;
         idleExpired = true; own.abort();
-      }, LIVE_IDLE_MILLISECONDS);
+      }, Math.min(remaining, LIVE_IDLE_MILLISECONDS));
     }
     connecting = true; reviewControls(); $('world-frame-message').textContent = '';
     message(nextMode === 'live' ? '正在連接即時觀戰…' : '正在讀取已保存快照…');
@@ -1169,7 +1177,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
                   if (!received) { received = performance.now(); status(); }
                   continue;
                 }
-                lastLiveSequence = current; liveAttempt = 0;
+                lastLiveSequence = current;
+                if (liveRetry) { liveRetry = null; watchLive(); }
               }
               if (playerReview) {
                 if (!hasHeader || playerFrame || data.packet.sequence !== target.throughSequence
@@ -1241,8 +1250,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
         if (playerReview || witness) resetRecording();
         if (clip) clipPlayback = '';
         connected = connecting = false; status();
-        const original = hasHeader || initialLiveSequence ? geometry : liveAttempt ? expectedGeometry : null;
-        if (nextMode === 'live' && (idleExpired || transportFailure) && retryLive(id, key, original, request, liveAttempt)) return;
+        const original = hasHeader || initialLiveSequence ? geometry : liveRetry ? expectedGeometry : null;
+        if (nextMode === 'live' && (idleExpired || transportFailure) && retryLive(id, key, original, request, liveRetry)) return;
         message('觀戰已中斷：' + (idleExpired ? '等待即時資料逾時' : error.message) + '；可重新連接。', true);
       }
     } finally { clearTimeout(idleTimer); }

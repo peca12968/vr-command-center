@@ -271,6 +271,8 @@ python scripts/check-server-venue-gui.py <伺服器包目錄> --control-package 
 
 同機可用以下命令排演五房獨立場次。改成 `--topology linked` 可排演一個遊戲伺服器同時負責五房。桌面玩家預設每房一位，`--players-per-room 5` 可同時連上 25 個桌面客戶端。測試在新資料夾建立管理實例，只中斷自己啟動的管理 API。每輪核對原連線、全館結束命令、雙封存、戰績確認、完整回放及程序清理。啟動前會先讀取各接收入站連線的程式在本機的防火牆設定。 [無人值守的 Windows 測試](#無人值守的-windows-測試)
 
+選加 `--observer-console C:\packages\VrCommand-ControlServer\Runtime\wwwroot\console` 可在背景以 Chromium 開啟指定發布版的第 4 房觀戰，查驗管理 API 重啟後仍是同一錄製、房間與鏡頭。瀏覽器直接向受測實例請求 API，指定目錄供應頁面與其他靜態檔。
+
 ```powershell
 python .\scripts\check-packaged-management-restart.py `
   --control-package 'C:\packages\VrCommand-ControlServer' `
