@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { encodeUnconfirmedSeatsCsv, matchesReportRows } from '../../src/VrCommand.Api/wwwroot/console/report-csv.js';
 const code = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/closure-ui.js', import.meta.url), 'utf8');
 const { closureView, debriefReceiptPlayers } = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
 const session = { id: 'session', sequence: 20, state: 'Ended', roomIds: [1], mission: { definition: { durationSeconds: 600 } }, combatStream: { streamId: 'stream', origin: 'Simulation', acceptedSequence: 0, sealed: true, missionClockVersion: 1 } };
@@ -59,4 +60,18 @@ test('Receipt rows require exact sealed boundaries and the original visible admi
     { players: [{ ...row, admissionId: 'revoked' }] }, { players: [{ ...row, acknowledged: 'true' }] }]) {
     assert.equal(read(change), null);
   }
+});
+
+test('The unconfirmed seat CSV keeps sealed identities and scores, excluding acknowledged seats', () => {
+  const room = { sessionId: 'session', streamId: 'stream', roomId: 2, worldSequence: 60 };
+  const score = { ammoUsed: 4, shotsHit: 3, kills: 2, hitsReceived: 1, damageTaken: 20, accuracyPercent: 75, health: 80 };
+  const pending = { room, seat: 1, playerId: 'missing-id', name: ' =1+1, "玩家"\n第二行', acknowledged: false,
+    throughSequence: 26, throughCombatSequence: 12, score };
+  const confirmed = { ...pending, seat: 2, playerId: 'confirmed-id', acknowledged: true };
+  const format = ['reportVersion', 'requestId', 'sessionId', 'streamId', 'roomId', 'seat', 'throughSequence',
+    'finalStreamSequence', 'worldSequence', 'playerId', 'playerName', 'acknowledged', 'ammoUsed', 'shotsHit',
+    'kills', 'hitsReceived', 'damageTaken', 'accuracyPercent', 'health'];
+  const bytes = new TextEncoder().encode(encodeUnconfirmedSeatsCsv('batch', [pending, confirmed]));
+  assert.ok(matchesReportRows(bytes, [format, [1, 'batch', 'session', 'stream', 2, 1, 26, 12, 60, 'missing-id',
+    "' =1+1, \"玩家\"\n第二行", false, 4, 3, 2, 1, 20, 75, 80]]));
 });

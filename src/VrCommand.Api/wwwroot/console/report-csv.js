@@ -39,6 +39,20 @@ export function matchesDebriefCsv(bytes, { playerId, name, room, throughSequence
   return matchesReportRows(bytes, [finalColumns, row]);
 }
 
+export function encodeUnconfirmedSeatsCsv(batchId, players) {
+  const rows = [['reportVersion', 'requestId', 'sessionId', 'streamId', 'roomId', 'seat', 'throughSequence',
+    'finalStreamSequence', 'worldSequence', 'playerId', 'playerName', 'acknowledged', 'ammoUsed', 'shotsHit',
+    'kills', 'hitsReceived', 'damageTaken', 'accuracyPercent', 'health']];
+  for (const player of players) {
+    if (player.acknowledged) continue;
+    const { room, seat, throughSequence, throughCombatSequence, playerId, name, score } = player;
+    rows.push([1, batchId, room.sessionId, room.streamId, room.roomId, seat, throughSequence, throughCombatSequence,
+      room.worldSequence, playerId, csvReportText(name), false, score.ammoUsed, score.shotsHit, score.kills,
+      score.hitsReceived, score.damageTaken, score.accuracyPercent, score.health]);
+  }
+  return '\uFEFF' + rows.map(row => row.map(cell => `"${String(cell).replaceAll('"', '""')}"`).join(',') + '\r\n').join('');
+}
+
 export function csvReportText(value) {
   return /\p{Cc}|^\p{White_Space}*[=+@-]/u.test(value) ? "'" + value : value;
 }

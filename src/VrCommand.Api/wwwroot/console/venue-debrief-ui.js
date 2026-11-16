@@ -1,4 +1,4 @@
-import { matchesDebriefCsv } from './report-csv.js';
+import { encodeUnconfirmedSeatsCsv, matchesDebriefCsv } from './report-csv.js';
 
 const $ = id => document.getElementById(id);
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
@@ -31,12 +31,29 @@ export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) 
   const table = $('venue-debrief-seat-table'), onlyMissing = $('venue-debrief-only-missing');
   const refresh = $('venue-debrief-seats-refresh');
   const csvStatus = $('venue-debrief-csv-status');
+  const missingCsv = $('venue-debrief-missing-csv');
   const all = $('venue-debrief-all'), roomHeading = $('venue-debrief-room-heading');
   let active = false, rooms = new Map(), batchTarget = null, target = null, controller = null, players = null;
   let csvRequest = null;
 
+  function canDownloadMissing() {
+    return active && target && !target.pendingRooms?.length && !controller && !csvRequest
+      && current().actor?.role === 'Master' && players?.some(player => !player.acknowledged);
+  }
+
   function updateCsvButtons() {
     for (const button of rows.querySelectorAll('[data-venue-debrief-csv]')) button.disabled = !!csvRequest;
+    missingCsv.disabled = !canDownloadMissing();
+  }
+
+  function downloadMissing() {
+    if (!canDownloadMissing()) return;
+    const { batchId, roomId } = target;
+    const scope = roomId === null ? '' : `-room-${String(roomId).padStart(2, '0')}`;
+    const file = `vr-command-venue-unconfirmed-seats-v1-${batchId}${scope}.csv`;
+    save(file, new Blob([encodeUnconfirmedSeatsCsv(batchId, players)], { type: 'text/csv;charset=utf-8' }));
+    const count = players.filter(player => !player.acknowledged).length;
+    csvStatus.textContent = `已下載 ${count} 席的未確認清單。`;
   }
 
   async function downloadSeat(player) {
@@ -208,6 +225,7 @@ export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) 
 
   onlyMissing.addEventListener('change', render);
   refresh.addEventListener('click', read);
+  missingCsv.addEventListener('click', downloadMissing);
   $('venue-debrief-seats-close').addEventListener('click', close);
   all.addEventListener('click', () => open(batchTarget));
   return { update, available: roomId => rooms.has(roomId), active(on) { active = on; if (!on) close(); },

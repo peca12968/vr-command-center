@@ -798,6 +798,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const showAllSeats = page.locator('#venue-debrief-all');
     const seatPanel = page.locator('#venue-debrief-seats');
     const seatStatus = page.locator('#venue-debrief-seats-status');
+    const exportMissingSeats = page.locator('#venue-debrief-missing-csv');
     const groupRows = page.locator('#venue-debrief-seat-rows tr');
     const seatReport = (id, room, seat) => `/venue/closure/${id}/rooms/${room}/seats/${seat}/report.csv`;
     const showSeats = room => page.locator(`[data-venue-debrief-seats="${room}"]`);
@@ -838,7 +839,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await seatStatus.filter({ hasText: '房間 2 尚無可核對回條' }).waitFor();
     check(await groupRows.count() === readyDetail.players.length
       && (await groupRows.locator('td:first-child').allTextContents()).every(room => room === '1')
-      && await page.locator('#venue-debrief-only-missing').isChecked(),
+      && await page.locator('#venue-debrief-only-missing').isChecked() && await exportMissingSeats.isDisabled(),
       'The group shows the sealed independent room and calls out the still-unsealed occupied room');
     await page.locator('#venue-debrief-seats-close').click();
     const reportsPath = `/venue/closure/${closure.requestId}/reports.zip?includeScores=true`;
@@ -1502,7 +1503,8 @@ with zipfile.ZipFile(sys.argv[1]) as original, zipfile.ZipFile(sys.argv[2]) as c
     try {
       await page.locator('#venue-debrief-seats-refresh').click();
       await seatStatus.filter({ hasText: '暫時無法確認原席位回條' }).waitFor();
-      check(await groupRows.count() === 0, 'A substituted room stream clears the aggregate and its seat actions');
+      check(await groupRows.count() === 0 && await exportMissingSeats.isDisabled(),
+        'A substituted room stream clears the aggregate and its seat actions');
     } finally { await page.unroute(groupRoute, foreignRoomSource); }
     const originalView = (await api(combinedPath + '/world?includeDebriefReceipts=true')).debriefReceipts;
     const roomOne = originalView.players.find(player => player.roomId === 1);
@@ -1511,6 +1513,13 @@ with zipfile.ZipFile(sys.argv[1]) as original, zipfile.ZipFile(sys.argv[2]) as c
     await seatStatus.filter({ hasText: '已確認 1／2 席' }).waitFor();
     check(await groupRows.count() === 1 && await groupRows.first().locator('td').first().textContent() === '2',
       'A late acknowledgement removes only its original seat from the open whole-venue filter');
+    const missingDownload = page.waitForEvent('download');
+    await exportMissingSeats.click();
+    const missingFile = await missingDownload;
+    const missingText = await fs.readFile(await missingFile.path(), 'utf8');
+    check(missingFile.suggestedFilename() === `vr-command-venue-unconfirmed-seats-v1-${originalBatch.requestId}.csv`
+      && missingText.includes(roomTwo) && !missingText.includes(roomOne.playerId),
+      'The missing-seat export follows the late acknowledgement and keeps only the other original seat');
     const groupDownload = page.waitForEvent('download');
     await seatPanel.getByRole('button', { name: '下載房間 2 第 1 席個人戰績 CSV' }).click();
     const seatFile = await groupDownload;
