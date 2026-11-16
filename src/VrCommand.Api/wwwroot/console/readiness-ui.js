@@ -1,5 +1,6 @@
 import { formatClock } from './mission-clock.js';
 import { validEndpoint } from './connection-ui.js';
+import { csvReportText, encodeReportRows } from './report-csv.js';
 
 const labels = { NoRecording: '等待遊戲來源', WaitingFrame: '等待第一份快照', UnknownCaptureTime: '擷取時間未知', ClockSkew: '來源時鐘未同步',
   Stale: '快照已過期', Suspended: '管理連線中斷', PhasePending: '等待階段同步', Ended: '場次已結束', Fresh: '正在接收',
@@ -10,6 +11,23 @@ const beginSeatStates = new Set(['AwaitingAdmission', 'AwaitingPose', 'PoseUnava
 export const beginSeatLabels = { Vacant: '未編列', AwaitingAdmission: '等待入場同步', WaitingRevision: '等待場次同步',
   AwaitingPose: '等待姿態', PoseUnavailable: '姿態未就緒', Eliminated: '已淘汰', Tracked: '追蹤就緒',
   Simulated: '合成姿態就緒', NeedsTracking: '合成姿態 · 需追蹤', Unknown: '待確認', NotPreparing: '尚無準備場次' };
+
+export function venueBeginSeatState(row, index) {
+  return row.seats?.[index] ?? (row.state === 'NotPreparing' ? 'NotPreparing' : 'Unknown');
+}
+
+export function encodeVenueBeginCsv(rooms, policy, exportedAtUtc) {
+  const rows = [['reportVersion', 'exportedAtUtc', 'beginPolicy', 'roomId', 'seat', 'sessionId', 'sessionSequence',
+    'origin', 'roomState', 'roomStatus', 'seatState', 'seatStatus']];
+  for (const room of rooms) {
+    for (let index = 0; index < 5; index++) {
+      const seatState = venueBeginSeatState(room, index);
+      rows.push([1, exportedAtUtc, policy, room.roomId, index + 1, csvReportText(room.sessionId ?? ''),
+        room.sessionSequence ?? '', room.origin ?? '', room.state, csvReportText(room.text), seatState, beginSeatLabels[seatState]]);
+    }
+  }
+  return encodeReportRows(rows);
+}
 
 export function venueBeginRejection(roomIds, blockedRooms, fences = [], rooms = []) {
   if (!Array.isArray(roomIds) || !roomIds.length || roomIds.length > 5 || !roomIds.every((room, index) =>

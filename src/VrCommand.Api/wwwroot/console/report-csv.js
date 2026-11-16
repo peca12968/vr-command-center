@@ -50,6 +50,10 @@ export function encodeUnconfirmedSeatsCsv(batchId, players) {
       room.worldSequence, playerId, csvReportText(name), false, score.ammoUsed, score.shotsHit, score.kills,
       score.hitsReceived, score.damageTaken, score.accuracyPercent, score.health]);
   }
+  return encodeReportRows(rows);
+}
+
+export function encodeReportRows(rows) {
   return '\uFEFF' + rows.map(row => row.map(cell => `"${String(cell).replaceAll('"', '""')}"`).join(',') + '\r\n').join('');
 }
 

@@ -17,7 +17,8 @@ import { mountReport, mountVenueReport, venueScoreFields } from './report-ui.js'
 import { matchesDebriefCsv } from './report-csv.js';
 import { mountVenueHistory } from './venue-history-ui.js';
 import { mountVenueDebriefSeats } from './venue-debrief-ui.js';
-import { beginSeatLabels, mountReadiness, mountRoomReadiness, usesTrackedVrStart, venueBeginRejection } from './readiness-ui.js';
+import { beginSeatLabels, encodeVenueBeginCsv, mountReadiness, mountRoomReadiness, usesTrackedVrStart,
+  venueBeginRejection, venueBeginSeatState } from './readiness-ui.js';
 import { mountConnections, validDestination } from './connection-ui.js';
 import { mountClosure } from './closure-ui.js';
 import { placementHistory } from './placement-history.js';
@@ -1100,16 +1101,20 @@ function venueBeginPolicy() {
   if ($('venue-full-tracking').checked) return 'tracking';
   return $('venue-full-participation').checked ? 'participation' : 'normal';
 }
-function renderVenueBegin(targets, waiting, policy) {
-  const summary = $('venue-begin-evidence'), list = $('venue-begin-rooms');
+function venueBeginRows(targets, policy) {
   const rows = targets.flatMap(target => target.roomIds.map(roomId => ({
-    roomId, sessionId: target.sessionId, ...roomReadiness.venueBegin(target, roomId, policy)
+    roomId, sessionId: target.sessionId, sessionSequence: target.sessionSequence, ...roomReadiness.venueBegin(target, roomId, policy)
   })));
   if (policy !== 'normal' && rows.length) {
     for (const roomId of [1, 2, 3, 4, 5])
       if (!rows.some(row => row.roomId === roomId)) rows.push({ roomId, state: 'NotPreparing', text: '尚無準備中的目標場次' });
   }
-  rows.sort((a, b) => a.roomId - b.roomId);
+  return rows.sort((a, b) => a.roomId - b.roomId);
+}
+
+function renderVenueBegin(targets, waiting, policy) {
+  const summary = $('venue-begin-evidence'), list = $('venue-begin-rooms');
+  const rows = venueBeginRows(targets, policy);
   summary.hidden = list.hidden = !rows.length;
   const message = !rows.length ? '' : `準備開始房間 ${venueRoomText(targets)} · `
     + (waiting ? '仍有開場條件待確認，請查看各房狀態。' : '目標場次已就緒。');
@@ -1138,14 +1143,14 @@ function renderVenueBegin(targets, waiting, policy) {
   }));
   const matrix = $('venue-begin-seats');
   matrix.hidden = !rows.some(row => row.seats);
-  $('venue-begin-seat-rows').replaceChildren(...(matrix.hidden ? [] : rows.map(({ roomId, state, seats }) => {
+  $('venue-begin-seat-rows').replaceChildren(...(matrix.hidden ? [] : rows.map(row => {
     const tr = element('tr');
-    tr.dataset.beginSeatRoom = roomId;
-    const room = element('th', `房間 ${roomId}`);
+    tr.dataset.beginSeatRoom = row.roomId;
+    const room = element('th', `房間 ${row.roomId}`);
     room.scope = 'row';
     tr.append(room);
     for (let index = 0; index < 5; index++) {
-      const status = seats?.[index] ?? (state === 'NotPreparing' ? state : 'Unknown');
+      const status = venueBeginSeatState(row, index);
       const cell = element('td', beginSeatLabels[status]);
       cell.dataset.beginSeat = index + 1;
       cell.dataset.seatState = status;
@@ -1173,6 +1178,8 @@ function applyVenuePermissions() {
   $('venue-full-tracking').disabled = locked || !begin.length;
   $('venue-full-participation').disabled = locked || !begin.length;
   $('venue-begin').disabled = locked || !begin.length || starting;
+  $('venue-begin-export').hidden = !begin.length;
+  $('venue-begin-export').disabled = locked || !begin.length;
   $('venue-pause').disabled = locked || !pause.length;
   $('venue-resume').disabled = locked || !resume.length || !!waiting.length;
   $('venue-end').disabled = locked || !end.length;
@@ -1211,6 +1218,31 @@ function applyVenuePermissions() {
       return item;
     }));
   }
+}
+
+async function downloadVenueBeginChecklist() {
+  if (!master() || $('venue-begin-export').disabled || $('operations-view').hidden) return;
+  const epoch = state.epoch, view = operationsViewEpoch, policy = venueBeginPolicy();
+  const targets = venueTargets('Begin');
+  const signature = JSON.stringify(targets);
+  const current = () => master() && state.epoch === epoch && operationsViewEpoch === view && !state.pending
+    && !$('operations-view').hidden && document.visibilityState === 'visible';
+  const sameScope = () => policy === venueBeginPolicy() && signature === JSON.stringify(venueTargets('Begin'));
+  await run(async () => {
+    if (!current()) return;
+    await refresh();
+    if (!current()) return;
+    const read = sameScope() && await roomReadiness.recheck();
+    if (!current()) return;
+    const rows = read && sameScope() ? venueBeginRows(targets, policy) : [];
+    if (!rows.length || rows.length > 5 || new Set(rows.map(row => row.roomId)).size !== rows.length
+      || rows.some(row => row.state === 'Updating')) {
+      notify('開場狀態無法確認或已變更。請核對目前房間，再下載清單。', true);
+      return;
+    }
+    const timestamp = new Date().toISOString();
+    download('vr-command-venue-begin-v1.csv', new Blob([encodeVenueBeginCsv(rows, policy, timestamp)], { type: 'text/csv;charset=utf-8' }));
+  });
 }
 async function venuePhase(action, { environment, enemyPolicy } = {}) {
   if (!master() || state.pending) return;
@@ -2458,6 +2490,7 @@ for (const kind of ['environment', 'enemies']) {
 }
 $('retry-command').addEventListener('click', () => run(sendPending));
 $('venue-begin').addEventListener('click', () => run(() => venuePhase('Begin')));
+$('venue-begin-export').addEventListener('click', downloadVenueBeginChecklist);
 for (const [id, other] of [['venue-full-tracking', 'venue-full-participation'], ['venue-full-participation', 'venue-full-tracking']]) {
   $(id).addEventListener('change', () => {
     if ($(id).checked) $(other).checked = false;

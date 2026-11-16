@@ -4,14 +4,34 @@ import { readFile } from 'node:fs/promises';
 const code = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/readiness-ui.js', import.meta.url), 'utf8');
 const missionClock = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/mission-clock.js', import.meta.url), 'utf8');
 const connection = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/connection-ui.js', import.meta.url), 'utf8');
+const reportCsv = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/report-csv.js', import.meta.url), 'utf8');
 const dataModule = source => 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
 const { readinessView, roomReadinessView, roomEndpointText, roomTicketDestination, roomTicketSourceLive, mrReadinessView, roomMissionTimeView, roomVenuePhaseView,
-  roomMrTrackingPauseTarget, roomMrPauseView, venueTrackingRow, roomPoseFrameTarget, venueBeginRejection } =
-  await import(dataModule(code.replace('./mission-clock.js', dataModule(missionClock)).replace('./connection-ui.js', dataModule(connection))));
+  roomMrTrackingPauseTarget, roomMrPauseView, venueTrackingRow, roomPoseFrameTarget, venueBeginRejection, encodeVenueBeginCsv } =
+  await import(dataModule(code.replace('./mission-clock.js', dataModule(missionClock)).replace('./connection-ui.js', dataModule(connection))
+    .replace('./report-csv.js', dataModule(reportCsv))));
 const player = { id: 'player', admissionId: 'first', roomId: 1, seat: 0 };
 const session = { id: 'session', sequence: 10, state: 'Preparing', players: [player] };
 const report = { version: 1, sessionId: 'session', sessionSequence: 10, sourceState: 'Fresh', sourceAgeMilliseconds: 10, origin: 'Simulation',
   players: [{ playerId: 'player', admissionId: 'first', roomId: 1, seat: 0, state: 'Participating', rigKind: 'Simulated', canParticipate: true }] };
+test('Begin CSV retains only room and seat status and distinguishes stale and absent rooms', async () => {
+  const { matchesReportRows } = await import(dataModule(reportCsv));
+  const stamp = '2026-11-17T00:00:00.000Z';
+  const actual = encodeVenueBeginCsv([
+    { roomId: 1, sessionId: 'session', sessionSequence: 10, origin: 'Simulation', state: 'WaitingFullTracking',
+      text: '等待「名冊」, 追蹤', seats: ['NeedsTracking', 'Vacant', 'Vacant', 'Vacant', 'Vacant'], playerId: 'private' },
+    { roomId: 3, sessionId: 'stale', sessionSequence: 11, state: 'Stale', text: '快照已過期' },
+    { roomId: 5, state: 'NotPreparing', text: '尚無準備中的目標場次' }
+  ], 'tracking', stamp);
+  const rows = [['reportVersion', 'exportedAtUtc', 'beginPolicy', 'roomId', 'seat', 'sessionId', 'sessionSequence',
+    'origin', 'roomState', 'roomStatus', 'seatState', 'seatStatus']];
+  for (let seat = 1; seat <= 5; seat++) rows.push([1, stamp, 'tracking', 1, seat, 'session', 10, 'Simulation',
+    'WaitingFullTracking', '等待「名冊」, 追蹤', seat === 1 ? 'NeedsTracking' : 'Vacant', seat === 1 ? '合成姿態 · 需追蹤' : '未編列']);
+  for (let seat = 1; seat <= 5; seat++) rows.push([1, stamp, 'tracking', 3, seat, 'stale', 11, '', 'Stale', '快照已過期', 'Unknown', '待確認']);
+  for (let seat = 1; seat <= 5; seat++) rows.push([1, stamp, 'tracking', 5, seat, '', '', '', 'NotPreparing', '尚無準備中的目標場次', 'NotPreparing', '尚無準備場次']);
+  assert(matchesReportRows(Buffer.from(actual, 'utf8'), rows));
+  assert(!actual.includes('private'));
+});
 test('The Begin rejection describes only verified blocked seats and keeps the room summary for older responses', () => {
   const ids = [2, 5];
   const summary = '房間 2、5 的名冊或遊戲快照尚未就緒，本批場次維持準備中。';
