@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 指定獨立房間的即時環境
+
+- 管理台 0.31.229 的全館環境可勾選執行中的獨立房間，一次調整天氣、日夜與閃電。管理服務重查所選房間及原環境版本。其餘房間可獨立變更。合併場維持五房共用一筆設定。 [操作方式](ENVIRONMENT.md#只調整指定獨立房間)
+- 原始碼與解壓包各通過 13 項獨立房 Chromium 專項，合併解壓包通過 5 項。核對原房 1 和 4 命令與下載報告、同時變更未選房、所選房版本衝突、回條重試及房間重用。首輪合併的定位查核失敗，複驗直接讀取選項停用及區塊隱藏狀態。各場使用本機 IPC 並已結束。 [獨立房](../artifacts/venue-climate-scope-031229/package-independent/checks.json) · [合併場](../artifacts/venue-climate-scope-031229/package-linked-dom/checks.json) · [操作畫面](../artifacts/venue-climate-scope-031229/package-independent/climate-scope-mobile.png)
+- 1159 項 .NET、128 項 Node 通過。新增的模擬世界保存畫格以 UTC 擷取時間及原管理序號驗證，只確認原來源房間。保留測試前幾輪的夾具失敗紀錄，複驗使用原公開讀取介面、準備階段開啟世界並提供擷取時鐘。Windows 管理包 583 個檔案與原 0.50.12 Windows／Quest 配套通過發行核對。GitHub Actions 對 `97f3dda` 回報帳務或用量限制，工作未啟動。Quest 仍無 ADB 介面。 [下載管理包](../artifacts/venue-climate-scope-031229/VRCommand-ControlServer-0.31.229.zip) · [發行報告](../artifacts/venue-climate-scope-031229/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43970712154/job/133661820053)
+
 ## 2026-11-17 從 CSV 帶入五房名冊草稿
 
 - 管理台 0.31.228 提供 25 席 UTF-8 範本，可從 CSV 帶入房席、名稱與頭盔。瀏覽器先核對所有列及原準備場次。重複列、已占用席位、已有草稿和 MR 頭盔不符會阻止整份匯入，原草稿保留。帶入後可修改，確認登記才送交管理服務。 [操作方式](PLAYER_READINESS.md#批次加入場館名冊) · [25 席範本](../artifacts/venue-roster-csv-031228/package-independent/venue-roster-template.csv)
