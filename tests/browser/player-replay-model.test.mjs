@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readPlayerReplay, sourcePaused, sourceTransitions } from '../../src/VrCommand.Api/wwwroot/console/player-replay-model.js';
+import { playerReplayEventFrames, readPlayerReplay, sourcePaused, sourceTransitions } from '../../src/VrCommand.Api/wwwroot/console/player-replay-model.js';
 
 const point = { x: 0, y: 0, z: 0 };
 const actor = '71100000-0000-0000-0000-000000000000';
@@ -21,6 +21,17 @@ function replay(version, rooms) {
 test('keeps original contiguous timing in both full and room player files', () => {
   for (const file of [replay(1, [1, 2, 3, 4, 5]), replay(2, [3])])
     assert.equal(readPlayerReplay(file), file);
+});
+
+test('indexes only known saved events by their original frame in both file formats', () => {
+  for (const file of [replay(1, [1, 2, 3, 4, 5]), replay(2, [3])]) {
+    const events = kind => ({ hasRay: false, kind, playerId: actor });
+    file.packets[0].events = ['ShotHit', 'PlayerDamaged', 'ShotHit', 'constructor', 'Unknown'].map(events);
+    file.packets[1].events = [events(undefined)];
+    const data = readPlayerReplay(file);
+    assert.deepEqual(playerReplayEventFrames(data.packets), [{ index: 0, counts: { ShotHit: 2, PlayerDamaged: 1 } }]);
+    assert.deepEqual(playerReplayEventFrames(data.packets.slice(1)), []);
+  }
 });
 
 test('finds saved source pauses and running recoveries without counting an operator pause', () => {

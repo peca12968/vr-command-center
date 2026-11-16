@@ -1,16 +1,20 @@
-import { MAX_REPLAY_BYTES, readPlayerReplay, sourcePaused, sourceTransitions } from './player-replay-model.js';
+import { MAX_REPLAY_BYTES, playerReplayEventFrames, readPlayerReplay, sourcePaused, sourceTransitions } from './player-replay-model.js';
 import { recordedClock } from './mission-clock.js';
+import { eventNames } from './world-event-names.js';
 
 const $ = id => document.getElementById('player-replay-' + id);
 const timeline = document.getElementById('replay-timeline');
 const canvas = document.getElementById('replay-canvas');
 const loop = $('loop');
 const frameNumber = $('number');
+const eventKind = $('event-kind');
+for (const [kind, label] of Object.entries(eventNames)) eventKind.add(new Option(label, kind));
 const loopPauseMilliseconds = 300;
 const weatherNames = { Clear: '晴朗', Rain: '下雨', Fog: '濃霧', Storm: '暴風雨' };
 const phaseNames = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
 let replay, scene, index = 0, cursor = 0, lastTime = 0, animation = 0, epoch = 0;
 let restartAt = null;
+let eventFrames = [], matchingEvents = [];
 
 function message(text, error = false) {
   $('message').textContent = text;
@@ -23,6 +27,30 @@ function pause() {
   restartAt = null;
   $('play').textContent = '播放';
   scene?.weather.pause();
+}
+
+function adjacentEvent(forward) {
+  if (forward) return matchingEvents.find(row => row.index > index);
+  for (let cursor = matchingEvents.length - 1; cursor >= 0; cursor--) {
+    if (matchingEvents[cursor].index < index) return matchingEvents[cursor];
+  }
+}
+
+function showFrameEvents() {
+  $('event-back').disabled = !adjacentEvent(false);
+  $('event-next').disabled = !adjacentEvent(true);
+  const counts = matchingEvents.find(row => row.index === index)?.counts;
+  const summary = Object.entries(counts ?? {}).filter(([kind]) => !eventKind.value || kind === eventKind.value)
+    .map(([kind, count]) => `${eventNames[kind]} ${count} 筆`);
+  $('event-frame').textContent = summary.join(' · ');
+  $('event-frame').hidden = summary.length === 0;
+}
+
+function filterEvents() {
+  matchingEvents = eventKind.value ? eventFrames.filter(row => row.counts[eventKind.value]) : eventFrames;
+  eventKind.disabled = eventFrames.length === 0;
+  $('event-count').textContent = matchingEvents.length ? `${matchingEvents.length} 個事件畫格` : '片段內沒有符合的戰鬥事件。';
+  showFrameEvents();
 }
 
 function show(next, continuous = false) {
@@ -43,6 +71,7 @@ function show(next, continuous = false) {
     packet.lightning ? '雷電開啟' : '雷電關閉'].join(' · ');
   const first = packets[0].elapsedMilliseconds;
   $('time').textContent = `片段 ${((packet.elapsedMilliseconds - first) / 1000).toFixed(2)} / ${((packets.at(-1).elapsedMilliseconds - first) / 1000).toFixed(2)} 秒`;
+  showFrameEvents();
 }
 
 function openFrame(next) {
@@ -57,6 +86,7 @@ $('file').addEventListener('change', async () => {
   pause();
   replay = null;
   loop.checked = false;
+  eventKind.value = '';
   frameNumber.value = '';
   $('file').value = '';
   $('view').hidden = true;
@@ -90,6 +120,8 @@ $('file').addEventListener('change', async () => {
     $('view').hidden = false;
     scene.resize();
     scene.preset('top', $('room').value);
+    eventFrames = playerReplayEventFrames(candidate.packets);
+    filterEvents();
     show(0);
     message(`已載入 ${candidate.packets.length} 格。`);
   } catch (error) {
@@ -135,6 +167,9 @@ $('play').addEventListener('click', () => {
 });
 $('back').addEventListener('click', () => openFrame(index - 1));
 $('next').addEventListener('click', () => openFrame(index + 1));
+eventKind.addEventListener('change', filterEvents);
+$('event-back').addEventListener('click', () => openFrame(adjacentEvent(false)?.index));
+$('event-next').addEventListener('click', () => openFrame(adjacentEvent(true)?.index));
 $('jump').addEventListener('submit', event => {
   event.preventDefault();
   const sequence = frameNumber.valueAsNumber;

@@ -40,6 +40,13 @@
         <button type="submit" class="quiet">跳到畫格</button>
       </form>
       <label id="player-replay-transition-field" hidden>遊戲來源畫格<select id="player-replay-transition"></select></label>
+      <div class="replay-transport replay-event-tools">
+        <label>戰鬥事件<select id="player-replay-event-kind"><option value="">所有類型</option></select></label>
+        <button id="player-replay-event-back" type="button" class="quiet" disabled>上一個事件畫格</button>
+        <button id="player-replay-event-next" type="button" class="quiet" disabled>下一個事件畫格</button>
+        <output id="player-replay-event-count" role="status"></output>
+      </div>
+      <p id="player-replay-event-frame" class="hint" hidden></p>
     </section>
   </main>
 </body>

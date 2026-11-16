@@ -8,11 +8,11 @@ import { mountWorldClipStatistics } from './world-clip-statistics.js';
 import { mountWorldShotTrace, isTraceableShot } from './world-shot-trace.js';
 import { missionTicksPerSecond, recordedClock } from './mission-clock.js';
 import { recordedPointInRoom } from './recorded-room.js';
+import { eventNames } from './world-event-names.js';
 
 const $ = id => document.getElementById(id);
 const time = milliseconds => (milliseconds / 1000).toFixed(2) + ' 秒';
 const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
-const eventNames = { ShotFired: '玩家射擊', ShotHit: '命中敵軍', EnemyEliminated: '擊殺敵軍', EnemyShot: '敵軍射擊', PlayerDamaged: '玩家受傷', ReloadStarted: '開始換彈', ReloadCompleted: '完成換彈' };
 const shortId = id => id && id !== '00000000-0000-0000-0000-000000000000' ? id.slice(0, 8) : '—';
 const roomName = room => room === 'all' ? '全部房間' : '房間 ' + room;
 const LIVE_RETRY_DELAYS = [500, 1000, 2000, 3000, 3000, 3000, 3000, 3000];

@@ -1,4 +1,5 @@
 import { recordedPointInRoom } from './recorded-room.js';
+import { eventNames } from './world-event-names.js';
 
 export const MAX_REPLAY_BYTES = 8 * 1024 * 1024;
 export const MAX_REPLAY_FRAMES = 300;
@@ -72,6 +73,18 @@ export function readPlayerReplay(data) {
 
 export function sourcePaused(packet) {
   return packet?.suspended === true && packet.frame.phase === 'Paused';
+}
+
+export function playerReplayEventFrames(packets) {
+  const frames = [];
+  for (const [index, packet] of packets.entries()) {
+    const counts = {};
+    for (const { kind } of packet.events) {
+      if (typeof kind === 'string' && Object.hasOwn(eventNames, kind)) counts[kind] = (counts[kind] || 0) + 1;
+    }
+    if (Object.keys(counts).length) frames.push({ index, counts });
+  }
+  return frames;
 }
 
 export function sourceTransitions(packets) {

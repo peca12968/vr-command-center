@@ -221,6 +221,8 @@ node scripts/package-player-replay.mjs artifacts/VRCommand-Player-Replay.html
 
 管理包 0.31.189 的玩家頁可在「畫格序號」輸入場館提供的原序號，再按 Enter 或「跳到畫格」。畫面會停在指定格，保留目前視角與循環設定。可用序號以頁面顯示的原畫格範圍為準，載入另一份檔案會清空輸入。
 
+管理包 0.31.222 的網頁和離線播放器皆可按「戰鬥事件」篩選，使用「上一個事件畫格」或「下一個事件畫格」跳轉。同一格的多筆事件會合在一起顯示筆數，跳轉後會暫停並停在原始畫格。事件範圍依場館匯出的檔案，分房檔只讀該房，全場檔切換視角時仍可查看全場事件。
+
 `GET /api/sessions/{id}/world/clips` 回傳 `sessionId`、`streamId` 及 `clips`。主控以 `PUT .../clips/{clipId}` 送出 `streamId`、`name`、`startFrame` 和 `endFrame`，兩格都必須已保存且依序排列。兩個毫秒值由服務從原格讀取。以 `DELETE .../clips/{clipId}` 移除項目。用原識別和內容重試會得到同一筆結果，已移除的項目會回覆 `deleted: true`。資料保存在原世界資料庫的獨立資料表。
 
 ### 依房間與種類搜尋戰鬥事件

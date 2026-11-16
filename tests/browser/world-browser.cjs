@@ -809,6 +809,16 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       check((await position.innerText()).startsWith(`第 ${clipTail} 格`)
         && await player.locator('#player-replay-next').isDisabled() && requests.length === 0,
       'Player frame jump reads the exact original last frame without an API request');
+      const eventKind = player.locator('#player-replay-event-kind');
+      const damageFrames = exported.packets.filter(packet => packet.events.some(event => event.kind === 'PlayerDamaged'));
+      const previousDamage = damageFrames.filter(packet => packet.sequence < clipTail).at(-1);
+      await eventKind.selectOption('PlayerDamaged');
+      await player.locator('#player-replay-event-back').click();
+      check((await position.innerText()).startsWith(`第 ${previousDamage.sequence} 格`)
+        && await player.locator('#player-replay-event-count').innerText() === `${damageFrames.length} 個事件畫格`
+        && (await player.locator('#player-replay-event-frame').innerText()).includes('玩家受傷') && requests.length === 0,
+      'Player goes to the previous saved damage frame using only the exported events');
+      await eventKind.selectOption('');
       await playerFrameNumber.fill(String(eventSequence));
       await playerFrameGo.click();
       await player.locator('#player-replay-next').click();
