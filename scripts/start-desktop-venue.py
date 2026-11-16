@@ -106,7 +106,7 @@ def player_result_phase(text):
 
 class Venue:
     def __init__(self, args, *, artifact_family='desktop-venue'):
-        if artifact_family not in ('desktop-venue', 'desktop-demo', 'desktop-capacity', 'desktop-active', 'desktop-debrief', 'desktop-end-race', 'desktop-clock', 'desktop-clock-faults', 'desktop-long', 'desktop-seal-faults', 'desktop-briefing', 'desktop-readiness', 'desktop-first-person', 'desktop-navigation', 'desktop-ai-targeting', 'desktop-crouch', 'desktop-exercise', 'desktop-walkway', 'desktop-journal-recovery', 'desktop-openxr-aim'):
+        if artifact_family not in ('desktop-venue', 'desktop-demo', 'desktop-capacity', 'desktop-active', 'desktop-debrief', 'desktop-end-race', 'desktop-clock', 'desktop-clock-faults', 'desktop-long', 'desktop-seal-faults', 'desktop-briefing', 'desktop-readiness', 'desktop-first-person', 'desktop-navigation', 'desktop-ai-targeting', 'desktop-crouch', 'desktop-exercise', 'desktop-walkway', 'desktop-journal-recovery', 'desktop-openxr-aim', 'desktop-guarded-openxr'):
             raise ValueError('Unknown native fixture artifact family')
         self.args = args
         self.artifact_family = artifact_family
@@ -199,7 +199,7 @@ class Venue:
             'props': [{'assetId': 'barrel' if index % 2 else 'sandbag', 'position': {'x': (index - (room - 1) / 2) * 2, 'y': 0, 'z': 3}, 'yawDegrees': room * 15} for index in range(room)]}
         return self.request('/api/missions', definition, expected=201)
 
-    def create(self, mission, rooms, name, role='Master', players=None, *, origin='Simulation'):
+    def create(self, mission, rooms, name, role='Master', players=None, *, origin='Simulation', headset='Quest3'):
         if origin not in ('Simulation', 'GameServer'):
             raise ValueError('Invalid desktop fixture telemetry origin')
         state = self.request('/api/sessions', {'missionId': mission['id'], 'mode': 'Linked' if len(rooms) == 5 else 'Independent', 'roomIds': rooms}, role=role, expected=201)
@@ -207,7 +207,7 @@ class Venue:
         self.rounds.append(entry)  # Track immediately so partial setup is always cleaned up.
         for room in rooms:
             player = players[room] if players else str(uuid.uuid4())
-            state = self.request(f'/api/sessions/{entry["id"]}/players', {'playerId': player, 'roomId': room, 'name': f'PC room {room}', 'headset': 'Quest3'}, role='Room' + str(room))
+            state = self.request(f'/api/sessions/{entry["id"]}/players', {'playerId': player, 'roomId': room, 'name': f'PC room {room}', 'headset': headset}, role='Room' + str(room))
             entry['players'].append(next(p for p in state['players'] if p['id'] == player))
         self.start_server(entry)
         return entry

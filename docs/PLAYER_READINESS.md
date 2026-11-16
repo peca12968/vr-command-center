@@ -10,6 +10,19 @@
 
 管理包 0.31.201 會記錄單場追蹤開場的原始畫格，封存後可在「任務收尾」直接開啟。 [回看單場 VR 追蹤開場](SESSION_CLOSURE.md#回看單場-vr-追蹤開場)
 
+### Windows 原生回歸
+
+解壓管理包並依 Windows 玩家包說明準備 Unity Mock Runtime 與右手指向測試 DLL。指令會用原 Windows 遊戲程序建立追蹤場次，先取得準備畫格，再使右手指向失效並驗證開場遭拒。恢復後原封不動重送命令，核對成功及重送回條。結束後，從原驗收 ZIP 及已關閉的世界日誌核對開場所採用的畫格。 [準備 Mock Runtime](WINDOWS_PLAYER_PACKAGE.md#本機追蹤整合驗證)
+
+```powershell
+python scripts/check-desktop-guarded-openxr.py `
+    --control-package '<解壓原管理包>' --runtime-root 'C:\VrGuardedTest' `
+    --mock-dll '<Unity OpenXR 套件>/Runtime/MockRuntime/windows/x64/mock_runtime.dll' `
+    --pose-dll artifacts/openxr-mock-pose.dll
+```
+
+測試管理程序以 Kestrel 的本機 Unix domain socket 啟動，確認其 TCP 監聽和 UDP 端點均為零，再透過已通過防火牆查核的 Python 迴環位址連接 Unity。選用短的本機資料根目錄以容納 Windows IPC 路徑。 [Kestrel 本機 socket](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/servers/kestrel/endpoints?view=aspnetcore-10.0)
+
 ## 從房卡查看姿態中斷快照
 
 控制台 0.31.86 在執行中的 VR 或 MR 場次確認本房有存活席位失去有效姿態時，提供「檢視姿態中斷快照」。按鈕開啟原錄製，在該房的原畫格停住，並標示受影響席位。房控可查看本房，主控可查看五房。畫面中的已淘汰席位不列為中斷。

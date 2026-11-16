@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 原生 Unity 驗證管理台追蹤開場
+
+- 管理包 0.31.206 的 568 項清單完整核對後，以 Windows 本機 IPC 啟動原 API。實查原管理程序的 TCP 監聽及 UDP 端點均為零，由已通過防火牆查核的 Python 迴環轉送接上 Windows 0.50.12。使用 Unity Mock Runtime。 [重跑方式](PLAYER_READINESS.md#windows-原生回歸) · [原程序監聽](../artifacts/desktop-guarded-openxr/20261116-125322-fa3a2e53/api-runtime.json)
+- 原世界第 44 格追蹤就緒，第 50 格右手指向失效。原管理序號 3 的 Begin 回傳 HTTP 409 並保持準備中。第 52 格恢復後，原樣重送同一命令成功於管理序號 4 開場，再重送取得相同序號的重複回條。封存 ZIP 含第 52 格原開場回條，原世界及戰鬥日誌讀回通過。8 項檢查、65 格回放、原玩家終場確認，C 槽原件與 F 槽快照 14 檔雜湊相符。 [驗證摘要](../artifacts/desktop-guarded-openxr/20261116-125322-fa3a2e53/verification.json) · [原 ZIP](../artifacts/desktop-guarded-openxr/20261116-125322-fa3a2e53/field-evidence.zip) · [封存讀回](../artifacts/desktop-guarded-openxr/20261116-125322-fa3a2e53/closed-readback.json)
+- 首輪開場拒絕、恢復和重送均成功，ZIP 查詢省略 `includeTrackedVrStart=true`，因此只取得一般回條。保留首輪封存並加上原查詢參數後重跑。實機頭盔、跨機及現場管理網路待驗。 [首輪一般 ZIP](../artifacts/desktop-guarded-openxr/20261116-125151-a539829f/field-evidence.zip)
+
 ## 2026-11-16 追蹤來源與四個桌面房同時驗證
 
 - Windows 0.50.12 以 `--tracked-vr` 讓第一房使用 `GameServer`，其餘四房使用 `Simulation`。第一房兩席均完成原簽名票券與 UDP 入場，只有 Unity Mock Runtime 席在準備及執行畫格上取得 `Tracked` 參戰姿態。右手指向失效後暫停該席，恢復沿用原連線並完成放開再扣的輸入驗證。 [重跑方式](WINDOWS_PLAYER_PACKAGE.md#本機追蹤整合驗證) · [五房報告](../artifacts/desktop-openxr-aim/20261116-123914-b7499bf7/summary.json)
