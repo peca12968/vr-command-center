@@ -152,7 +152,8 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
       const args = packageRoot ? [...gui && packagePathInput ? [] : ['--config', file], ...gui ? [] : ['--launch', '--headless', '--wait'], '--log', log, '--report', report, ...launcherStatus ? ['--status-report', statusPath] : []]
         : ['-batchmode', '-nographics', '-job-worker-count', '2', '-logFile', log, '--vr-config', file];
       requireSilentWindowsLaunch(root, playerExecutable);
-      const child = spawn(executable, args, { cwd: path.dirname(executable), windowsHide: !gui, stdio: 'ignore' });
+      const child = spawn(executable, args, { cwd: path.dirname(executable), windowsHide: !gui, stdio: 'ignore',
+        env: { ...process.env, VR_COMMAND_UNATTENDED: '1' } });
       child.on('error', error => { errors.push(error.message); }); const owned = { child, log, player, gui, statusPath, report }; children.push(owned);
       if (packageRoot) {
         if (gui) console.log('PACKAGED_LAUNCHER_UI_READY ' + JSON.stringify({ processId: child.pid, configPath: file }));
@@ -215,7 +216,9 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
         const file = path.join(evidence, label + '.json'), log = path.join(evidence, label + '.log'), report = path.join(evidence, label + '-launch.json'), statusPath = path.join(evidence, label + '-status.json');
         await fs.writeFile(file, JSON.stringify(value), { flag: 'wx' });
         requireSilentWindowsLaunch(root, playerExecutable);
-        const child = spawn(launcherExecutable, ['--config', file, '--launch', '--headless', '--wait', '--log', log, '--report', report, '--status-report', statusPath], { cwd: packageRoot, windowsHide: true, stdio: 'ignore' });
+        const child = spawn(launcherExecutable, ['--config', file, '--launch', '--headless', '--wait', '--log', log, '--report', report, '--status-report', statusPath], {
+          cwd: packageRoot, windowsHide: true, stdio: 'ignore', env: { ...process.env, VR_COMMAND_UNATTENDED: '1' },
+        });
         child.on('error', error => errors.push(error.message)); const owned = { child, log, gui: false, statusPath }; children.push(owned);
         const started = await until(async () => { const r = JSON.parse(await fs.readFile(report, 'utf8').catch(() => '{}')); return r.status === 'started' && r; }, 'status probe child'); owned.nativeId = started.processId;
         const state = await until(async () => { const s = JSON.parse(await fs.readFile(statusPath, 'utf8').catch(() => '{}')); return expected.includes(s.state) && s; }, 'actual native ' + label + ' status', 45);

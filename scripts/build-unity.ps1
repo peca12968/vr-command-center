@@ -4,6 +4,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 trap { Write-Error $_ -ErrorAction Continue; exit 1 }
+$env:VR_COMMAND_UNATTENDED = '1'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $unityProject = Join-Path $projectRoot 'clients/unity'
 $logDirectory = Join-Path $projectRoot 'artifacts/unity-logs'

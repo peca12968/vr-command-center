@@ -2,14 +2,26 @@ import importlib.util
 import copy
 from pathlib import Path
 import socket
+import sys
 import time
 import unittest
 
-spec=importlib.util.spec_from_file_location('udp_gate',Path(__file__).resolve().parents[1]/'scripts/udp_gate.py')
+SCRIPTS = Path(__file__).resolve().parents[1] / 'scripts'
+sys.path.insert(0, str(SCRIPTS))
+spec=importlib.util.spec_from_file_location('udp_gate',SCRIPTS/'udp_gate.py')
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 
 
 class UdpGateTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
+
+        try:
+            require_silent_windows_launch(sys.executable)
+        except WindowsFirewallLaunchError as error:
+            raise unittest.SkipTest(str(error)) from error
+
     def setUp(self):
         self.server=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);self.server.bind(('127.0.0.1',0));self.server.settimeout(2)
         self.client=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);self.client.bind(('127.0.0.1',0));self.client.settimeout(2)

@@ -20,7 +20,7 @@ function requireSilentWindowsLaunch(root, executable) {
   const checker = path.join(root, 'scripts', 'check-windows-firewall-notifications.ps1');
   const result = spawnSync(powershell,
     ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', checker, '-Executable', program],
-    { windowsHide: true, encoding: 'utf8', timeout: 15000 });
+    { env: { ...process.env, VR_COMMAND_UNATTENDED: '1' }, windowsHide: true, encoding: 'utf8', timeout: 15000 });
   if (result.status !== 0) {
     const reason = result.stderr?.trim() || result.error?.message || `check exited with code ${result.status}`;
     throw new Error(`Startup skipped for ${path.basename(program)}. ${reason}`);

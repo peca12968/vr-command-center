@@ -21,6 +21,7 @@ def require_silent_windows_launch(executable):
         result = subprocess.run(
             [powershell, '-NoLogo', '-NoProfile', '-NonInteractive', '-File', str(checker),
              '-Executable', str(executable)],
+            env={**os.environ, 'VR_COMMAND_UNATTENDED': '1'},
             creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, errors='replace', timeout=15,
         )
     except (OSError, subprocess.SubprocessError) as error:
@@ -36,4 +37,7 @@ def start_checked_windows_process(command, **options):
     """Recheck the exact image at each native launch."""
     executable = Path(command[0]).resolve(strict=True)
     require_silent_windows_launch(executable)
+    if os.name == 'nt':
+        environment = options.get('env')
+        options['env'] = {**(os.environ if environment is None else environment), 'VR_COMMAND_UNATTENDED': '1'}
     return subprocess.Popen([str(executable), *command[1:]], executable=str(executable), **options)

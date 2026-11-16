@@ -115,5 +115,20 @@ exit $LASTEXITCODE
             self.assertEqual(launch.call_args.kwargs['executable'], str(image))
             self.assertEqual(venue.processes, {'server': launch.return_value})
 
+    @unittest.skipUnless(os.name == 'nt', 'Windows Firewall preflight uses Windows process options')
+    def test_automated_launch_overrides_inherited_interactive_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory).resolve() / 'VrCommand.exe'
+            image.touch()
+            child_env = {'VR_COMMAND_UNATTENDED': '0', 'SET_BY_CALLER': 'value'}
+            with patch.dict(os.environ, {'VR_COMMAND_UNATTENDED': '0'}), \
+                    patch.object(windows_firewall.subprocess, 'run', return_value=SimpleNamespace(returncode=0)) as check, \
+                    patch.object(windows_firewall.subprocess, 'Popen') as launch:
+                windows_firewall.start_checked_windows_process([image], env=child_env)
+
+            self.assertEqual(check.call_args.kwargs['env']['VR_COMMAND_UNATTENDED'], '1')
+            self.assertEqual(launch.call_args.kwargs['env'], {'VR_COMMAND_UNATTENDED': '1', 'SET_BY_CALLER': 'value'})
+            self.assertEqual(child_env['VR_COMMAND_UNATTENDED'], '0')
+
 
 if __name__ == '__main__': unittest.main()

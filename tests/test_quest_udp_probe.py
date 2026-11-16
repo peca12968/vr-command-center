@@ -66,7 +66,10 @@ class QuestUdpProtocolTests(unittest.TestCase):
 
         java = java_tool('java')
         try:
+            require_silent_windows_launch(sys.executable)
             require_silent_windows_launch(java)
+            if POWERSHELL:
+                require_silent_windows_launch(POWERSHELL)
         except WindowsFirewallLaunchError as error:
             raise unittest.SkipTest(str(error)) from error
         work = tempfile.TemporaryDirectory(prefix='quest-udp-test-')
@@ -521,6 +524,13 @@ class QuestUdpVenuePlanTests(unittest.TestCase):
 
     @unittest.skipUnless(POWERSHELL, 'PowerShell is required for the original UDP listener and probe')
     def test_venue_retry_reprobes_an_original_sample_outside_the_recorded_timeout(self):
+        from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
+
+        try:
+            require_silent_windows_launch(sys.executable)
+            require_silent_windows_launch(POWERSHELL)
+        except WindowsFirewallLaunchError as error:
+            self.skipTest(str(error))
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reservation:
             reservation.bind((SERVER, 0))
             port = reservation.getsockname()[1]

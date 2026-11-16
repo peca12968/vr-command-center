@@ -366,7 +366,7 @@ def packet(key, kind, nonce):
 
 
 @unittest.skipUnless(SHELL, 'PowerShell is required for native UDP preflight checks')
-class LanPreflightTests(unittest.TestCase):
+class LanPreflightFixtures(unittest.TestCase):
     def setUp(self):
         scratch = tempfile.TemporaryDirectory(prefix='lan-preflight-')
         self.addCleanup(scratch.cleanup)
@@ -374,16 +374,44 @@ class LanPreflightTests(unittest.TestCase):
         self.key = self.root / 'probe.key'
         self.shell = [SHELL, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned',
                       '-File', str(ROOT / 'scripts/check-lan-udp.ps1')]
+        self.environment = {**os.environ, 'VR_COMMAND_UNATTENDED': '1'}
         result = self.run_script('-NewKey', '-KeyFile', self.key)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), {'version': 1, 'stage': 'key-created'})
 
     def run_script(self, *args):
-        return subprocess.run([*self.shell, *map(str, args)], capture_output=True, text=True, timeout=15)
+        return subprocess.run([*self.shell, *map(str, args)], env=self.environment, capture_output=True, text=True, timeout=15)
 
     def options(self, port, count, *, key=None, peer=LOOPBACK, local=LOOPBACK):
         return ['-LocalAddress', local, '-PeerAddress', peer, '-Port', str(port), '-Count', str(count),
                 '-KeyFile', str(key or self.key)]
+
+
+class LanPreflightOfflineTests(LanPreflightFixtures):
+    def test_key_is_created_once_and_errors_hide_private_values(self):
+        original = self.key.read_bytes()
+        self.assertEqual(len(base64.b64decode(original, validate=True)), 32)
+        duplicate = self.run_script('-NewKey', '-KeyFile', self.key)
+        self.assertEqual(duplicate.returncode, 1)
+        self.assertEqual(json.loads(duplicate.stdout)['step'], 'key')
+        self.assertEqual(self.key.read_bytes(), original)
+        self.assertNotIn(original.decode('ascii'), duplicate.stdout)
+        self.assertNotIn(str(self.key), duplicate.stdout)
+        invalid = self.run_script('-Mode', 'Probe', *self.options(7777, 1, peer='192.168.050.2'))
+        self.assertEqual(invalid.returncode, 1)
+        self.assertEqual(json.loads(invalid.stdout)['step'], 'address')
+
+
+class LanPreflightTests(LanPreflightFixtures):
+    @classmethod
+    def setUpClass(cls):
+        from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
+
+        try:
+            require_silent_windows_launch(sys.executable)
+            require_silent_windows_launch(SHELL)
+        except WindowsFirewallLaunchError as error:
+            raise unittest.SkipTest(str(error)) from error
 
     @contextmanager
     def listener(self, port, count, *, peer=LOOPBACK, seconds=10, filename='listener.ndjson', endpoint=None):
@@ -392,7 +420,7 @@ class LanPreflightTests(unittest.TestCase):
             '-EndpointFile', str(endpoint), '-Count', str(count), '-KeyFile', str(self.key)]
         with path.open('xb') as output:
             with subprocess.Popen(self.shell + ['-Mode', 'Listen', '-Seconds', str(seconds), *options],
-                                  stdout=output, stderr=subprocess.STDOUT) as process:
+                                  env=self.environment, stdout=output, stderr=subprocess.STDOUT) as process:
                 try:
                     end = time.monotonic() + 8
                     while time.monotonic() < end:
@@ -1229,19 +1257,6 @@ class LanPreflightTests(unittest.TestCase):
         self.assertEqual((1, 4), (invalid['unmatchedPairs'], invalid['verifiedSources']))
         self.assertEqual('missing', invalid['groups'][4]['sources'][0]['status'])
 
-    def test_key_is_created_once_and_errors_hide_private_values(self):
-        original = self.key.read_bytes()
-        self.assertEqual(len(base64.b64decode(original, validate=True)), 32)
-        duplicate = self.run_script('-NewKey', '-KeyFile', self.key)
-        self.assertEqual(duplicate.returncode, 1)
-        self.assertEqual(json.loads(duplicate.stdout)['step'], 'key')
-        self.assertEqual(self.key.read_bytes(), original)
-        self.assertNotIn(original.decode('ascii'), duplicate.stdout)
-        self.assertNotIn(str(self.key), duplicate.stdout)
-        invalid = self.run_script('-Mode', 'Probe', *self.options(7777, 1, peer='192.168.050.2'))
-        self.assertEqual(invalid.returncode, 1)
-        self.assertEqual(json.loads(invalid.stdout)['step'], 'address')
-
     def test_both_processes_finish_and_the_port_can_be_reused(self):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reserved:
             reserved.bind((LOOPBACK, 0))
@@ -1367,7 +1382,7 @@ class LanPreflightTests(unittest.TestCase):
             server.settimeout(6)
             options = self.options(server.getsockname()[1], 1)
             with subprocess.Popen(self.shell + ['-Mode', 'Probe', '-TimeoutMs', '600', *options],
-                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as probe:
+                                  env=self.environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as probe:
                 try:
                     incoming, source = server.recvfrom(256)
                     nonce = incoming.decode('ascii').split(':')[1]

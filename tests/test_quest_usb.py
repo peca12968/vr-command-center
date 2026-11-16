@@ -4,11 +4,13 @@ from pathlib import Path
 import shutil
 import socket
 import subprocess
+import sys
 from threading import Thread
 import unittest
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/check-quest-usb.ps1'
+sys.path.insert(0, str(SCRIPT.parent))
 USB_ROOT = r'USB\VID_2833&PID_5011\fixture-serial'
 USB_PORTABLE = r'USB\VID_2833&PID_5011&MI_00\generated&0&0000'
 USB_ADB = r'USB\VID_2833&PID_5011&MI_04\generated&0&0004'
@@ -41,6 +43,15 @@ def adb_reply(text):
 
 @unittest.skipUnless(shutil.which('pwsh'), 'PowerShell is required')
 class QuestUsbTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
+
+        try:
+            require_silent_windows_launch(sys.executable)
+        except WindowsFirewallLaunchError as error:
+            raise unittest.SkipTest(str(error)) from error
+
     def diagnose(self, nodes, reply, *, unobservable=False):
         requests = []
         with socket.socket() as server:
