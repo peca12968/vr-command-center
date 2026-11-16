@@ -14,6 +14,7 @@ import unittest
 from unittest.mock import call, patch
 
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'scripts'))
 spec=importlib.util.spec_from_file_location('artifact_venue',ROOT/'scripts/start-desktop-venue.py')
 venue=importlib.util.module_from_spec(spec);spec.loader.exec_module(venue)
 
@@ -34,6 +35,28 @@ class ArtifactTests(unittest.TestCase):
                 venue.api_command(args)
             dll.touch()
             self.assertEqual(([str(exe)], root, dll), venue.api_command(args))
+
+    def test_api_preflight_uses_the_program_that_will_listen(self):
+        from local_api import checked_api_command
+        from windows_firewall import WindowsFirewallLaunchError
+
+        with self.directory() as temporary:
+            root = Path(temporary).resolve()
+            exe = root / 'VrCommand.Api.exe'
+            dll = root / 'VrCommand.Api.dll'
+            dotnet = root / 'dotnet.exe'
+            for file in (exe, dll, dotnet):
+                file.touch()
+            with (patch('local_api.shutil.which', return_value=str(dotnet)),
+                  patch('windows_firewall.require_silent_windows_launch') as check):
+                check.side_effect = WindowsFirewallLaunchError('Blocked API host')
+                with self.assertRaisesRegex(WindowsFirewallLaunchError, 'Blocked API host'):
+                    checked_api_command(SimpleNamespace(api_dll=dll))
+                check.assert_called_once_with(str(dotnet))
+
+                check.reset_mock(side_effect=True)
+                self.assertEqual(([str(exe)], root, dll), checked_api_command(SimpleNamespace(api_exe=exe)))
+                check.assert_called_once_with(str(exe))
 
     @unittest.skipUnless(os.name == 'nt', 'Windows launch preflight')
     def test_blocked_relay_checks_the_actual_python_process_and_stops_validation(self):

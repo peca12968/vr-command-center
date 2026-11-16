@@ -21,13 +21,17 @@ import io
 import zipfile
 from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
+
+from local_api import checked_api_command
+from windows_firewall import WindowsFirewallLaunchError
 
 ROOT = Path(__file__).resolve().parents[1]
 api_exe = os.environ.get("VR_COMMAND_API_EXE")
-api_path = Path(api_exe or os.environ.get("VR_COMMAND_API_DLL", ROOT / "src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll")).resolve()
-if not api_path.is_file():
-    raise SystemExit("Build Release or point VR_COMMAND_API_EXE to an extracted management service binary.")
-api_command = [str(api_path)] if api_exe else ["dotnet", str(api_path)]
+try:
+    api_command, api_cwd, _ = checked_api_command(SimpleNamespace(api_exe=Path(api_exe) if api_exe else None))
+except WindowsFirewallLaunchError as error:
+    raise SystemExit(str(error)) from None
 
 with socket.socket() as reservation:
     reservation.bind(("127.0.0.1", 0))
@@ -230,7 +234,7 @@ try:
             if overrides:
                 process_environment.update(overrides)
             return subprocess.Popen(
-                args, cwd=ROOT, env=process_environment,
+                args, cwd=api_cwd, env=process_environment,
                 stdout=output, stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )

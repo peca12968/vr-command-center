@@ -22,6 +22,11 @@ import urllib.request
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
+local_api_spec = importlib.util.spec_from_file_location('venue_local_api', Path(__file__).with_name('local_api.py'))
+local_api = importlib.util.module_from_spec(local_api_spec)
+local_api_spec.loader.exec_module(local_api)
+add_api_arguments = local_api.add_api_arguments
+api_command = local_api.api_command
 
 
 def read_json(path):
@@ -70,30 +75,6 @@ def snapshot_runtime(source,destination):
             if not sharing or time.monotonic()>=deadline:raise
             time.sleep(.05)
     with readers:shutil.copytree(source,destination)
-
-
-def add_api_arguments(parser):
-    api = parser.add_mutually_exclusive_group()
-    api.add_argument('--api-dll', type=Path, help='Managed API assembly to run with the installed dotnet host')
-    api.add_argument('--api-exe', type=Path, help='VrCommand.Api.exe in an extracted Windows management package')
-
-
-def api_command(args):
-    executable = getattr(args, 'api_exe', None)
-    if executable is not None:
-        executable = executable.resolve(strict=True)
-        assembly = executable.with_suffix('.dll')
-        if executable.name.lower() != 'vrcommand.api.exe' or not executable.is_file() or not assembly.is_file():
-            raise ValueError('Use VrCommand.Api.exe alongside VrCommand.Api.dll from the Windows management package')
-        return [str(executable)], executable.parent, assembly
-
-    assembly = getattr(args, 'api_dll', None) or Path(os.environ.get('VR_COMMAND_API_DLL',
-        ROOT / 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll'))
-    dotnet = shutil.which('dotnet')
-    if not dotnet or not assembly.is_file():
-        raise RuntimeError('Build the API and install dotnet, or specify --api-exe')
-    assembly = assembly.resolve(strict=True)
-    return [str(Path(dotnet).resolve(strict=True)), str(assembly)], ROOT, assembly
 
 
 def verify_player(args, *, python_listener=False):
@@ -179,10 +160,7 @@ class Venue:
         raise RuntimeError('Timed out: ' + label)
 
     def start(self):
-        from windows_firewall import require_silent_windows_launch
-
-        command, cwd, assembly = api_command(self.args)
-        require_silent_windows_launch(command[0])
+        command, cwd, assembly = local_api.checked_api_command(self.args)
         with assembly.open('rb') as binary:
             assembly_sha256 = hashlib.file_digest(binary, 'sha256').hexdigest()
         environment = {k: v for k, v in os.environ.items() if not k.lower().startswith('operatorkeys__') and k.lower() not in ['operatorkeyfile', 'playerticketsigningkey']}

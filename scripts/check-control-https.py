@@ -203,6 +203,7 @@ def main():
     folder = args.package.resolve()
     manifest = legacy.package.verify(folder)
     assert manifest['launcherSourceSha256'] == legacy.sha(ROOT / 'tools/WindowsControlLauncher/ControlLauncher.cs')
+    require_silent_windows_launch(folder / 'Runtime/VrCommand.Api.exe')
     server_folder = args.server_package.resolve() if args.server_package else None
     if server_folder:
         load_module('package-windows-server').verify(server_folder)

@@ -13,14 +13,21 @@ import socket
 import subprocess
 import tempfile
 import time
+from types import SimpleNamespace
 from uuid import uuid4
 import urllib.error
 import urllib.request
 
 from world_test_socket import WebSocket
+from local_api import checked_api_command
+from windows_firewall import WindowsFirewallLaunchError
 
 ROOT = Path(__file__).resolve().parents[1]
-API = os.environ.get("VR_COMMAND_API_DLL", str(ROOT / "src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll"))
+api_exe = os.environ.get("VR_COMMAND_API_EXE")
+try:
+    api_command, api_cwd, _ = checked_api_command(SimpleNamespace(api_exe=Path(api_exe) if api_exe else None))
+except WindowsFirewallLaunchError as error:
+    raise SystemExit(str(error)) from None
 RELAY = os.environ.get("VR_COMMAND_WORLD_RELAY_DLL", str(ROOT / "tools/VrCommand.WorldRelay/bin/Release/net10.0/VrCommand.WorldRelay.dll"))
 RECOVERY = [os.environ["VR_COMMAND_RECOVERY_EXE"]] if "VR_COMMAND_RECOVERY_EXE" in os.environ else ["dotnet", RELAY]
 count = 0
@@ -70,7 +77,7 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
             return json.load(response)
 
     def start():
-        process = subprocess.Popen(["dotnet", API, "--urls", base], cwd=ROOT, env=environment, stdout=log, stderr=log)
+        process = subprocess.Popen([*api_command, "--urls", base], cwd=api_cwd, env=environment, stdout=log, stderr=log)
         for _ in range(150):
             try:
                 with urllib.request.urlopen(base + "/health", timeout=.5):

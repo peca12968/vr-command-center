@@ -1,9 +1,20 @@
 """Exercise the actual API's opt-in private stdin lifetime. No HTTP shutdown endpoint or historical data."""
 import argparse,json,os,secrets,socket,subprocess,threading,time,urllib.error,urllib.request,uuid
 from pathlib import Path
+from types import SimpleNamespace
+
+from local_api import checked_api_command
+from windows_firewall import WindowsFirewallLaunchError
+
 ROOT=Path(__file__).resolve().parents[1]
 def main():
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--api',type=Path,default=Path(os.environ.get('VR_COMMAND_API_DLL',ROOT/'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')));parser.add_argument('--runtime-root',type=Path);args=parser.parse_args()
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--api',type=Path,default=os.environ.get('VR_COMMAND_API_EXE'));parser.add_argument('--runtime-root',type=Path);args=parser.parse_args()
+    is_exe = args.api is not None and args.api.suffix.lower() == '.exe'
+    try:
+        command, api_cwd, _ = checked_api_command(SimpleNamespace(
+            api_exe=args.api if is_exe else None, api_dll=None if is_exe else args.api))
+    except WindowsFirewallLaunchError as error:
+        parser.exit(1, f'{error}\n')
     out=ROOT/'artifacts/control-pipe'/('run-'+uuid.uuid4().hex);out.mkdir(parents=True,exist_ok=False)
     runtime=(args.runtime_root.resolve()/out.name) if args.runtime_root else out/'runtime';runtime.mkdir(parents=True,exist_ok=False);rows=[]
     for mode in ('default','invalid','stop','eof','oversized','closed-pipes'):
@@ -13,8 +24,7 @@ def main():
         env={k:v for k,v in os.environ.items() if not k.lower().startswith('operatorkeys__') and k.lower() not in ('operatorkeyfile','playerticketsigningkey','controlpipetoken')}
         env.update(OperatorKeyFile=str(keyfile),DataDirectory=str(data/'missions'),SessionDataDirectory=str(data/'sessions'),Logging__LogLevel__Default='Warning')
         if mode!='default':env['ControlPipeToken']=nonce
-        command=([str(args.api.resolve())] if args.api.suffix.lower()=='.exe' else ['dotnet',str(args.api.resolve())])+['--urls',f'http://127.0.0.1:{port}']
-        process=subprocess.Popen(command,cwd=ROOT,env=env,stdin=subprocess.DEVNULL if mode=='default' else subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+        process=subprocess.Popen([*command,'--urls',f'http://127.0.0.1:{port}'],cwd=api_cwd,env=env,stdin=subprocess.DEVNULL if mode=='default' else subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
         ready=threading.Event();logs=[];ready_count=[0]
         def output():
             for raw in process.stdout:

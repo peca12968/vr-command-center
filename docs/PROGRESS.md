@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 無人值守的管理 API 與 Unity 測試
+
+- 修正 Unity 冒煙、入場及管理 API 測試啟動前的查核。預設 `dotnet.exe` 在本機私人網路缺少涵蓋的防火牆規則，五個入口實測均在啟動前以代碼 1 結束。三個新解壓的 0.50.12 遊戲路徑也由防火牆查核擋下。管理包 HTTPS 和重啟驗證同樣先查核包內實際的 API 執行檔。 [操作說明](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
+- 使用既有已通過防火牆查核的 0.31.184 管理包和 Windows 0.50.12 遊戲，完成兩席合併 117 格、入場及重連 8 項／361 格、管理服務程序 6 項、HTTP 825 項、串流回放 138 項。測試在迴環位址背景執行，管理服務及遊戲程序已結束。測試後讀取三種 Windows 網路設定檔，防火牆及通知均為啟用。 [兩席合併](../artifacts/unity-player-smoke/20261116-114334-aa7669d2/summary.json) · [入場及重連](../artifacts/unity-admission/20261116-114458-b3e4adf3/summary.json) · [程序測試](../artifacts/control-pipe/run-10286f497f734f0dbbdbddcd203fc146/checks.json)
+- 桌面場館另以同一組程式完成五房隔離、房間重用和後續合併的 6 項查核。7 場皆完成回放及戰績封存，活動場次為零。 [五房背景測試](../artifacts/desktop-venue/20261116-114952-9942dba8/stage.json)
+
 ## 2026-11-16 Windows 與 Quest 0.50.12 同源發行
 
 - Unity 套件管理器透過本機 IPC 連接 Editor。本輪抽查該程序時，TCP 監聽與 UDP 端點均為零。走完整套件流程後，八項 VIVE 專項和全部 285 項 EditMode 測試通過，失敗和跳過均為零。前兩輪各有兩項失敗，分別停在 Editor 緩衝區的動作讀值及部分姿態事件的座標檢查。最後於 Dynamic 更新核對完整姿態事件。 [IPC 紀錄](../artifacts/vive-release-05012-fb9bcabe/upm-ipc-readback.json) · [完整測試](../artifacts/vive-release-05012-fb9bcabe/complete-pose-events/full.xml)

@@ -9,12 +9,13 @@ import importlib.util
 from pathlib import Path
 import sys
 from live_world_frame import read_live_frame
+from local_api import add_api_arguments, checked_api_command
 from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
 
 root=Path(__file__).resolve().parent.parent
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--player-exe',type=Path,default=Path(os.environ.get('VR_COMMAND_UNITY_PLAYER',root/'artifacts/desktop/VrCommand.exe')))
-parser.add_argument('--api-dll',type=Path,default=Path(os.environ.get('VR_COMMAND_API_DLL',root/'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
+add_api_arguments(parser)
 parser.add_argument('--seconds',type=int,default=8,choices=range(8,61))
 parser.add_argument('--linked',action='store_true',help='Link all five rooms, with one real desktop client in room 1 and another in room 5')
 parser.add_argument('--maximum-source-age-ms',type=int,default=1500)
@@ -23,10 +24,11 @@ storage.add_argument('--runtime-root',type=Path,help='Directory for new runtime 
 storage.add_argument('--runtime-on-artifact-drive',action='store_true',help='Use the artifact drive for active journals to test that storage')
 args=parser.parse_args()
 if os.name!='nt': raise RuntimeError('This fixture requires a Windows Unity player')
-if not args.player_exe.is_file() or not args.api_dll.is_file(): raise RuntimeError('Build the current Unity Desktop player and API before running this fixture')
+if not args.player_exe.is_file(): raise RuntimeError('Build the current Unity Desktop player before running this fixture')
 if not 500<=args.maximum_source_age_ms<=10000: raise ValueError('Source age threshold must be 500–10000 ms')
 try:
     require_silent_windows_launch(args.player_exe)
+    api_command, api_cwd, _ = checked_api_command(args)
 except WindowsFirewallLaunchError as error:
     parser.exit(1, f'{error}\n')
 directory=root/'artifacts/unity-player-smoke'/(time.strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:8])
@@ -82,7 +84,7 @@ def wait_for(predicate,timeout,label):
         time.sleep(.25)
     raise RuntimeError('Timed out: '+label)
 try:
-    api=subprocess.Popen(['dotnet',str(args.api_dll.resolve()),'--urls',base],cwd=root,env=environment,stdout=api_log,stderr=api_log,creationflags=subprocess.CREATE_NO_WINDOW)
+    api=subprocess.Popen([*api_command,'--urls',base],cwd=api_cwd,env=environment,stdout=api_log,stderr=api_log,creationflags=subprocess.CREATE_NO_WINDOW)
     processes.append(api)
     wait_for(lambda:request('/health'),20,'isolated API')
     mission=request('/api/missions',{'name':'Unity desktop native integration - Simulation','briefing':'Two actual desktop clients; synthetic head/hand poses, no headset','durationSeconds':120,'environment':{'mode':'VR','weather':'Storm','timeOfDay':'Night','lightning':True},'enemies':{'count':2,'behavior':'Advance','autoAttack':True},'props':[]})

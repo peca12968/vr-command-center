@@ -47,21 +47,26 @@ def source_fingerprint():
 
 def main():
     from admission_witness import BeginWitness, observer_fingerprint
-    from windows_firewall import require_silent_windows_launch
+    from local_api import add_api_arguments, checked_api_command
+    from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--interactive', action='store_true')
     parser.add_argument('--server-trace', action='store_true', help='Opt in to the existing bounded Windows server timing trace; explicitly finish it before stopping its process')
     parser.add_argument('--journal-trace', action='store_true', help='With --server-trace, opt in to bounded lock / write / durable-flush stages on a dedicated Windows server')
     parser.add_argument('--runtime-root', type=Path, help='Fresh isolated SQLite / journals on an explicit SSD root; keep originals and copy a closed snapshot to artifacts')
     parser.add_argument('--player-exe', type=Path, default=Path(os.environ.get('VR_COMMAND_UNITY_PLAYER', ROOT / 'artifacts/desktop/VrCommand.exe')))
-    parser.add_argument('--api-dll', type=Path, default=Path(os.environ.get('VR_COMMAND_API_DLL', ROOT / 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
+    add_api_arguments(parser)
     args = parser.parse_args()
     if args.journal_trace and not args.server_trace: parser.error('--journal-trace requires --server-trace')
-    if os.name != 'nt' or not args.player_exe.is_file() or not args.api_dll.is_file(): parser.error('Build the Windows player and API first')
+    if os.name != 'nt' or not args.player_exe.is_file(): parser.error('Build the Windows player first')
     receipt = json.loads((args.player_exe.parent / 'build-receipt.json').read_text())
     if receipt['target'] != 'StandaloneWindows64' or receipt['sourceFingerprint'] != source_fingerprint():
         parser.error('Player receipt does not match current sources; build Desktop before this check')
-    require_silent_windows_launch(args.player_exe)
+    try:
+        require_silent_windows_launch(args.player_exe)
+        api_command, api_cwd, _ = checked_api_command(args)
+    except WindowsFirewallLaunchError as error:
+        parser.exit(1, f'{error}\n')
     directory = ROOT / 'artifacts/unity-admission' / (time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
     directory.mkdir(parents=True)
     runtime_directory = directory if args.runtime_root is None else args.runtime_root.resolve() / directory.name
@@ -178,7 +183,7 @@ def main():
 
     try:
         stage('starting')
-        api = subprocess.Popen(['dotnet', str(args.api_dll.resolve()), '--urls', base], cwd=ROOT, env=environment,
+        api = subprocess.Popen([*api_command, '--urls', base], cwd=api_cwd, env=environment,
                                stdout=api_log, stderr=api_log, creationflags=subprocess.CREATE_NO_WINDOW)
         live['api'] = api; all_processes.append(api)
         wait_for(lambda: request('/health'), 30, 'API')
