@@ -19,10 +19,19 @@ const LIVE_IDLE_MILLISECONDS = 6000;
 const CLIP_LOOP_DELAY = 500;
 const RECORDING_PAGE_SIZE = 30;
 const recordingId = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+const replayScoreFields = ['ammoUsed', 'shotsHit', 'kills', 'hitsReceived', 'damageTaken', 'accuracyPercent', 'health'];
 const hasRecordedPose = player => player.connected && (player.rig.kind === 'Simulated' || player.rig.kind === 'Tracked');
 const isBeginWitness = witness => ['tracking-begin', 'participation-begin', 'tracked-vr-start'].includes(witness?.kind);
 const witnessLabels = { enemies: '敵軍', environment: '環境', 'tracking-begin': '追蹤開場', 'participation-begin': '有效姿態開場',
   'pose-interruption': '姿態中斷', 'tracked-vr-start': '本場追蹤開場', 'blocked-begin': '開場受阻' };
+
+function matchesPlayerReplayScore(statistics, target) {
+  const score = target.playerScore;
+  if (!Array.isArray(statistics) || !Number.isInteger(score?.roomId)) return false;
+  const rows = statistics.filter(row => row?.playerId === target.playerId);
+  return rows.length === 1 && rows[0].roomId === score.roomId && rows[0].name === target.playerName
+    && replayScoreFields.every(field => Number.isFinite(score[field]) && rows[0][field] === score[field]);
+}
 
 export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips, download) {
   let active = false, scene, controller, epoch = 0, listEpoch = 0, listController, info, frame, geometry = '', mode = '', connected = false, received = 0;
@@ -1166,6 +1175,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
                 if (!hasHeader || playerFrame || data.packet.sequence !== target.throughSequence
                   || data.packet.frame.phase !== 'Ended' || data.packet.throughCombatSequence !== target.throughCombatSequence)
                   throw new Error('回應的最終快照或戰鬥封存序號不同。');
+                if (!matchesPlayerReplayScore(data.statistics, target)) throw new Error('回應的個人封存戰績不同。');
                 playerFrame = data;
                 continue;
               }

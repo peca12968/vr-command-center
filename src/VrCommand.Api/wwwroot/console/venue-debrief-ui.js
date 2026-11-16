@@ -82,7 +82,7 @@ export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) 
     const { room, throughCombatSequence } = player;
     openReplay({ mode: 'replay', complete: true, sessionId: room.sessionId, roomId: room.roomId,
       streamId: room.streamId, throughSequence: room.worldSequence, throughCombatSequence,
-      playerId: player.playerId, playerName: player.name });
+      playerId: player.playerId, playerName: player.name, playerScore: { ...player.score, roomId: room.roomId } });
   }
 
   function render() {

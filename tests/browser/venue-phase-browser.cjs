@@ -14,6 +14,31 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
   const evidence = page.locator('#venue-phase-evidence');
   const roomPhase = room => page.locator(`[data-room-venue-phase="${room}"]`);
   const run = (id, action) => api(`/sessions/${id}/commands`, 'POST', { commandId: randomUUID(), action });
+  async function rejectReplayStatistics(button, sessionId, playerId, change, label) {
+    const route = url => url.pathname === `/api/sessions/${sessionId}/world/watch` && url.searchParams.get('mode') === 'replay';
+    const substituted = async request => {
+      const response = await request.fetch();
+      let changed = false;
+      const body = (await response.text()).replace(/event: frame\ndata: (.+)/, (_, raw) => {
+        const data = JSON.parse(raw);
+        const player = data.statistics.find(row => row.playerId === playerId);
+        assert.ok(player);
+        change(player);
+        changed = true;
+        return 'event: frame\ndata: ' + JSON.stringify(data);
+      });
+      assert.ok(changed);
+      await request.fulfill({ response, body });
+    };
+    await page.route(route, substituted, { times: 1 });
+    try {
+      await button.click();
+      await page.waitForFunction(() => document.querySelector('#world-message').textContent.includes('個人封存戰績不同')
+        || document.querySelector('#world-review-player-scope').getClientRects().length > 0);
+      check((await page.locator('#world-message').textContent()).includes('個人封存戰績不同')
+        && await page.locator('#world-review-player-scope').isHidden() && await page.locator('#world-player').isHidden(), label);
+    } finally { await page.unroute(route, substituted); }
+  }
   async function prepare(id, room, withSource, connected = false, reinforcementVersion = 0) {
     let snapshot = await api(`/sessions/${id}/players`, 'POST', { playerId: randomUUID(), roomId: room, name: 'Venue seat', headset: 'Quest3' });
     let publish;
@@ -248,6 +273,9 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     check(await review.inputValue() === '' && await openReview.isDisabled(), 'Switching rooms clears a previous personal review selection outside the scope');
     await reportRoom.selectOption('2');
     await review.selectOption(subject);
+    await rejectReplayStatistics(openReview, linked.id, subject, player => { player.playerId = randomUUID(); },
+      'A different archived player at the exact final frame prevents opening the personal replay');
+    await page.locator('#tab-operations').click();
     const scopedSearch = page.waitForResponse(response => new URL(response.url()).pathname === `/api/sessions/${linked.id}/world/event-frames`);
     await openReview.click();
     const searchQuery = new URL((await scopedSearch).url()).searchParams;
@@ -1097,9 +1125,15 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await page.setViewportSize({ width: 1440, height: 1080 });
     await detailPanel.screenshot({ path: path.join(screenshots, 'venue-debrief-seats.png') });
     const worldPath = `/api/sessions/${originalSession}/world`;
+    const replaySeat = page.locator(`[data-venue-debrief-replay="${missing.seat + 1}"]`);
+    await rejectReplayStatistics(replaySeat, originalSession, missing.id, player => { player.roomId = 5; },
+      'A changed player room at the sealed frame prevents opening the seat replay');
+    await page.locator('#tab-operations').click();
+    await showSeats(4).click();
+    await detailStatus.filter({ hasText: '已確認 1／2 席' }).waitFor();
     const watchSeat = page.waitForRequest(request => new URL(request.url()).pathname === worldPath + '/watch');
     const findSeat = page.waitForResponse(response => new URL(response.url()).pathname === worldPath + '/event-frames');
-    await page.locator(`[data-venue-debrief-replay="${missing.seat + 1}"]`).click();
+    await replaySeat.click();
     const watch = new URL((await watchSeat).url()).searchParams;
     const search = await findSeat;
     const personalFrames = await search.json();
@@ -1565,8 +1599,17 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
       assert.deepEqual(await fs.readFile(await downloaded.path()), csvBytes);
       await downloaded.saveAs(path.join(screenshots, `venue-${mode.toLowerCase()}-departed.csv`));
       check(true, `The ${mode} departed player download matches the original sealed personal CSV byte for byte`);
-      if (mode === 'Linked') await page.locator('#venue-departed-players').screenshot({ path: path.join(screenshots, 'venue-departed-players.png') });
-      await departureTable.getByRole('button', { name: `開啟房間 1 ${departed.name} 的個人回放` }).click();
+      const replayDeparture = departureTable.getByRole('button', { name: `開啟房間 1 ${departed.name} 的個人回放` });
+      if (mode === 'Linked') {
+        await page.locator('#venue-departed-players').screenshot({ path: path.join(screenshots, 'venue-departed-players.png') });
+        await rejectReplayStatistics(replayDeparture, first.running.id, departed.id, player => { player.ammoUsed++; },
+          'Changed rounds used at the sealed frame prevent opening the departed player replay');
+        await page.locator('#world-message').screenshot({ path: path.join(screenshots, 'venue-departed-replay-score-refused.png') });
+        await page.locator('#tab-operations').click();
+        await openDeparture.click();
+        await departureTable.waitFor();
+      }
+      await replayDeparture.click();
       await page.locator('#world-review-player-name').filter({ hasText: departed.name }).waitFor();
       check(await recording.inputValue() === first.running.id && await page.locator('#world-room').inputValue() === '1'
         && await page.locator('#venue-departed-players').isHidden(), `The ${mode} archived scores open the departed player in the original room and recording`);

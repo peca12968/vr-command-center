@@ -1256,7 +1256,7 @@ async function openVenueDepartures(batch, session, scope) {
         if (!current() || state.busy || state.pending) return;
         tab('world', { mode: 'replay', complete: true, sessionId: body.sessionId, streamId: body.streamId,
           roomId: player.roomId, throughSequence: body.worldSequence, throughCombatSequence: body.finalStreamSequence,
-          playerId: player.playerId, playerName: player.name });
+          playerId: player.playerId, playerName: player.name, playerScore: player });
       });
       return row([player.roomId, player.name, ...scores.map(key => player[key]), `${player.accuracyPercent}%`, player.health, csv, replay]);
     }));
