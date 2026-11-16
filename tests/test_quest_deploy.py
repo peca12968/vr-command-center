@@ -25,6 +25,16 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 CAPTURE_FIXTURE = ROOT / 'tests/fixtures/run-quest-capture.py'
+
+
+def posix_shell():
+    shell = shutil.which('sh')
+    if shell is None and os.name == 'nt':
+        git = Path(shutil.which('git')).resolve()
+        shell = str(git.parent.parent / 'bin/sh.exe')
+    return shell
+
+
 ADB_FIXTURE = r"""
 $remote = Join-Path $env:QUEST_TEST_ROOT 'remote'
 $installedApp = Join-Path $env:QUEST_TEST_ROOT 'installed-app'
@@ -98,10 +108,16 @@ switch ($args[2]) {
     }
     'shell' {
         switch ($args[3]) {
-            { $_.StartsWith('current=$(sha256sum ') } {
+            { $_.StartsWith('current=$(sha256sum ') -or $_.StartsWith('staged=$(sha256sum ') } {
                 if ($args.Count -ne 4) { exit 96 }
-                Set-Location -LiteralPath $env:QUEST_TEST_ROOT
-                & $env:QUEST_TEST_SH -c $args[3].Replace('/sdcard/Android/data/com.vrcommand.quest/files/', 'remote/')
+                $isConnection = $args[3].EndsWith("/vr-connection.json'")
+                if ($isConnection -and $env:QUEST_TEST_FAIL -eq 'config-move') { exit 1 }
+                Push-Location -LiteralPath $env:QUEST_TEST_ROOT
+                try { & $env:QUEST_TEST_SH -c $args[3].Replace('/sdcard/Android/data/com.vrcommand.quest/files/', 'remote/') }
+                finally { Pop-Location }
+                if ($LASTEXITCODE -eq 0 -and $isConnection -and $env:QUEST_TEST_FAIL -eq 'config-active-changed') {
+                    [IO.File]::AppendAllText((Join-Path $remote 'vr-connection.json'), "`n")
+                }
                 exit $LASTEXITCODE
             }
             'getprop' {
@@ -127,15 +143,6 @@ switch ($args[2]) {
                 }
                 exit 98
             }
-            'mv' {
-                $name = $args[5].Split('/')[-1]
-                if ($name -eq 'vr-connection.json' -and $env:QUEST_TEST_FAIL -eq 'config-move') { exit 1 }
-                Move-Item -Force -LiteralPath (Join-Path $remote ($args[4].Split('/')[-1])) -Destination (Join-Path $remote $name)
-                if ($name -eq 'vr-connection.json' -and $env:QUEST_TEST_FAIL -eq 'config-active-changed') {
-                    [IO.File]::AppendAllText((Join-Path $remote $name), "`n")
-                }
-                exit 0
-            }
             'sha256sum' {
                 if ($args[4] -ceq '/data/app/fixture/base.apk' -and $env:QUEST_TEST_RELEASE_HASH) {
                     $hash = if ($env:QUEST_TEST_FAIL -eq 'installed-apk-mismatch') { 'f' * 64 } else { $env:QUEST_TEST_RELEASE_HASH }
@@ -143,6 +150,9 @@ switch ($args[2]) {
                 }
                 $file = Join-Path $remote ($args[4].Split('/')[-1])
                 $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+                if ($env:QUEST_TEST_FAIL -ceq 'alignment-late-stage-changed' -and $args[4] -cmatch '/vr-room-alignment-[a-f0-9]+\.tmp$') {
+                    [IO.File]::AppendAllText($file, "`n")
+                }
                 "$hash  $($args[4])"
                 exit 0
             }
@@ -163,6 +173,11 @@ switch ($args[2]) {
             }
             'am' {
                 if ($env:QUEST_TEST_FAIL -eq 'force-stop') { exit 1 }
+                if ($args[4] -ceq 'force-stop' -and $env:QUEST_TEST_FAIL -ceq 'config-changed-at-stop') {
+                    $staging = Get-ChildItem -LiteralPath $remote -Filter 'vr-connection-*.tmp' -File
+                    if (@($staging).Count -ne 1) { exit 96 }
+                    [IO.File]::AppendAllText($staging.FullName, "`n")
+                }
                 if ($args[4] -ceq 'start') {
                     $target = '--user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n com.vrcommand.quest/com.unity3d.player.UnityPlayerActivity'
                     $last = $args.Count - 1
@@ -330,7 +345,8 @@ class QuestDeployTests(unittest.TestCase):
 
     def run_script(self, *flags, failure='', alter=False, release_hash='', management_key=None):
         env = {**os.environ, 'QUEST_TEST_ROOT':str(self.root), 'QUEST_TEST_FAIL':failure,
-               'QUEST_TEST_ALTER_ALIGNMENT':str(self.plan) if alter else '', 'QUEST_TEST_RELEASE_HASH':release_hash}
+               'QUEST_TEST_ALTER_ALIGNMENT':str(self.plan) if alter else '', 'QUEST_TEST_RELEASE_HASH':release_hash,
+               'QUEST_TEST_SH': posix_shell()}
         if management_key is not None:
             env['VR_COMMAND_MASTER_KEY'] = management_key
         return subprocess.run(['pwsh','-NoProfile','-NonInteractive','-File',str(self.script),
@@ -731,11 +747,7 @@ class QuestDeployTests(unittest.TestCase):
         return current, installed, fresh, identities, alignment
 
     def run_refresh(self, failure='', *, management_api=None, management_key=None):
-        shell = shutil.which('sh')
-        if shell is None and os.name == 'nt':
-            git = Path(shutil.which('git')).resolve()
-            shell = str(git.parent.parent/'bin/sh.exe')
-        env = {**os.environ, 'QUEST_TEST_ROOT': str(self.root), 'QUEST_TEST_FAIL': failure, 'QUEST_TEST_SH': shell}
+        env = {**os.environ, 'QUEST_TEST_ROOT': str(self.root), 'QUEST_TEST_FAIL': failure, 'QUEST_TEST_SH': posix_shell()}
         if management_api is not None:
             env['VR_COMMAND_MASTER_KEY'] = management_key
         management = ['-ManagementApi', management_api] if management_api is not None else []
@@ -929,7 +941,7 @@ class QuestDeployTests(unittest.TestCase):
         alignment_readback = next(i for i, line in enumerate(commands) if 'shell sha256sum' in line and line.endswith(f'/vr-room-alignment-{digest}.json'))
         staged_config = next(i for i, line in enumerate(commands) if 'shell sha256sum' in line and '/vr-connection-' in line and line.endswith('.tmp'))
         stop = next(i for i, line in enumerate(commands) if 'shell am force-stop' in line)
-        activate = next(i for i, line in enumerate(commands) if 'shell mv' in line and line.endswith('/vr-connection.json'))
+        activate = next(i for i, line in enumerate(commands) if 'shell staged=$(sha256sum ' in line and line.endswith("/vr-connection.json'"))
         verified = next(i for i, line in enumerate(commands) if 'shell sha256sum' in line and line.endswith('/vr-connection.json'))
         self.assertEqual(sorted({alignment_readback, staged_config, stop, activate, verified}),
                          [alignment_readback, staged_config, stop, activate, verified])
@@ -990,7 +1002,7 @@ class QuestDeployTests(unittest.TestCase):
                 self.assertFalse(any('shell monkey' in line for line in commands))
                 if fault == 'force-stop':
                     self.assertTrue(any('shell sha256sum' in line and '/vr-connection-' in line for line in commands))
-                    self.assertFalse(any('shell mv' in line and line.endswith('/vr-connection.json') for line in commands))
+                    self.assertFalse(any('shell staged=$(sha256sum ' in line and line.endswith("/vr-connection.json'") for line in commands))
 
     def test_failed_or_wrong_device_identification_never_installs(self):
         self.provision_apk()
@@ -1002,7 +1014,11 @@ class QuestDeployTests(unittest.TestCase):
     def test_deployment_refuses_altered_staged_or_active_files_before_launch(self):
         self.provision_apk()
         active = self.remote / 'vr-connection.json'
+        original_alignment = self.plan.read_bytes()
+        alignment = self.remote / f'vr-room-alignment-{hashlib.sha256(original_alignment).hexdigest()}.json'
+        alignment.write_bytes(original_alignment)
         for fault, description in (('alignment-stage-changed', 'Room alignment file'),
+                                   ('alignment-late-stage-changed', 'Room alignment file'),
                                    ('config-stage-changed', 'Player connection file'),
                                    ('config-active-changed', 'Player connection file')):
             with self.subTest(fault=fault):
@@ -1014,7 +1030,24 @@ class QuestDeployTests(unittest.TestCase):
                 if fault.endswith('stage-changed'):
                     self.assertEqual(b'previous configuration', active.read_bytes())
                     self.assertNotIn('shell am force-stop', commands)
+                self.assertEqual(original_alignment, alignment.read_bytes())
                 self.assertFalse(list(self.remote.glob('*.tmp')))
+                self.assertNotIn('shell monkey', commands)
+
+    def test_connection_changed_after_staged_verification_preserves_active_file(self):
+        self.provision_apk()
+        for run in (self.run_script, self.run_mr):
+            with self.subTest(mode=run.__name__):
+                self.commands.unlink(missing_ok=True)
+                active = self.remote / 'vr-connection.json'
+                original = b'{"role":"Client","address":"192.168.1.11","port":7777,"joinTicket":"previous"}'
+                active.write_bytes(original)
+                result = run('-Serial', 'fixture', failure='config-changed-at-stop')
+                self.assert_rejected(result, 'Player connection file could not be verified')
+                self.assertTrue(active.read_bytes() == original, 'Late mutation replaced the original connection file')
+                self.assertFalse(list(self.remote.glob('*.tmp')))
+                commands = self.commands.read_text(encoding='utf-8')
+                self.assertIn('-t 41 shell am force-stop com.vrcommand.quest', commands)
                 self.assertNotIn('shell monkey', commands)
 
 
@@ -2553,6 +2586,7 @@ else:
             ('alignment-stage-changed', 'file-verification-failed', 'stage-alignment'),
             ('force-stop', 'deployment-failed', 'stop-game'),
             ('config-move', 'deployment-failed', 'activate-connection'),
+            ('config-changed-at-stop', 'file-verification-failed', 'activate-connection'),
             ('config-active-changed', 'file-verification-failed', 'verify-active-connection'),
             ('launch', 'deployment-failed', 'launch-game'),
         )
@@ -2768,11 +2802,17 @@ else:
                              'VR_COMMAND_MASTER_KEY': 'PRIVATE_MASTER_CANARY', 'VR_QUEST_FLEET_FAULTS': json.dumps(faults or {}),
                              'VR_QUEST_FLEET_TRANSPORT_BASE': str(transport_base)})
 
-                first = invoke(faults={'fixture-02': 'config-active-changed'})
+                previous = self.root / 'fixture-02' / 'vr-connection.json'
+                previous.parent.mkdir()
+                original_connection = b'{"fixture":"previous connection"}'
+                previous.write_bytes(original_connection)
+                first = invoke(faults={'fixture-02': 'config-changed-at-stop'})
                 self.assertEqual(1, first.returncode, first.stderr)
                 interrupted = json.loads(first.stdout)
                 self.assertEqual(['launch-requested','file-verification-failed','not-attempted'],
                                  [row['status'] for row in interrupted['devices']])
+                self.assertEqual('activate-connection', interrupted['devices'][1]['failedStep'])
+                self.assertEqual(original_connection, previous.read_bytes())
                 self.assertEqual(hashlib.sha256(original_bytes).hexdigest(), interrupted['retry']['venueSha256'])
                 first_report.write_text(first.stdout, encoding='utf-8')
                 done_config = self.root/'fixture-01/vr-connection.json'
@@ -2982,7 +3022,8 @@ else:
         self.assertEqual([True] * 3 + [None] * (count - 3), [row.get('filesVerified') for row in report['devices']])
         self.assertEqual([None] * 3 + [failed_step] + [None] * (count - 4), [row.get('failedStep') for row in report['devices']])
         expected_write_checks = 6 if fault in ('identity-changed', 'apk-changed') else 7
-        if fault in ('force-stop', 'config-move', 'config-active-changed', 'launch', 'source-stale-after-staging', 'disconnect-after-staging'):
+        if fault in ('force-stop', 'config-move', 'config-changed-at-stop', 'config-active-changed', 'launch',
+                     'source-stale-after-staging', 'disconnect-after-staging'):
             expected_write_checks += 1
         self.assertEqual(['/api/mr-deployment/venue-check', f'/api/sessions/{session}/connection-endpoint']
                          + ['/api/mr-deployment/venue-check'] * expected_write_checks, calls)
@@ -3012,12 +3053,12 @@ else:
             self.assertTrue(all('admissionId' not in row for row in report['devices'][3:]))
             self.assertEqual(2, sum(line.startswith('-s fixture-04 shell pm path ') for line in commands))
             self.assertFalse(any(line.startswith('-s fixture-04 shell mkdir ') for line in commands))
-        self.assertEqual(fault in ('force-stop', 'config-move', 'config-active-changed', 'launch'),
+        self.assertEqual(fault in ('force-stop', 'config-move', 'config-changed-at-stop', 'config-active-changed', 'launch'),
                          any(line.startswith('-s fixture-04 shell am force-stop ') for line in commands))
         if fault == 'source-stale-after-staging':
             self.assertTrue(any(line.startswith('-s fixture-04 shell sha256sum ') and '/vr-connection-' in line for line in commands))
             self.assertTrue(any(line.startswith('-s fixture-04 shell rm -f ') and '/vr-connection-' in line for line in commands))
-            self.assertFalse(any(line.startswith('-s fixture-04 shell mv ') and line.endswith('/vr-connection.json') for line in commands))
+            self.assertFalse(any(line.startswith('-s fixture-04 shell staged=$(sha256sum ') and line.endswith("/vr-connection.json'") for line in commands))
         if fault == 'identity-changed':
             self.assertEqual(['-s fixture-04 shell pm list packages -e --show-versioncode --user current com.vrcommand.quest',
                               '-s fixture-04 shell getprop ro.serialno',
@@ -3053,7 +3094,7 @@ else:
         apk.write_bytes(b'mock APK')
         remote = self.root / 'remote'
         remote.mkdir()
-        environment = {**os.environ, 'QUEST_TEST_ROOT':str(self.root),
+        environment = {**os.environ, 'QUEST_TEST_ROOT':str(self.root), 'QUEST_TEST_SH': posix_shell(),
                        'QUEST_TEST_ALTER_ALIGNMENT':str(self.root / 'quest-mr-venue.zip')}
         result = self.run_bundle(files, '-RoomId', '4', '-Seat', '3', '-Serial', 'fixture', '-AdbPath', str(adb),
                                  environment=environment, script=script)
@@ -3173,7 +3214,8 @@ else:
             try:
                 result = self.run_bundle(files, '-RoomId', '4', '-Seat', '3', '-Serial', 'fixture', '-AdbPath', str(adb),
                     '-ManagementApi', f'http://127.0.0.1:{server.server_port}', script=script,
-                    environment={**os.environ, 'QUEST_TEST_ROOT': str(self.root), 'VR_COMMAND_MASTER_KEY': 'PRIVATE_MASTER_CANARY'})
+                    environment={**os.environ, 'QUEST_TEST_ROOT': str(self.root), 'QUEST_TEST_SH': posix_shell(),
+                                 'VR_COMMAND_MASTER_KEY': 'PRIVATE_MASTER_CANARY'})
             finally:
                 server.shutdown()
                 thread.join(timeout=5)

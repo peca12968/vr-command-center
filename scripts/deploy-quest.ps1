@@ -1416,7 +1416,13 @@ function Publish-QuestFile([string[]]$Target, [string]$Local, [string]$Staging, 
             if ($LASTEXITCODE -ne 0) { throw 'Could not confirm ticket replacement. Check the selected device and read its current configuration before retrying.' }
         } else {
             if ($null -ne $ConnectionDeployment) { $ConnectionDeployment.Step = 'activate-connection' }
-            Invoke-QuestAdb ($Target + @('shell', 'mv', $Staging, $Destination)) | Out-Null
+            # The staged bytes may change while checking the live source or stopping the app.
+            $command = 'staged=$(sha256sum ''{0}'') && [ "${{staged%% *}}" = ''{1}'' ] || exit 42; mv -f ''{0}'' ''{2}''' `
+                -f $Staging, $stagedHash, $Destination
+            Invoke-QuestAdb ($Target + @('shell', $command)) *> $null
+            if ($LASTEXITCODE -eq 42) {
+                throw [IO.InvalidDataException]::new("$Description could not be verified on the selected Quest.")
+            }
             if ($LASTEXITCODE -ne 0) { throw "$Description could not be activated." }
             if ($null -ne $ConnectionDeployment) { $ConnectionDeployment.Step = 'verify-active-connection' }
             Confirm-QuestFileHash $Target $Destination $stagedHash $Description

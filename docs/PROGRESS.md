@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 Quest 部署切換前重新核對暫存檔
+
+- 舊版在遊戲停止階段改動暫存連線檔後，VR 與 MR 皆已覆寫正式檔才回報驗證失敗。新版由裝置端在更名前再次核對暫存檔 SHA-256，核對未通過就保留原檔。套用同一規則到 MR 校正檔。批次報告沿用 `file-verification-failed` 與 `activate-connection`，原成功席位可在重試時保留。 [舊版反例](../artifacts/quest-activation-guard-20261116/before.log) · [部署說明](QUEST3.md#啟動前核對裝置檔案)
+- 使用實際 Windows SDK 的 ADB 用戶端連上獨立的模擬裝置，在 PowerShell 7 與 Windows PowerShell 5.1 各跑正常與晚到改檔。兩種終端都收到遠端退出碼 42，錯誤案例保留原正式檔並清理暫存檔。原 Quest APK 版碼 77 雜湊相符。目前 USB 列舉有一個媒體傳輸介面，USB 偵錯介面仍待可用。 [原生 ADB 結果](../artifacts/quest-activation-guard-20261116/native-adb-readback.json) · [USB 快照](../artifacts/quest-activation-guard-20261116/usb-status.json)
+- 首輪完整回歸的兩個單席模擬缺少 POSIX shell 路徑。補上測試環境後，4 項專項、78 項部署回歸套件及 3 項 USB 檢查全部通過，部署套件有 1 個 Windows PowerShell 腳本政策子案例略過。五房批次測試確認保留原成功前綴、重試保留原報告及僅處理未完成席位。 [完整部署回歸](../artifacts/quest-activation-guard-20261116/full-final.log) · [專項檢查](../artifacts/quest-activation-guard-20261116/focused-final.log)
+
 ## 2026-11-16 管理服務重啟後自動恢復觀戰
 
 - 管理台 0.31.213 在中斷後最多重試八次，受 20 秒窗口限制。舊版在同一實測流程耗盡重試後留在第 40 格，遊戲仍恢復並完成封存。新版在五房獨立及合併各 25 個同機桌面客戶端的場次中恢復第 4 房觀戰，沿用同一頁與原鏡頭，分別從第 71 格續到 202、第 46 格續到 155。獨立用主控，合併用第 4 房房控的限房串流。場館測試使用既有 0.31.184 管理包與 1.23.0 伺服器包，瀏覽器載入 0.31.213 解壓包網頁並直連實際 API。兩輪共通過 144 項、收到 50 份戰績確認及核對 1,364 幀完整回放。 [兩輪實測與舊版對照](../artifacts/observer-management-restart-031213/readback.json)

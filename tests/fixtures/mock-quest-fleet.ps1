@@ -99,14 +99,21 @@ switch -CaseSensitive ($args[3]) {
         else { "package:com.vrcommand.quest versionCode:$versionCode" }
         exit 0
     }
-    'mv' {
-        $name = $args[5].Split('/')[-1]
-        if ($name -ceq 'vr-connection.json' -and $fault -ceq 'config-move') { exit 1 }
-        Move-Item -Force -LiteralPath (Join-Path $device ($args[4].Split('/')[-1])) -Destination (Join-Path $device $name)
-        if ($name -ceq 'vr-connection.json' -and $fault -ceq 'config-active-changed') {
-            [IO.File]::AppendAllText((Join-Path $device $name), "`n")
+    { $_.StartsWith('staged=$(sha256sum ') } {
+        if ($args.Count -ne 4) { exit 96 }
+        $isConnection = $args[3].EndsWith("/vr-connection.json'")
+        if ($isConnection -and $fault -ceq 'config-move') { exit 1 }
+        $shell = (Get-Command sh -ErrorAction SilentlyContinue).Source
+        if (-not $shell -and $env:OS -eq 'Windows_NT') {
+            $shell = Join-Path (Split-Path (Split-Path (Get-Command git).Source)) 'bin/sh.exe'
         }
-        exit 0
+        Push-Location -LiteralPath $device
+        try { & $shell -c $args[3].Replace('/sdcard/Android/data/com.vrcommand.quest/files/', './') }
+        finally { Pop-Location }
+        if ($LASTEXITCODE -eq 0 -and $isConnection -and $fault -ceq 'config-active-changed') {
+            [IO.File]::AppendAllText((Join-Path $device 'vr-connection.json'), "`n")
+        }
+        exit $LASTEXITCODE
     }
     'sha256sum' {
         $path = $args[4]
@@ -150,6 +157,11 @@ switch -CaseSensitive ($args[3]) {
     }
     'am' {
         if ($fault -ceq 'force-stop') { exit 1 }
+        if ($args[4] -ceq 'force-stop' -and $fault -ceq 'config-changed-at-stop') {
+            $staging = Get-ChildItem -LiteralPath $device -Filter 'vr-connection-*.tmp' -File
+            if (@($staging).Count -ne 1) { exit 96 }
+            [IO.File]::AppendAllText($staging.FullName, "`n")
+        }
         if ($args[4] -ceq 'start') {
             $activity = 'com.vrcommand.quest/com.unity3d.player.UnityPlayerActivity'
             $expected = "-W --user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n $activity --es com.vrcommand.quest.OPENXR_PROBE"
