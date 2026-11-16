@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-16 開場回條核對完整保存任務
+
+- 管理台 0.31.214 在建立單房、五房合併與五房獨立場次時，會保存送出當下選定的版本內容，並用它核對回條的原房間、版本資訊、任務簡報、時間、環境、敵軍及逐件物件的種類、座標與角度。回條資料不符時，畫面保留前一份已確認的結果，操作員可用原請求重試。 [操作方式](MISSION_VERSIONS.md#五房各自獨立) · [Windows 管理包](../artifacts/mission-launch-content-031214/VRCommand-ControlServer-0.31.214.zip)
+- 舊版對照重現五房獨立誤收變動的物件座標，以及五房合併誤收變動的物件角度。新版以解壓套件、本機 IPC 的實際 API 與 Chromium 通過 118 項檢查。涵蓋簡報與物件遭改動、同一請求識別重試、JSON 欄位重新排列、讀取歷史配置及保存修訂。另通過 119 項 Node 與 7 項封裝檢查。568 份封裝檔案已逐檔核對，兩場 API 均無 TCP／UDP 監聽並完成清理。 [回讀核對](../artifacts/mission-launch-content-031214/readback.json)
+
 ## 2026-11-16 Quest 部署切換前重新核對暫存檔
 
 - 舊版在遊戲停止階段改動暫存連線檔後，VR 與 MR 皆已覆寫正式檔才回報驗證失敗。新版由裝置端在更名前再次核對暫存檔 SHA-256，核對未通過就保留原檔。套用同一規則到 MR 校正檔。批次報告沿用 `file-verification-failed` 與 `activate-connection`，原成功席位可在重試時保留。 [舊版反例](../artifacts/quest-activation-guard-20261116/before.log) · [部署說明](QUEST3.md#啟動前核對裝置檔案)

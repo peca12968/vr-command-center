@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-16 管理台 0.31.214 的 Windows ZIP 為 53,394,941 位元組，SHA-256 `2226ccd0dc560183c07d445c5b23ae90f515759415aa526c85008a5d30d82477`。解壓後逐檔核對 568 筆。建立單房、五房合併及五房獨立場次時，管理台核對回條中的完整保存任務。 [管理包](../artifacts/mission-launch-content-031214/VRCommand-ControlServer-0.31.214.zip) · [開場操作](MISSION_VERSIONS.md#五房各自獨立)
+
 2026-11-16 管理台 0.31.213 的 Windows ZIP 為 53,394,282 位元組，SHA-256 `61d7cb125af8b0e00e13ba12823af7192cf976c2a62fcb060ec7dd41cf3bcee9`。解壓後逐檔核對 568 筆。即時觀戰在管理服務中斷後有 20 秒自動重連窗口。 [管理包](../artifacts/observer-management-restart-031213/VRCommand-ControlServer-0.31.213.zip) · [觀戰操作](WORLD_RECORDING.md)
 
 2026-11-16 管理台 0.31.212 的 Windows ZIP 為 53,393,741 bytes，SHA-256 `f6eab938633620da662ac77c5e7dd0eec70083ec01e669db1415ce09732d0780`。主控可直接查看五房 UDP 預檢的待補席位與原因。 [管理包](../artifacts/venue-udp-console-20261116-1654/VRCommand-ControlServer-0.31.212.zip) · [操作說明](EXTERNAL_CLIENTS.md#補測未完成的全館-udp-預檢)

@@ -1593,6 +1593,23 @@ function applyLiveSetting(kind, action, value) {
   if (expectedSettingSequence) return command(action, { [kind]: value, expectedSettingSequence }, null);
 }
 function loadClock() { if (state.session) { $('clock-auto-end').checked = state.session.missionClock?.autoEnd === true; state.clockSequence = state.session.sequence; } }
+function matchesPreparedSession(session, mode, roomIds, expected) {
+  const mission = session?.mission;
+  if (!archiveId.test(session?.id) || session.mode !== mode || !Array.isArray(session.roomIds)
+    || session.roomIds.length !== roomIds.length || !roomIds.every((roomId, index) => session.roomIds[index] === roomId)
+    || mission?.id !== expected.id || mission.schemaVersion !== expected.schemaVersion || mission.createdAtUtc !== expected.createdAtUtc)
+    return false;
+  const actual = mission.definition, original = expected.definition;
+  return actual?.name === original.name && actual.briefing === original.briefing && actual.durationSeconds === original.durationSeconds
+    && ['mode', 'weather', 'timeOfDay', 'lightning'].every(field => actual.environment?.[field] === original.environment[field])
+    && ['count', 'behavior', 'autoAttack'].every(field => actual.enemies?.[field] === original.enemies[field])
+    && Array.isArray(actual.props) && actual.props.length === original.props.length
+    && original.props.every((prop, index) => {
+      const saved = actual.props[index];
+      return saved?.assetId === prop.assetId && saved.yawDegrees === prop.yawDegrees
+        && ['x', 'y', 'z'].every(axis => saved.position?.[axis] === prop.position[axis]);
+    });
+}
 function renderIndependentReceipt(sessions = [], versions = []) {
   const rows = sessions.map((session, index) => {
     const row = element('tr'), title = element('th', `房間 ${index + 1}`);
@@ -1612,16 +1629,17 @@ async function createSession() {
   if (!placement.canLaunch()) { placement.scheduleLaunch(); notify('請先完成保存版本的場地檢查，再建立新場次。', true); return; }
   if (!plan.revision || !plan.available) { notify('請選取已保存的任務及空閒房間。', true); return; }
   const independentSet = plan.body.mode === 'IndependentSet';
-  const revisions = plan.mixed ? roomPlan.revisions() : independentSet ? plan.body.roomIds.map(() => plan.revision) : [];
-  const versions = revisions.map(({ mission, number }) => ({ id: mission.id, number, name: mission.definition.name,
-    durationSeconds: mission.definition.durationSeconds, environment: mission.definition.environment, enemies: mission.definition.enemies }));
+  const revisions = plan.mixed ? roomPlan.revisions() : independentSet ? plan.body.roomIds.map(() => plan.revision) : [plan.revision];
+  const versions = structuredClone(revisions.map(({ mission, number }) => ({ mission, number })));
   if (plan.mixed) {
-    const summary = versions.map(({ name, number, environment, enemies, durationSeconds }, index) =>
-      `房間 ${index + 1}　${name} · 第 ${number} 版 · ${environment.mode} · ${durationSeconds} 秒 · ${venueClimateText(environment)} · ${missionEnemyText(enemies)}`);
+    const summary = versions.map(({ mission, number }, index) => {
+      const { name, environment, enemies, durationSeconds } = mission.definition;
+      return `房間 ${index + 1}　${name} · 第 ${number} 版 · ${environment.mode} · ${durationSeconds} 秒 · ${venueClimateText(environment)} · ${missionEnemyText(enemies)}`;
+    });
     if (!confirm(`依下列保存版本建立五個獨立準備場次？\n\n${summary.join('\n')}`)) return;
   }
   state.pending = { kind: independentSet ? 'create-set' : 'create', path: independentSet ? '/sessions/independent-set' : '/sessions',
-    method: 'POST', requestId: uuid(), versions, body: plan.mixed ? { rooms: versions.map(({ id }, index) => ({ roomId: index + 1, missionId: id })) }
+    method: 'POST', requestId: uuid(), versions, body: plan.mixed ? { rooms: versions.map(({ mission }, index) => ({ roomId: index + 1, missionId: mission.id })) }
       : independentSet ? { missionId: plan.body.missionId } : plan.body };
   await sendPending();
 }
@@ -1704,18 +1722,14 @@ async function sendPending() {
     if (pending.kind === 'create-set') {
       const sessions = response?.sessions;
       if (!Array.isArray(sessions) || sessions.length !== 5 || new Set(sessions.map(session => session?.id)).size !== 5
-          || sessions.some((session, index) => {
-            const version = pending.versions[index], definition = session?.mission?.definition;
-            return !session?.id || session.mode !== 'Independent' || session.roomIds?.length !== 1 || session.roomIds[0] !== index + 1
-              || session.mission?.id !== version.id || definition?.name !== version.name || definition?.durationSeconds !== version.durationSeconds
-              || !['mode', 'weather', 'timeOfDay', 'lightning'].every(field => definition?.environment?.[field] === version.environment[field])
-              || !['count', 'behavior', 'autoAttack'].every(field => definition?.enemies?.[field] === version.enemies[field]);
-          }))
-        throw new Error('Incomplete five-room preparation receipt');
+          || sessions.some((session, index) => !matchesPreparedSession(session, 'Independent', [index + 1], pending.versions[index].mission)))
+        throw new MissionVersionMismatch('五房回條與原選定的任務或房間不符，建立結果未確認。');
       renderIndependentReceipt(sessions, pending.versions);
       $('include-ended').checked = sessions.some(session => session.state === 'Ended');
       resetSelection((sessions.find(session => session.state !== 'Ended') ?? sessions[0]).id);
     }
+    if (pending.kind === 'create' && !matchesPreparedSession(response, pending.body.mode, pending.body.roomIds, pending.versions[0].mission))
+      throw new MissionVersionMismatch('場次回條與原選定的任務或房間不符，建立結果未確認。');
     if (pending.kind === 'venue-phase') {
       const targets = pending.body.targets;
       if (response?.requestId !== pending.requestId || response.action !== pending.body.action || typeof response.duplicate !== 'boolean'
@@ -1883,7 +1897,7 @@ function knownHeadNumber(seriesId) {
   return Math.max(state.catalog.find(row => row.seriesId === seriesId)?.number || 0, state.history?.seriesId === seriesId ? state.history.headNumber : 0);
 }
 class MissionVersionMismatch extends Error {
-  constructor() { super('任務版本核對不符，已保留目前草稿。'); }
+  constructor(message = '任務版本核對不符，已保留目前草稿。') { super(message); }
 }
 function requireMissionVersion(revision, id, seriesId, number) {
   if (!revision?.mission || revision.mission.id !== id || revision.seriesId !== seriesId || revision.number !== number)

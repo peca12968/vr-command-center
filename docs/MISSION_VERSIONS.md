@@ -53,6 +53,8 @@ Windows 三包原生測試可加 `--prepare-independent-set --mission-template <
 
 主控也可等所有準備中的場次就緒，再一次開始。 [全館開始](MISSION_CLOCK.md#全館開始)
 
+控制台 0.31.214 建立單房、五房合併或五房獨立場次時，會用送出當下的保存版本核對回條。核對範圍包含房間、任務版本、名稱、簡報、時間、初始環境與敵軍，以及每件物件的種類、位置與角度。若回條不符，畫面會顯示建立結果未確認。按「重試確認結果」沿用原請求，取回同一批場次的回條。場次即時調整的天氣與敵軍仍可在場次面板查看。
+
 管理端的 `POST /api/sessions/independent-set` 需要主控身分及有效的 `Idempotency-Key`，請求使用 `{ "missionId": "<保存版本 ID>" }`。成功回傳 `201` 及 `{ sessions, duplicate: false }`，五場在同一筆交易寫入，按房號排序。相同金鑰與原版本重送回傳 `200` 及 `duplicate: true`，包括服務重啟或原場次結束後，回傳的仍是原五個 ID 及其當前狀態。房間被占用時回傳 `409`、`independent-rooms-occupied` 及 `roomIds`。
 
 ### 逐房指定任務版本

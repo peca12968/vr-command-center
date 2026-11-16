@@ -246,12 +246,45 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
     await end(blocker.id);
     active.delete(blocker.id);
     await page.locator('#refresh').click();
-    await create.click();
-    await page.locator('#notice').filter({ hasText: '場次建立結果已確認' }).waitFor();
-    const [session] = await api('/sessions');
-    active.add(session.id);
-    check(session.mode === 'Linked' && session.mission.id === a.id && session.state === 'Preparing',
-      'Explicit creation uses the loaded historical version');
+    const endpoint = url => url.origin === base && url.pathname === '/api/sessions';
+    const attempts = [];
+    let created;
+    const submit = async route => {
+      if (route.request().method() !== 'POST') return route.continue();
+      attempts.push({ key: route.request().headers()['idempotency-key'], body: route.request().postDataJSON() });
+      const original = await route.fetch();
+      assert.equal(original.status(), 201);
+      const session = await original.json();
+      if (attempts.length === 1) {
+        created = session;
+        active.add(session.id);
+        const changed = structuredClone(session);
+        changed.mission.definition.props[0].yawDegrees += 15;
+        return route.fulfill({ response: original, json: changed });
+      }
+      assert.deepEqual(session, created);
+      const definition = session.mission.definition;
+      const orderedDifferently = { props: definition.props, enemies: definition.enemies, environment: definition.environment,
+        durationSeconds: definition.durationSeconds, briefing: definition.briefing, name: definition.name };
+      return route.fulfill({ response: original, json: { ...session, mission: { ...session.mission, definition: orderedDifferently } } });
+    };
+    await page.route(endpoint, submit);
+    try {
+      const notice = page.locator('#notice');
+      await create.click();
+      await notice.filter({ hasText: /結果未確認|場次建立結果已確認/ }).waitFor();
+      check(!await page.locator('#pending-command').isHidden() && await page.locator('#session-panel').isHidden()
+        && (await notice.innerText()).includes('場次回條與原選定的任務或房間不符'),
+        'A Linked receipt with a different saved prop angle cannot confirm the selected historical mission');
+      await page.locator('#retry-command').click();
+      await notice.filter({ hasText: '場次建立結果已確認' }).waitFor();
+      const [session] = await api('/sessions');
+      assert.deepEqual(attempts[0].body, { missionId: a.id, mode: 'Linked', roomIds: [1, 2, 3, 4, 5] });
+      check(attempts.length === 2 && attempts[0].key && JSON.stringify(attempts[0]) === JSON.stringify(attempts[1])
+        && session.id === created.id && session.mode === 'Linked' && session.mission.id === a.id && session.state === 'Preparing'
+        && JSON.stringify(session.mission.definition) === JSON.stringify(created.mission.definition),
+        'The same Linked request confirms the original historical session when the exact definition arrives in a different JSON field order');
+    } finally { await page.unroute(endpoint, submit); }
   } finally {
     try { for (const id of active) await end(id); }
     finally { await page.close(); }

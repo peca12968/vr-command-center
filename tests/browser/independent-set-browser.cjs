@@ -262,6 +262,12 @@ module.exports = async function independentSetBrowser({ context, api, tokens, ba
         } else if (attempts === 4) {
           result.sessions[3].mission.definition.enemies.autoAttack = false;
           await route.fulfill({ response: actual, json: result });
+        } else if (attempts === 5) {
+          result.sessions[3].mission.definition.props[0].position.x += 0.5;
+          await route.fulfill({ response: actual, json: result });
+        } else if (attempts === 6) {
+          result.sessions[3].mission.definition.briefing += '\n不同的任務內容';
+          await route.fulfill({ response: actual, json: result });
         } else {
           result.sessions[3].environment.lightning = false;
           result.sessions[3].enemies = draft.enemies;
@@ -291,6 +297,14 @@ module.exports = async function independentSetBrowser({ context, api, tokens, ba
     await page.waitForFunction(() => !document.querySelector('#retry-command').disabled && !document.querySelector('#pending-command').hidden, null, { polling: 100 });
     check(attempts === 4 && JSON.stringify(await receiptRows()) === JSON.stringify(originalReceipt),
       'A retry receipt with a different saved enemy setting cannot replace the confirmed batch');
+    for (const [attempt, field] of [[5, 'prop position'], [6, 'briefing']]) {
+      await page.locator('#retry-command').click();
+      await page.waitForFunction(() => !document.querySelector('#retry-command').disabled, null, { polling: 100 });
+      check(attempts === attempt && !await page.locator('#pending-command').isHidden()
+        && (await notice.innerText()).includes('五房回條與原選定的任務或房間不符')
+        && JSON.stringify(await receiptRows()) === JSON.stringify(originalReceipt),
+        `A retry receipt with a different saved ${field} keeps the previous confirmed batch and original request`);
+    }
     await page.locator('#retry-command').click(); await notice.filter({ hasText: '五個獨立場次已確認' }).waitFor();
     check(mixed.sessions.every((session, index) => session.roomIds[0] === index + 1 && session.mission.id === plan[index].missionId)
       && mixed.sessions[3].mission.definition.durationSeconds === 420
