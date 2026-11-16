@@ -250,6 +250,62 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await page.locator('[data-world-room="2"]').click();
     await actorPicker.selectOption('p:' + roomPeer);
     await page.locator('#world-canvas').screenshot({ path: path.join(screenshots, 'world-room-actor-scope.png') });
+    const liveRoomPage = await context.newPage();
+    captureErrors(liveRoomPage);
+    try {
+      const worldPath = `/sessions/${linked.id}/world`, scope = '?observerRoomId=2';
+      const liveWatch = url => url.pathname === '/api' + worldPath + '/watch'
+        && url.searchParams.get('mode') === 'live' && url.searchParams.get('observerRoomId') === '2';
+      const message = liveRoomPage.locator('#world-message'), canvas = liveRoomPage.locator('#world-canvas');
+      const player = liveRoomPage.locator('#world-player'), live = liveRoomPage.locator('#world-live');
+      const header = await api(worldPath + scope, 'GET', undefined, 'Room2');
+      const reply = (...records) => route => route.fulfill({ status: 200, contentType: 'text/event-stream',
+        body: records.map(([type, value]) => `event: ${type}\ndata: ${JSON.stringify(value)}\n\n`).join('') });
+      const foreignProp = { id: randomUUID(), kind: 'Sandbag', roomId: 1, feet: { x: -28, y: 0, z: 2 }, yaw: 0 };
+      const foreignHeader = { ...header, header: { ...header.header, props: [...header.header.props, foreignProp] } };
+      await liveRoomPage.goto(base + '/console/');
+      await liveRoomPage.locator('#login-key').fill(tokens.Room2);
+      await liveRoomPage.locator('#login-form button').click();
+      await liveRoomPage.route(liveWatch, reply(['header', foreignHeader]), { times: 1 });
+      await liveRoomPage.locator('[data-watch-room-only="2"]').click();
+      await liveRoomPage.waitForFunction(() => document.querySelector('#world-message').textContent.includes('標頭含其他房間')
+        || !document.querySelector('#world-player').hidden, null, { polling: 100 });
+      check((await message.textContent()).includes('標頭含其他房間') && await player.isHidden(),
+        'Room-only live observation rejects a foreign scene prop before creating the picture');
+
+      const { armLiveWatchFault, cutLiveWatch } = require('./live-watch-fault.cjs');
+      await armLiveWatchFault(liveRoomPage, linked.id, 'stall');
+      await live.click();
+      await liveRoomPage.locator(`#world-canvas[data-sequence="${header.acceptedSequence}"]`).waitFor();
+      const previous = await canvas.getAttribute('data-sequence'), camera = await canvas.getAttribute('data-camera');
+      assert.equal(await cutLiveWatch(liveRoomPage), Number(previous));
+      const foreignActor = linkedState.players.find(row => row.roomId === 1);
+      const peer = linkedState.players.find(row => row.id === roomPeer), eventId = randomUUID(), shotId = randomUUID();
+      await api(`/sessions/${linked.id}/combat-stream/reports`, 'POST', { streamId: linkedState.combatStream.streamId,
+        streamSequence: 1, observedSequence: linkedState.sequence,
+        report: { reportId: eventId, shotId, kind: 'ShotFired', origin: 'Simulation', playerId: roomPeer } }, 'GameServer');
+      linkedState = await api(`/sessions/${linked.id}`);
+      linkedPublish(linkedState, [], { throughCombatSequence: 1, magazines: new Map([[roomPeer, 29]]), events: [{
+        sequence: 1, eventId, shotId, kind: 'ShotFired', playerId: roomPeer, tick: 3, hasRay: true,
+        origin: { x: -14 + peer.seat, y: 1.65, z: -3 }, direction: { x: 0, y: 0, z: 1 }, distance: 20, hit: 'Miss' }] });
+      const next = await api(worldPath + scope, 'GET', undefined, 'Room2');
+      const value = await api(`${worldPath}/frames/${next.acceptedSequence}${scope}`, 'GET', undefined, 'Room2');
+      assert.equal(value.packet.events[0].eventId, eventId);
+      value.packet.events[0].playerId = foreignActor.id;
+      await liveRoomPage.route(liveWatch, reply(['header', next], ['frame', value]), { times: 1 });
+      await live.click();
+      await liveRoomPage.waitForFunction(sequence => document.querySelector('#world-message').textContent.includes('快照含其他房間')
+        || Number(document.querySelector('#world-canvas').dataset.sequence) === sequence, next.acceptedSequence, { polling: 100 });
+      check((await message.textContent()).includes('快照含其他房間')
+        && await canvas.getAttribute('data-sequence') === previous && await canvas.getAttribute('data-camera') === camera
+        && await canvas.getAttribute('data-trace-count') === '0',
+      'Room-only live observation keeps its last frame and camera when an event names a foreign player');
+      await live.click();
+      await liveRoomPage.locator(`#world-canvas[data-sequence="${next.acceptedSequence}"]`).waitFor();
+      check(await liveRoomPage.locator('#world-room').inputValue() === '2'
+        && await liveRoomPage.locator('#world-room option').count() === 1 && await canvas.getAttribute('data-trace-count') === '1',
+      'A valid reconnect resumes the same room and displays the genuine local shot');
+    } finally { await liveRoomPage.close(); }
     await page.locator('#tab-operations').click();
     await page.locator('#refresh').click(); await summary.filter({ hasText: '可暫停 房間 1、2、3、4、5' }).waitFor();
     await click('pause', '1、2、3、4、5 的 1 個場次'); await notice.filter({ hasText: '全館管理命令已確認' }).waitFor();
@@ -257,8 +313,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       'A linked venue sends one transition for all five rooms');
     await end(linked.id);
     const archivedLinked = await api(`/sessions/${linked.id}`);
-    await api(`/sessions/${linked.id}/combat-stream/seal`, 'POST', { streamId: archivedLinked.combatStream.streamId, finalSequence: 0 }, 'GameServer');
-    linkedPublish(await api(`/sessions/${linked.id}`));
+    await api(`/sessions/${linked.id}/combat-stream/seal`, 'POST', { streamId: archivedLinked.combatStream.streamId, finalSequence: 1 }, 'GameServer');
+    linkedPublish(await api(`/sessions/${linked.id}`), [], { throughCombatSequence: 1, magazines: new Map([[roomPeer, 29]]) });
     linkedPublish.seal();
     await page.locator('#include-ended').check();
     await page.locator(`#session-select option[value="${linked.id}"]`).waitFor({ state: 'attached' });
@@ -320,11 +376,25 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       await roomPage.locator('#world-frame-message').filter({ hasText: '讀取快照失敗' }).waitFor();
       check(await canvas.getAttribute('data-sequence') === tail,
         'A frame carrying another room score keeps the last verified picture');
+      await roomPage.route(url => url.pathname === `${worldRoute}frames/${back}`, async route => {
+        const original = await route.fetch(), data = await original.json();
+        const shot = data.packet.events.find(event => event.playerId === roomPeer && event.hasRay);
+        assert.ok(shot);
+        shot.origin.x = -28;
+        await route.fulfill({ response: original, json: data });
+      }, { times: 1 });
+      await roomPage.locator('#world-frame-back').click();
+      await roomPage.waitForFunction(sequence => document.querySelector('#world-frame-message').textContent.includes('讀取快照失敗')
+        || Number(document.querySelector('#world-canvas').dataset.sequence) === sequence, back, { polling: 100 });
+      check(await canvas.getAttribute('data-sequence') === tail
+        && (await roomPage.locator('#world-frame-message').textContent()).includes('讀取快照失敗'),
+      'A room-only seek rejects a ray from another room even when it names a local player');
       const [previous] = await Promise.all([observe('frames/'), roomPage.locator('#world-frame-back').click()]);
       await roomPage.locator('#world-frame-message').filter({ hasText: `已停在第 ${back} 格` }).waitFor();
       check(new URL(previous.url()).searchParams.get('observerRoomId') === '2'
         && await canvas.getAttribute('data-sequence') === String(back)
-        && await roomPicker.locator('option').count() === 1 && await roomPicker.inputValue() === '2',
+        && await roomPicker.locator('option').count() === 1 && await roomPicker.inputValue() === '2'
+        && (await roomPage.locator('#world-events').textContent()).includes('同房玩家'),
       'Clearing the player filter and stepping back keeps the room controller in the original room');
     } finally {
       await roomPage.close();

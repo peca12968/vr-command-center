@@ -264,12 +264,28 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     }
   }
   function stopRoomSwitch() { roomSwitch?.abort(); roomSwitch = null; }
+  function rowsInRoom(rows, roomId) {
+    return Array.isArray(rows) && rows.every(row => row?.roomId === roomId);
+  }
+  function pointInRoom(point, roomId, radius) {
+    // The recording uses the server's single-precision positions and room bounds.
+    const center = (roomId - 3) * 14, bound = Math.fround(radius);
+    return Number.isFinite(point?.x) && Number.isFinite(point?.z)
+      && Math.abs(Math.fround(Math.fround(point.x) - center)) <= bound && Math.abs(Math.fround(point.z)) <= bound;
+  }
+  function matchesRoomRecording(recording, roomId) {
+    const header = recording?.header;
+    return recording?.observerRoomId === roomId && Array.isArray(header?.roomIds) && header.roomIds.includes(roomId)
+      && rowsInRoom(header.props, roomId) && header.props.every(prop => pointInRoom(prop.feet, roomId, 6));
+  }
   function matchesRoomFrame(value, roomId) {
     const packet = value?.packet, world = packet?.frame;
-    const inRoom = actors => Array.isArray(actors) && actors.every(actor => actor?.roomId === roomId);
-    return value?.observerRoomId === roomId && inRoom(world?.players) && inRoom(world?.enemies)
-      && (world.roomEnemyPolicies == null || inRoom(world.roomEnemyPolicies))
-      && Array.isArray(packet.events) && inRoom(value.statistics);
+    if (value?.observerRoomId !== roomId || !rowsInRoom(world?.players, roomId) || !rowsInRoom(world?.enemies, roomId)
+      || (world.roomEnemyPolicies != null && !rowsInRoom(world.roomEnemyPolicies, roomId))
+      || !Array.isArray(packet.events) || !rowsInRoom(value.statistics, roomId)) return false;
+    const players = new Set(value.statistics.map(row => row.playerId));
+    return packet.events.every(event => typeof event?.playerId === 'string' && players.has(event.playerId)
+      && (event.hasRay === false || (event.hasRay === true && pointInRoom(event.origin, roomId, 6.01))));
   }
   async function switchLiveRoom(roomId) {
     const recording = liveRooms.get(roomId), picker = $('world-recording');
@@ -281,8 +297,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     try {
       const endpoint = `/api/sessions/${sessionId}/world`, scope = `?observerRoomId=${roomId}`;
       const verified = await (await response(endpoint + scope, signal)).json();
-      if (verified.observerRoomId !== roomId || verified.header?.sessionId !== sessionId || verified.header?.streamId !== streamId
-        || !verified.header.roomIds.includes(roomId) || verified.complete !== false
+      if (!matchesRoomRecording(verified, roomId) || verified.header.sessionId !== sessionId || verified.header.streamId !== streamId
+        || verified.complete !== false
         || !Number.isSafeInteger(verified.acceptedSequence) || verified.acceptedSequence < 1
         || !Number.isSafeInteger(verified.durationMilliseconds) || verified.durationMilliseconds < 0)
         throw new Error('Room recording changed');
@@ -943,6 +959,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
       if (request !== epoch || !canExtendSaved()) return;
       const tail = latest.acceptedSequence;
       if ((latest.observerRoomId ?? null) !== observerRoom || latest.header?.sessionId !== id || latest.header.streamId !== streamId || latest.header.origin !== origin
+        || (observerRoom !== null && observationKey(latest) !== geometry)
         || !Number.isSafeInteger(tail) || tail < previous || typeof latest.complete !== 'boolean') throw new Error('保存尾端或錄製來源不符。');
       const selected = $('world-recording').selectedOptions[0];
       selected.dataset.accepted = String(tail); selected.dataset.complete = String(latest.complete); recordingControls();
@@ -1143,6 +1160,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
             if ((sourceRecord || type === 'frame') && (data.observerRoomId ?? null) !== observerRoom)
               throw new Error('回應的觀戰房間不同。');
             if (sourceRecord) {
+              if (observerRoom !== null && !matchesRoomRecording(data, observerRoom)) throw new Error('標頭含其他房間的資料。');
               const source = observationKey(data);
               if ((expectedGeometry && source !== expectedGeometry) || (streamGeometry && source !== streamGeometry))
                 throw new Error('回應的錄製來源不同。');
