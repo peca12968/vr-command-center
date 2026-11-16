@@ -473,6 +473,7 @@ class LanPreflightTests(unittest.TestCase):
             ('bind-too-late', 'UDP binding is outside the original preflight window for room'),
             ('bind-too-late-without-receipt', 'UDP binding is outside the original preflight window for room'),
             ('same-window', None),
+            ('launcher-deadline-support', None),
         ):
             with self.subTest(case=case):
                 for path, raw in originals.items():
@@ -481,6 +482,9 @@ class LanPreflightTests(unittest.TestCase):
                 work = self.root / case
                 work.mkdir()
                 receipt = work / 'start.json'
+                if case == 'launcher-deadline-support':
+                    (launcher.parent / 'server-package.json').write_text(
+                        json.dumps({'schemaVersion': 1, 'venueUdpDeadlineVersion': 1}), encoding='utf-8')
                 args = SimpleNamespace(verify_only=False, launcher=launcher, launch_plan=launch_path, network_plan=network,
                                        readiness=self.root / 'readiness.json', require_distinct_remote_roster=False,
                                        retry_output=None, release_report=None, work=work / 'game',
@@ -501,6 +505,17 @@ class LanPreflightTests(unittest.TestCase):
                 @contextmanager
                 def game(command):
                     self.assertEqual('--venue-run', command[1])
+                    if case == 'launcher-deadline-support':
+                        index = command.index('--udp-deadlines')
+                        window = json.loads(Path(command[index + 1]).read_bytes())
+                        exact_stamp = json.loads(originals[listener].splitlines()[-1])['completedAtUtc']
+                        fractional = exact_stamp.split('+')[0].removesuffix('Z').partition('.')[2]
+                        tail = fractional[6:7] or '0'
+                        ending = expires.isoformat(timespec='microseconds').replace('+00:00', tail + '+00:00')
+                        self.assertEqual({'version': 1, 'planSha256': hashlib.sha256(originals[launch_path]).hexdigest(),
+                                          'groups': [{'roomIds': rooms, 'expiresAtUtc': ending}]}, window)
+                    else:
+                        self.assertNotIn('--udp-deadlines', command)
                     args.ready_report.write_text(json.dumps({'topology': 'Linked', 'status': 'venue-ready', 'instanceId': 'instance',
                         'servers': [{'roomIds': rooms, 'ready': {'udpBinding': {'observedAtUtc': observed.isoformat()}}}]}),
                         encoding='utf-8')
@@ -517,8 +532,8 @@ class LanPreflightTests(unittest.TestCase):
                             start.launch(args)
                     else:
                         self.assertEqual(0, start.launch(args))
-                self.assertEqual(case.startswith('bind-too-late') or case == 'same-window', process.called)
-                self.assertEqual(case == 'same-window', receipt.exists())
+                self.assertEqual(case.startswith('bind-too-late') or rejected is None, process.called)
+                self.assertEqual(rejected is None, receipt.exists())
                 if receipt.exists():
                     self.assertEqual(after_preview.isoformat(), json.loads(receipt.read_bytes())['checkedAtUtc'])
 

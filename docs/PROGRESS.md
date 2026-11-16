@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 Windows 啟動器在公告前核對逐房 UDP 期限
+
+- 五房查核工具將原計畫的 SHA-256 與各房有效期限傳入啟動器 1.27。啟動時核對期限與原計畫，Windows 觀察到的 UDP 綁定若晚於該房期限，會阻止全館公告並清理本次程序。舊包沿用啟動前與收尾檢查。 [操作方式](WINDOWS_SERVER_PACKAGE.md#以-udp-預檢報告啟動五房)
+- 解壓後的新版 Windows 啟動器通過兩種模式共 8 項離線 CLI 檢查。過期、錯批、少房或錯誤時區均在建立工作目錄與就緒檔之前拒絕。12 項 .NET Framework 測試涵蓋逐房期限與 100 ns 邊界，21 項 LAN 測試核對原報告到新舊啟動器的交接。 [實際執行檔檢查](../artifacts/venue-udp-deadlines-20261116-1643/offline-launcher-proof.json) · [Framework](../artifacts/venue-udp-deadlines-20261116-1643/framework-deadline-final.log) · [LAN](../artifacts/venue-udp-deadlines-20261116-1643/lan.log)
+- 新伺服器包逐檔核對 331 項，和 Windows 玩家包的 324 項共用遊戲檔相符。Quest 0.50.12／77 APK 的來源與簽章通過離線重新核對，9 項發行測試通過。新解壓路徑未通過防火牆啟動前查核，本輪實際程序測試限於離線啟動器。新版 Unity 伺服器啟動、跨機與頭盔待驗。 [Windows 伺服器 ZIP](../artifacts/venue-udp-deadlines-20261116-1643/VRCommand-GameServer-0.50.12-launcher-1.27.0-win-x64.zip) · [共同發行報告](../artifacts/venue-udp-deadlines-20261116-1643/venue-release.json) · [發行測試](../artifacts/venue-udp-deadlines-20261116-1643/release-tests.log) · [USB 快照](../artifacts/venue-udp-deadlines-20261116-1643/usb-status.json)
+
 ## 2026-11-16 開場前重驗 UDP 原檔與綁定期限
 
 - `start-verified-venue.py` 在 Windows 更新預覽後，再次核對啟動計畫、網路清單、預檢、預覽及雙端報告。準備期間換檔或超過 30 分鐘，在建立遊戲程序前退出。正常收尾時以各房間端點最早的原監聽完成時間核對實際 UDP 綁定，保留 Windows 的 100 ns 時間精度。綁定逾時以非零退出，並保留原就緒與結束檔。 [使用方式](WINDOWS_SERVER_PACKAGE.md#以-udp-預檢報告啟動五房)

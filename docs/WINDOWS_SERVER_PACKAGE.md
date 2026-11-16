@@ -1,5 +1,7 @@
 # Windows 遊戲伺服器包
 
+2026-11-16 啟動器 1.27 搭配 Windows 遊戲 0.50.12。ZIP 為 84,988,858 位元組，SHA-256 `22a6bafe884702fa4251b589c4dd2309836a6a1514106de17227021ad3f0db96`。與既有 Windows 玩家包和 Quest 0.50.12 APK 完成共同發行檢查。 [伺服器 ZIP](../artifacts/venue-udp-deadlines-20261116-1643/VRCommand-GameServer-0.50.12-launcher-1.27.0-win-x64.zip) · [共同發行報告](../artifacts/venue-udp-deadlines-20261116-1643/venue-release.json)
+
 ## 依場館發行報告核對伺服器包
 
 啟動器可在離線核對、五房預覽或五房批次啟動時加上 `--release-report`。使用由主控提供且含 `windows.serverManifestSha256` 的原發行報告，報告及輸出放在程式包之外。工具比對清單原始位元組的 SHA-256，逐檔核對遊戲伺服器包。伺服器包不符時在查詢管理服務與建立遊戲程序前退出。
@@ -143,6 +145,8 @@ python .\scripts\start-verified-venue.py `
 ```
 
 指令先重驗原計畫、網路清單及雙端 UDP 報告。在 Windows 啟動器完成最新預覽後，會再次核對這些檔案的雜湊和既有 30 分鐘期限。缺件、逾時或原檔異動會在遊戲程序建立前回報。看到 `udp-preflight-verified` 後，仍須等啟動器寫出 `venue-ready`，再到控制台配票和開始。`--peer-diagnostics` 可選，用於需要保存玩家 UDP 來源的驗收。 [補測方式](EXTERNAL_CLIENTS.md#補測未完成的全館-udp-預檢)
+
+使用啟動器 1.27 時，工具會自動傳入逐房 UDP 期限。若遊戲啟動期間超出期限，啟動器會停止本批作業，保留本次結果，控制台也不會收到這次的全館端點公告。期限以 Windows 觀察到各房實際 UDP 綁定的時間為準。舊版啟動器搭配此指令時，仍會在啟動前重驗，並在收尾核對實際綁定。
 
 正常封存並停止後，指令會按就緒檔核對各端點的實際 UDP 綁定時間。每個端點須在其最早一組監聽報告完成後的 30 分鐘內綁定。若遊戲啟動期間超出期限，指令會在收尾回報該房未通過。要讓戰後驗收核對這次啟動，可加 `--start-receipt C:\VRCommand\venue-start.json`。核對通過才會輸出回條，保存最後重驗時間，以及預檢、就緒檔與結束檔的 SHA-256。請保留三份原檔及雙端報告。 [封存核對](EXTERNAL_CLIENTS.md#核對-windows-五房啟動回條)
 

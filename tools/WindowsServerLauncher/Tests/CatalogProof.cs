@@ -45,6 +45,51 @@ internal static class ServerCatalogProof
         }
     }
 
+    static void CheckUdpDeadlines()
+    {
+        var planHash = new String('a', 64);
+        var cutoff = DateTimeOffset.Parse("2026-11-16T00:30:00.1234567+00:00", System.Globalization.CultureInfo.InvariantCulture);
+        foreach (var linked in new[] { false, true })
+        {
+            var topology = linked ? "Linked" : "Independent";
+            var rooms = linked ? new[] { new[] { 1, 2, 3, 4, 5 } } : Enumerable.Range(1, 5).Select(room => new[] { room }).ToArray();
+            var plan = ServerLauncher.Map(ServerLauncher.Json.DeserializeObject(ServerLauncher.Json.Serialize(new {
+                topology = topology, servers = rooms.Select(group => new { roomIds = group }).ToArray()
+            })));
+            var proof = ServerLauncher.Map(ServerLauncher.Json.DeserializeObject(ServerLauncher.Json.Serialize(new {
+                version = 1, planSha256 = planHash, groups = rooms.Select((group, index) => new {
+                    roomIds = group, expiresAtUtc = cutoff.AddTicks(index).ToString("O")
+                }).ToArray()
+            })));
+            var deadlines = ServerLauncher.VenueUdpDeadlines.Parse(proof, plan, planHash);
+            deadlines.RequirePending(cutoff);
+            for (var index = 0; index < rooms.Length; index++) deadlines.RequireObserved(rooms[index], cutoff.AddTicks(index));
+            Check(true, topology + " permits an observation at each original room's cutoff");
+            RejectDeadline(() => deadlines.RequirePending(cutoff.AddTicks(1)), "UDP 預檢已逾時",
+                topology + " stops startup when a required endpoint expires");
+            RejectDeadline(() => deadlines.RequireObserved(rooms[0], cutoff.AddTicks(1)), "UDP 預檢已逾時",
+                topology + " rejects an observation 100 ns late before endpoint publication");
+            RejectDeadline(() => ServerLauncher.VenueUdpDeadlines.Parse(proof, plan, new String('b', 64)), "原場館計畫不符",
+                topology + " cannot apply deadlines to a different plan snapshot");
+            var groups = (object[])proof["groups"];
+            var last = ServerLauncher.Map(groups[groups.Length - 1]);
+            last["expiresAtUtc"] = cutoff.ToOffset(TimeSpan.FromHours(8)).ToString("O");
+            RejectDeadline(() => ServerLauncher.VenueUdpDeadlines.Parse(proof, plan, planHash), "使用 UTC",
+                topology + " rejects a non-UTC presentation of a deadline");
+            proof["groups"] = groups.Take(groups.Length - 1).ToArray();
+            RejectDeadline(() => ServerLauncher.VenueUdpDeadlines.Parse(proof, plan, planHash), "原場館計畫不符",
+                topology + " requires a deadline for every endpoint");
+        }
+    }
+
+    static void RejectDeadline(Action action, string message, string name)
+    {
+        var rejected = false;
+        try { action(); }
+        catch (InvalidDataException error) { rejected = error.Message.Contains(message); }
+        Check(rejected, name);
+    }
+
     static void CheckVenuePreviewRows()
     {
         var independent = ServerLauncher.Choice.Parse(Row(2));
@@ -231,9 +276,15 @@ internal static class ServerCatalogProof
     [STAThread]
     static int Main(string[] args)
     {
-        var output = args[1];
+        var output = args.Length == 2 ? args[1] : null;
         try
         {
+            CheckUdpDeadlines();
+            if (args.Length == 1 && args[0] == "--udp-deadline-proof")
+            {
+                Console.WriteLine(ServerLauncher.Json.Serialize(new { complete = true, checks = checks }));
+                return 0;
+            }
             CheckUdpBindings();
             CheckVenuePreviewRows();
             foreach (var code in new[] { 502, 503, 504 })
@@ -319,6 +370,12 @@ internal static class ServerCatalogProof
             Check(failed && !state.CanStart && state.Current == null, "empty path fails closed");
             ServerLauncher.Save(output, new { complete = true, checks = checks, scope = "Actual Framework catalog state, in-process WinForms message loop with held management responses, and Windows UDP socket owner/address/port checks. No desktop input, game readiness or headset proof." }); return 0;
         }
-        catch (Exception e) { ServerLauncher.Save(output, new { complete = false, checks = checks, error = ServerLauncher.Safe(e) }); return 1; }
+        catch (Exception e)
+        {
+            var failure = new { complete = false, checks = checks, error = ServerLauncher.Safe(e) };
+            if (output == null) Console.Error.WriteLine(ServerLauncher.Json.Serialize(failure));
+            else ServerLauncher.Save(output, failure);
+            return 1;
+        }
     }
 }

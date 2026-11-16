@@ -104,6 +104,23 @@ def check_ready_bind_times(ready, mode, checked_at, expiries):
     field.require(verified == expiries.keys(), 'Windows ready report does not cover the original rooms')
 
 
+def launcher_udp_deadline_args(launcher, directory, plan_digest, expiries):
+    try:
+        with (launcher.parent / 'server-package.json').open('rb') as stream:
+            manifest = field.read_json(field.limited_read(stream).decode('utf-8-sig'))
+    except FileNotFoundError:
+        return []
+    if 'venueUdpDeadlineVersion' not in manifest:
+        return []
+    field.integer(manifest['venueUdpDeadlineVersion'], 1, 1)
+    groups = [{'roomIds': list(rooms), 'expiresAtUtc': instant.isoformat(timespec='microseconds').removesuffix('+00:00') + f'{tick}+00:00'}
+              for rooms, (instant, tick) in sorted(expiries.items())]
+    path = directory / 'udp-deadlines.json'
+    with path.open('x', encoding='utf-8') as stream:
+        json.dump({'version': 1, 'planSha256': plan_digest, 'groups': groups}, stream)
+    return ['--udp-deadlines', str(path)]
+
+
 def launch(args):
     readiness = args.readiness.resolve(strict=True)
     with readiness.open('rb') as stream:
@@ -222,6 +239,7 @@ def launch(args):
         recheck_launch_inputs(((args.network_plan, checked['networkPlanSha256']), (original_plan, binding['planSha256']),
                                (preview, binding['previewSha256'])), readiness, original)
         expiries = recheck_udp_windows(checked, readiness.parent)
+        command.extend(launcher_udp_deadline_args(launcher, snapshot.parent, binding['planSha256'], expiries))
         print(json.dumps({'status': 'udp-preflight-verified', 'mode': checked['mode'],
                           'verifiedSources': checked['verifiedSources'], 'launchPlanSha256': binding['planSha256'],
                           'networkPlanSha256': checked['networkPlanSha256'],

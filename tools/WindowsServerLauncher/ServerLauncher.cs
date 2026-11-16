@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Net.NetworkInformation;
@@ -153,12 +154,12 @@ internal static class ServerLauncher
 
         readonly int processId, port;
         readonly string address;
-        readonly DateTimeOffset observedAt;
+        internal readonly DateTimeOffset ObservedAt;
         UdpBinding(int processId, string address, int port)
         {
-            this.processId = processId; this.address = address; this.port = port; observedAt = DateTimeOffset.UtcNow;
+            this.processId = processId; this.address = address; this.port = port; ObservedAt = DateTimeOffset.UtcNow;
         }
-        internal object Public() { return new { processId = processId, address = address, port = port, observedAtUtc = observedAt.ToString("O") }; }
+        internal object Public() { return new { processId = processId, address = address, port = port, observedAtUtc = ObservedAt.ToString("O") }; }
 
         internal static UdpBinding Find(int processId, string address, int port)
         {
@@ -554,7 +555,8 @@ internal static class ServerLauncher
             Config = config; Work = Full(work); Plain(Work); Need(!Inside(Work, Root) && !Inside(Root, Work) && !Directory.Exists(Work) && !File.Exists(Work), "請使用程式包之外的新資料夾。");
         }
         internal void Start(Func<bool> cancelled = null, bool peerDiagnostics = false, bool packageVerified = false,
-            Action beforeNative = null, bool deferPublication = false, Action candidateReady = null, bool trackedVr = false)
+            Action beforeNative = null, bool deferPublication = false, Action candidateReady = null, bool trackedVr = false,
+            Action<DateTimeOffset> checkUdpDeadline = null)
         {
             Config.Validate();
             if (!packageVerified)
@@ -578,6 +580,7 @@ internal static class ServerLauncher
             Config.CheckPort();
             if (beforeNative != null) beforeNative();
             Need(cancelled == null || !cancelled(), "已中止啟動；此輪未完成。");
+            if (checkUdpDeadline != null) checkUdpDeadline(DateTimeOffset.UtcNow);
             Directory.CreateDirectory(Work); Save(Path.Combine(Work, "server-config.json"), Config.Config(Path.Combine(Work, "telemetry"), Origin));
             Process = new Native(Path.Combine(Work, "server-config.json"), Path.Combine(Work, "server.log"), peerDiagnostics);
             PeerDiagnosticsEnabled = peerDiagnostics;
@@ -587,6 +590,7 @@ internal static class ServerLauncher
             while (timer.Elapsed.TotalSeconds < 90)
             {
                 Need(cancelled == null || !cancelled(), "已中止啟動；此輪未完成。");
+                if (checkUdpDeadline != null) checkUdpDeadline(DateTimeOffset.UtcNow);
                 var exited = Process.Exited;
                 var log = BootstrapLog();
                 Need(!log.Contains("VR_GUARDED_SOURCE_OPEN status=conflict"), "場次序號已變更或已有來源，請回主控台重新核對。");
@@ -629,6 +633,7 @@ internal static class ServerLauncher
                         }
                         Need(cancelled == null || !cancelled(), "已中止啟動；此輪未完成。");
                         Need(!Process.Exited, "遊戲程序在公告前結束。");
+                        if (checkUdpDeadline != null) checkUdpDeadline(binding.ObservedAt);
                         VerifiedUdp = binding;
                         if (deferPublication) Status = "已確認 UDP，等候全館公告";
                         else ConfirmEndpoint(Config.Request("/api/sessions/" + Config.Session + "/connection-endpoint", EndpointDraft()));
@@ -804,20 +809,76 @@ internal static class ServerLauncher
     const string VenueEndpointsRoute = "/api/venue/connection-endpoints";
     const string VenueSourcesRoute = "/api/venue/combat-streams";
 
+    internal sealed class VenueUdpDeadlines
+    {
+        readonly Dictionary<string, DateTimeOffset> deadlines;
+
+        VenueUdpDeadlines(Dictionary<string, DateTimeOffset> deadlines) { this.deadlines = deadlines; }
+
+        internal static VenueUdpDeadlines Parse(Dictionary<string, object> evidence, Dictionary<string, object> plan, string planHash)
+        {
+            var topology = Text(plan, "topology");
+            object servers, groups;
+            Need(evidence.Count == 3 && Num(evidence, "version") == 1 && Text(evidence, "planSha256") == planHash
+                && (topology == "Linked" || topology == "Independent")
+                && plan.TryGetValue("servers", out servers) && servers is object[]
+                && evidence.TryGetValue("groups", out groups) && groups is object[]
+                && ((object[])servers).Length == (topology == "Linked" ? 1 : 5)
+                && ((object[])groups).Length == ((object[])servers).Length, "UDP 預檢期限與原場館計畫不符。");
+            var expected = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var item in (object[])plan["servers"])
+                Need(expected.Add(String.Join(",", Choice.ReadRooms(Map(item), topology))), "UDP 預檢期限的房間重複。");
+            var parsed = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+            foreach (var item in (object[])evidence["groups"])
+            {
+                var row = Map(item);
+                Need(row != null && row.Count == 2, "UDP 預檢期限格式不符。");
+                var rooms = String.Join(",", Choice.ReadRooms(row, topology));
+                DateTimeOffset cutoff;
+                var valid = DateTimeOffset.TryParseExact(Text(row, "expiresAtUtc"), "O",
+                    CultureInfo.InvariantCulture, DateTimeStyles.None, out cutoff);
+                Need(expected.Remove(rooms) && valid && cutoff.Offset == TimeSpan.Zero,
+                    "UDP 預檢期限須涵蓋原房間並使用 UTC。");
+                parsed.Add(rooms, cutoff);
+            }
+            return new VenueUdpDeadlines(parsed);
+        }
+
+        internal void RequirePending(DateTimeOffset now)
+        {
+            foreach (var entry in deadlines) RequireTime(entry.Key, now, entry.Value);
+        }
+
+        internal void RequireObserved(int[] rooms, DateTimeOffset observedAt)
+        {
+            var key = String.Join(",", rooms);
+            RequireTime(key, observedAt, deadlines[key]);
+        }
+
+        static void RequireTime(string rooms, DateTimeOffset observedAt, DateTimeOffset cutoff)
+        {
+            Need(observedAt <= cutoff, "房間 " + rooms + " 的 UDP 預檢已逾時，請重新探測。");
+        }
+    }
+
     static int RunVenue(Dictionary<string, string> options, ref bool outputValid)
     {
         outputValid = false;
         string diagnostics; var peerDiagnostics = options.TryGetValue("--peer-diagnostics", out diagnostics);
         Need(!peerDiagnostics || diagnostics == "on", "來源診斷只接受 on。");
         var trackedVr = TrackedVrOption(options);
-        Need(options.Count == 5 + (peerDiagnostics ? 1 : 0) + (trackedVr ? 1 : 0) + (options.ContainsKey("--release-report") ? 1 : 0) && options.ContainsKey("--work")
+        string deadlinePath;
+        var hasDeadlines = options.TryGetValue("--udp-deadlines", out deadlinePath);
+        Need(options.Count == 5 + (peerDiagnostics ? 1 : 0) + (trackedVr ? 1 : 0) + (options.ContainsKey("--release-report") ? 1 : 0)
+            + (hasDeadlines ? 1 : 0) && options.ContainsKey("--work")
             && options.ContainsKey("--seconds") && options.ContainsKey("--ready-report"), "需要venue-run/work/seconds/ready-report/report五個參數。");
         int seconds; Need(Int32.TryParse(options["--seconds"], out seconds) && seconds >= 60 && seconds <= 86400, "執行期限須為60至86400秒。");
         var planPath = Full(options["--venue-run"]); var work = Full(options["--work"]);
         Need(!Inside(planPath, Root) && !Inside(planPath, work) && !Inside(work, Root) && !Inside(Root, work)
             && !Directory.Exists(work) && !File.Exists(work) && Directory.Exists(Path.GetDirectoryName(work)), "請使用包外的設定檔及全新工作目錄。");
         Plain(work);
-        var plan = Read(planPath, 8192);
+        string planHash = null;
+        var plan = Read(planPath, 8192, recordHash: hasDeadlines ? (Action<string>)(hash => planHash = hash) : null);
         var instancePath = VenueInstancePath(plan);
         var instanceDirectory = Path.GetDirectoryName(instancePath);
         Need(!Inside(work, instanceDirectory) && !Inside(instanceDirectory, work), "工作目錄必須與管理實例分開。");
@@ -826,7 +887,16 @@ internal static class ServerLauncher
         Output(report, work); Output(ready, work);
         Need(!String.Equals(Full(report), Full(ready), StringComparison.OrdinalIgnoreCase), "結果路徑不能重複。");
         outputValid = true;
-        return ExecuteVenue(LoadVenuePlan(plan, instancePath, ReadRelease(options)), work, seconds, ready, report, peerDiagnostics, () => false, trackedVr);
+        VenueUdpDeadlines deadlines = null;
+        if (hasDeadlines)
+        {
+            Need(Path.IsPathRooted(deadlinePath) && !Inside(deadlinePath, Root) && !Inside(deadlinePath, work)
+                && !Inside(deadlinePath, instanceDirectory), "UDP 預檢期限檔必須在程式包、管理實例及工作目錄之外。");
+            deadlines = VenueUdpDeadlines.Parse(Read(deadlinePath, 4096), plan, planHash);
+            deadlines.RequirePending(DateTimeOffset.UtcNow);
+        }
+        return ExecuteVenue(LoadVenuePlan(plan, instancePath, ReadRelease(options)), work, seconds, ready, report, peerDiagnostics,
+            () => false, trackedVr, deadlines);
     }
 
     static string VenueInstancePath(Dictionary<string, object> plan)
@@ -896,17 +966,22 @@ internal static class ServerLauncher
             "房間 " + String.Join("、", rooms) + " 的場次序號或任務版本已變更；請在主控台重新讀取並下載計畫。");
     }
 
-    static void RequireVenueUdp(List<VenueServer> servers)
+    static void RequireVenueUdp(List<VenueServer> servers, VenueUdpDeadlines deadlines)
     {
         foreach (var server in servers)
+        {
+            if (deadlines != null) deadlines.RequireObserved(server.Choice.Rooms, server.Run.VerifiedUdp.ObservedAt);
             Need(!server.Run.Process.Exited && UdpBinding.Find(server.Run.Process.Pid, server.Config.Bind, server.Config.Port) != null,
                 "房間 " + String.Join("、", server.Choice.Rooms) + " 的原遊戲程序或 UDP 綁定已失效。");
+        }
     }
 
-    static int ExecuteVenue(VenuePlan plan, string work, int seconds, string ready, string report, bool peerDiagnostics, Func<bool> cancel, bool trackedVr)
+    static int ExecuteVenue(VenuePlan plan, string work, int seconds, string ready, string report, bool peerDiagnostics, Func<bool> cancel,
+        bool trackedVr, VenueUdpDeadlines deadlines = null)
     {
         Need(!cancel(), "已中止啟動；此輪未完成。");
         if (trackedVr) RequireTrackedVrBuild();
+        if (deadlines != null) deadlines.RequirePending(DateTimeOffset.UtcNow);
         var servers = plan.Servers;
         var launchId = plan.Version >= 4 ? Guid.NewGuid().ToString("D") : null;
         foreach (var server in servers)
@@ -958,7 +1033,8 @@ internal static class ServerLauncher
                                 {
                                     signaledCandidate = true;
                                     candidates.Signal();
-                                }, trackedVr: trackedVr);
+                                }, trackedVr: trackedVr, checkUdpDeadline: deadlines == null ? (Action<DateTimeOffset>)null
+                                    : observedAt => deadlines.RequireObserved(server.Choice.Rooms, observedAt));
                                 server.Ready = true;
                             }
                             catch (Exception error) { server.Error = Safe(error); gate.Abort = true; }
@@ -996,12 +1072,18 @@ internal static class ServerLauncher
                     candidates.Wait();
                     if (!gate.Abort && !cancel() && servers.TrueForAll(server => server.Run.Candidate != null && !server.Run.Process.Exited))
                     {
-                        sourceAttachment = "unconfirmed";
                         try
                         {
+                            if (deadlines != null) deadlines.RequirePending(DateTimeOffset.UtcNow);
+                            sourceAttachment = "unconfirmed";
                             var receipt = plan.Catalog.Target.RequestVenueBatch(VenueSourcesRoute, new { version = 1, topology = plan.Topology,
                                 launchId = launchId, servers = servers.ConvertAll(server => server.Run.SourceDraft()) },
-                                canRetry, ref sourceAttachmentRetried);
+                                () =>
+                                {
+                                    if (!canRetry()) return false;
+                                    if (deadlines != null) deadlines.RequirePending(DateTimeOffset.UtcNow);
+                                    return true;
+                                }, ref sourceAttachmentRetried);
                             object raw;
                             Need(Num(receipt, "version") == 1 && Text(receipt, "topology") == plan.Topology && Text(receipt, "launchId") == launchId
                                 && receipt.TryGetValue("servers", out raw) && raw is object[] && ((object[])raw).Length == servers.Count,
@@ -1028,7 +1110,7 @@ internal static class ServerLauncher
                 {
                     try
                     {
-                        RequireVenueUdp(servers);
+                        RequireVenueUdp(servers, deadlines);
                         Need(!cancel(), "已中止啟動；此輪未完成。");
                         endpointPublication = "unconfirmed";
                         var receipt = plan.Catalog.Target.RequestVenueBatch(VenueEndpointsRoute, new { version = 1, topology = plan.Topology,
@@ -1036,7 +1118,7 @@ internal static class ServerLauncher
                             () =>
                             {
                                 if (!canRetry()) return false;
-                                RequireVenueUdp(servers); return true;
+                                RequireVenueUdp(servers, deadlines); return true;
                             }, ref endpointPublicationRetried);
                         object raw;
                         Need(Num(receipt, "version") == 1 && Text(receipt, "topology") == plan.Topology
@@ -1044,7 +1126,7 @@ internal static class ServerLauncher
                         var endpoints = (object[])receipt["servers"];
                         for (var index = 0; index < servers.Count; index++) servers[index].Run.ConfirmEndpoint(Map(endpoints[index]));
                         endpointPublication = "confirmed";
-                        RequireVenueUdp(servers);
+                        RequireVenueUdp(servers, deadlines);
                         Need(!cancel(), "已中止啟動；此輪未完成。");
                         Save(ready, WithRelease(new Dictionary<string, object>
                         {
