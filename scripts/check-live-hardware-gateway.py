@@ -873,13 +873,17 @@ def run(args, api_command, api_cwd):
                       f'{mode} status without credentials reports five waiting rooms and writes no files')
                 venue_connections = {}
 
-                def send_venue_batch(room, count, decision='ack'):
+                def publish_venue_batch(room, count):
                     stream_id, observed, position = venue_streams[owners[room]]
                     reports = [{'streamId':stream_id,'streamSequence':position+index+1,'observedSequence':observed,
                                 'report':{'reportId':str(uuid.uuid4()),'kind':'ShotFired','origin':'Simulation','playerId':player['id'],
                                           'shotId':str(uuid.uuid4())}} for index,player in enumerate(rosters[room][:count])]
                     request('/api/sessions/'+owners[room]+'/combat-stream/batch', reports, 'GameServer')
                     venue_streams[owners[room]] = (stream_id, observed, position+count)
+                    return reports
+
+                def send_venue_batch(room, count, decision='ack'):
+                    reports = publish_venue_batch(room, count)
                     received = venue_peers[room].read('feedback')
                     assert received['roomId']==room and received['connectionId']==venue_connections[room]
                     assert [(row['signal']['reportId'],row['deviceId']) for row in received['signals']] == [
@@ -1349,6 +1353,53 @@ def run(args, api_command, api_cwd):
                         assert not result['complete'] and result['acknowledged']==1 and not result['physicalDeliveryConfirmed']
                         del faults[room]
 
+                    for room, identity in ((3, 'eventId'), (4, 'reportId')):
+                        same_page = mode == 'Linked' and room == 4
+                        count = 2 if same_page else 1
+                        seen, substituted = [], []
+
+                        def duplicate_signal(page):
+                            signals = page['signals']
+                            if not signals:
+                                return page
+                            if not seen:
+                                assert len(signals) == 1
+                                seen.append(signals[0])
+                            elif len(signals) == count and signals[0]['eventSequence'] > seen[0]['eventSequence']:
+                                original = signals[0] if same_page else seen[0]
+                                duplicate = dict(signals[-1], **{identity: original[identity]})
+                                substituted.append(duplicate)
+                                return dict(page, signals=[*signals[:-1], duplicate])
+                            return page
+
+                        faults[room] = duplicate_signal
+                        original_ids = send_venue_batch(room, 1)
+                        wait(lambda:venue_status(continuity_directory)[room-1]['status']['progress']['acknowledged']==1,
+                             'original acknowledgment before a repeated signal identity')
+                        fresh = publish_venue_batch(room, count)[-1]
+
+                        def duplicate_outcome():
+                            if not venue_peers[room].lines.empty():
+                                return {'duplicateFeedback': venue_peers[room].read('feedback')}
+                            row = venue_status(continuity_directory)[room-1]
+                            return row if row['state']=='stopped' else None
+
+                        terminal = wait(duplicate_outcome, f'{mode} repeated {identity}')
+                        assert seen[0]['reportId'] in original_ids and substituted
+                        assert substituted[0]['eventSequence'] > seen[0]['eventSequence']
+                        assert substituted[0]['streamSequence'] == fresh['streamSequence']
+                        save(f'{label}-continuity-duplicate-{identity}.json',
+                             {'original':seen[0], 'substituted':substituted[0], 'samePage':same_page, 'result':terminal})
+                        assert 'duplicateFeedback' not in terminal, f'{mode} repeated {identity} reached the mock device'
+                        result = json.loads((continuity_directory/f'room-{room:02}-report.json').read_bytes())
+                        check(terminal['status']['termination']=='management-invalid-response'
+                              and terminal['status']['progress']['acknowledged']==1
+                              and terminal['status']['progress']['batches']==1
+                              and [attempt['status'] for attempt in result['attempts']]==['simulated-acknowledged']
+                              and result['acknowledged']==1 and not result['physicalDeliveryConfirmed'],
+                              f'{mode} stops a repeated {identity} before another mock batch and retains the original acknowledgment')
+                        del faults[room]
+
                     unaffected = send_venue_batch(5, 1)
                     wait(lambda:venue_status(continuity_directory)[4]['status']['progress']['acknowledged']==1,
                          'room five remains active after other rooms reject authority regressions')
@@ -1357,7 +1408,7 @@ def run(args, api_command, api_cwd):
                     stdout, _ = continuous.communicate(timeout=8)
                     aggregate = json.loads((continuity_directory/'venue-report.json').read_bytes())
                     assert continuous.returncode==1 and json.loads(stdout)==aggregate
-                    assert [row['exitCode'] for row in aggregate['rooms']]==[1,1,0,0,0]
+                    assert [row['exitCode'] for row in aggregate['rooms']]==[1,1,1,1,0]
                     room_five = json.loads((continuity_directory/'room-05-report.json').read_bytes())
                     assert {item['signal']['reportId'] for attempt in room_five['attempts']
                             for item in attempt['deliveries']}==unaffected

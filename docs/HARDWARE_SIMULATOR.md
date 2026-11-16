@@ -2,6 +2,8 @@
 
 即時模擬與單房停止的操作方式見[硬體模擬閘道](HARDWARE.md#停止單房模擬閘道)。
 
+模擬器 0.2.19 在送出前拒絕同一回覆或本輪先前批次的重複事件及回報識別。Windows 測試套件含 8 筆清單，ZIP 共 255,601 bytes，SHA-256 為 `c947bfd7481b34dea19946d8856256d26f7789ad75e2fdb35d3a55daa7f29ec9`。 [下載套件](../artifacts/hardware-packages/hardware-simulator-0.2.19-signal-identity-net10.zip) · [五房排演](HARDWARE.md#一次啟動與停止五房排演)
+
 模擬器 0.2.18 支援五房報告交接 ZIP。`hardware-simulator-0.2.18-net10.zip` 為 251,560 bytes，SHA-256 `448a14dc95b9a987e3909d99fb2ef58e60c062346725821010acf0e4eb24d683`，解壓核對 8 筆清單。 [下載套件](../artifacts/hardware-packages/hardware-simulator-0.2.18-net10.zip) · [交接指令](HARDWARE.md#離線核對五房排演結果)
 
 模擬器 0.2.17 核對五房排演原設定及逐席結果。`hardware-simulator-0.2.17-net10.zip` 為 249,988 bytes，SHA-256 `80eb08be7721b4f4889355c885226132cb8866b3a8d207055d630a38399390ab`，解壓核對 8 筆清單。 [下載套件](../artifacts/hardware-packages/hardware-simulator-0.2.17-net10.zip) · [核對指令](HARDWARE.md#離線核對五房排演結果)

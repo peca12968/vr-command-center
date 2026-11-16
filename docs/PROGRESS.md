@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 硬體模擬閘道拒絕重複回饋
+
+- 用原封裝 0.2.18 重現合併場第 3 房在確認原事件後，又收到其事件識別被移到較新序號的回覆。模擬設備實際收到第二批，原序號為 76，重複識別出現在序號 77。留存該輪反例及正常清理。 [舊版原反例](../artifacts/live-hardware-gateway/run-cf52c3c403994a17a4879c83812254b0/linked-continuity-duplicate-eventId.json)
+- 0.2.19 在同一房檢查每頁的事件及回報識別，並在本輪重連後保留已嘗試轉送的識別。合併與獨立各驗證兩種重複情況，涵蓋同一頁及不同批次。受影響房間未送出第二批，保留第一筆確認並以 `management-invalid-response` 結束。第 5 房在兩種模式均用原連線確認新回饋。等待原批次時的讀回、暫停及恢復複驗通過。 [合併同頁反例](../artifacts/live-hardware-gateway/run-e02a15758718403cbb8ef8c469a5f341/linked-continuity-duplicate-reportId.json) · [獨立跨批次反例](../artifacts/live-hardware-gateway/run-e02a15758718403cbb8ef8c469a5f341/independent-continuity-duplicate-reportId.json)
+- 使用已通過防火牆啟動前檢查的管理 API，實際完成原編譯及解壓套件各 95 項即時排演、38 項離線檢查。解壓套件的離線範例報告與原建置逐位元相同。8 筆套件清單一致，測試程序均已關閉。廠商協議、實體設備輸出與停止須另行驗收。 [下載 0.2.19](../artifacts/hardware-packages/hardware-simulator-0.2.19-signal-identity-net10.zip) · [離線檢查](../artifacts/hardware-simulator/run-02222a380f914feba4b7d657c3523ca2/checks.json) · [解壓即時複驗](../artifacts/live-hardware-gateway/run-e783a5b52d6542f6943d065b124d29fa/checks.json)
+
 ## 2026-11-16 回放五房開場的受阻畫格
 
 - 控制台 0.31.208 可從拒絕訊息直接開啟受阻房間的原準備畫格。回放限原房間及單一畫格，呈現前核對錄製來源、所送管理序號、擷取偏移與該席未就緒的原因。拒絕畫格的座標及姿態仍取自原世界錄製。 [操作說明](PLAYER_READINESS.md#五房追蹤驗收開場) · [Windows 管理包](../artifacts/windows-control-blocked-frame-031208.zip)
