@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+from xml.etree.ElementTree import Element
 import zipfile
 
 
@@ -25,6 +26,7 @@ IDENTITY = ('unityVersion', 'sourceFingerprint', 'sceneNetworkId', 'playerPrefab
 HASH = r'[0-9a-f]{64}'
 ABI = 'arm64-v8a'
 QUEST_APP = 'com.vrcommand.quest'
+QUEST_VR_CATEGORY = 'com.oculus.intent.category.VR'
 
 
 def require(condition, message):
@@ -119,6 +121,72 @@ def quest_metadata(badging, signing):
             'architecture': ABI, 'minSdk': 32, 'targetSdk': 35, 'signatureV2': True, 'signerSha256': signers[0]}
 
 
+def quest_manifest_tree(dump):
+    root = None
+    stack = []
+    for line in dump.splitlines():
+        item = re.fullmatch(r'( *)([EN]): (\S+)(?: \(line=\d+\))?', line)
+        if item:
+            depth = len(item[1])
+            while stack and stack[-1][0] >= depth:
+                stack.pop()
+            if item[2] == 'N':
+                continue
+            element = Element(item[3])
+            if stack:
+                stack[-1][1].append(element)
+            else:
+                require(root is None and element.tag == 'manifest', 'Invalid compiled Quest manifest tree')
+                root = element
+            stack.append((depth, element))
+            continue
+        attribute = re.fullmatch(r' *A: (?:http://schemas\.android\.com/apk/res/android:|android:)(\w+)(?:\(0x[0-9a-fA-F]+\))?=(.*)', line)
+        if attribute and stack:
+            value = re.match(r'"([^"]*)"', attribute[2])
+            stack[-1][1].set(attribute[1], value[1] if value else attribute[2])
+    require(root is not None, 'Missing compiled Quest manifest tree')
+    return root
+
+
+def quest_manifest_metadata(badging, dump):
+    manifest = quest_manifest_tree(dump)
+    launchers = re.findall(r"^launchable-activity: name='([^']+)'", badging, re.M)
+    applications = manifest.findall('application')
+    require(len(launchers) == len(applications) == 1, 'Quest APK needs one launchable activity and application')
+    launcher, = launchers
+    application, = applications
+    names = {launcher}
+    if launcher.startswith(QUEST_APP + '.'):
+        relative = launcher[len(QUEST_APP):]
+        names.add(relative)
+        if '.' not in relative[1:]:
+            names.add(relative[1:])
+    activities = [activity for activity in application.findall('activity') if activity.get('name') in names]
+    require(len(activities) == 1 and application.get('enabled', 'true') == 'true',
+            'Quest APK launcher activity is missing or disabled')
+    activity, = activities
+    require(activity.get('enabled', 'true') == 'true' and activity.get('exported') == 'true',
+            'Quest APK launcher activity must be enabled and exported')
+    require(any('android.intent.action.MAIN' in {action.get('name') for action in intent.findall('action')}
+                and {'android.intent.category.LAUNCHER', QUEST_VR_CATEGORY} <= {node.get('name') for node in intent.findall('category')}
+                for intent in activity.findall('intent-filter')),
+            'Quest APK launcher lacks a single MAIN filter with Android launcher and Meta VR categories')
+    supported = application.findall("meta-data[@name='com.oculus.supportedDevices']")
+    devices = supported[0].get('value', '').split('|') if len(supported) == 1 else []
+    # The project's pinned Unity OpenXR settings emit eureka for Quest 3 development builds.
+    quest3 = 'quest3' if 'quest3' in devices else 'eureka' if 'eureka' in devices else None
+    require(quest3 is not None, 'Quest APK does not declare Quest 3 support')
+    tracking = manifest.findall("uses-feature[@name='android.hardware.vr.headtracking']")
+    require(len(tracking) == 1 and tracking[0].get('required', 'true') == 'true' and tracking[0].get('version') == '1',
+            'Quest APK must require version 1 head tracking')
+    require(len(manifest.findall("uses-feature[@name='com.oculus.feature.PASSTHROUGH']")) == 1,
+            'Quest APK is missing the MR passthrough feature declaration')
+    require(manifest.find("uses-permission[@name='android.permission.INTERNET']") is not None,
+            'Quest APK lacks the Android Internet permission for multiplayer')
+    return {'launchActivity': launcher, 'immersiveLauncher': True, 'quest3DeviceIdentifier': quest3,
+            'headTrackingVersion': 1, 'passthroughDeclared': True, 'internetPermission': True}
+
+
 def verify_quest(apk, sdk, jdk, game):
     require(apk.is_file() and apk.suffix.lower() == '.apk', 'Choose the original Quest APK')
     receipt = read(apk.with_suffix('.receipt.json'))
@@ -134,9 +202,10 @@ def verify_quest(apk, sdk, jdk, game):
 
     def run(*args):
         return subprocess.run([str(arg) for arg in args], check=True, capture_output=True,
-                              encoding='utf-8', timeout=45).stdout
+                              timeout=45).stdout.decode('utf-8').replace('\r\n', '\n')
 
-    meta = quest_metadata(run(aapt, 'dump', 'badging', apk), run(java, '-jar', signer, 'verify', '--verbose', '--print-certs', apk))
+    badging = run(aapt, 'dump', 'badging', apk)
+    meta = quest_metadata(badging, run(java, '-jar', signer, 'verify', '--verbose', '--print-certs', apk))
     require(meta['version'] == receipt.get('version') and meta['versionCode'] == receipt.get('versionCode')
             and meta['architecture'] == receipt.get('architecture'), 'Quest APK version or architecture differs from the release receipt')
     for field in ('applicationId', 'minSdk', 'targetSdk', 'signatureV2', 'signerSha256'):
@@ -146,7 +215,9 @@ def verify_quest(apk, sdk, jdk, game):
     with zipfile.ZipFile(apk) as archive:
         natives = {f'lib/{ABI}/{name}' for name in ('libil2cpp.so', 'libUnityOpenXR.so', 'libopenxr_loader.so')}
         require(natives <= set(archive.namelist()), 'Quest APK is missing the required OpenXR or game libraries')
-    return {**meta, 'bytes': receipt['bytes'], 'sha256': receipt['sha256']}
+    android_manifest = quest_manifest_metadata(badging, run(aapt, 'dump', 'xmltree', apk, '--file', 'AndroidManifest.xml'))
+    require(digest(apk) == receipt['sha256'], 'Quest APK changed during verification')
+    return {**meta, 'bytes': receipt['bytes'], 'sha256': receipt['sha256'], 'androidManifest': android_manifest}
 
 
 def main():

@@ -1,6 +1,6 @@
 # Quest 3 接入與工具鏈
 
-2026-11-16 目前 Quest 開發 APK 為 `0.50.12`／77，61,046,094 bytes，SHA-256 `f2ff7f1ce8cd9a89864a8a6f245d168d64457869cb1e812d9582399eef098873`。發行報告記錄 ARM64、SDK 32／35 和 APK v2 簽章。 [APK](../artifacts/quest/VrCommand.apk) · [發行報告](../artifacts/vive-release-05012-fb9bcabe/venue-release.json)
+目前 Quest 開發 APK 為 `0.50.12`／77，61,046,094 bytes，SHA-256 `f2ff7f1ce8cd9a89864a8a6f245d168d64457869cb1e812d9582399eef098873`。2026-11-17 重新核對同一份 APK 的 ARM64、SDK 32／35、v2 簽章及內附 AndroidManifest 的 VR 啟動與 MR 透視宣告。 [APK](../artifacts/quest/VrCommand.apk) · [發行報告](../artifacts/quest-apk-manifest-20261117/venue-release-final.json)
 
 2026-11-16 Quest 開發 APK `0.50.11`／76 為 61,044,650 bytes，SHA-256 `06cec1ccf61c867038a05ff89acdd476ce24766dc146b3a325f6327455cf493c`。通過 ARM64、SDK 32／35、OpenXR 程式庫、APK v2 簽章及同版 Windows 來源核對。開啟遊戲內量測後，每條新連線可獨立採樣。 [發行報告](../artifacts/venue-release-quest-reconnect-0511.json) · [前版原件](../artifacts/history/unity-0510-before-reconnect-fd0b4f27/quest/VrCommand.apk)
 
@@ -51,7 +51,7 @@ pwsh -NoProfile -NonInteractive -File .\scripts\check-quest-usb.ps1
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -SmokeTest -Serial '<ADB 序號>' `
-  -ReleaseReport .\artifacts\vive-release-05012-fb9bcabe\venue-release.json
+  -ReleaseReport .\artifacts\quest-apk-manifest-20261117\venue-release-final.json
 ```
 
 工具核對指定 Quest 3，在目前 Android 使用者下安裝 APK，並讀回裝置上的 APK 雜湊。沒有既有玩家設定時，工具等待 Android 確認啟動，接著讀取該程序的 Unity 與 AndroidRuntime 日誌，並在三秒後重查原程序。成功輸出 JSON 的 `status` 為 `process-observed`。`unityLogLines` 是查到的 Unity 日誌列數，允許為零。預設遇到既有安裝會停止。

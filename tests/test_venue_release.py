@@ -140,15 +140,28 @@ class VenueReleaseTests(unittest.TestCase):
                    'source': dict(self.source, target='Android'), 'version': meta['version'],
                    'versionCode': meta['versionCode'], 'architecture': meta['architecture']}
         game = release.identity(self.source, 'StandaloneWindows64')
-        with patch.object(release.subprocess, 'run'), patch.object(release, 'quest_metadata', return_value=meta):
+        with (patch.object(release.subprocess, 'run', **{'return_value.stdout': b''}),
+              patch.object(release, 'quest_metadata', return_value=meta),
+              patch.object(release, 'quest_manifest_metadata', return_value={'immersiveLauncher': True})):
             for accepted in (receipt, dict(receipt, **meta)):
                 self.write(self.root, 'game.receipt.json', accepted)
-                self.assertEqual(release.verify_quest(apk, self.root, self.root, game)['signerSha256'], 'e' * 64)
+                result = release.verify_quest(apk, self.root, self.root, game)
+                self.assertEqual(result['signerSha256'], 'e' * 64)
+                self.assertTrue(result['androidManifest']['immersiveLauncher'])
             for field, value in [('signerSha256', 'f' * 64), ('signatureV2', 1), ('minSdk', 31),
                                  ('targetSdk', 34), ('applicationId', 'com.example.other')]:
                 with self.subTest(field=field), self.assertRaisesRegex(ValueError, f'Quest APK {field} differs'):
                     self.write(self.root, 'game.receipt.json', {**receipt, **meta, field: value})
                     release.verify_quest(apk, self.root, self.root, game)
+
+            def replace_apk(_badging, _manifest):
+                apk.write_bytes(b'replaced after the manifest was read')
+                return {'immersiveLauncher': True}
+
+            self.write(self.root, 'game.receipt.json', receipt)
+            with patch.object(release, 'quest_manifest_metadata', side_effect=replace_apk), \
+                    self.assertRaisesRegex(ValueError, 'changed during verification'):
+                release.verify_quest(apk, self.root, self.root, game)
 
     def test_quest_metadata_accepts_arm64_and_verified_v2_only(self):
         badging = ("package: name='com.vrcommand.quest' versionCode='63' versionName='0.49.0'\n"
@@ -164,3 +177,47 @@ class VenueReleaseTests(unittest.TestCase):
                 release.quest_metadata(altered, signing)
         with self.assertRaisesRegex(ValueError, 'v2 signature'):
             release.quest_metadata(badging, signing.replace('true', 'false'))
+
+    def test_compiled_quest_manifest_requires_the_same_vr_launcher_and_mr_declarations(self):
+        badging = "launchable-activity: name='com.vrcommand.quest.PlayerActivity'  label='' icon=''\n"
+        tree = '''N: android=http://schemas.android.com/apk/res/android (line=1)
+  E: manifest (line=1)
+    E: uses-feature (line=3)
+      A: android:name="android.hardware.vr.headtracking"
+      A: android:required=true
+      A: android:version=1
+    E: uses-feature (line=6)
+      A: android:name="com.oculus.feature.PASSTHROUGH"
+    E: uses-permission (line=8)
+      A: android:name="android.permission.INTERNET"
+    E: application (line=10)
+      E: meta-data (line=11)
+        A: android:name="com.oculus.supportedDevices"
+        A: android:value="quest2|eureka|quest3s" (Raw: "quest2|eureka|quest3s")
+      E: activity (line=14)
+        A: http://schemas.android.com/apk/res/android:name(0x01010003)=".PlayerActivity" (Raw: ".PlayerActivity")
+        A: android:exported=true
+        E: intent-filter (line=16)
+          E: category (line=17)
+            A: android:name="android.intent.category.LAUNCHER"
+          E: action (line=19)
+            A: android:name="android.intent.action.MAIN"
+          E: category (line=21)
+            A: android:name="com.oculus.intent.category.VR"
+'''
+        summary = release.quest_manifest_metadata(badging, tree)
+        self.assertEqual(summary['launchActivity'], 'com.vrcommand.quest.PlayerActivity')
+        self.assertEqual(summary['quest3DeviceIdentifier'], 'eureka')
+        self.assertEqual(release.quest_manifest_metadata(badging, tree.replace('eureka', 'quest3'))['quest3DeviceIdentifier'], 'quest3')
+        split_vr_filter = tree.replace('          E: category (line=21)', '        E: intent-filter (line=21)\n          E: category (line=22)')
+        for candidate, error in (
+            (split_vr_filter, 'single MAIN filter'),
+            (tree.replace('com.oculus.intent.category.VR', 'com.oculus.intent.category.2D'), 'Meta VR categories'),
+            (tree.replace('android:exported=true', 'android:exported=false'), 'enabled and exported'),
+            (tree.replace('android:required=true', 'android:required=false'), 'version 1 head tracking'),
+            (tree.replace('quest2|eureka|quest3s', 'quest2|quest3s'), 'declare Quest 3 support'),
+            (tree.replace('com.oculus.feature.PASSTHROUGH', 'com.oculus.feature.OTHER'), 'passthrough feature declaration'),
+            (tree.replace('android.permission.INTERNET', 'android.permission.ACCESS_NETWORK_STATE'), 'Internet permission'),
+        ):
+            with self.subTest(error=error), self.assertRaisesRegex(ValueError, error):
+                release.quest_manifest_metadata(badging, candidate)
