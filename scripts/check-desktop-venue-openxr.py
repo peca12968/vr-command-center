@@ -26,6 +26,55 @@ def session_route(entry):
     return '/api/sessions/' + entry['id']
 
 
+def rejected_openings(entries, denied, tracked_id, readiness):
+    by_room = {room: entry for entry in entries for room in entry['roomIds']}
+    fences = {target['sessionId']: target['sessionSequence'] for target in denied['targets']}
+    assert len(fences) == len(denied['targets']) and set(fences) == {entry['id'] for entry in entries}
+    result = {entry['id']: [] for entry in entries}
+    for policy, rooms, state in (('fullTracking', ROOMS, 'NeedsTracking'), ('withoutSeat', [5], 'PoseUnavailable')):
+        rejection = denied[policy]
+        assert rejection['code'] == 'venue-begin-not-ready' and rejection['roomIds'] == rooms
+        assert [row['roomId'] for row in rejection['blockedRooms']] == rooms
+        for row in rejection['blockedRooms']:
+            room = row['roomId']
+            entry = by_room[room]
+            session = entry['id']
+            players = sorted((player for player in entry['players'] if player['roomId'] == room), key=lambda player: player['seat'])
+            assert [player['seat'] for player in players] == list(range(5))
+            expected_seats = [{'seat': player['seat'] + 1, 'state': state}
+                              for player in players if (player['id'] == tracked_id) == (policy == 'withoutSeat')]
+            assert row['seats'] == expected_seats, (policy, room, 'rejected seats differ from the original roster')
+            frame = row['frame']
+            assert (frame['sessionId'], frame['streamId'], frame['origin'], frame['observedSequence']) == (
+                session, entry['streamId'], 'Simulation', fences[session]), (policy, room, 'rejected recording differs')
+            assert frame['players'] == [{'seat': player['seat'] + 1, 'playerId': player['id']} for player in players]
+            sequence = row['worldSequence']
+            before, lost, recovered = (readiness[step][session]['worldSequence'] for step in ('before', 'lost', 'recovered'))
+            assert (before <= sequence <= lost if policy == 'fullTracking' else lost <= sequence < recovered), (
+                policy, room, 'rejected frame is outside the original preparation interval')
+            result[session].append((policy, row))
+    return result
+
+
+def verify_rejected_opening_packet(packet, policy, rejected, tracked_id):
+    room = rejected['roomId']
+    frame = packet['frame']
+    reference = rejected['frame']
+    assert (packet['sequence'], packet['observedSequence'], packet['elapsedMilliseconds']) == (
+        rejected['worldSequence'], reference['observedSequence'], reference['elapsedMilliseconds']), (
+        policy, room, 'rejected frame metadata differs')
+    assert frame['phase'] == 'Preparing' and frame['tick'] == 0 and packet['suspended'] is False
+    bodies = {body['id']: body for body in frame['players'] if body['roomId'] == room}
+    assert set(bodies) == {player['playerId'] for player in reference['players']}, (policy, room, 'frame roster differs')
+    for player_id, body in bodies.items():
+        assert 0 < body['health'] <= 100
+        if policy == 'withoutSeat' and player_id == tracked_id:
+            assert body['connected'] is False or body['rig']['kind'] == 'None', (policy, room, 'rejected pose is valid')
+        else:
+            expected_kind = 'Tracked' if player_id == tracked_id else 'Simulated'
+            assert body['connected'] is True and body['rig']['kind'] == expected_kind
+
+
 def run(venue, mode):
     venue.start()
     scopes = [ROOMS] if mode == 'Linked' else [[room] for room in ROOMS]
@@ -171,6 +220,8 @@ def verify_closed(venue, entries, clients, openings, tracked_id):
         return (venue.directory / (name + '.log')).read_text(encoding='utf-8', errors='replace')
 
     checkpoints = native.desktop.read_json(venue.directory / 'readiness-transition.json')
+    denied = native.desktop.read_json(venue.directory / 'rejected-start.json')
+    blocked = rejected_openings(entries, denied, tracked_id, checkpoints)
     reports = {}
     for entry in entries:
         session = entry['id']
@@ -207,8 +258,13 @@ def verify_closed(venue, entries, clients, openings, tracked_id):
         steps = ('before', 'lost', 'recovered')
         observed = {step: checkpoints[step][session]['worldSequence'] for step in steps}
         remaining = set(steps)
+        rejected_frames = {}
+        for policy, row in blocked[session]:
+            rejected_frames.setdefault(row['worldSequence'], []).append((policy, row))
 
         def check_preparing(packet):
+            for policy, row in rejected_frames.pop(packet['sequence'], ()):
+                verify_rejected_opening_packet(packet, policy, row, tracked_id)
             for step, sequence in observed.items():
                 if packet['sequence'] != sequence:
                     continue
@@ -226,9 +282,11 @@ def verify_closed(venue, entries, clients, openings, tracked_id):
             players={row['id']: row for row in entry['players']}, on_packet=check_preparing)
         combat_proof = field.verify_combat_journal(telemetry / (session + '.journal'), session, stream, 'Simulation',
                                                   combat, ended, ledger)
-        assert not remaining and all(row['runningFrames'] > 0 for row in sources.values())
+        assert not remaining and not rejected_frames and all(row['runningFrames'] > 0 for row in sources.values())
         reports[session] = {'rooms': entry['roomIds'], 'world': world_proof, 'combat': combat_proof,
                             'preparingFrames': observed, 'opening': openings[session], 'sources': sources,
+                            'rejectedOpenings': [{'policy': policy, 'roomId': row['roomId'], 'worldSequence': row['worldSequence'],
+                                                 'seats': row['seats']} for policy, row in blocked[session]],
                             'serverAcknowledgements': len(acknowledged)}
     venue.save('closed-readback.json', reports)
     assert sum(value['serverAcknowledgements'] for value in reports.values()) == 25
@@ -251,7 +309,7 @@ def main():
         if not venue.cleanup():
             raise RuntimeError('See cleanup.json for native test cleanup errors')
     verify_closed(venue, *closed)
-    venue.stage('passed', mode=args.mode, checks=len(venue.evidence), closedJournalVerified=True)
+    venue.stage('passed', mode=args.mode, checks=len(venue.evidence), closedJournalVerified=True, rejectedOpeningsVerified=True)
 
 
 if __name__ == '__main__':

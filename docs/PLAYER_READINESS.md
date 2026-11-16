@@ -18,10 +18,12 @@
 python scripts/check-desktop-guarded-openxr.py `
     --control-package '<解壓原管理包>' --runtime-root 'C:\VrGuardedTest' `
     --mock-dll '<Unity OpenXR 套件>/Runtime/MockRuntime/windows/x64/mock_runtime.dll' `
-    --pose-dll artifacts/openxr-mock-pose.dll
+    --pose-dll artifacts/openxr-mock/aim-loss-v1/openxr-mock-pose.dll
 ```
 
 測試管理程序以 Kestrel 的本機 Unix domain socket 啟動，確認其 TCP 監聽和 UDP 端點均為零，再透過已通過防火牆查核的 Python 迴環位址連接 Unity。選用短的本機資料根目錄以容納 Windows IPC 路徑。 [Kestrel 本機 socket](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/servers/kestrel/endpoints?view=aspnetcore-10.0)
+
+`--pose-dll` 使用由目前 `tests/fixtures/openxr-mock-pose.c` 建置、支援右手指向失效訊號與確認檔的 DLL。工具在啟動前檢查這兩項設定；執行時仍核對實際確認檔及原始姿態畫格。
 
 裝好 `tests/browser` 的 Node 相依套件及 Playwright Chromium 後，可在上方指令加 `--room-console`。無介面的瀏覽器使用第一房房控開啟原套件管理台。畫面從 1／1 席更新為 0／1 席時，實際點擊開場並核對拒絕提示。追蹤恢復後再次點擊，以新的命令開場，再原樣重送這筆已成功的命令查驗重複回條。雙封存後從任務收尾開啟原開場畫格，核對第一房錄製及原世界序號，並驗證逐格前進及返回開場畫格。
 
@@ -112,6 +114,8 @@ Windows 三包整合驗證可使用 `--prepare-independent-set --check-venue-beg
 自動化客戶端可在新版的 `POST /api/venue/phase` 加入 `requireFullParticipation: true`。以回條的同名欄位確認政策已套用。成功時原 `Begin` 事件的 `venue.participationFrame` 保存來源、世界格和擷取偏移。重試須使用同一請求識別與相同政策。
 
 Windows 同機可執行 `scripts/check-desktop-venue-openxr.py`，沿用 [單場原生回歸](#windows-原生回歸) 的管理包、資料目錄及兩個 DLL 參數，再選 `--mode Linked` 或 `--mode Independent`。每次開啟 24 個桌面玩家端和房間 5 第 5 席的原生 OpenXR Mock Runtime。工具先核對全追蹤開場會拒絕含合成姿態的房間，再讓該 OpenXR 席失去姿態，確認有效姿態政策只標記第 5 房、整批保持準備中。恢復後以相同的場館請求識別開始，並從原日誌核對開場畫格與各席終場回條。
+
+雙封存後，測試也會重讀兩次拒絕所指的準備畫格。`closed-readback.json` 的 `rejectedOpenings` 列出全追蹤政策的五個房間，以及第 5 房姿態失效時的拒絕。每筆核對原錄製、管理序號、畫格擷取時間、房內名冊和受阻席位的姿態。有任一筆找不到或與原畫格不符時，測試會失敗。
 
 ### 執行中五房追蹤總覽
 

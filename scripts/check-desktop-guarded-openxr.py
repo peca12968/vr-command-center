@@ -306,6 +306,9 @@ def verify_native_inputs(args):
     args.api_exe = package / 'Runtime/VrCommand.Api.exe'
     args.mock_dll = args.mock_dll.resolve(strict=True)
     args.pose_dll = args.pose_dll.resolve(strict=True)
+    fixture = args.pose_dll.read_bytes()
+    if not all(name.encode('utf-16-le') in fixture for name in ('VR_COMMAND_OPENXR_AIM_LOSS_FILE', 'VR_COMMAND_OPENXR_AIM_LOSS_ACK')):
+        raise ValueError('Build tests/fixtures/openxr-mock-pose.c with right-hand aim-loss support and pass the resulting --pose-dll')
     desktop.verify_player(args)
     require_silent_windows_launch(sys.executable)
 

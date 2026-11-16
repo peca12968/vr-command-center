@@ -214,7 +214,7 @@ python scripts/check-server-package.py '<解壓遊戲伺服器包>' `
 python scripts/check-desktop-openxr-aim.py `
     --api-exe '<已通過查核的管理包>/Runtime/VrCommand.Api.exe' `
     --mock-dll '<Unity OpenXR 套件>/Runtime/MockRuntime/windows/x64/mock_runtime.dll' `
-    --pose-dll artifacts/openxr-mock-pose.dll --runtime-root '<新隔離執行目錄>'
+    --pose-dll artifacts/openxr-mock/aim-loss-v1/openxr-mock-pose.dll --runtime-root '<新隔離執行目錄>'
 ```
 
 加上 `--tracked-vr` 可在第一房以 `GameServer` 追蹤來源驗證原票券入場。同房桌面玩家的 UDP 連線仍可建立，參戰快照只接受原 OpenXR 席的姿態。第二至第五房同時以 `Simulation` 運作，工具會在追蹤失效前、失效期間及第一房封存後，逐房核對原場次、原串流與持續前進的 tick。此測試使用一般開場指令及 Unity Mock Runtime。 [單場追蹤開場條件](PLAYER_READINESS.md#單場-vr-追蹤開場)

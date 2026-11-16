@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-16 從封存重驗五房的拒絕開場畫格
+
+- 原生五房測試加入兩種拒絕回條的原始畫格讀回。全追蹤政策須對上 24 席合成姿態與五個房間，有效姿態政策只拒絕當時失效的第 5 房第 5 席。讀回比對各房原場次、串流、管理序號、時間、名冊與姿態，並將核對完成的畫格寫入 `rejectedOpenings`。 [重跑方式](PLAYER_READINESS.md#五房各-5-席有效姿態開場)
+- 既有合併與獨立兩輪封存各重讀 6 筆拒絕房間記錄，兩輪原世界日誌 SHA-256 均相符。各模式另以測試副本核對錯誤串流及把失效姿態替換為有效姿態的回應皆被拒絕。 [既有封存重驗](../artifacts/native-rejected-openings-20261116-144600/archives.json)
+- 使用管理包 0.31.209 及 Windows 0.50.12 重新執行 25 席合併及五房獨立。六場雙封存共 482 格，各模式讀回 6 筆拒絕房間記錄並核對 25 份伺服器戰績確認。12 個世界與戰鬥日誌在 C／F 槽的 SHA-256 相符，兩輪活動場次與遺留程序均為零。此輪以 24 個桌面模擬席及一個 OpenXR Mock Runtime 席進行，實體頭盔與跨機待驗。 [本機兩模式摘要](../artifacts/native-rejected-openings-20261116-144600/fresh-runs.json) · [合併讀回](../artifacts/desktop-venue-openxr/20261116-144901-1012744d/closed-readback.json) · [獨立讀回](../artifacts/desktop-venue-openxr/20261116-144916-110bedb0/closed-readback.json)
+- 首輪誤用較舊的姿態 DLL，25 個玩家端都已連線，但右手指向失效測試所需的確認檔未出現，等待就緒逾時後清理。工具現於啟動前檢查 DLL 是否包含指向失效的設定及確認檔欄位。舊 DLL 回傳退出碼 2，未建立場次執行目錄。 [首輪](../artifacts/native-rejected-openings-20261116-144600/Linked.log) · [啟動前拒絕](../artifacts/native-rejected-openings-20261116-144600/old-dll-rejected.log)
+
 ## 2026-11-16 受阻回放返回全館開場檢查
 
 - 管理台 0.31.209 在受阻快照提供「返回全館開場檢查」，把焦點移回全館控制標題。25 席合併與 VR／MR 混合五房的瀏覽器測試核對原開場條件、席位仍失效時停用開始、恢復後不經手動重新整理即可確認開場。若原快照比對遭拒，仍可返回；一般觀戰頁隱藏此動作。 [合併返回按鈕](../artifacts/desktop-guarded-openxr/20261116-143931-ce153a4f/refused-begin-linked-return.png) · [混合場返回按鈕](../artifacts/desktop-guarded-openxr/20261116-143931-ce153a4f/refused-begin-mixed-return.png)
