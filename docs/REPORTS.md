@@ -24,6 +24,8 @@ API／控制台 **0.27.0** 新增 `GET /api/sessions/{id}/report.csv`。在「�
 
 端點為 `GET /api/sessions/{id}/reports.zip`，檔名為 `vr-command-reports-v1-{sessionId}.zip`，使用 `application/zip` 與 `Cache-Control: no-store`。服務先擷取一份最終報表，再產出全場及分房檔案。六份 CSV 的內容與逐一下載相同，包含空房與已離場玩家的既有表示。已結束且沒有戰鬥串流的歷史場次沿用原報表條件。此下載使用戰鬥封存條件，場館驗收 ZIP 則另行核對世界封存、端點與名冊。
 
+管理台 0.31.215 也接受對這個 ZIP 端點送出 `HEAD`，沿用主控權限及原戰鬥封存條件。管理台先讀取原場次的附件檔名和 `Repr-Digest` 的 SHA-256，再核對下載內容。檔名或內容與核對資料不符時，顯示可重新下載，保留原場次選擇。 [RFC 9530](https://www.rfc-editor.org/rfc/rfc9530.html#name-server-returns-no-represent) · [Fetch 完整性檢查](https://fetch.spec.whatwg.org/#concept-request-integrity-metadata)
+
 三包驗證可加上 `--check-room-reports --check-room-combat`。先在五個獨立房間、再在五房連線，以五名原生模擬玩家及五名敵軍配置每房。所有玩家連線及原 Begin 生效後，使用正常管理命令開啟攻擊。等每位原玩家受傷後關閉攻擊，確認遊戲來源已套用，再執行 End。
 
 驗證會比對每筆原生敵軍射線、同房受傷事件、逐格統計和最終戰鬥封存序號。最後再核對個人戰績、伺服器確認及匯出 CSV。此模式檢查敵軍造成的耗損與中彈，玩家保持原生桌面合成姿態且未操作武器。
@@ -77,6 +79,8 @@ Windows 管理包 0.31.37 起，主控可在「最近一次全館收尾」按「
 管理包 0.31.187 的「下載本批戰績 ZIP」也包含 `scores.csv`，列出各房與本批合計。`manifest.json` 以 `scoresFile` 指向此檔。若從 API 取得同一份 ZIP，請加上 `?includeScores=true`。省略此參數時，API 沿用既有 ZIP 格式。
 
 `GET /api/venue/closure/{batchId}/reports.zip` 限主控，回傳 `vr-command-venue-reports-v1-{batchId}.zip` 與 `Cache-Control: no-store`。若任一場的戰鬥報表尚未完成，回傳 `409`、`venue-reports-not-ready` 與待封存房號。即使房間重用或已有新批次，原批次網址仍指向原場次和報表。
+
+管理台 0.31.215 也接受對批次 ZIP 端點送出 `HEAD`。管理台用同一原批次、同一 `includeScores` 參數取得附件檔名與 SHA-256，再驗證下載內容。若收到其他匯出版本或檔案內容有變，畫面保留所選批次並顯示可重新下載。
 
 ### 在全館收尾比較分房戰績
 

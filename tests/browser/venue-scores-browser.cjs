@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { randomUUID } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const readCsv = require('./csv.cjs');
@@ -18,6 +18,9 @@ module.exports = async ({ context, api, tokens, base, screenshots, check, captur
   const csvUrl = id => `/venue/closure/${id}/scores.csv`;
   const roomUrl = (id, room) => `/venue/closure/${id}/rooms/${room}/report.csv`;
   const fetchCsv = id => fetch(base + '/api' + csvUrl(id), { headers: { Authorization: 'Bearer ' + tokens.Master } });
+  const reportZipUrl = id => `/api/venue/closure/${id}/reports.zip?includeScores=true`;
+  const getArchive = (url, role = 'Master', method = 'GET') => fetch(base + url,
+    { method, headers: { Authorization: 'Bearer ' + tokens[role] } });
   const command = (id, action) => api(`/sessions/${id}/commands`, 'POST', { commandId: randomUUID(), action });
   async function login(role) {
     await page.goto(base + '/console/');
@@ -76,6 +79,38 @@ module.exports = async ({ context, api, tokens, base, screenshots, check, captur
     const original = await fetch(response.url(), { headers: { Authorization: 'Bearer ' + tokens.Master } });
     check(response.ok() && original.ok && archiveBytes.equals(Buffer.from(await original.arrayBuffer())),
       'The selected batch downloads the exact API ZIP with its room and venue totals requested');
+    await checkArchiveHead(reportZipUrl(requestId), archiveBytes, archive.suggestedFilename());
+  }
+  async function checkArchiveHead(url, bytes, filename) {
+    const head = await getArchive(url, 'Master', 'HEAD');
+    assert.equal((await getArchive(url, 'Room1', 'HEAD')).status, 403);
+    check(head.ok && head.headers.get('repr-digest') === `sha-256=:${createHash('sha256').update(bytes).digest('base64')}:`
+      && head.headers.get('content-disposition')?.includes(filename)
+      && head.headers.get('cache-control') === 'no-store' && (await head.arrayBuffer()).byteLength === 0,
+      'ZIP metadata is read-only and Master-only and binds the expected filename and exact archive bytes');
+  }
+  async function rejectArchive(url, button, status, replacement, label) {
+    const match = candidate => candidate.origin === new URL(base).origin && candidate.pathname + candidate.search === url;
+    let downloads = 0, supplied = false;
+    const downloaded = () => downloads++;
+    const replace = async route => {
+      if (route.request().method() === 'HEAD') return route.continue();
+      const original = await route.fetch();
+      const bytes = replacement ?? Buffer.from(await original.body());
+      if (!replacement) bytes[bytes.length - 1] ^= 1;
+      supplied = true;
+      await route.fulfill({ response: original, headers: { ...original.headers(), 'content-length': String(bytes.length) }, body: bytes });
+    };
+    page.on('download', downloaded);
+    await page.route(match, replace);
+    try {
+      await button.click();
+      await status.filter({ hasText: /ZIP.*可重新下載|已下載/ }).waitFor();
+      check(supplied && downloads === 0 && (await status.textContent()).includes('ZIP') && await button.isEnabled(), label);
+    } finally {
+      await page.unroute(match, replace);
+      page.off('download', downloaded);
+    }
   }
   const shot = (playerId, hit) => {
     const shotId = randomUUID(), enemyId = randomUUID();
@@ -212,6 +247,10 @@ module.exports = async ({ context, api, tokens, base, screenshots, check, captur
     await api(csvUrl(independent), 'GET', undefined, 'Room1', 403);
     await api(csvUrl(randomUUID()), 'GET', undefined, 'Master', 404);
     check((await fetch(base + '/api' + csvUrl(independent))).status === 401, 'Only an authenticated Master can download an original batch summary');
+    const legacyArchive = await getArchive(reportZipUrl(independent).split('?')[0]);
+    assert.equal(legacyArchive.status, 200);
+    await rejectArchive(reportZipUrl(independent), page.locator('#export-venue-reports'), page.locator('#venue-report-status'),
+      Buffer.from(await legacyArchive.arrayBuffer()), 'A valid ZIP from the wrong report variant stays in the console for a fresh retry');
     await checkDownload(separate.scores, 'Independent CSV matches the displayed original rooms including an empty room and the weighted total');
 
     const rooms = [1, 2, 3, 4, 5], linked = await prepare('Linked', rooms);
@@ -236,6 +275,21 @@ module.exports = async ({ context, api, tokens, base, screenshots, check, captur
     check(await table.locator('[data-venue-score-room]').count() === 5, 'Linked room scores count their original players once and show all five rooms');
     await checkRoomDownload(linkedBatch, linked, 5, 'Player', wing, 'A Linked room exports only its players from the shared session');
     await checkDownload(combined.scores, 'Linked CSV counts the shared session once and preserves the original decimal accuracy');
+    await page.locator('#include-ended').check();
+    await page.locator('#session-select').selectOption(linked);
+    const sessionBundle = page.locator('#export-report-bundle');
+    const sessionZip = `/api/sessions/${linked}/reports.zip`;
+    await rejectArchive(sessionZip, sessionBundle, page.locator('#report-status'), null,
+      'A changed byte in the Linked ZIP prevents download even when the attachment name and media type match');
+    const downloaded = page.waitForEvent('download');
+    await sessionBundle.click();
+    const result = await downloaded;
+    const bundled = await fs.readFile(await result.path());
+    assert.equal(result.suggestedFilename(), `vr-command-reports-v1-${linked}.zip`);
+    const sourceZip = await getArchive(sessionZip);
+    check(sourceZip.ok && bundled.equals(Buffer.from(await sourceZip.arrayBuffer())),
+      'Retry downloads the exact original Linked archive without changing its contents');
+    await checkArchiveHead(sessionZip, bundled, result.suggestedFilename());
 
     await page.locator('#venue-closure-load').click();
     const selector = page.locator('#venue-closure-batch');

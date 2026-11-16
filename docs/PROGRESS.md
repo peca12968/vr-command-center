@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-16 全館與合併場戰績 ZIP 下載核對
+
+- 管理台 0.31.215 用 `HEAD` 取得原封存戰績 ZIP 的附件檔名與 SHA-256，下載時再用摘要核對內容。舊版會下載同批次的另一個匯出版本。新版在本機 IPC API 與 Chromium 通過 34 項檢查，包含拒絕同批次的另一個匯出版本、拒絕變動一個位元組的合併場 ZIP、成功重試及主控權限。另通過 119 項 Node 與 7 項封裝檢查。 [舊版反例](../artifacts/report-zip-verification-031215/before.log) · [新版瀏覽器](../artifacts/desktop-guarded-openxr/20261116-184519-ed467169/browser.log) · [Windows 管理包](../artifacts/report-zip-verification-031215/VRCommand-ControlServer-0.31.215.zip)
+- 以封存資料的副本讀回 Windows 桌面模擬五房獨立和合併各 25 席。從本機 HTTP Chromium 驗證兩批拒收變更的 ZIP，重試存下原始下載。將其中的 50 筆戰績逐席比對原始結算與七項成績。兩個管理服務實例透過 Windows 本機 IPC 執行，並完成清理。 [回讀核對](../artifacts/report-zip-verification-031215/native-history-readback.json)
+
 ## 2026-11-16 開場回條核對完整保存任務
 
 - 管理台 0.31.214 在建立單房、五房合併與五房獨立場次時，會保存送出當下選定的版本內容，並用它核對回條的原房間、版本資訊、任務簡報、時間、環境、敵軍及逐件物件的種類、座標與角度。回條資料不符時，畫面保留前一份已確認的結果，操作員可用原請求重試。 [操作方式](MISSION_VERSIONS.md#五房各自獨立) · [Windows 管理包](../artifacts/mission-launch-content-031214/VRCommand-ControlServer-0.31.214.zip)

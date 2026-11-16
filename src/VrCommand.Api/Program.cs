@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json.Serialization;
 using VrCommand.Core;
 using VrCommand.Persistence;
@@ -356,11 +357,11 @@ app.MapGet("/api/venue/closure/{id:guid}/linked-plan", (Guid id, SessionManager 
 
     return new { batch.RequestId, SessionId = session.Id, session.RoomIds, Revision = store.Version(session.Mission.Id, actor) };
 });
-app.MapGet("/api/venue/closure/{id:guid}/reports.zip", (Guid id, bool? includeScores, SessionManager manager, HttpContext context) =>
+app.MapMethods("/api/venue/closure/{id:guid}/reports.zip", [HttpMethods.Get, HttpMethods.Head], (Guid id, bool? includeScores, SessionManager manager, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";
     var report = manager.FinalVenueReports(id, Actor(context));
-    return Results.File(FinalReportCsv.EncodeVenueBundle(report, includeScores == true), "application/zip", $"vr-command-venue-reports-v1-{id:D}.zip");
+    return ReportArchive(context, FinalReportCsv.EncodeVenueBundle(report, includeScores == true), $"vr-command-venue-reports-v1-{report.RequestId:D}.zip");
 });
 app.MapGet("/api/venue/closure/{id:guid}/scores.csv", (Guid id, SessionManager manager, HttpContext context) =>
 {
@@ -452,15 +453,20 @@ app.MapGet("/api/sessions/{id:guid}/players/{playerId:guid}/report.csv", (Guid i
     var report = manager.FinalPlayerReport(id, playerId, Actor(context));
     return Results.File(FinalReportCsv.Encode(report), "text/csv; charset=utf-8", FinalReportCsv.FileName(id, playerId));
 });
-app.MapGet("/api/sessions/{id:guid}/reports.zip", (Guid id, SessionManager manager, HttpContext context) =>
+app.MapMethods("/api/sessions/{id:guid}/reports.zip", [HttpMethods.Get, HttpMethods.Head], (Guid id, SessionManager manager, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";
     var actor = Actor(context);
     if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Only the master may export the linked report bundle.");
     var report = manager.FinalReport(id, actor);
     if (report.Mode != SessionMode.Linked) throw new ArgumentException("The report bundle requires a linked session.");
-    return Results.File(FinalReportCsv.EncodeBundle(report), "application/zip", $"vr-command-reports-v1-{id:D}.zip");
+    return ReportArchive(context, FinalReportCsv.EncodeBundle(report), $"vr-command-reports-v1-{report.SessionId:D}.zip");
 });
+static IResult ReportArchive(HttpContext context, byte[] archive, string filename)
+{
+    context.Response.Headers["Repr-Digest"] = $"sha-256=:{Convert.ToBase64String(SHA256.HashData(archive))}:";
+    return Results.File(archive, "application/zip", filename);
+}
 static IResult ExportReport(Guid id, int? roomId, SessionManager manager, HttpContext context)
 {
     context.Response.Headers.CacheControl = "no-store";

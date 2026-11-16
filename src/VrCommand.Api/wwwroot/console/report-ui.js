@@ -1,6 +1,29 @@
 import { matchesFinalCsv } from './report-csv.js';
 
 export const venueScoreFields = ['players', 'ammoUsed', 'shotsHit', 'kills', 'hitsReceived', 'damageTaken'];
+const invalidArchive = '無法核對戰績 ZIP 的原始內容，可重新下載。';
+
+function attachmentName(response) {
+  return response.headers.get('Content-Disposition')?.match(/^attachment;\s*filename="?([^";\s]+)"?(?:;|$)/i)?.[1];
+}
+
+async function fetchReportArchive(url, filename, options) {
+  const request = { ...options, redirect: 'error' };
+  const metadata = await fetch(url, { ...request, method: 'HEAD' });
+  if (!metadata.ok) return metadata;
+  const digest = /^sha-256=:([A-Za-z0-9+/]{43}=):$/.exec(metadata.headers.get('Repr-Digest') ?? '')?.[1];
+  if (!digest || attachmentName(metadata) !== filename
+    || metadata.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase() !== 'application/zip')
+    throw new Error(invalidArchive);
+  // Fetch checks the representation before handing the response body to the console.
+  try {
+    const response = await fetch(url, { ...request, integrity: 'sha256-' + digest });
+    if (!response.ok || attachmentName(response) !== filename) throw new Error(invalidArchive);
+    return response;
+  } catch {
+    throw new Error(invalidArchive);
+  }
+}
 
 function venueScoreCsv(scores) {
   const header = ['reportVersion', 'rowType', 'requestId', 'sessionId', 'roomId', ...venueScoreFields, 'accuracyPercent'];
@@ -82,14 +105,18 @@ export function mountReport(current, unauthorized, scopeChanged) {
     const suffix = roomId === null ? '' : '-room-' + String(roomId).padStart(2, '0');
     const path = playerId ? `/players/${playerId}/report.csv` : allRooms ? '/reports.zip'
       : `${roomId === null ? '' : `/rooms/${roomId}`}/report.csv`;
+    const filename = allRooms ? `vr-command-reports-v1-${id}.zip`
+      : `vr-command-report-v1-${id}${playerId ? `-player-${playerId}` : suffix}.csv`;
     const request = new AbortController(); controller = request;
     requestedPlayer = playerId;
     const timeout = setTimeout(() => request.abort(), 8000);
     update(); status.textContent = allRooms ? '正在下載五房戰績 ZIP…' : '正在下載最終報表…';
     try {
-      const response = await fetch(`/api/sessions/${id}${path}`, {
+      const reportUrl = `/api/sessions/${id}${path}`;
+      const options = {
         headers: { Authorization: 'Bearer ' + value.key }, cache: 'no-store', signal: request.signal
-      });
+      };
+      const response = allRooms ? await fetchReportArchive(reportUrl, filename, options) : await fetch(reportUrl, options);
       if (!active()) return;
       if (!response.ok) {
         if (response.status === 401) { unauthorized(); return; }
@@ -109,8 +136,7 @@ export function mountReport(current, unauthorized, scopeChanged) {
       }
       const url = URL.createObjectURL(blob), link = document.createElement('a');
       try {
-        link.href = url; link.download = allRooms ? `vr-command-reports-v1-${id}.zip`
-          : `vr-command-report-v1-${id}${playerId ? `-player-${playerId}` : suffix}.csv`;
+        link.href = url; link.download = filename;
         document.body.append(link); link.click();
       } finally { link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
       status.textContent = playerId ? '已下載所選玩家的最終戰績。' : allRooms ? '已下載全場及五份分房戰績 CSV。'
@@ -132,7 +158,7 @@ export function mountVenueReport(current, unauthorized, save) {
   const rooms = mountVenueRoomReports(current, unauthorized, save);
   const reports = mountVenueDownload(current, unauthorized, save, {
     actions: 'venue-report-actions', button: 'export-venue-reports', status: 'venue-report-status',
-    route: 'reports', query: '?includeScores=true', filename: 'reports',
+    route: 'reports', query: '?includeScores=true', filename: 'reports', verifyArchive: true,
     ready: session => ['Sealed', 'NoSource'].includes(session.combat),
     waiting: rooms => `等待房間 ${rooms} 的戰鬥資料封存。`,
     available: '本批戰績已可匯出。', loading: '正在下載本批戰績 ZIP…',
@@ -237,8 +263,7 @@ function mountVenueRoomReports(current, unauthorized, save) {
       if (!active()) return;
       if (response.status === 401) { unauthorized(); return; }
       const filename = `vr-command-report-v1-${score.sessionId}-room-${String(roomId).padStart(2, '0')}.csv`;
-      const attachment = response.headers.get('Content-Disposition')?.match(/^attachment;\s*filename="?([^";\s]+)"?(?:;|$)/i)?.[1];
-      if (!response.ok || attachment !== filename
+      if (!response.ok || attachmentName(response) !== filename
         || response.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase() !== 'text/csv') throw new Error('Report mismatch');
       const blob = await response.blob();
       if (!active()) return;
@@ -286,9 +311,12 @@ function mountVenueDownload(current, unauthorized, save, options) {
     const timeout = setTimeout(() => request.abort(), 8000);
     updateButton(); status.textContent = options.loading;
     try {
-      const response = await fetch(`/api/venue/closure/${batchId}/${options.route}.${extension}${options.query ?? ''}`, {
+      const url = `/api/venue/closure/${batchId}/${options.route}.${extension}${options.query ?? ''}`;
+      const filename = `vr-command-venue-${options.filename}-v1-${batchId}.${extension}`;
+      const requestOptions = {
         headers: { Authorization: 'Bearer ' + key }, signal: request.signal, cache: 'no-store'
-      });
+      };
+      const response = options.verifyArchive ? await fetchReportArchive(url, filename, requestOptions) : await fetch(url, requestOptions);
       if (!active()) return;
       if (response.status === 401) { unauthorized(); return; }
       if (!response.ok) throw new Error(response.status === 409 ? options.conflict : options.failed);
@@ -302,7 +330,7 @@ function mountVenueDownload(current, unauthorized, save, options) {
         if (!active()) return;
         if (csv !== expected) throw new Error(options.invalid);
       }
-      save(`vr-command-venue-${options.filename}-v1-${batchId}.${extension}`, blob);
+      save(filename, blob);
       status.textContent = options.saved;
     } catch (error) {
       if (active()) status.textContent = request.signal.aborted ? '下載逾時，可重新下載。' : error.message;

@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-16 管理台 0.31.215 的 Windows ZIP 為 53,397,043 位元組，SHA-256 `f8b1c8a4ac235ae354a16f32e19dfed3b9841416ca6391309903feb1e7a835aa`。解壓後逐檔核對 568 筆。全館收尾及合併場戰績 ZIP 在下載前會核對原檔名與 SHA-256。 [管理包](../artifacts/report-zip-verification-031215/VRCommand-ControlServer-0.31.215.zip) · [下載操作](REPORTS.md#下載全館結束批次)
+
 2026-11-16 管理台 0.31.214 的 Windows ZIP 為 53,394,941 位元組，SHA-256 `2226ccd0dc560183c07d445c5b23ae90f515759415aa526c85008a5d30d82477`。解壓後逐檔核對 568 筆。建立單房、五房合併及五房獨立場次時，管理台核對回條中的完整保存任務。 [管理包](../artifacts/mission-launch-content-031214/VRCommand-ControlServer-0.31.214.zip) · [開場操作](MISSION_VERSIONS.md#五房各自獨立)
 
 2026-11-16 管理台 0.31.213 的 Windows ZIP 為 53,394,282 位元組，SHA-256 `61d7cb125af8b0e00e13ba12823af7192cf976c2a62fcb060ec7dd41cf3bcee9`。解壓後逐檔核對 568 筆。即時觀戰在管理服務中斷後有 20 秒自動重連窗口。 [管理包](../artifacts/observer-management-restart-031213/VRCommand-ControlServer-0.31.213.zip) · [觀戰操作](WORLD_RECORDING.md)
