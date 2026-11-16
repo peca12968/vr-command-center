@@ -1010,9 +1010,50 @@ class VenueReconnectWindows:
         return rows
 
 
+def read_room_enemy_policy_checks(rows, applied_end):
+    require(type(rows) is list and 1 <= len(rows) <= 160, 'Provide 1 to 160 room enemy policy checks')
+    checks = {}
+    for row in rows:
+        require(type(row) is dict and set(row) == {'roomId', 'appliedAtSequence', 'inherited', 'behavior', 'autoAttack'}
+                and row['behavior'] in ('Hold', 'Patrol', 'Advance') and type(row['inherited']) is bool
+                and type(row['autoAttack']) is bool, 'Invalid room enemy policy check')
+        sequence = integer(row['appliedAtSequence'], 1, applied_end - 1)
+        room = integer(row['roomId'], 1, 5)
+        rooms = checks.setdefault(sequence, {})
+        require(room not in rooms, 'Duplicate room enemy policy check at the same management sequence')
+        rooms[room] = row
+    return checks
+
+
+def verify_room_enemy_policy_frame(packet, room_ids, checks, frames):
+    frame = packet['frame']
+    policies = frame.get('roomEnemyPolicies')
+    if policies is None:
+        policies = []
+    behaviors = ('Hold', 'Patrol', 'Advance')
+    require(type(policies) is list and len(policies) <= len(room_ids)
+            and frame.get('behavior') in behaviors and type(frame.get('autoAttack')) is bool,
+            'Invalid room enemy policies in the original Running frame')
+    by_room = {}
+    for row in policies:
+        require(type(row) is dict and type(row.get('roomId')) is int and row['roomId'] in room_ids
+                and row['roomId'] not in by_room and row.get('behavior') in behaviors and type(row.get('autoAttack')) is bool,
+                'Invalid room enemy policies in the original Running frame')
+        by_room[row['roomId']] = row
+    require(list(by_room) == sorted(by_room), 'Invalid room enemy policy ordering in the original Running frame')
+    sequence = packet['observedSequence']
+    for room, check in checks.items():
+        inherited = room not in by_room
+        effective = by_room.get(room, frame)
+        require(inherited is check['inherited'] and effective['behavior'] == check['behavior']
+                and effective['autoAttack'] is check['autoAttack'],
+                f'Original Running frame disagrees with room {room} enemy policy at management sequence {sequence}')
+        frames.setdefault((sequence, room), {**check, 'worldSequence': packet['sequence']})
+
+
 def verify_world_journal(path, world, combat_sequence, through, applied_end, *, player_sources=None, guarded_begin=None,
                          players=None, concurrency=None, sealed_fires=None, reconnect_window=None, on_packet=None,
-                         control_batches=(), quest_readiness=(), departed=None):
+                         control_batches=(), quest_readiness=(), departed=None, room_enemy_policy_checks=None):
     spec = importlib.util.spec_from_file_location('field_world_journal', Path(__file__).with_name('analyze-world-journal.py'))
     analyzer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(analyzer)
@@ -1026,6 +1067,7 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
     begin_roster = None
     controls = {batch['appliedAtSequence']: batch for batch in control_batches}
     control_frames = {}
+    room_policy_frames = {}
     readiness_frames, verified_readiness_frames = {}, []
     if quest_readiness:
         require(expected['origin'] == 'GameServer' and expected.get('captureStartedAtUtc'),
@@ -1073,18 +1115,21 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
                 if departure is not None and body['connected'] is True:
                     require(body['roomId'] == departure['roomId'] and departure['joinedAtSequence'] <= observed < departure['leftAtSequence'],
                             'World journal contains a connected departed player outside the original admission')
-        if observed in controls and packet['frame']['phase'] == 'Running' and packet['suspended'] is False and packet['frame']['tick'] > 0:
-            batch = controls[observed]
-            frame = packet['frame']
-            if batch['action'] == 'SetEnvironment':
-                require(packet['weather'] == batch['weather'] and packet['lightning'] is batch['lightning']
-                        and frame['night'] is (batch['timeOfDay'] == 'Night'),
-                        'Original Running frame disagrees with the venue environment batch')
-            else:
-                require(frame['behavior'] == batch['behavior'] and frame['autoAttack'] is batch['autoAttack']
-                        and frame.get('roomEnemyPolicies') in (None, []),
-                        'Original Running frame disagrees with the venue enemy policy batch')
-            control_frames.setdefault(observed, {**batch, 'worldSequence': packet['sequence']})
+        frame = packet['frame']
+        if frame['phase'] == 'Running' and packet['suspended'] is False and frame['tick'] > 0:
+            batch = controls.get(observed)
+            if batch:
+                if batch['action'] == 'SetEnvironment':
+                    require(packet['weather'] == batch['weather'] and packet['lightning'] is batch['lightning']
+                            and frame['night'] is (batch['timeOfDay'] == 'Night'),
+                            'Original Running frame disagrees with the venue environment batch')
+                else:
+                    require(frame['behavior'] == batch['behavior'] and frame['autoAttack'] is batch['autoAttack']
+                            and frame.get('roomEnemyPolicies') in (None, []),
+                            'Original Running frame disagrees with the venue enemy policy batch')
+                control_frames.setdefault(observed, {**batch, 'worldSequence': packet['sequence']})
+            if room_enemy_policy_checks and observed in room_enemy_policy_checks:
+                verify_room_enemy_policy_frame(packet, expected['roomIds'], room_enemy_policy_checks[observed], room_policy_frames)
         if on_packet is not None:
             on_packet(packet)
 
@@ -1129,7 +1174,7 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
     try:
         journal = analyzer.analyze(path, accepted_sequence=begin['appliedAtSequence'] if begin is not None else None,
                                    expected_full_header=expected, on_running_frame=count_player_rigs if player_sources is not None else None,
-                                   on_packet=observe_packet if controls or quest_readiness or departed or any(
+                                   on_packet=observe_packet if controls or room_enemy_policy_checks or quest_readiness or departed or any(
                                        item is not None for item in (begin, concurrency, reconnect_window, on_packet)) else None)
     except EvidenceError:
         raise
@@ -1163,6 +1208,12 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
     if controls:
         require(control_frames.keys() == controls.keys(), 'World journal lacks an exact Running frame for a venue control batch')
         result['venueControlFrames'] = [control_frames[observed] for observed in sorted(control_frames)]
+    if room_enemy_policy_checks:
+        for sequence, rooms in room_enemy_policy_checks.items():
+            for room in rooms:
+                require((sequence, room) in room_policy_frames,
+                        f'World journal lacks an exact Running frame for room {room} enemy policy at management sequence {sequence}')
+        result['roomEnemyPolicyFrames'] = [room_policy_frames[key] for key in sorted(room_policy_frames)]
     if begin is not None:
         first = journal['firstApplied']
         require(begin_roster is not None and first is not None
@@ -1384,7 +1435,7 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                    quest_deployments=None, require_distinct_remote_roster=False, control_batches=(),
                    observed_quest_addresses=None, quest_readiness=(), planned_seat_addresses=None, reconnect_sources=None,
                    tracked_vr_start=None, roster_departures=None, topology_witness=None, require_quest_link_metrics=False,
-                   quest_link_criteria=None, quest_link_issues=None, quest_openxr_launches=None):
+                   quest_link_criteria=None, quest_link_issues=None, quest_openxr_launches=None, room_enemy_policy_checks=None):
     integer(size, 0 if roster_departures is not None else 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(not verify_player_sources or world_journal is not None, 'Player source verification requires the original closed world journal')
@@ -1557,7 +1608,8 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                                    player_sources=player_sources, guarded_begin=guarded_begin, players=players,
                                    concurrency=concurrency, sealed_fires=sealed_fires,
                                    reconnect_window=reconnect_window, control_batches=control_batches,
-                                   quest_readiness=quest_readiness, departed=departed) if world_journal is not None else None
+                                   quest_readiness=quest_readiness, departed=departed,
+                                   room_enemy_policy_checks=room_enemy_policy_checks) if world_journal is not None else None
     alignments = None
     if room_alignments is not None:
         require(journal is not None and quest_players == size, 'MR alignment evidence requires the closed world journal and all original Quest logs')
@@ -3470,6 +3522,11 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     if 'venueControlBatches' in manifest and not inspect_windows:
         require(journals, 'Venue control batch verification requires the original world journals for the full batch')
         control_summary, controls = read_venue_control_batches(manifest['venueControlBatches'], expected, closure, recorded_at, evidence_path)
+    room_enemy_policy_checks = None
+    if 'roomEnemyPolicyChecks' in manifest and not inspect_windows:
+        require(mode == 'Linked' and journals, 'Room enemy policy checks require a Linked venue with its original world journal')
+        room_enemy_policy_checks = read_room_enemy_policy_checks(manifest['roomEnemyPolicyChecks'],
+                                                                next(iter(expected.values()))['appliedAtSequence'])
 
     inbox_supplied = 'windowsEvidenceDirectory' in manifest
     explicit_windows = 'windowsPlayers' in manifest
@@ -3705,6 +3762,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
                                          quest_deployments=quest_deployments,
                                          require_distinct_remote_roster=require_distinct_remote_roster,
                                          control_batches=controls.get(session['id'], ()), observed_quest_addresses=observed_quest_addresses,
+                                         room_enemy_policy_checks=room_enemy_policy_checks,
                                          quest_readiness=quest_readiness.pop(session['id'], ()),
                                          planned_seat_addresses=planned_seat_addresses, reconnect_sources=reconnect_sources,
                                          roster_departures=departures, tracked_vr_start=documents.get('tracked-vr-start.json'),

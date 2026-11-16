@@ -806,6 +806,22 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json --inspect-c
 
 工具依原場次、房間及管理序號逐場找出有效的執行畫格。環境核對天氣、日夜及閃電；敵軍策略核對行為與自動攻擊開關。可用逐場 `worldJournal.venueControlFrames` 的 `worldSequence` 定位回放。需要確認的批次應在下一個管理變更前取得畫格。僅有較晚序號的相同設定，或只有暫停、暫緩及結束畫格時，該批驗收會失敗。
 
+### 核對合併場的分房敵軍策略
+
+合併場可在 `venue.json` 填入 `roomEnemyPolicyChecks`，並照常保留原 `worldJournal`。`appliedAtSequence` 填入管理 API 套用或恢復策略回條上的序號。`inherited` 表示該房是否沿用全場策略，`behavior` 與 `autoAttack` 則填入預期的實際設定。可在同一序號列出其他房間，確認房間間的策略隔離。 [房控操作](LAYOUT.md#合併場分房敵軍策略)
+
+```json
+{
+  "roomEnemyPolicyChecks": [
+    {"roomId": 2, "appliedAtSequence": 29, "inherited": false, "behavior": "Patrol", "autoAttack": true},
+    {"roomId": 1, "appliedAtSequence": 29, "inherited": true, "behavior": "Hold", "autoAttack": false},
+    {"roomId": 2, "appliedAtSequence": 31, "inherited": true, "behavior": "Hold", "autoAttack": false}
+  ]
+}
+```
+
+`verify-field-results.py --venue-manifest` 核對該管理序號下每個有效的執行畫格。結果的 `worldJournal.roomEnemyPolicyFrames` 會逐房列出第一個相符畫格的 `worldSequence`，可用於回放。只有較晚序號、暫停或暫緩的畫格時，工具會指出缺少畫格的房間及序號。
+
 ### 核對 Quest 開場追蹤回條
 
 在 `direct-lan` 驗收清單的 `questReadinessReports` 加入每一批部署的成功追蹤回條。使用 `prepare-venue-field-manifest.py` 時可重複指定 `--quest-readiness-report`，並照常提供原部署報告、發行報告和玩家日誌。手動編輯時可加入下列欄位。 [保存開場前回條](QUEST3.md#核對本次部署與追蹤席位)

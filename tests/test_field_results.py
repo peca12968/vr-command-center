@@ -1940,6 +1940,67 @@ class FieldResultsTests(unittest.TestCase):
                 with self.assertRaisesRegex(field.EvidenceError, 'lacks an exact Running frame'):
                     field.verify_venue(path)
 
+    def test_linked_room_enemy_policy_checks_use_the_exact_original_running_frame(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Linked', with_journals=True)
+            entry, = manifest['sessions']
+            world = json.loads((root / entry['launcherReport']).read_text(encoding='utf-8'))['finalWorld']
+            checks = [
+                {'roomId': 2, 'appliedAtSequence': 5, 'inherited': False, 'behavior': 'Patrol', 'autoAttack': True},
+                {'roomId': 1, 'appliedAtSequence': 5, 'inherited': True, 'behavior': 'Hold', 'autoAttack': False},
+                {'roomId': 2, 'appliedAtSequence': 6, 'inherited': True, 'behavior': 'Hold', 'autoAttack': False},
+            ]
+            original_override = {'roomId': 2, 'behavior': 'Patrol', 'autoAttack': True}
+
+            def verify(rows, *, override=None, suspend_override=False):
+                path.write_text(json.dumps(dict(manifest, roomEnemyPolicyChecks=rows)), encoding='utf-8')
+
+                def configure(packet):
+                    frame = packet['frame']
+                    if frame['phase'] != 'Running':
+                        return
+                    frame.update(behavior='Hold', autoAttack=False)
+                    if packet['sequence'] < 10:
+                        packet.update(observedSequence=5, suspended=suspend_override)
+                        frame['roomEnemyPolicies'] = [original_override] if override is None else override
+                    else:
+                        packet.update(observedSequence=6)
+                        frame['roomEnemyPolicies'] = []
+
+                world_journal(root / entry['worldJournal'], world, preparing_sequence=4, edit_packet=configure)
+                return field.verify_venue(path)
+
+            result = verify(checks)
+            self.assertEqual(result['sessions'][0]['worldJournal']['roomEnemyPolicyFrames'], [
+                dict(checks[1], worldSequence=2), dict(checks[0], worldSequence=2), dict(checks[2], worldSequence=10),
+            ])
+            for replacement, error in (
+                (dict(checks[0], roomId=3), 'disagrees with room 3'),
+                (dict(checks[0], inherited=True), 'disagrees with room 2'),
+                (dict(checks[0], autoAttack=False), 'disagrees with room 2'),
+                (dict(checks[0], appliedAtSequence=4), 'lacks an exact Running frame'),
+                (dict(checks[0], appliedAtSequence=6), 'disagrees with room 2'),
+                (dict(checks[0], inherited=1), 'Invalid room enemy policy check'),
+                (dict(checks[0], roomId=6), 'Invalid numeric evidence'),
+                (dict(checks[0], appliedAtSequence=8), 'Invalid numeric evidence'),
+            ):
+                with self.subTest(replacement=replacement), self.assertRaisesRegex(field.EvidenceError, error):
+                    verify([replacement])
+            with self.assertRaisesRegex(field.EvidenceError, 'Duplicate room enemy policy check'):
+                verify([checks[0], checks[0]])
+            with self.assertRaisesRegex(field.EvidenceError, 'lacks an exact Running frame'):
+                verify(checks, suspend_override=True)
+            with self.assertRaisesRegex(field.EvidenceError, 'Invalid room enemy policies'):
+                verify(checks, override=[original_override, original_override])
+            with self.assertRaisesRegex(field.EvidenceError, 'disagrees with room 2'):
+                verify([dict(checks[0], behavior='Hold', autoAttack=False)], override=[])
+
+            entry.pop('worldJournal')
+            path.write_text(json.dumps(dict(manifest, roomEnemyPolicyChecks=checks)), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'Linked venue with its original world journal'):
+                field.verify_venue(path)
+
     def test_prepared_venue_manifest_uses_embedded_original_receipts(self):
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:

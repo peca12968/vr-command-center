@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 合併場分房敵軍策略封存核對
+
+- 場館收尾工具可依房控原回條上的管理序號核對各房的行為、自動攻擊及是否沿用全場策略。每個指定序號至少要有一個有效執行畫格，同一序號內的所有有效畫格都須符合。結果回傳各房第一個可定位的畫格。 [操作方式](EXTERNAL_CLIENTS.md#核對合併場的分房敵軍策略)
+- 離線重讀六份原 Windows 封存共 849 格。合併場第 153 格的管理序號為 29，只有第 2 房巡邏並開啟自動攻擊。第 165 格的管理序號為 31，五房均沿用全場設定。刻意把第 154 格的策略移到第 3 房並重算紀錄校驗值，舊版通用日誌查核可讀完該副本，新版指定房間的查核拒絕了它。六份原始日誌雜湊相同。 [封存複驗](../artifacts/linked-room-policy-field-20261117/native-readback.json) · [舊版讀取結果](../artifacts/linked-room-policy-field-20261117/baseline-readback.json)
+- 146 項場館驗收回歸通過。本輪以原封存和離線測試驗證。Windows 仍只看到 Quest 3 的 USB 檔案傳輸介面，實體頭盔與跨機操作待驗。 [測試結果](../artifacts/linked-room-policy-field-20261117/field-tests.log) · [USB 快照](../artifacts/linked-room-policy-field-20261117/usb-status.json)
+
 ## 2026-11-17 硬體模擬排演沿用場館 HTTPS 憑證
 
 - 模擬器 0.2.22 讓房控與主控對私有 HTTPS 管理服務使用相同葉憑證指紋。單房及五房產生的設定保存原指紋。使用本機管理服務、私有測試憑證及模擬設備，確認單房收到 1 筆回饋，五房合併和獨立各收到 25 筆。錯誤指紋、錯誤主機名稱、HTTP 附帶指紋、無信任路徑或五房指紋不一致均失敗。 [HTTPS 排演](../artifacts/hardware-management-https-0222/compiled-tls-3c8dc04a/checks.json) · [配置方式](HARDWARE.md#使用場館-https)
