@@ -3,7 +3,8 @@
 ## 2026-11-16 無人值守的 Windows 測試
 
 - 桌面、套件與原生 GUI 測試在開啟 Unity 前先核對實際執行檔路徑。Unity Editor 與 Quest ADB 工具也加入啟動前檢查。風險或檢查失敗會回報到終端機。Windows 防火牆規則及通知設定未調整。 [操作方式](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
-- 同一個遊戲執行檔在現有桌面路徑通過檢查，複製到臨時路徑後由測試入口拒絕啟動。以固定路徑在 `127.0.0.1` 背景完成五房、重建房間及合併場次，共 7 場、6 項檢查，結束時場次與程序已清理。另一個舊版雙玩家快速測試完成啟動與入場，但來源新鮮度 4.710 秒超過原 1.5 秒門檻，該輪為失敗。 [五房測試摘要](../artifacts/desktop-venue/20261116-080148-82e80dc4/summary.json) · [快速測試進度](../artifacts/unity-player-smoke/20261116-080015-ff6d6b12/progress.json)
+- 同一個遊戲執行檔在現有桌面路徑通過檢查，複製到臨時路徑後由測試入口拒絕啟動。以固定路徑在 `127.0.0.1` 背景完成五房、重建房間及合併場次，共 7 場、6 項檢查，結束時場次與程序已清理。另一個雙玩家快速測試兩次完成啟動與入場，來源資料最大延遲分別為 4.710 與 3.239 秒，皆超過原 1.5 秒門檻。 [五房測試摘要](../artifacts/desktop-venue/20261116-080148-82e80dc4/summary.json) · [第一次快速測試](../artifacts/unity-player-smoke/20261116-080015-ff6d6b12/progress.json) · [第二次快速測試](../artifacts/unity-player-smoke/20261116-080524-d7354a61/progress.json)
+- Quest 部署命令在執行臨時路徑的 ADB 前即退出。67 項部署、133 項封存及 3 項 USB 檢查通過，實機部署待驗。功能提交 `d0d11e8` 已推送。GitHub Actions 因帳務或支出上限未啟動，工作執行步驟數為零。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43778180460/job/133009163550)
 
 ## 2026-11-16 Quest 分批部署的同輪追蹤回條
 
