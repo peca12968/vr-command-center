@@ -4,12 +4,14 @@ import argparse
 import codecs
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+from decimal import Decimal
 import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
 import re
+from typing import NamedTuple
 
 
 SPEC = importlib.util.spec_from_file_location('field_results', Path(__file__).with_name('verify-field-results.py'))
@@ -17,10 +19,23 @@ field = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(field)
 
 
-def read_report_lines(path):
+class PairInput(NamedTuple):
+    reports: dict
+    base: Path
+    group: tuple | None = None
+    hashes: list | None = None
+    source: tuple | None = None
+    exchange: str | None = None
+    samples: int | None = None
+    timeout_ms: int | None = None
+
+
+def read_report_lines(path, expected_sha256=None):
     with path.open('rb') as stream:
         raw = stream.read(32769)
     field.require(1 <= len(raw) <= 32768, 'Invalid UDP report size')
+    if expected_sha256 is not None:
+        field.require(hashlib.sha256(raw).hexdigest() == expected_sha256, 'UDP pair differs from its original files')
     encoding = 'utf-16' if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)) else 'utf-8-sig'
     return raw.decode(encoding).strip().splitlines()
 
@@ -66,7 +81,7 @@ def load_inbox(directory, expected_sources):
     for (server, port, peer, _), entries in exchanges.items():
         roles = dict(entries)
         if len(roles) == len(entries) == 2:
-            pairs.append(({'listener': roles['listen'], 'probe': roles['probe']}, directory, None, None))
+            pairs.append(PairInput({'listener': roles['listen'], 'probe': roles['probe']}, directory))
         else:
             status = 'duplicate-role' if len(roles) < len(entries) else 'missing-counterpart'
             issue = {'status': status, 'files': [name for _, name in entries]}
@@ -86,14 +101,59 @@ def path_reference(path, directory):
         return str(path)
 
 
-def load_pairs(pairs_path, batch_paths, mode, rooms, binding, plan_hash):
+def quest_batch_pairs(report, path, mode, endpoints, sources):
+    field.require(field.integer(report['version'], 1, 1) and report.get('mode') == mode
+                  and type(report.get('complete')) is bool, 'Quest UDP preflight batch must use the original mode')
+    groups = report['groups']
+    field.require(type(groups) is list and 1 <= len(groups) <= len(endpoints), 'Invalid Quest UDP endpoint groups')
+    samples = field.integer(report.get('sampleCount'), 1, 20)
+    timeout_ms = field.integer(report['sampleTimeoutMs'], 200, 3000) if 'sampleTimeoutMs' in report else None
+    seen_groups, seen_seats, pairs = set(), set(), []
+    for group in groups:
+        rooms = group['roomIds']
+        field.require(type(rooms) is list and all(type(room) is int for room in rooms)
+                      and tuple(rooms) in endpoints and tuple(rooms) not in seen_groups, 'Invalid or repeated Quest UDP endpoint group')
+        group_key = tuple(rooms)
+        seen_groups.add(group_key)
+        rows = group['seats']
+        field.require(type(rows) is list and 1 <= len(rows) <= len(rooms) * 5, 'Invalid Quest UDP seat list')
+        verified = []
+        for row in rows:
+            seat = field.integer(row['roomId'], 1, 5), field.integer(row['seat'], 1, 5)
+            field.require(seat[0] in rooms and seat in sources and seat not in seen_seats,
+                          'Quest UDP seat differs from the original venue network plan')
+            seen_seats.add(seat)
+            stage = row.get('stage')
+            field.require(type(row['complete']) is bool and type(stage) is str
+                          and row['complete'] == (stage in ('verified', 'reused')), 'Invalid Quest UDP seat outcome')
+            if not row['complete']:
+                continue
+            refs = {role: row[role] for role in ('listener', 'probe')}
+            hashes = [row['listenerSha256'], row['probeSha256']]
+            exchange = row['exchangeSha256']
+            field.require(all(type(value) is str and re.fullmatch('[0-9a-f]{64}', value) for value in (*hashes, exchange))
+                          and all(type(value) is str and value for value in refs.values()), 'Invalid original Quest UDP pair metadata')
+            pairs.append(PairInput(refs, path.parent, group_key, hashes, (*endpoints[group_key], sources[seat]),
+                                   exchange, samples, timeout_ms))
+            verified.append(refs)
+        complete = len(verified) == len(rows)
+        field.require(group.get('complete') is complete and (
+            group.get('udpSourcePreflights') == verified if complete else 'udpSourcePreflights' not in group
+        ), 'Quest UDP endpoint completeness differs from its seat outcomes')
+    field.require(field.integer(report.get('expectedSeats'), 1, 25) == len(seen_seats)
+                  and field.integer(report.get('verifiedSeats'), 0, 25) == len(pairs)
+                  and report['complete'] == (len(seen_seats) == len(pairs)), 'Quest UDP batch totals differ from its seat outcomes')
+    return pairs
+
+
+def load_pairs(pairs_path, batch_paths, mode, endpoints, sources, binding, plan_hash):
     pairs = []
     distinct = False
     if pairs_path:
         manifest = field.read_quest_plan_file(pairs_path)
         field.require(set(manifest) == {'version', 'pairs'} and type(manifest['pairs']) is list,
                       'Expected a version 1 list of report pairs')
-        pairs.extend((row, pairs_path.parent, None, None) for row in manifest['pairs'])
+        pairs.extend(PairInput(row, pairs_path.parent) for row in manifest['pairs'])
     for path in batch_paths:
         report = field.read_json(field.content(path))
         batch_distinct = field.udp_preflight_distinct_roster(report)
@@ -101,15 +161,21 @@ def load_pairs(pairs_path, batch_paths, mode, rooms, binding, plan_hash):
             field.require(report.get('networkPlanSha256') == plan_hash,
                           'Reuse the original venue network plan when including a distinct-roster UDP report')
         distinct |= batch_distinct
-        sources, launch = field.udp_preflight_batch(report, path, mode, rooms)
+        groups = report.get('groups')
+        seat_rows = type(groups) is list and any(type(group) is dict and 'seats' in group for group in groups)
+        if report.get('scope') == 'quest-udp-preflight-only' and (report.get('complete') is False or seat_rows):
+            pairs.extend(quest_batch_pairs(report, path, mode, endpoints, sources))
+            launch = field.read_udp_launch_binding(report, path.parent, mode)
+        else:
+            batch_pairs, launch = field.udp_preflight_batch(report, path, mode, [list(group) for group in sorted(endpoints)])
+            digests = {tuple(group['roomIds']): field.udp_pair_digests(group) for group in report['groups']} if (
+                report['scope'] == 'venue-udp-preflight-only') else {}
+            for group, rows in batch_pairs.items():
+                pairs.extend(PairInput(row, base, group, hashes) for (row, base), hashes in
+                             zip(rows, digests.get(group, [None] * len(rows)), strict=True))
         if launch is not None:
             field.require(binding is not None and all(binding[key] == launch[0][key] for key in ('planSha256', 'previewSha256')),
                           'Reuse the original Windows plan and preview when including a bound UDP report')
-        digests = {tuple(group['roomIds']): field.udp_pair_digests(group) for group in report['groups']} if (
-            report['scope'] == 'venue-udp-preflight-only') else {}
-        for group, rows in sources.items():
-            pairs.extend((row, base, group, hashes) for (row, base), hashes in
-                         zip(rows, digests.get(group, [None] * len(rows)), strict=True))
     field.require(len(pairs) <= 50, 'Too many UDP preflight reports')
     return pairs, distinct
 
@@ -131,6 +197,19 @@ def verify_source(address, paths, checked_at, hashes=None, *, failure_reason=Fal
                                            {field.ipv4(peer)}, failure_reason=failure_reason)
     field.require(field.udp_pair_hashes(paths) == before, 'UDP pair files changed during verification')
     return summary, before
+
+
+def quest_pair_matches(candidate, probe, summary):
+    if (summary['exchangeSha256'], summary['samples']) != (candidate.exchange, candidate.samples):
+        return False
+    if candidate.timeout_ms is None:
+        return True
+    try:
+        samples = field.read_json(read_report_lines(probe, candidate.hashes[1])[0])['samples']
+        return type(samples) is list and len(samples) == candidate.samples and all(
+            type(sample['roundTripMs']) in (int, Decimal) and 0 <= sample['roundTripMs'] <= candidate.timeout_ms for sample in samples)
+    except (OSError, ValueError, IndexError, KeyError, TypeError, RecursionError):
+        return False
 
 
 def read_retry(path, mode, plan_hash):
@@ -215,7 +294,7 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
         require_distinct_remote_roster |= field.udp_preflight_distinct_roster(prior)
     if require_distinct_remote_roster and not inventory_checked:
         field.require_distinct_remote_sources(sources, endpoints.values())
-    pairs, batch_distinct = load_pairs(pairs_path, batch_paths, mode, [list(group) for group in rooms], binding, plan_hash)
+    pairs, batch_distinct = load_pairs(pairs_path, batch_paths, mode, endpoints, sources, binding, plan_hash)
     if batch_distinct and not require_distinct_remote_roster:
         field.require_distinct_remote_sources(sources, endpoints.values())
         require_distinct_remote_roster = True
@@ -236,7 +315,8 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
     else:
         inbox_pairs = []
     field.require(len(pairs) + len(inbox_pairs) <= 50, 'Too many UDP preflight reports')
-    for index, (pair, base, declared_group, original_hashes) in enumerate(pairs + inbox_pairs):
+    for index, candidate in enumerate(pairs + inbox_pairs):
+        pair, base, declared_group = candidate.reports, candidate.base, candidate.group
         try:
             paths = read_pair(pair, base)
             # The retry already checked these original paths and their stored hashes.
@@ -259,14 +339,20 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
                 candidates = set(identities.values())
                 if len(candidates) == 1:
                     source, = candidates
-                    if source in expected and room_groups[expected[source][0][0]] == declared_group:
+                    if ((candidate.source is None or source == candidate.source)
+                            and source in expected and room_groups[expected[source][0][0]] == declared_group):
                         unreadable_sources[source].update({'listener', 'probe'} - identities.keys())
             continue
-        if address not in expected or (declared_group is not None and
-                                      declared_group != room_groups[expected[address][0][0]]):
+        if (address not in expected or (declared_group is not None and declared_group != room_groups[expected[address][0][0]])
+                or (candidate.source is not None and address != candidate.source)):
             unmatched += 1
             continue
-        observed[address].append((paths, original_hashes))
+        prior_source = retained.get(address)
+        if candidate.exchange is not None and prior_source is not None:
+            retained_paths, receipt, hashes = prior_source
+            if (paths, candidate.hashes) == (retained_paths, hashes) and quest_pair_matches(candidate, paths[1], receipt):
+                continue  # The Quest retry can carry the same original pair as the venue retry.
+        observed[address].append((paths, candidate))
         path_counts.update(paths)
 
     results, exchange_counts = {}, Counter()
@@ -284,7 +370,7 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
         if len(choices) != 1 or any(path_counts[path] != 1 for path in choices[0][0]):
             row['status'] = 'duplicate-pair'
             continue
-        paths, original_hashes = choices[0]
+        paths, candidate = choices[0]
         try:
             summary, hashes = retained[address][1:] if address in retained else verify_source(
                 address, paths, checked_at, failure_reason=explain_failures)
@@ -293,9 +379,13 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
             if explain_failures:
                 row['reason'] = getattr(error, 'reason', None) or 'invalid-report'
             continue
-        if original_hashes is not None and hashes != original_hashes:
+        if candidate is not None and candidate.hashes is not None and hashes != candidate.hashes:
             row['status'] = 'invalid-or-expired'
             row['reason'] = 'changed-original'
+            continue
+        if candidate is not None and candidate.exchange is not None and not quest_pair_matches(candidate, paths[1], summary):
+            row['status'] = 'invalid-or-expired'
+            row['reason'] = 'invalid-report'
             continue
         row.update(status='verified', summary=summary, paths=paths, hashes=hashes)
         exchange_counts[summary['exchangeSha256']] += 1
@@ -343,7 +433,8 @@ def main():
     parser.add_argument('--network-plan', required=True, type=Path)
     parser.add_argument('--pairs', type=Path, help='Version 1 JSON list of original listener and probe report paths')
     parser.add_argument('--inbox', type=Path, help='Directory of original UDP listener and probe reports to match by exchange')
-    parser.add_argument('--batch', type=Path, action='append', default=[], help='Original completed UDP batch report')
+    parser.add_argument('--batch', type=Path, action='append', default=[],
+                        help='Original completed UDP batch or incomplete Quest batch with verified seats')
     parser.add_argument('--retry-report', type=Path, help='Incomplete venue report whose verified sources should be checked again')
     parser.add_argument('--launcher-preview', type=Path, help='Original successful Launch-Server.exe --venue-check report')
     parser.add_argument('--launch-plan', type=Path, help='Original revision-guarded Windows launch plan for the provided preview')

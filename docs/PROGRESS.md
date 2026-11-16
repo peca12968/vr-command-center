@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-16 全館預檢可保留 Quest 批次已通過的來源
+
+- 全館工具的 `--batch` 可讀取未完成的 Quest 批次，按原房席、端點與預定來源重驗已通過的雙端檔案。核對原雜湊、交換摘要、樣本數及原報告記錄的等待上限。缺少有效報告的席位仍列在全館報告並擋住開場。補測帶入未完成的全館報告及最新 Quest 報告時，相同路徑與原始雜湊的雙端檔案合計一次。 [操作方式](EXTERNAL_CLIENTS.md#開場前核對五房-udp-報告)
+- 沿用上一輪合併場的原 Quest 日誌及模擬 Android 報告，再用實際 Windows 迴環 UDP 產生一組 Windows 報告。首輪全館確認 2 個來源，第 1 房缺件使 `start-verified-venue.py --verify-only` 回傳 1。補件後確認 3 個來源、沿用 2 組，開場唯讀查核通過。9 份原始檔案逐位元相同。第一次排演程式誤以為原 Quest 批次缺第 2 房，依原報告改為第 1 房後以新目錄重驗。 [合併排演](../artifacts/venue-partial-udp-20261116-1558/linked-final/linked-original-evidence.log)
+- 獨立五房沿用原 ADB 模擬 Android、Windows 迴環的 25 組雙端報告，全館確認 25 個來源。加入樣本期限時的首個候選誤把實際小數拒絕，改用證據解析器的 `Decimal` 後通過，保留首輪紀錄。Windows 仍只列出 Quest 的檔案傳輸介面，跨機及頭盔實機待驗。 [25 席核對](../artifacts/venue-partial-udp-20261116-1558/independent-verified.log) · [首輪失敗](../artifacts/venue-partial-udp-20261116-1558/independent-readiness.log) · [USB 快照](../artifacts/venue-partial-udp-20261116-1558/usb-status.json)
+- 18 項 LAN 回歸通過。新增案例確認原房席錯置、雙端原檔變更、900 ms 上限下的 901 ms 樣本均無法被當成已驗證來源。 [最終回歸](../artifacts/venue-partial-udp-20261116-1558/lan-verified.log)
+
 ## 2026-11-16 Quest UDP 預檢沿用當次 ADB 連線
 
 - 單席及五房 UDP 預檢從授權清單選定連線識別。傳入私有金鑰、執行診斷及清理均使用該條連線。對照版在金鑰傳入後轉向接手同一序號的替代連線，仍會接受其診斷回報。新版會將該席判為失敗。也核對了診斷已回報完成、但原連線在清理前中斷的情況。 [預檢方式](QUEST3.md#開場前從頭盔執行-udp-預檢) · [舊版反例](../artifacts/quest-udp-transport-20261116-1545/before.log)
