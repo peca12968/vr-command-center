@@ -3,11 +3,13 @@
 import argparse
 import ctypes
 from ctypes import wintypes
+from datetime import datetime, timedelta, timezone
 import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
@@ -47,6 +49,59 @@ def own_launcher_processes():
             and kernel.AssignProcessToJobObject(job, kernel.GetCurrentProcess())):
         kernel.CloseHandle(job)
         raise field.EvidenceError('Could not own the Windows launcher and game processes')
+
+
+def recheck_launch_inputs(inputs, readiness, original):
+    message = 'The original network plan or launch evidence changed before starting Windows'
+    for path, expected_digest in inputs:
+        with path.open('rb') as stream:
+            raw = stream.read(field.MAX_QUEST_PLAN_BYTES + 1)
+        field.require(hashlib.sha256(raw).hexdigest() == expected_digest, message)
+    with readiness.open('rb') as stream:
+        field.require(stream.read(len(original) + 1) == original, message)
+
+
+def udp_utc_ticks(value):
+    timestamp = datetime.fromisoformat(value)
+    field.require(timestamp.utcoffset() == timedelta(0), 'UDP evidence time must be in UTC')
+    # Windows records 100 ns ticks. Keep the seventh digit when comparing deadlines.
+    tail = re.search(r'\.\d{6}(\d)(?:Z|\+00:00)$', value)
+    return timestamp, int(tail[1]) if tail else 0
+
+
+def recheck_udp_windows(checked, directory):
+    windows = {}
+    for group in checked['groups']:
+        finishes = []
+        for pair, hashes in zip(group['udpSourcePreflights'], group['udpSourcePreflightSha256'], strict=True):
+            listener, probe = preflight.read_pair(pair, directory)
+            lines = preflight.read_report_lines(listener, hashes[0])
+            field.require(field.udp_pair_hashes((probe,)) == [hashes[1]], 'UDP pair differs from its original files')
+            finishes.append(udp_utc_ticks(field.read_json(lines[-1])['completedAtUtc']))
+        first, tick = min(finishes)
+        windows[tuple(group['roomIds'])] = (first + timedelta(minutes=30), tick), max(finishes)
+    now = datetime.now(timezone.utc)
+    field.require(now >= datetime.fromisoformat(checked['checkedAtUtc']), 'The clock moved back during Windows launch checks')
+    for rooms, (expires, completed) in windows.items():
+        room_label = ', '.join(map(str, rooms))
+        field.require(completed < (now, 0), 'UDP preflight completion is ahead of the launch clock for room(s) ' + room_label)
+        field.require((now, 0) <= expires, 'UDP preflight expired before starting room(s) ' + room_label)
+    checked['checkedAtUtc'] = now.isoformat()
+    return {rooms: expires for rooms, (expires, _) in windows.items()}
+
+
+def check_ready_bind_times(ready, mode, checked_at, expiries):
+    field.require(ready['status'] == 'venue-ready' and ready['topology'] == mode,
+                  'Windows launch needs the original ready report for this venue')
+    verified = set()
+    for server in ready['servers']:
+        rooms = tuple(server['roomIds'])
+        field.require(rooms in expiries and rooms not in verified, 'Windows ready report does not cover the original rooms')
+        bound = udp_utc_ticks(server['ready']['udpBinding']['observedAtUtc'])
+        field.require((checked_at, 0) <= bound <= expiries[rooms],
+                      'UDP binding is outside the original preflight window for room(s) ' + ', '.join(map(str, rooms)))
+        verified.add(rooms)
+    field.require(verified == expiries.keys(), 'Windows ready report does not cover the original rooms')
 
 
 def launch(args):
@@ -158,16 +213,19 @@ def launch(args):
             field.require(current.returncode == 0, 'Windows launcher could not verify the original session revisions or server release')
             fresh = field.read_udp_launcher_document(fresh_path, preview=True, include_release=True)
             field.require(fresh == original_preview, 'Current Windows launcher preview differs from the original sessions, seats or bindings')
-        print(json.dumps({'status': 'udp-preflight-verified', 'mode': checked['mode'],
-                          'verifiedSources': checked['verifiedSources'], 'launchPlanSha256': binding['planSha256'],
-                          'networkPlanSha256': checked['networkPlanSha256'],
-                          **({'requireDistinctRemoteRoster': True} if distinct else {})}), flush=True)
         command = [str(launcher), '--venue-run', str(snapshot), '--work', str(args.work.resolve()),
                    '--seconds', str(args.seconds), '--ready-report', str(ready_path), '--report', str(result_path), *release_args]
         if args.peer_diagnostics:
             command.extend(('--peer-diagnostics', 'on'))
         if args.tracked_vr:
             command.extend(('--tracked-vr', 'on'))
+        recheck_launch_inputs(((args.network_plan, checked['networkPlanSha256']), (original_plan, binding['planSha256']),
+                               (preview, binding['previewSha256'])), readiness, original)
+        expiries = recheck_udp_windows(checked, readiness.parent)
+        print(json.dumps({'status': 'udp-preflight-verified', 'mode': checked['mode'],
+                          'verifiedSources': checked['verifiedSources'], 'launchPlanSha256': binding['planSha256'],
+                          'networkPlanSha256': checked['networkPlanSha256'],
+                          **({'requireDistinctRemoteRoster': True} if distinct else {})}), flush=True)
         with subprocess.Popen(command) as process:
             try:
                 code = process.wait()
@@ -176,13 +234,16 @@ def launch(args):
                     process.terminate()
                 process.wait()
                 return 130
-        if code == 0 and receipt_path is not None:
-            write_start_receipt(receipt_path, ready_path, result_path, readiness, original, checked, release_stamps)
+        if code == 0:
+            ready_evidence = field.read_quest_document(ready_path)
+            check_ready_bind_times(ready_evidence[0], checked['mode'], datetime.fromisoformat(checked['checkedAtUtc']), expiries)
+            if receipt_path is not None:
+                write_start_receipt(receipt_path, ready_path, ready_evidence, result_path, readiness, original, checked, release_stamps)
         return code
 
 
-def write_start_receipt(path, ready_path, result_path, readiness, original, checked, release_stamps):
-    ready, ready_raw = field.read_quest_document(ready_path)
+def write_start_receipt(path, ready_path, ready_evidence, result_path, readiness, original, checked, release_stamps):
+    ready, ready_raw = ready_evidence
     with result_path.open('rb') as stream:
         result_raw = field.limited_read(stream)
     terminal = field.read_json(result_raw.decode('utf-8-sig'))

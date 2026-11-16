@@ -64,8 +64,9 @@ class NetworkPlanPreparationTests(unittest.TestCase):
         terminal = self.store('terminal.json', dict(source, status='venue-sealed-stopped', complete=True, readyPublished=True))
         readiness = self.store('readiness.json', {'complete': True})
         checked = {'mode': 'Linked', 'checkedAtUtc': '2026-11-16T00:00:00+00:00'}
+        ready_evidence = start.field.read_quest_document(ready)
         accepted = readiness.with_name('accepted.json')
-        start.write_start_receipt(accepted, ready, terminal, readiness, readiness.read_bytes(), checked, stamps)
+        start.write_start_receipt(accepted, ready, ready_evidence, terminal, readiness, readiness.read_bytes(), checked, stamps)
         receipt = json.loads(accepted.read_bytes())
         self.assertEqual(hashlib.sha256(ready.read_bytes()).hexdigest(), receipt['readySha256'])
         self.assertEqual(hashlib.sha256(terminal.read_bytes()).hexdigest(), receipt['terminalSha256'])
@@ -73,8 +74,25 @@ class NetworkPlanPreparationTests(unittest.TestCase):
                               status='venue-sealed-stopped', complete=True, readyPublished=True))
         rejected = readiness.with_name('rejected.json')
         with self.assertRaisesRegex(start.field.EvidenceError, 'do not share the verified server release'):
-            start.write_start_receipt(rejected, ready, terminal, readiness, readiness.read_bytes(), checked, stamps)
+            start.write_start_receipt(rejected, ready, ready_evidence, terminal, readiness, readiness.read_bytes(), checked, stamps)
         self.assertFalse(rejected.exists())
+
+    def test_verified_start_binding_uses_each_rooms_exact_windows_deadline(self):
+        spec = importlib.util.spec_from_file_location('start_verified_venue', ROOT / 'scripts/start-verified-venue.py')
+        start = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(start)
+        checked = datetime.fromisoformat('2026-11-16T00:29:59.000000+00:00')
+        expiry = start.udp_utc_ticks('2026-11-16T00:30:00.1234567+00:00')
+        deadlines = {(room,): expiry for room in range(1, 6)}
+        deadlines[(5,)] = start.udp_utc_ticks('2026-11-16T00:30:00.1234569Z')
+        ready = {'status': 'venue-ready', 'topology': 'Independent', 'servers': [
+            {'roomIds': [room], 'ready': {'udpBinding': {
+                'observedAtUtc': '2026-11-16T00:30:00.1234568Z' if room == 5 else '2026-11-16T00:30:00.1234567Z'
+            }}} for room in range(1, 6)]}
+        start.check_ready_bind_times(ready, 'Independent', checked, deadlines)
+        ready['servers'][3]['ready']['udpBinding']['observedAtUtc'] = '2026-11-16T00:30:00.1234568Z'
+        with self.assertRaisesRegex(start.field.EvidenceError, r'outside the original preflight window for room\(s\) 4'):
+            start.check_ready_bind_times(ready, 'Independent', checked, deadlines)
 
     def test_prepare_both_topologies_and_a_quest_subset_consumed_by_the_original_probe(self):
         spec = importlib.util.spec_from_file_location('quest_venue_probe', ROOT / 'scripts/probe-quest-venue.py')
@@ -416,6 +434,93 @@ class LanPreflightTests(unittest.TestCase):
         self.assertNotIn(str(self.root), result.stdout + result.stderr)
         self.assertTrue(report.is_file(), result.stderr)
         return json.loads(report.read_text(encoding='utf-8'))
+
+    def test_verified_start_checks_udp_evidence_after_the_live_preview_and_at_binding(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reserve:
+            reserve.bind((LOOPBACK, 0))
+            port = reserve.getsockname()[1]
+        launch, preview = guarded_documents('Linked', [port])
+        rooms = list(range(1, 6))
+        seats = [{'roomId': room, 'seat': 1} for room in rooms]
+        preview['servers'][0]['registeredSeats'] = seats
+        launch_path = self.venue_json('launch.json', launch)
+        preview_path = self.venue_json('preview.json', preview)
+        network = self.venue_json('network.json', {'version': 1, 'mode': 'Linked',
+            'endpoints': [{'roomIds': rooms, 'address': LOOPBACK, 'port': port}],
+            'sources': [{**seat, 'address': '127.0.0.2'} for seat in seats]})
+        pair = self.venue_pair(port, '127.0.0.2', 'current', encoding='utf-16')
+        pairs = self.venue_json('pairs.json', {'version': 1, 'pairs': [pair]})
+        self.venue_check(network, 'readiness.json', '--pairs', pairs, '--launch-plan', launch_path,
+                         '--launcher-preview', preview_path)
+        listener = self.root / pair['listener']
+        probe = self.root / pair['probe']
+        inputs = (listener, probe, preview_path, network, launch_path, self.root / 'readiness.json')
+        originals = {path: path.read_bytes() for path in inputs}
+        completed = datetime.fromisoformat(json.loads(originals[listener].splitlines()[-1])['completedAtUtc'])
+        expires = completed + timedelta(minutes=30)
+        launcher = self.root / 'package' / 'Launch-Server.exe'
+        launcher.parent.mkdir()
+        launcher.touch()
+        spec = importlib.util.spec_from_file_location('start_verified_venue', ROOT / 'scripts/start-verified-venue.py')
+        start = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(start)
+        firewall = SimpleNamespace(WindowsFirewallLaunchError=RuntimeError, require_silent_windows_launch=Mock())
+
+        for case, rejected in (
+            ('elapsed-during-preview', 'UDP preflight expired before starting room'),
+            ('probe-replaced', 'UDP pair differs from its original files'),
+            ('network-replaced', 'The original network plan or launch evidence changed'),
+            ('bind-too-late', 'UDP binding is outside the original preflight window for room'),
+            ('bind-too-late-without-receipt', 'UDP binding is outside the original preflight window for room'),
+            ('same-window', None),
+        ):
+            with self.subTest(case=case):
+                for path, raw in originals.items():
+                    if path.read_bytes() != raw:
+                        path.write_bytes(raw)
+                work = self.root / case
+                work.mkdir()
+                receipt = work / 'start.json'
+                args = SimpleNamespace(verify_only=False, launcher=launcher, launch_plan=launch_path, network_plan=network,
+                                       readiness=self.root / 'readiness.json', require_distinct_remote_roster=False,
+                                       retry_output=None, release_report=None, work=work / 'game',
+                                       ready_report=work / 'ready.json', report=work / 'terminal.json',
+                                       start_receipt=None if case.endswith('without-receipt') else receipt,
+                                       peer_diagnostics=False, tracked_vr=False, seconds=60)
+                after_preview = expires + timedelta(seconds=1) if case == 'elapsed-during-preview' else expires - timedelta(seconds=1)
+                observed = expires + timedelta(microseconds=1) if case.startswith('bind-too-late') else expires
+
+                def live_preview(command, *, timeout):
+                    self.assertEqual('--venue-check', command[1])
+                    Path(command[4]).write_bytes(originals[preview_path])
+                    if case in ('probe-replaced', 'network-replaced'):
+                        replaced = probe if case == 'probe-replaced' else network
+                        replaced.write_bytes(originals[replaced] + b'\n')
+                    return SimpleNamespace(returncode=0)
+
+                @contextmanager
+                def game(command):
+                    self.assertEqual('--venue-run', command[1])
+                    args.ready_report.write_text(json.dumps({'topology': 'Linked', 'status': 'venue-ready', 'instanceId': 'instance',
+                        'servers': [{'roomIds': rooms, 'ready': {'udpBinding': {'observedAtUtc': observed.isoformat()}}}]}),
+                        encoding='utf-8')
+                    args.report.write_text(json.dumps({'topology': 'Linked', 'status': 'venue-sealed-stopped',
+                        'instanceId': 'instance', 'complete': True, 'readyPublished': True}), encoding='utf-8')
+                    yield SimpleNamespace(wait=lambda: 0)
+
+                process = Mock(side_effect=game)
+                with (patch.dict(sys.modules, windows_firewall=firewall), patch.object(start, 'own_launcher_processes'),
+                      patch.object(start, 'datetime', SimpleNamespace(now=lambda zone: after_preview, fromisoformat=datetime.fromisoformat)),
+                      patch.object(start, 'subprocess', SimpleNamespace(Popen=process, run=live_preview))):
+                    if rejected:
+                        with self.assertRaisesRegex(start.field.EvidenceError, rejected):
+                            start.launch(args)
+                    else:
+                        self.assertEqual(0, start.launch(args))
+                self.assertEqual(case.startswith('bind-too-late') or case == 'same-window', process.called)
+                self.assertEqual(case == 'same-window', receipt.exists())
+                if receipt.exists():
+                    self.assertEqual(after_preview.isoformat(), json.loads(receipt.read_bytes())['checkedAtUtc'])
 
     def test_venue_linked_shared_sources_and_original_batch(self):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reserved:

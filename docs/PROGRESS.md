@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-16 開場前重驗 UDP 原檔與綁定期限
+
+- `start-verified-venue.py` 在 Windows 更新預覽後，再次核對啟動計畫、網路清單、預檢、預覽及雙端報告。準備期間換檔或超過 30 分鐘，在建立遊戲程序前退出。正常收尾時以各房間端點最早的原監聽完成時間核對實際 UDP 綁定，保留 Windows 的 100 ns 時間精度。綁定逾時以非零退出，並保留原就緒與結束檔。 [使用方式](WINDOWS_SERVER_PACKAGE.md#以-udp-預檢報告啟動五房)
+- 在原端點使用實際 Windows UDP 採樣，受控模擬預覽期間過期、換掉探測報告或網路清單、遊戲綁定逾時。舊工具在這些情形仍返回成功，新工具依階段停止啟動或拒絕回條。 [舊版反例](../artifacts/venue-launch-window-20261116-1632/baseline.log) · [修正後測試](../artifacts/venue-launch-window-20261116-1632/targeted-final.log)
+- 使用已通過防火牆啟動前查核的既有 Windows 包，在本機完成合併 1 個及獨立 5 個原生伺服器的就緒、封存、停止及回條。最長從原探測完成到 Windows 觀察遊戲 UDP 綁定為 9.654 秒。以最終程式回讀兩批的綁定與原雜湊，30 份證據檔案逐位元相同。排演涵蓋伺服器與控制台處理，入場玩家、頭盔和跨機需另驗。 [原生程序](../artifacts/venue-launch-window-20261116-1632/native.log) · [最終回讀](../artifacts/venue-launch-window-20261116-1632/native-final-readback.json)
+- 21 項 LAN 和啟動回歸通過，包含獨立場逐房期限、綁定比期限晚 100 ns，以及省略回條路徑時仍拒絕逾時綁定。 [回歸](../artifacts/venue-launch-window-20261116-1632/lan-final.log)
+
 ## 2026-11-16 五房獨立模式並行 Quest UDP 預檢
 
 - 五房獨立預檢會同時處理不同 UDP 端點，每個端點逐席完成 Windows 監聽、ADB 探測與清理。合併場維持同一端點逐席。中斷後停止安排新席，獨立場等已開始的探測收尾，再保存依房間與席位排序的報告。原取樣期限、完成條件及 30 分鐘有效窗沿用。 [操作方式](QUEST3.md#批次預檢五房-quest-席位)
