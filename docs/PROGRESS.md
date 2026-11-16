@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 六批驗收核對同一伺服器發行
+
+- `prepare-venue-stages.py --require-server-release` 讓 5、10、25 人的獨立與合併批次使用同一份原場館發行報告，並核對各批原五房終止檔的伺服器清單摘要。收件報告逐批標示缺少摘要或摘要不符。通過的批次列出摘要及原場次數。 [操作方式](EXTERNAL_CLIENTS.md#六批核對同一份-windows-伺服器發行)
+- 合成六批通過後共核對 18 場與 80 份戰績確認。另將第 2 批終止檔的摘要移除並更改第 5 批的摘要，同一份報告指出兩批原因，其餘四批通過。舊 0.50.7 六批在原設定下重驗出 80 份戰績確認，摘要逐位元組相符。套用新的發行要求時，六批各自指出舊發行檔缺少摘要。九項原輸入雜湊維持一致。 [舊封存重驗摘要](../artifacts/stage-server-release-readback-936a2402/validation.json) · [收件報告](../artifacts/stage-server-release-readback-936a2402/strict-inspection.json)
+- 實際解壓的 1.25 啟動器離線核對 0.50.11 套件與原發行報告。136 項封存、9 項發行及 10 項伺服器套件測試通過。功能提交 `7b7f6b6` 已推送，GitHub Actions 回報失敗且未執行任何步驟。新發行的跨機六批與頭盔實機仍待驗收。 [伺服器包核對報告](../artifacts/stage-server-release-readback-936a2402/current-server-package-verified.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43785663105/job/133032596229)
+
 ## 2026-11-16 無人值守啟動補查
 
 - 五房查核後啟動、Quest 單席與五房 UDP 探測及伺服器包內的 PowerShell UDP 測試均先查當前 Windows 防火牆設定與實際執行檔路徑。五房離線查核可直接執行。查核失敗或逾時會停止該次啟動並在終端機回報。 [操作方式](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
