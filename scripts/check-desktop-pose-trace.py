@@ -90,7 +90,7 @@ def main():
     p.add_argument('--player-exe',type=Path,default=Path(os.environ.get('VR_COMMAND_UNITY_PLAYER',ROOT/'artifacts/desktop/VrCommand.exe')))
     p.add_argument('--api-dll',type=Path,default=Path(os.environ.get('VR_COMMAND_API_DLL',ROOT/'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
     args=p.parse_args();args.duration=600;args.visible_room=3;args.job_workers=2;args.check=False
-    try:venue_module.verify_player(args)
+    try:venue_module.verify_player(args, python_listener=True)
     except(OSError,RuntimeError,ValueError)as error:p.error(str(error))
     v=TraceVenue(args);gates=[]
     try:run(v,gates)

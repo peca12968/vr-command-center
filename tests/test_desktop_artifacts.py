@@ -1,7 +1,9 @@
 """Actual concurrent observation reads and Windows writer-lease copy fencing."""
 import ctypes
 from ctypes import wintypes
+from contextlib import redirect_stderr
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -76,6 +78,43 @@ class ArtifactTests(unittest.TestCase):
                 venue.verify_player(args, python_listener=True)
             self.assertEqual(verify.call_args_list, [call(args.player_exe), call(sys.executable)])
             run.assert_not_called()
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows launch preflight')
+    def test_diagnostic_commands_reject_a_blocked_relay_before_creating_the_venue(self):
+        from windows_firewall import WindowsFirewallLaunchError
+
+        cases = (
+            ('check-desktop-journal-recovery', lambda script: (script.fixture.vm, script.fixture, 'SealVenue'),
+             ['--before-build', 'before', '--after-build', 'after']),
+            ('check-desktop-pose-trace', lambda script: (script.venue_module, script, 'TraceVenue'), []),
+            ('check-pose-continuity', lambda script: (script.multi.vm, script.multi, 'DiagnosticVenue'), []),
+        )
+        with self.directory() as temporary:
+            player = Path(temporary) / 'VrCommand.exe'
+            player.touch()
+
+            def check(program):
+                if program == sys.executable:
+                    raise WindowsFirewallLaunchError('Blocked Python listener')
+
+            for name, fixture, options in cases:
+                with self.subTest(command=name):
+                    spec = importlib.util.spec_from_file_location(name, ROOT / 'scripts' / (name + '.py'))
+                    script = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(script)
+                    verifier, owner, factory_name = fixture(script)
+                    arguments = [name, '--runtime-root', temporary, '--player-exe', str(player),
+                                 '--api-dll', str(Path(temporary) / 'VrCommand.Api.dll'), *options]
+                    with (patch.object(sys, 'argv', arguments), patch.object(verifier, 'api_command'),
+                          patch.object(owner, factory_name) as factory,
+                          patch('windows_firewall.require_silent_windows_launch', side_effect=check) as verify,
+                          redirect_stderr(io.StringIO()) as stderr):
+                        with self.assertRaises(SystemExit) as stopped:
+                            script.main()
+                    self.assertEqual(stopped.exception.code, 2)
+                    self.assertIn('Blocked Python listener', stderr.getvalue())
+                    self.assertEqual(verify.call_args_list, [call(player), call(sys.executable)])
+                    factory.assert_not_called()
 
     def test_concurrent_reader_sees_only_complete_json_and_no_temporary_files_remain(self):
         with self.directory() as temporary:

@@ -409,7 +409,7 @@ Windows 依執行檔的完整路徑套用程式規則。即使只有同機測試
 
 Unity 冒煙和入場測試會同時核對玩家程式與管理 API 的啟動程式。若 `dotnet.exe` 的路徑未通過查核，可以給 `smoke-unity-player.py` 和 `check-unity-admission.py` 加上 `--api-exe`，指定已通過查核的管理包 `Runtime/VrCommand.Api.exe`。HTTP、回放及管理服務程序測試可使用 `VR_COMMAND_API_EXE` 指向同一執行檔。測試用獨立資料與 `127.0.0.1`。
 
-同機 UDP 轉送及管理 API 故障測試也會在啟動前檢查實際執行的 `python.exe`。`start-local.ps1` 先完成 Release 建置，再查核 Windows 管理程式。桌面場館、練習模式與操作員工具可用 `--api-exe` 指向已通過查核的管理包 `Runtime/VrCommand.Api.exe`。
+同機 UDP 轉送及管理 API 故障測試也會在啟動前檢查實際執行的 `python.exe`。桌面姿態追蹤、姿態連續性及世界日誌復原診斷在建立測試場次前即執行這項查核。`start-local.ps1` 先完成 Release 建置，再查核 Windows 管理程式。桌面場館、練習模式與操作員工具可用 `--api-exe` 指向已通過查核的管理包 `Runtime/VrCommand.Api.exe`。
 
 直接執行 `tests/browser/check.cjs` 或 `tests/browser/check-clock-native.cjs` 時，也會先查核負責測試連接埠的 Node 及實際啟動管理服務的 `dotnet.exe`。若要在新解壓路徑下測試管理服務，可以使用 [Windows 本機 IPC 測試流程](PLAYER_READINESS.md#windows-原生回歸)。本機 IPC 方式會檢查管理服務的 TCP 監聽與 UDP 端點均為零，迴環轉送使用已通過查核的 Python。
 
@@ -419,7 +419,7 @@ Unity 冒煙和入場測試會同時核對玩家程式與管理 API 的啟動程
 
 直接執行 `hardware-mock-peer.py` 也會在開始接收迴環 TCP 連線前核對 Python。自動執行 Windows 原生連線測試時，優先沿用已通過查核的固定執行檔路徑。解壓到新資料夾後，Windows 會以新路徑個別判定。
 
-Windows 玩家啟動器 1.17.2、伺服器啟動器 1.27.1 及更新的管理啟動器也內建同一項唯讀查核。按下開始遊戲或使用對應的命令列時，會查核套件內的實際遊戲或管理程式。伺服器啟動器另外在自己試綁 UDP 埠前查核本身。遇到提示風險時，圖形介面在狀態欄顯示原因，命令列退出並保留拒絕原因。套件完整性核對可直接執行。Unity 建置在啟動 Editor 前也會查核 Unity Package Manager。
+Windows 玩家啟動器 1.17.2、伺服器啟動器 1.27.1 及更新的管理啟動器也內建同一項唯讀查核。無人值守請從套件啟動器進入，由它先查核實際遊戲或管理程式路徑。伺服器啟動器另外在自己試綁 UDP 埠前查核本身。遇到提示風險時，圖形介面在狀態欄顯示原因，命令列退出並保留拒絕原因，無需有人按「允許」。套件完整性核對可直接執行。Unity 建置在啟動 Editor 前也會查核 Unity Package Manager。
 
 若啟用通知的設定檔缺少涵蓋實際 EXE 的入站 TCP 與 UDP 規則，或查核無法完成，工具會在終端機回報並停止啟動。這項檢查只讀取防火牆設定。可用同一支指令檢查其他執行檔的實際路徑。
 

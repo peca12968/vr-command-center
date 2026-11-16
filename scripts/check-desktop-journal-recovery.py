@@ -84,7 +84,10 @@ def main():
     if portable:
         args.recovery_exe = args.recovery_exe.resolve(strict=True)
     args.job_workers, args.visible_room = 2, 0
-    fixture.vm.verify_player(args)
+    try:
+        fixture.vm.verify_player(args, python_listener=True)
+    except (OSError, RuntimeError, ValueError) as error:
+        parser.exit(2, f'{error}\n')
     venue = fixture.SealVenue(args, artifact_family='desktop-journal-recovery')
     report = {}
     browser = browser_log = None

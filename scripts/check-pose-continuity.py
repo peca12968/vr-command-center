@@ -27,7 +27,11 @@ def main():
     parser.add_argument('--player-exe', type=Path, default=ROOT / 'artifacts/desktop/VrCommand.exe')
     parser.add_argument('--api-dll', type=Path, default=Path(os.environ.get('VR_COMMAND_API_DLL', ROOT / 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
     args = parser.parse_args(); args.pose_continuity = True; args.duration = 120; args.job_workers = 2; args.visible_room = 0; args.check = False
-    multi.vm.verify_player(args); venue = multi.DiagnosticVenue(args, artifact_family='desktop-long'); gate = None; report = None
+    try:
+        multi.vm.verify_player(args, python_listener=True)
+    except (OSError, RuntimeError, ValueError) as error:
+        parser.exit(2, f'{error}\n')
+    venue = multi.DiagnosticVenue(args, artifact_family='desktop-long'); gate = None; report = None
     try:
         venue.start()
         mission = venue.request('/api/missions', {'name': 'Sparse continuity controlled-loss calibration', 'briefing': 'Two native stationary Simulation clients; one deliberate upstream dropout', 'durationSeconds': 120,
