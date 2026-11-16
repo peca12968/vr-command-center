@@ -128,24 +128,31 @@ def launch(args):
             return 0 if checked['complete'] else 1
         field.require(checked['complete'], 'UDP readiness is no longer complete or within its original time window')
         distinct = field.udp_preflight_distinct_roster(checked)
-        original_preview = field.read_udp_launcher_document(preview, preview=True)
+        original_preview = field.read_udp_launcher_document(preview, preview=True, include_release=True)
         field.require(original_preview[0] == binding['previewSha256'], 'The original Windows launcher preview changed')
+        release_stamps = original_preview[3]
+        field.require(not release_stamps or release_args, 'Supply --release-report from the original Windows launcher preview')
+        if release_args:
+            release, release_hash = field.read_venue_release(release_snapshot)
+            server_hash = field.server_manifest_digest(release.get('windows'))
+            field.require(server_hash is not None and server_hash == release_stamps.get('serverManifestSha256'),
+                          'Repeat the Windows launcher preview with the selected venue server release')
+            field.require(release_stamps.get('venueReleaseReportSha256', release_hash) == release_hash,
+                          'Use the exact original venue release report from the Windows launcher preview')
         from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
 
         try:
             require_silent_windows_launch(launcher.parent / 'Runtime' / 'VrCommand.exe')
+            require_silent_windows_launch(launcher)
         except WindowsFirewallLaunchError as error:
             raise field.EvidenceError(str(error)) from error
         own_launcher_processes()
-        release_hash = None
         if release_args or any('registeredSeats' in row for row in original_preview[2].values()):
             fresh_path = Path(directory) / 'current-preview.json'
             current = subprocess.run([str(launcher), '--venue-check', str(snapshot), '--report', str(fresh_path), *release_args], timeout=45)
             field.require(current.returncode == 0, 'Windows launcher could not verify the original session revisions or server release')
-            fresh = field.read_udp_launcher_document(fresh_path, preview=True)
+            fresh = field.read_udp_launcher_document(fresh_path, preview=True, include_release=True)
             field.require(fresh == original_preview, 'Current Windows launcher preview differs from the original sessions, seats or bindings')
-            if release_args:
-                release_hash = field.read_quest_document(fresh_path)[0]['serverManifestSha256']
         print(json.dumps({'status': 'udp-preflight-verified', 'mode': checked['mode'],
                           'verifiedSources': checked['verifiedSources'], 'launchPlanSha256': binding['planSha256'],
                           'networkPlanSha256': checked['networkPlanSha256'],
@@ -165,20 +172,19 @@ def launch(args):
                 process.wait()
                 return 130
         if code == 0 and receipt_path is not None:
-            write_start_receipt(receipt_path, ready_path, result_path, readiness, original, checked, release_hash)
+            write_start_receipt(receipt_path, ready_path, result_path, readiness, original, checked, release_stamps)
         return code
 
 
-def write_start_receipt(path, ready_path, result_path, readiness, original, checked, release_hash=None):
+def write_start_receipt(path, ready_path, result_path, readiness, original, checked, release_stamps):
     ready, ready_raw = field.read_quest_document(ready_path)
     with result_path.open('rb') as stream:
         result_raw = field.limited_read(stream)
     terminal = field.read_json(result_raw.decode('utf-8-sig'))
     field.require(terminal['status'] == 'venue-sealed-stopped' and terminal['complete'] is terminal['readyPublished'] is True,
                   'The original Windows venue launch did not seal and stop')
-    if release_hash is not None:
-        field.require(ready.get('serverManifestSha256') == terminal.get('serverManifestSha256') == release_hash,
-                      'The Windows launch reports do not share the verified server release')
+    field.require(field.server_release_stamps(ready) == field.server_release_stamps(terminal) == release_stamps,
+                  'The Windows launch reports do not share the verified server release')
     receipt = {'version': 1, 'scope': 'verified-windows-venue-start', 'mode': checked['mode'],
                'checkedAtUtc': checked['checkedAtUtc'], 'readinessSha256': hashlib.sha256(original).hexdigest(),
                'terminalSha256': hashlib.sha256(result_raw).hexdigest(),

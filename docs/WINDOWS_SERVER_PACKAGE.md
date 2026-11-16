@@ -2,14 +2,16 @@
 
 ## 依場館發行報告核對伺服器包
 
-啟動器 1.25 可在離線核對、五房預覽或五房批次啟動時加上 `--release-report`。使用由主控提供且含 `windows.serverManifestSha256` 的原發行報告，報告及輸出放在程式包之外。工具比對清單原始位元組的 SHA-256，逐檔核對遊戲伺服器包。發行不符時在查詢管理服務與建立遊戲程序前退出。
+啟動器可在離線核對、五房預覽或五房批次啟動時加上 `--release-report`。使用由主控提供且含 `windows.serverManifestSha256` 的原發行報告，報告及輸出放在程式包之外。工具比對清單原始位元組的 SHA-256，逐檔核對遊戲伺服器包。伺服器包不符時在查詢管理服務與建立遊戲程序前退出。
 
 ```powershell
 & .\Launch-Server.exe --verify package --release-report C:\Delivery\venue-release.json --report C:\Delivery\server-verified.json
 & .\Launch-Server.exe --venue-check C:\Delivery\venue-plan.json --release-report C:\Delivery\venue-release.json --report C:\Delivery\venue-preview.json
 ```
 
-在 `--venue-run` 加入相同參數，即可於啟動時重新核對。完成核對的報告、五房預覽、就緒與收尾檔均可查到 `serverManifestSha256`。使用 `start-verified-venue.py` 時，將同一份 `--release-report` 帶入。工具會以相同報告重做預覽與啟動。 [產生原發行報告](EXTERNAL_CLIENTS.md#發送前離線核對交付套件) · [戰後核對伺服器發行](EXTERNAL_CLIENTS.md#核對五房伺服器發行版本)
+在 `--venue-run` 加入相同參數，即可於啟動時重新核對。啟動器 1.26 的離線核對、五房預覽、就緒及收尾檔會同時列出 `serverManifestSha256` 和整份原發行報告的 `venueReleaseReportSha256`。用 `start-verified-venue.py` 開啟五房時，帶入預覽原本使用的 `--release-report`。若換成另一份報告或修改過原檔內容，工具會在開啟遊戲前拒絕。換用新伺服器包時，請用它重新預覽並產生 UDP 預檢報告。 [產生原發行報告](EXTERNAL_CLIENTS.md#發送前離線核對交付套件) · [戰後核對伺服器發行](EXTERNAL_CLIENTS.md#核對五房伺服器發行版本)
+
+2026-11-16 啟動器 1.26／Windows 遊戲 0.50.11 的 ZIP 為 84,984,799 位元組，SHA-256 `c12fc5c5b5e66825be2bef971cd8ddfdc5d5603f327123d34b3f82de84812a4b`。解壓核對 331 筆清單。 [伺服器包](../artifacts/windows-server-release-report-1260-05011.zip) · [共同發行報告](../artifacts/venue-release-server-report-1260-05011.json)
 
 2026-11-16 `VRCommand-GameServer-0.50.11-1.24-win-x64.zip` 為 84,985,912 bytes，SHA-256 `3b6f84c96b05daba8b2f72202b7db13bcb0b3217feba4459adf1b5a395f00bbe`。解壓核對 331 筆清單，已和 Quest 0.50.11 核對來源及網路識別。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.11-1.24-win-x64.zip) · [發行報告](../artifacts/venue-release-quest-reconnect-0511.json)
 
@@ -387,7 +389,7 @@ python scripts/check-server-package.py '<解壓後的 VRCommand-GameServer>' `
 
 Windows 依執行檔的完整路徑套用程式規則。即使只有同機測試，新解壓路徑的 `vrcommand.exe` 也可能觸發入站連線提示。自動測試用 `127.0.0.1`，並先核對實際 EXE 路徑在目前網路設定檔的既有規則。新路徑尚未確認時，可先跑建置、套件驗證及使用測試替身的檢查。 [Microsoft Windows 防火牆規則](https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/rules)
 
-桌面場館、Unity 啟動與入場測試，以及會啟動原生遊戲的套件和 GUI 驗證，會在開啟遊戲或啟動器前，自動核對執行檔路徑與所有啟用中的防火牆設定檔。`start-verified-venue.py` 也會在啟動五房前檢查解壓包內的 `Runtime/VrCommand.exe`，離線 `--verify-only` 可直接執行。Unity Editor 建置、Quest 的 ADB 部署及擷取、Quest 單席與五房 UDP 探測也有啟動前檢查。使用 PowerShell 接收入站 UDP 的場館探測會檢查該 PowerShell 執行檔。
+桌面場館、Unity 啟動與入場測試，以及會啟動原生遊戲的套件和 GUI 驗證，會在開啟遊戲或啟動器前，自動核對執行檔路徑與所有啟用中的防火牆設定檔。`start-verified-venue.py` 在啟動五房前會檢查解壓包內的 `Launch-Server.exe` 與 `Runtime/VrCommand.exe`。離線 `--verify-only` 可直接執行。Unity Editor 建置、Quest 的 ADB 部署及擷取、Quest 單席與五房 UDP 探測也有啟動前檢查。使用 PowerShell 接收入站 UDP 的場館探測會檢查該 PowerShell 執行檔。
 
 若啟用通知的設定檔缺少涵蓋實際 EXE 的入站 TCP 與 UDP 規則，或查核無法完成，工具會在終端機回報並停止啟動。這項檢查只讀取防火牆設定。可用同一支指令檢查其他執行檔的實際路徑。
 

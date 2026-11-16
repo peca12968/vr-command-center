@@ -697,6 +697,7 @@ class FieldResultsTests(unittest.TestCase):
             release_path.write_text(json.dumps(release), encoding='utf-8')
             terminal_path, terminal, _ = self.terminal_venue_fixture(root, manifest, closure)
             terminal['serverManifestSha256'] = server_digest
+            terminal['venueReleaseReportSha256'] = hashlib.sha256(release_path.read_bytes()).hexdigest()
             terminal_path.write_text(json.dumps(terminal), encoding='utf-8')
         if count != 5:
             manifest['expectedPlayersPerRoom'] = count
@@ -760,10 +761,13 @@ class FieldResultsTests(unittest.TestCase):
                 path.write_bytes(raw)
                 return hashlib.sha256(raw).hexdigest()
 
-            def verify(ready_digest, preview_digest):
-                preview_hash = write(preview, {'serverManifestSha256': preview_digest})
+            def verify(ready_digest, preview_digest, *, ready_report=None, preview_report=None):
+                preview_hash = write(preview, {'serverManifestSha256': preview_digest,
+                    **({'venueReleaseReportSha256': preview_report} if preview_report is not None else {})})
                 ready_hash = write(ready, {'schemaVersion': 1, 'status': 'venue-ready', 'topology': 'Linked',
-                    'instanceId': id_for(1), 'servers': [], 'serverManifestSha256': ready_digest})
+                    'instanceId': id_for(1), 'servers': [],
+                    **({'serverManifestSha256': ready_digest} if ready_digest is not None else {}),
+                    **({'venueReleaseReportSha256': ready_report} if ready_report is not None else {})})
                 readiness_hash = write(readiness, {'scope': 'venue-udp-preflight-only', 'complete': True, 'mode': 'Linked',
                     'checkedAtUtc': checked, 'launchBinding': {'preview': preview.name, 'previewSha256': preview_hash}})
                 write(receipt_path, {'version': 1, 'scope': 'verified-windows-venue-start', 'mode': 'Linked',
@@ -777,6 +781,17 @@ class FieldResultsTests(unittest.TestCase):
                 verify('2' * 64, expected)
             with self.assertRaisesRegex(field.EvidenceError, 'launch preview does not match'):
                 verify(expected, '3' * 64)
+
+            report_digest = '4' * 64
+            terminal['venueReleaseReportSha256'] = report_digest
+            self.assertEqual(id_for(2), verify(expected, expected, ready_report=report_digest,
+                                               preview_report=report_digest)['launchId'])
+            with self.assertRaisesRegex(field.EvidenceError, 'preview and terminal reports used different original'):
+                verify(expected, expected, ready_report=report_digest, preview_report='5' * 64)
+            terminal.pop('venueReleaseReportSha256')
+            terminal.pop('serverManifestSha256')
+            with self.assertRaisesRegex(field.EvidenceError, 'launch preview does not match'):
+                verify(None, expected, preview_report=report_digest)
 
     def test_staged_venue_checks_original_batches_and_has_one_report_per_mode_and_size(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -912,7 +927,9 @@ class FieldResultsTests(unittest.TestCase):
             result = field.verify_venue_stages(plan_path)
             self.assertIs(result['requireServerRelease'], True)
             self.assertEqual(80, result['serverAcknowledgements'])
-            releases = [{'serverManifestSha256': digest, 'sessionsVerified': 5 if mode == 'Independent' else 1}
+            release_hash = hashlib.sha256(manifests[0].with_name('release.json').read_bytes()).hexdigest()
+            releases = [{'serverManifestSha256': digest, 'venueReleaseReportSha256': release_hash,
+                         'sessionsVerified': 5 if mode == 'Independent' else 1}
                         for mode, _ in field.VENUE_STAGE_KEYS]
             self.assertEqual(releases, [stage['serverRelease'] for stage in result['stages']])
             inspected = field.verify_venue_stages(plan_path, inspect=True)
@@ -922,6 +939,7 @@ class FieldResultsTests(unittest.TestCase):
             terminals = [path.with_name('venue-launcher.json') for path in manifests]
             missing, different = (json.loads(terminals[index].read_bytes()) for index in (1, 4))
             missing.pop('serverManifestSha256')
+            missing.pop('venueReleaseReportSha256')
             terminals[1].write_text(json.dumps(missing), encoding='utf-8')
             terminals[4].write_text(json.dumps(dict(different, serverManifestSha256='b' * 64)), encoding='utf-8')
             command = [sys.executable, str(SCRIPT), '--venue-stages', str(plan_path)]
@@ -941,6 +959,14 @@ class FieldResultsTests(unittest.TestCase):
             self.assertIn(b'original release-bound terminal venue launch report', rejected.stderr)
 
             terminals[4].write_text(json.dumps(different), encoding='utf-8')
+            release = manifests[4].with_name('release.json')
+            original_release = release.read_bytes()
+            release.write_bytes(original_release + b'\n')
+            inspected = field.verify_venue_stages(plan_path, inspect=True)
+            self.assertEqual([[2], [5]], [row['entries'] for row in inspected['issues']])
+            self.assertEqual({'kind': 'venueReleaseReport', 'name': release.name, 'status': 'venue-release-report-mismatch'},
+                             inspected['issues'][1]['evidenceMismatch'])
+            release.write_bytes(original_release)
             plan_path.write_text(json.dumps(dict(plan, requireServerRelease=False)), encoding='utf-8')
             self.assertNotIn('serverRelease', field.verify_venue_stages(plan_path)['stages'][1])
             single = json.loads(manifests[1].read_bytes())
@@ -3814,6 +3840,10 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertEqual(expected, verified['venueRelease']['server'])
                 self.assertEqual(25, verified['venueRelease']['windows']['seatsVerified'])
 
+                release_raw = release_path.read_bytes()
+                expected['venueReleaseReportSha256'] = hashlib.sha256(release_raw).hexdigest()
+                terminal['venueReleaseReportSha256'] = expected['venueReleaseReportSha256']
+                terminal_path.write_text(json.dumps(terminal), encoding='utf-8')
                 packed = self.pack_venue(root, manifest)
                 command = [sys.executable, str(SCRIPT.with_name('prepare-venue-field-manifest.py')),
                            '--venue-bundle', str(root / packed['venueBundle']), '--launcher-report', str(terminal_path),
@@ -3829,6 +3859,14 @@ class FieldResultsTests(unittest.TestCase):
                     entry['players'] = players[entry['sessionId']]
                 prepared_path.write_text(json.dumps(prepared), encoding='utf-8')
                 self.assertEqual(expected, field.verify_venue(prepared_path)['venueRelease']['server'])
+
+                changed_release_path = root / 'rejected-release.json'
+                release_path.write_bytes(release_raw + b'\n')
+                failed = subprocess.run([*command, '--output', str(changed_release_path)], capture_output=True, encoding='utf-8', timeout=30)
+                self.assertEqual(1, failed.returncode, failed.stderr)
+                self.assertIn('used different original venue release report bytes', failed.stderr)
+                self.assertFalse(changed_release_path.exists())
+                release_path.write_bytes(release_raw)
 
                 terminal['serverManifestSha256'] = '5' * 64
                 terminal_path.write_text(json.dumps(terminal), encoding='utf-8')

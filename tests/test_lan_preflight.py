@@ -57,21 +57,22 @@ class NetworkPlanPreparationTests(unittest.TestCase):
         start = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(start)
         expected = 'a' * 64
-        source = {'topology': 'Linked', 'instanceId': 'fixture-instance', 'serverManifestSha256': expected}
+        stamps = {'serverManifestSha256': expected, 'venueReleaseReportSha256': 'b' * 64}
+        source = {'topology': 'Linked', 'instanceId': 'fixture-instance', **stamps}
         ready = self.store('ready.json', dict(source, status='venue-ready'))
         terminal = self.store('terminal.json', dict(source, status='venue-sealed-stopped', complete=True, readyPublished=True))
         readiness = self.store('readiness.json', {'complete': True})
         checked = {'mode': 'Linked', 'checkedAtUtc': '2026-11-16T00:00:00+00:00'}
         accepted = readiness.with_name('accepted.json')
-        start.write_start_receipt(accepted, ready, terminal, readiness, readiness.read_bytes(), checked, expected)
+        start.write_start_receipt(accepted, ready, terminal, readiness, readiness.read_bytes(), checked, stamps)
         receipt = json.loads(accepted.read_bytes())
         self.assertEqual(hashlib.sha256(ready.read_bytes()).hexdigest(), receipt['readySha256'])
         self.assertEqual(hashlib.sha256(terminal.read_bytes()).hexdigest(), receipt['terminalSha256'])
-        terminal = self.store('other-terminal.json', dict(source, serverManifestSha256='b' * 64,
+        terminal = self.store('other-terminal.json', dict(source, venueReleaseReportSha256='c' * 64,
                               status='venue-sealed-stopped', complete=True, readyPublished=True))
         rejected = readiness.with_name('rejected.json')
         with self.assertRaisesRegex(start.field.EvidenceError, 'do not share the verified server release'):
-            start.write_start_receipt(rejected, ready, terminal, readiness, readiness.read_bytes(), checked, expected)
+            start.write_start_receipt(rejected, ready, terminal, readiness, readiness.read_bytes(), checked, stamps)
         self.assertFalse(rejected.exists())
 
     def test_prepare_both_topologies_and_a_quest_subset_consumed_by_the_original_probe(self):
@@ -493,6 +494,31 @@ class LanPreflightTests(unittest.TestCase):
                 start.launch(args)
         guard.assert_called_once_with(launcher.parent / 'Runtime' / 'VrCommand.exe')
         own.assert_not_called()
+        self.assertFalse(any(path.exists() for path in (args.work, args.ready_report, args.report)))
+
+        digest = 'a' * 64
+        release = self.venue_json('release.json', {'scope': 'offline-package-consistency', 'verified': True,
+                                                 'windows': {'serverManifestSha256': digest}})
+        raw_release = release.read_bytes()
+        pinned = self.venue_json('release-preview.json', dict(json.loads(guarded_preview.read_bytes()),
+            serverManifestSha256=digest, venueReleaseReportSha256=hashlib.sha256(raw_release).hexdigest()))
+        self.venue_check(generated, 'release-bound.json', '--batch', self.root / 'readiness.json',
+                         '--launcher-preview', pinned, '--launch-plan', original)
+        args.readiness = self.root / 'release-bound.json'
+        guard.reset_mock()
+        with patch.dict(sys.modules, windows_firewall=firewall), patch.object(start, 'own_launcher_processes') as own:
+            with self.assertRaisesRegex(start.field.EvidenceError, 'Supply --release-report'):
+                start.launch(args)
+            args.release_report = release
+            release.write_bytes(raw_release + b'\n')
+            with self.assertRaisesRegex(start.field.EvidenceError, 'Use the exact original venue release report'):
+                start.launch(args)
+            guard.assert_not_called()
+            own.assert_not_called()
+            release.write_bytes(raw_release)
+            with self.assertRaisesRegex(start.field.EvidenceError, 'Windows Firewall may prompt'):
+                start.launch(args)
+        guard.assert_called_once_with(launcher.parent / 'Runtime' / 'VrCommand.exe')
         self.assertFalse(any(path.exists() for path in (args.work, args.ready_report, args.report)))
 
         for missing_roles in [('probe',), ('listener',), ('listener', 'probe')]:

@@ -225,17 +225,18 @@ def prepare(args, output):
         manifest['questLinkCriteria'] = quest_link_criteria
     if args.require_quest_link_metrics:
         manifest['requireQuestLinkMetrics'] = True
-    release = windows_seats = None
+    release = release_hash = release_path = windows_seats = None
     if args.venue_release_report is not None:
         release_path = args.venue_release_report.resolve(strict=True)
         seen_paths.add(release_path)
-        release, _ = field.read_venue_release(release_path)
+        release, release_hash = field.read_venue_release(release_path)
         if args.windows_inbox is not None:
             digest = (release.get('windows') or {}).get('playerManifestSha256')
             field.require(type(digest) is str and re.fullmatch(r'[0-9a-f]{64}', digest),
                           'Windows evidence inbox requires the original Windows release report')
         manifest['venueReleaseReport'] = ref(release_path)
-    field.verify_venue_server_release(release, launch, required=args.require_server_release)
+    field.verify_venue_server_release(release, launch, required=args.require_server_release,
+                                      release_hash=release_hash, release_path=release_path, terminal_path=terminal)
     if args.require_server_release:
         manifest['requireServerRelease'] = True
     if args.windows_inbox is not None:

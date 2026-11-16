@@ -6,7 +6,7 @@ ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('server_player_package',ROOT/'scripts/package-windows-player.py');player=importlib.util.module_from_spec(spec);spec.loader.exec_module(player)
 digest=player.digest;plain=player.plain
 TOP='VRCommand-GameServer'
-README='''VR Command Windows 遊戲伺服器啟動器 1.25／Windows 遊戲程式
+README='''VR Command Windows 遊戲伺服器啟動器 1.26／Windows 遊戲程式
 
 完整解壓後開啟 Launch-Server.exe。先啟動配套的管理服務，在網頁控制台建立 Preparing VR 或 MR 場次。
 按「選擇檔案」選control-instance.json，或在路徑欄直接貼上完整檔案路徑，按 Enter 或「載入／更新」。只使用既有GameServer角色金鑰。
@@ -94,7 +94,7 @@ def main():
     with (stage/'compile.log').open('xb') as log:subprocess.run([str(compiler),'/nologo','/warnaserror','/codepage:65001','/target:winexe','/platform:x64','/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Web.Extensions.dll','/out:'+str(folder/'Launch-Server.exe'),str(frozen)],stdout=log,stderr=subprocess.STDOUT,check=True)
     if digest(source)!=source_hash:raise ValueError('Launcher source changed during compilation')
     (folder/'README.txt').write_text(README,encoding='utf-8')
-    manifest={'schemaVersion':1,'target':'win-x64','launcherVersion':'1.25.0','createdAtUtc':datetime.now(timezone.utc).isoformat(),'build':receipt,'launcherSourceSha256':source_hash,'scope':'Standalone server launcher; no keys, tickets or databases; manifest is not a signature.',
+    manifest={'schemaVersion':1,'target':'win-x64','launcherVersion':'1.26.0','createdAtUtc':datetime.now(timezone.utc).isoformat(),'build':receipt,'launcherSourceSha256':source_hash,'scope':'Standalone server launcher; no keys, tickets or databases; manifest is not a signature.',
         'files':[{'path':p.relative_to(folder).as_posix(),'bytes':p.stat().st_size,'sha256':digest(p)} for p in sorted(folder.rglob('*')) if p.is_file()]}
     (folder/'server-package.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8');verify(folder)
     output=plain(args.output);output.parent.mkdir(parents=True,exist_ok=True)

@@ -702,7 +702,7 @@ Quest 批次已設定 `questLinkCriteria` 時，`issues[].questLinkMetrics` 會�
 
 準備總清單時指定 `--require-server-release`，或在 `stages.json` 加入 `"requireServerRelease": true`。六批都須引用同一份原場館發行報告，並各自提交原五房終止報告。驗收會核對兩者的 `serverManifestSha256`，在各批的 `serverRelease` 列出摘要和原場次數。提交啟動回條時，也會核對原就緒及預覽報告。各批在自己的 `venue.json` 設定的要求也會套用。 [五房伺服器發行證據](#核對五房伺服器發行版本)
 
-收件檢查的 `issues[].evidenceMismatch` 會指出報告種類及檔名。`missing-report` 表示清單缺少原報告引用，`missing-server-manifest` 表示原報告沒有伺服器清單摘要，`server-manifest-mismatch` 表示摘要不一致。若清單已列出報告、檔案仍未收齊，查看 `missingFile`。`missingStages` 列出尚未通過的模式及人數。
+收件檢查的 `issues[].evidenceMismatch` 會指出報告種類及檔名。`missing-report` 表示清單缺少原報告引用，`missing-server-manifest` 表示原報告沒有伺服器清單摘要，`server-manifest-mismatch` 表示伺服器清單摘要不一致。`venue-release-report-mismatch` 表示其中一份證據對應到不同的場館發行報告位元組。若清單已列出報告、檔案仍未收齊，查看 `missingFile`。`missingStages` 列出尚未通過的模式及人數。
 
 ### 核對 25 席各自的直連來源
 
@@ -916,6 +916,8 @@ Quest 0.50.11 起，原程序重連後會在新連線第一次進入執行中時
 ### 核對五房伺服器發行版本
 
 同時提供 `venueReleaseReport` 和含 `serverManifestSha256` 的五房終止報告時，驗收會比對兩份檔案的伺服器清單摘要。成功時 `venueRelease.server` 會列出摘要及核對到的原場次數。若一併提交 `verifiedVenueStart`，也會比對啟動回條引用的原就緒檔與 UDP 報告引用的原預覽。任一檔案的摘要不同，驗收會失敗。
+
+Windows 啟動器 1.26 起會另記錄 `venueReleaseReportSha256`。驗收會比對該摘要與 `venueReleaseReport` 原檔。若有啟動回條，也會核對同次預覽、就緒及收尾是否紀錄同一份原發行報告。舊版只含伺服器清單摘要的封存可沿用原驗收項目。
 
 本次驗收若要求伺服器發行證據，準備清單時同時指定 `--venue-release-report` 和 `--require-server-release`。手動建立的 `venue.json` 可填 `"requireServerRelease": true`。啟動時須用原發行報告執行五房命令，讓終止檔保存核對結果。 [五房啟動方式](WINDOWS_SERVER_PACKAGE.md#依場館發行報告核對伺服器包)
 

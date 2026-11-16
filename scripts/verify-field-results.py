@@ -1894,15 +1894,17 @@ def summarize_link_samples(metrics, platform, criteria=None):
             **({'criteriaFailures': failures} if failures else {})}
 
 
-def read_udp_launcher_document(path, *, preview):
+def read_udp_launcher_document(path, *, preview, include_release=False):
     value, raw = read_quest_document(path)
     if preview:
         require(integer(value['schemaVersion'], 1, 1) and value['status'] == 'venue-checked' and value['complete'] is True,
                 'Provide the original successful Windows launcher preview')
+        release_stamps = server_release_stamps(value)
     else:
         require(set(value) == {'version', 'controlInstance', 'topology', 'address', 'listenAddress', 'servers'}
                 and integer(value['version'], 2, 4) and type(value['controlInstance']) is str and value['controlInstance'],
                 'Provide a revision-guarded Windows launch plan')
+        release_stamps = {}
     mode, rows = value['topology'], value['servers']
     require(mode in ('Independent', 'Linked'), 'Invalid Windows launcher topology')
     rooms = {QUEST_ROOMS} if mode == 'Linked' else {(room,) for room in QUEST_ROOMS}
@@ -1937,7 +1939,8 @@ def read_udp_launcher_document(path, *, preview):
         sessions.add(session)
     require(len({row['port'] for row in bindings.values()}) == len(bindings), 'Repeated launcher port')
     require(len({'registeredSeats' in row for row in bindings.values()}) == 1, 'Launcher seat roster must cover every room group')
-    return hashlib.sha256(raw).hexdigest(), mode, bindings
+    result = hashlib.sha256(raw).hexdigest(), mode, bindings
+    return (*result, release_stamps) if include_release else result
 
 
 def check_udp_launcher_seats(preview, sources):
@@ -2663,7 +2666,18 @@ def server_manifest_digest(document):
     return digest
 
 
-def verify_venue_server_release(release, terminal, *, required=False, release_path=None, terminal_path=None):
+def server_release_stamps(document):
+    server_digest = server_manifest_digest(document)
+    stamps = {'serverManifestSha256': server_digest} if server_digest is not None else {}
+    if type(document) is dict and 'venueReleaseReportSha256' in document:
+        report_digest = document['venueReleaseReportSha256']
+        require(server_digest is not None and type(report_digest) is str and re.fullmatch(r'[0-9a-f]{64}', report_digest),
+                'Invalid original venue release report digest')
+        stamps['venueReleaseReportSha256'] = report_digest
+    return stamps
+
+
+def verify_venue_server_release(release, terminal, *, required=False, release_hash=None, release_path=None, terminal_path=None):
     expected = server_manifest_digest(release.get('windows')) if release is not None else None
     actual = terminal.get('serverManifestSha256') if terminal is not None else None
     if required:
@@ -2680,7 +2694,11 @@ def verify_venue_server_release(release, terminal, *, required=False, release_pa
     if expected != actual:
         raise ServerReleaseEvidenceError('Windows terminal launch report does not match the original venue server release',
                                          'venueLauncherReport', terminal_path, 'server-manifest-mismatch')
-    return {'serverManifestSha256': actual, 'sessionsVerified': terminal['sessions']}
+    stamps = server_release_stamps(terminal)
+    if 'venueReleaseReportSha256' in stamps and stamps['venueReleaseReportSha256'] != release_hash:
+        raise ServerReleaseEvidenceError('Windows terminal launch report used different original venue release report bytes',
+                                         'venueReleaseReport', release_path, 'venue-release-report-mismatch')
+    return {**stamps, 'sessionsVerified': terminal['sessions']}
 
 
 def read_venue_debrief_receipts(raw, request_id, session_count):
@@ -2770,7 +2788,7 @@ def read_terminal_venue_launcher(path, mode, expected, *, include_instance=False
             'Provide the original terminal Windows venue launch report')
     instance_id = identity(report['instanceId'])
     launch_id = identity(report['venueLaunchId'])
-    server_digest = server_manifest_digest(report)
+    release_stamps = server_release_stamps(report)
     rows = report['servers']
     require(type(rows) is list and len(rows) == len(expected), 'Venue launcher report must cover every original venue session')
     results, child_pids = {}, set()
@@ -2789,7 +2807,7 @@ def read_terminal_venue_launcher(path, mode, expected, *, include_instance=False
         child_pids.add(pid)
         results[sid] = result
     return {'launchId': launch_id, 'sha256': hashlib.sha256(raw).hexdigest(), 'sessions': len(results),
-            **({'serverManifestSha256': server_digest} if server_digest is not None else {}),
+            **release_stamps,
             **({'instanceId': instance_id} if include_instance else {})}, results
 
 
@@ -2826,14 +2844,19 @@ def read_verified_venue_start(path, readiness_path, terminal, results, mode, *, 
     require(integer(ready['schemaVersion'], 1, 1) == 1 and ready['status'] == 'venue-ready'
             and ready['topology'] == mode and identity(ready['instanceId']) == terminal['instanceId'],
             'Verified start receipt differs from the original ready venue report')
-    server_digest = terminal.get('serverManifestSha256')
-    ready_digest = server_manifest_digest(ready)
+    terminal_stamps = server_release_stamps(terminal)
+    ready_stamps = server_release_stamps(ready)
+    server_digest = terminal_stamps.get('serverManifestSha256')
+    ready_digest = ready_stamps.get('serverManifestSha256')
     if ready_digest != server_digest:
         raise ServerReleaseEvidenceError('Windows ready and terminal reports do not share the original server release',
                                          'windowsReadyReport', ready_path,
                                          'missing-server-manifest' if ready_digest is None else 'server-manifest-mismatch')
-    if server_digest is not None:
-        binding = preflight['launchBinding']
+    if ready_stamps != terminal_stamps:
+        raise ServerReleaseEvidenceError('Windows ready and terminal reports used different original venue release report bytes',
+                                         'windowsReadyReport', ready_path, 'venue-release-report-mismatch')
+    binding = preflight['launchBinding']
+    if terminal_stamps or 'preview' in binding:
         if type(binding.get('preview')) is not str or not binding['preview']:
             raise ServerReleaseEvidenceError('Server release verification requires the original launch preview',
                                              'windowsLaunchPreview', None, 'missing-report')
@@ -2842,10 +2865,14 @@ def read_verified_venue_start(path, readiness_path, terminal, results, mode, *, 
         message = 'The original launch preview does not match the verified Windows server release'
         if hashlib.sha256(preview_raw).hexdigest() != binding.get('previewSha256'):
             raise VerifiedStartDigestMismatch(message, 'windowsLaunchPreview', preview_path)
-        preview_digest = server_manifest_digest(preview)
+        preview_stamps = server_release_stamps(preview)
+        preview_digest = preview_stamps.get('serverManifestSha256')
         if preview_digest != server_digest:
             raise ServerReleaseEvidenceError(message, 'windowsLaunchPreview', preview_path,
                                              'missing-server-manifest' if preview_digest is None else 'server-manifest-mismatch')
+        if preview_stamps != terminal_stamps:
+            raise ServerReleaseEvidenceError('Windows launch preview and terminal reports used different original venue release report bytes',
+                                             'windowsLaunchPreview', preview_path, 'venue-release-report-mismatch')
     checked = datetime.fromisoformat(receipt['checkedAtUtc'])
     require(checked.utcoffset() == timedelta(0)
             and datetime.fromisoformat(preflight['checkedAtUtc']) <= checked,
@@ -3238,7 +3265,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
                                                                      include_instance=wants_verified_start)
     server_release = verify_venue_server_release(release, venue_launcher,
                                                 required=require_server_release or staged_require_server_release,
-                                                release_path=release_path, terminal_path=terminal_path)
+                                                release_hash=release_hash, release_path=release_path, terminal_path=terminal_path)
     start_readiness_path = None
     if wants_verified_start:
         start_readiness_path = (udp_batch_paths[0] if udp_batch_paths is not None
