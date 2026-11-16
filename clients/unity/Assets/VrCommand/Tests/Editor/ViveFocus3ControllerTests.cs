@@ -1,11 +1,16 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.Controls;
 using UnityEngine.InputSystem.Layouts;
 using UnityEngine.InputSystem.LowLevel;
 using UnityEngine.InputSystem.XR;
+using UnityEngine.XR.OpenXR.Features.Interactions;
+using HapticControl = UnityEngine.XR.OpenXR.Input.HapticControl;
+using OpenXRPoseControl = UnityEngine.XR.OpenXR.Input.PoseControl;
 using InputDeviceCharacteristics = UnityEngine.XR.InputDeviceCharacteristics;
 using ViveController = VrCommand.Unity.ViveFocus3ControllerProfile.ViveFocus3Controller;
 
@@ -19,6 +24,22 @@ namespace VrCommand.Unity.Tests
         [TestCase(false, "1.1.0", true)]
         public void UsesTheExtensionOrOpenXr11(bool extension, string version, bool supported)
             => Assert.AreEqual(supported, ViveFocus3ControllerProfile.SupportsProfile(extension, version));
+
+        [Test]
+        public void QuestTouchAndViveWandExposeAimTrackingThroughTheirPoseControls()
+        {
+            var addedHapticLayout = InputSystem.LoadLayout("Haptic") == null;
+            if (addedHapticLayout) InputSystem.RegisterLayout<HapticControl>("Haptic");
+            try
+            {
+                AssertStockAimBinding<OculusTouchControllerProfile.OculusTouchController>("VrCommandQuestAimTest");
+                AssertStockAimBinding<HTCViveControllerProfile.ViveController>("VrCommandViveAimTest");
+            }
+            finally
+            {
+                if (addedHapticLayout) InputSystem.RemoveLayout("Haptic");
+            }
+        }
 
         [Test]
         public void ExposesGameplayButtonsAndTheTwoDistinctPosesThroughExistingPaths()
@@ -36,17 +57,19 @@ namespace VrCommand.Unity.Tests
 
                 Assert.IsNotNull(right.devicePose);
                 Assert.IsNotNull(right.pointer);
-                AssertAlias(right.isTracked, right.devicePose.isTracked);
-                AssertAlias(right.trackingState, right.devicePose.trackingState);
-                AssertAlias(left.devicePosition, left.devicePose.position);
-                AssertAlias(left.deviceRotation, left.devicePose.rotation);
-                AssertAlias(right.pointerPosition, right.pointer.position);
-                AssertAlias(right.pointerRotation, right.pointer.rotation);
+                AssertAlias(right.isTracked, right.devicePose["isTracked"]);
+                AssertAlias(right.trackingState, right.devicePose["trackingState"]);
+                AssertAlias(left.devicePosition, left.devicePose["position"]);
+                AssertAlias(left.deviceRotation, left.devicePose["rotation"]);
+                AssertAlias(right.pointerPosition, right.pointer["position"]);
+                AssertAlias(right.pointerRotation, right.pointer["rotation"]);
                 Assert.AreNotEqual(right.devicePosition.stateBlock.byteOffset, right.pointerPosition.stateBlock.byteOffset);
 
                 AssertBinding(NetworkAvatar.TrackedFireBinding, right.triggerPressed);
                 AssertBinding(NetworkAvatar.TrackedReloadBinding, right.primaryButton);
                 AssertBinding(ClientReconnectInput.Binding, right.secondaryButton);
+                AssertBinding(NetworkAvatar.RightAimTrackingBinding, right.pointer["trackingState"]);
+                AssertBinding(NetworkAvatar.RightAimTrackedBinding, right.pointer["isTracked"]);
                 AssertBinding("<XRController>{LeftHand}/primaryButton", left.primaryButton);
                 AssertBinding("<XRController>{LeftHand}/secondaryButton", left.secondaryButton);
                 AssertBinding("<XRController>{LeftHand}/gripPressed", left.gripPressed);
@@ -59,8 +82,14 @@ namespace VrCommand.Unity.Tests
             }
         }
 
-        [Test]
-        public void NativeDescriptorsKeepBothHandsAndReadIndependentState()
+        [TestCase(false)]
+        [TestCase(true)]
+        public void NativeDescriptorsKeepBothHandsAndReadIndependentState(bool useOpenXRPose)
+        {
+            WithPoseLayout(useOpenXRPose ? typeof(OpenXRPoseControl) : typeof(PoseControl), VerifyNativeDescriptors);
+        }
+
+        private static void VerifyNativeDescriptors()
         {
             const string layout = nameof(ViveFocus3ControllerProfile.ViveFocus3Controller);
             InputSystem.RegisterLayout<ViveController>(layout, matches: new InputDeviceMatcher()
@@ -84,6 +113,14 @@ namespace VrCommand.Unity.Tests
                 var grip = new Vector3(.11f, .35f, .42f);
                 var aim = new Vector3(.61f, .73f, .84f);
                 var rotation = Quaternion.Euler(5, 30, 10);
+                using var gripTracking = new InputAction(binding: "<XRController>{RightHand}/trackingState");
+                using var gripTracked = new InputAction(binding: "<XRController>{RightHand}/isTracked");
+                using var aimTracking = new InputAction(binding: NetworkAvatar.RightAimTrackingBinding);
+                using var aimTracked = new InputAction(binding: NetworkAvatar.RightAimTrackedBinding);
+                gripTracking.Enable();
+                gripTracked.Enable();
+                aimTracking.Enable();
+                aimTracked.Enable();
                 using (StateEvent.From(left, out var state))
                 {
                     WriteGrip(left, grip, state);
@@ -93,8 +130,8 @@ namespace VrCommand.Unity.Tests
                 using (StateEvent.From(right, out var state))
                 {
                     WriteGrip(right, grip, state);
-                    right.pointer.position.WriteValueIntoEvent(aim, state);
-                    right.pointer.rotation.WriteValueIntoEvent(rotation, state);
+                    right.pointer.GetChildControl<Vector3Control>("position").WriteValueIntoEvent(aim, state);
+                    right.pointer.GetChildControl<QuaternionControl>("rotation").WriteValueIntoEvent(rotation, state);
                     right.triggerPressed.WriteValueIntoEvent(1f, state);
                     right.secondaryButton.WriteValueIntoEvent(1f, state);
                     InputState.Change(right, state, InputUpdateType.Editor);
@@ -111,10 +148,26 @@ namespace VrCommand.Unity.Tests
                 Assert.IsTrue(left.primaryButton.isPressed && !right.primaryButton.isPressed);
                 Assert.IsTrue(right.triggerPressed.isPressed && !left.triggerPressed.isPressed);
                 Assert.IsTrue(right.secondaryButton.isPressed && !left.secondaryButton.isPressed);
+                // The last position and rotation can remain finite even when the aim is unavailable.
+                Assert.IsTrue(NetworkAvatar.HasTracking(gripTracking, gripTracked));
+                Assert.IsFalse(NetworkAvatar.HasTracking(aimTracking, aimTracked));
                 using (StateEvent.From(right, out var state))
                 {
-                    right.devicePose.isTracked.WriteValueIntoEvent(0f, state);
-                    right.devicePose.trackingState.WriteValueIntoEvent(0, state);
+                    WriteTrackingState(right.pointer, true, 3, state);
+                    InputState.Change(right, state, InputUpdateType.Editor);
+                }
+                Assert.IsTrue(NetworkAvatar.HasTracking(aimTracking, aimTracked));
+                using (StateEvent.From(right, out var state))
+                {
+                    WriteTrackingState(right.pointer, true, 1, state);
+                    InputState.Change(right, state, InputUpdateType.Editor);
+                }
+                Assert.IsFalse(NetworkAvatar.HasTracking(aimTracking, aimTracked));
+                Assert.AreEqual(aim, right.pointerPosition.ReadValue());
+                Assert.IsTrue(right.isTracked.isPressed && left.isTracked.isPressed);
+                using (StateEvent.From(right, out var state))
+                {
+                    WriteTrackingState(right.devicePose, false, 0, state);
                     InputState.Change(right, state, InputUpdateType.Editor);
                 }
                 Assert.IsFalse(right.isTracked.isPressed);
@@ -163,10 +216,15 @@ namespace VrCommand.Unity.Tests
 
         private static void WriteGrip(ViveController controller, Vector3 position, InputEventPtr state)
         {
-            controller.devicePose.isTracked.WriteValueIntoEvent(1f, state);
-            controller.devicePose.trackingState.WriteValueIntoEvent(3, state);
-            controller.devicePose.position.WriteValueIntoEvent(position, state);
-            controller.devicePose.rotation.WriteValueIntoEvent(Quaternion.identity, state);
+            WriteTrackingState(controller.devicePose, true, 3, state);
+            controller.devicePose.GetChildControl<Vector3Control>("position").WriteValueIntoEvent(position, state);
+            controller.devicePose.GetChildControl<QuaternionControl>("rotation").WriteValueIntoEvent(Quaternion.identity, state);
+        }
+
+        private static void WriteTrackingState(InputControl pose, bool tracked, int flags, InputEventPtr state)
+        {
+            pose.GetChildControl<ButtonControl>("isTracked").WriteValueIntoEvent(tracked ? 1f : 0f, state);
+            pose.GetChildControl<IntegerControl>("trackingState").WriteValueIntoEvent(flags, state);
         }
 
         private static void AssertAlias(InputControl alias, InputControl source)
@@ -181,6 +239,47 @@ namespace VrCommand.Unity.Tests
             using var action = new InputAction(binding: path);
             action.Enable();
             Assert.That(action.controls, Does.Contain(expected));
+        }
+
+        private static void AssertStockAimBinding<T>(string layout) where T : XRController
+        {
+            // The pinned OpenXR plugin selects the Pose type when compiling its controller layouts.
+            var poseType = typeof(T).GetProperty("pointer").PropertyType;
+            WithPoseLayout(poseType, () => VerifyStockAimBinding<T>(layout));
+        }
+
+        private static void VerifyStockAimBinding<T>(string layout) where T : XRController
+        {
+            InputSystem.RegisterLayout<T>(layout);
+            InputDevice device = null;
+            try
+            {
+                device = InputSystem.AddDevice(layout);
+                InputSystem.SetDeviceUsage(device, CommonUsages.RightHand);
+                var aim = device["pointer"];
+                AssertBinding(NetworkAvatar.RightAimTrackingBinding, aim["trackingState"]);
+                AssertBinding(NetworkAvatar.RightAimTrackedBinding, aim["isTracked"]);
+            }
+            finally
+            {
+                if (device != null) InputSystem.RemoveDevice(device);
+                InputSystem.RemoveLayout(layout);
+            }
+        }
+
+        private static void WithPoseLayout(Type type, Action run)
+        {
+            var original = InputSystem.LoadLayout("Pose")?.type;
+            if (type != original) InputSystem.RegisterLayout(type, "Pose");
+            try { run(); }
+            finally
+            {
+                if (type != original)
+                {
+                    if (original == null) InputSystem.RemoveLayout("Pose");
+                    else InputSystem.RegisterLayout(original, "Pose");
+                }
+            }
         }
     }
 }

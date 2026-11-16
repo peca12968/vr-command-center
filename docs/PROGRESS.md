@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 右手指向姿態追蹤核對
+
+- 玩家端以提交的右手指向姿態判定追蹤是否可用。只要指向缺位置或旋轉追蹤，就會暫停姿態發布與武器輸入，即使握把仍追蹤且舊座標可讀。恢復時沿用既有放開再按下的流程。VIVE Focus 3 設定可讀取 Input System 和 OpenXR 的兩種 `Pose` 配置。[Windows 玩家操作](WINDOWS_PLAYER_PACKAGE.md#windows-openxr-啟動) · [Quest 玩家操作](QUEST3.md#追蹤恢復後的武器輸入)
+- 隔離 Unity Editor 通過八項測試，涵蓋兩種 `Pose` 配置、指向失效及恢復，以及 Quest Touch、傳統 Vive 與 Focus 3 的輸入路徑。Windows 和 Android 玩家程式碼分別用本機 Unity SDK 編譯成受控組件。完整 EditMode、Windows 玩家包和 Quest APK 尚待重建驗證。 [測試與組件雜湊](../artifacts/vive-aim-pose-layouts-d566a794/verification.json)
+- 另嘗試讓隔離 Editor 使用原生 OpenXR 模擬執行環境。載入器找到後，Unity 仍無法註冊 `XR Display`，另一次 Play Mode 嘗試逾時。這些結果保留，原生取樣和頭盔待驗。 [原生載入紀錄](../artifacts/vive-native-openxr-bddb6f59/unity-mock-importer.log) · [Play Mode 紀錄](../artifacts/vive-native-openxr-bddb6f59/unity-play-mode.log)
+
 ## 2026-11-16 VIVE 控制器在 Unity Editor 驗證
 
 - 以 Unity 6000.3.27f1 執行獨立測試專案，從專案原始碼編譯並執行 `ViveFocus3ControllerTests.cs` 的六個案例。核對六個遊戲按鍵路徑及六個姿態對應，並以兩份模擬 XR 裝置描述觸發 Unity 動態建立手把配置。兩手的握持與指向姿態、按鍵值和右手追蹤中斷均可獨立讀取。 [驗證及雜湊](../artifacts/vive-unity-input-9cb0a383/verification.json) · [Editor 程序紀錄](../artifacts/vive-unity-input-9cb0a383/unity-repository-tests.log)

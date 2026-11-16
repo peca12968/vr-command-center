@@ -170,6 +170,8 @@ python .\scripts\probe-quest-venue.py --adb $adb --device-map .\device-map.json 
 
 ## 追蹤恢復後的武器輸入
 
+目前原始碼以右手指向姿態的位置與旋轉追蹤判定能否發布頭手姿態及處理武器輸入。握持姿態仍有效但指向追蹤失效時，玩家要等指向追蹤恢復，再放開並按下扳機或換彈鍵。此變更待納入新版 APK 並用頭盔驗證。
+
 遊戲自 0.48.1 起，在應用程式及 OpenXR 工作階段均有輸入焦點時才處理頭盔操作。系統選單或應用程式暫停期間會停止發布本機追蹤姿態。返回遊戲後，右手扳機、換彈鍵及 B 重連鍵各自需要先放開，再按下。 [Unity OpenXR 焦點介面](https://docs.unity3d.com/Packages/com.unity.xr.openxr@1.19/api/UnityEngine.XR.OpenXR.OpenXRUtility.html#UnityEngine_XR_OpenXR_OpenXRUtility_IsSessionFocused)
 
 MR 量測中失去焦點會清除尚未完成的 A／B／C 取樣。返回後從 A 開始，在每個標記先放開再按左扳機。單純失去焦點會保留已完成的校正，應用程式暫停或追蹤原點改變則需重新校正。主控仍可按原流程查看席位追蹤狀態，並決定何時暫停或繼續。

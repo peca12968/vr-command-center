@@ -83,9 +83,9 @@ namespace VrCommand.Unity
         public int BriefingPage => briefingPanel.Page;
         public int BriefingPageCount => briefingPanel.PageCount;
         public int BriefingSuppressedInputs => briefingPanel.Weapons.SuppressedPresses;
-        private InputAction headTracking, leftTracking, rightTracking;
-        private InputAction headTracked, leftTracked, rightTracked;
-        private bool JointTrackingReady => !tracked || HasTracking(headTracking, headTracked) && HasTracking(leftTracking, leftTracked) && HasTracking(rightTracking, rightTracked);
+        private InputAction headTracking, leftTracking, rightAimTracking;
+        private InputAction headTracked, leftTracked, rightAimTracked;
+        private bool JointTrackingReady => !tracked || HasTracking(headTracking, headTracked) && HasTracking(leftTracking, leftTracked) && HasTracking(rightAimTracking, rightAimTracked);
         internal bool TrackedInputAvailable => !tracked || TrackedInputFocus.Available(applicationPaused);
         public bool TrackingReady => TrackedInputAvailable && JointTrackingReady && (floorCalibration == null || floorCalibration.Ready)
             && (questPassthrough == null || questPassthrough.Visible);
@@ -111,6 +111,8 @@ namespace VrCommand.Unity
         internal const string TrackedFireBinding = "<XRController>{RightHand}/triggerPressed";
         internal const string TrackedReloadBinding = "<XRController>{RightHand}/primaryButton";
         internal const string ViveReloadBinding = "<ViveController>{RightHand}/gripPressed";
+        internal const string RightAimTrackingBinding = "<XRController>{RightHand}/pointer/trackingState";
+        internal const string RightAimTrackedBinding = "<XRController>{RightHand}/pointer/isTracked";
         private TrackedWeaponReleaseGate trackedWeaponRelease;
         internal bool TrackedWeaponReleasePending => tracked && !trackedWeaponRelease.Armed;
         internal static bool HasTracking(InputAction state, InputAction tracked) => state != null && tracked != null && tracked.ReadValue<float>() > .5f && (state.ReadValue<int>() & 3) == 3;
@@ -189,10 +191,10 @@ namespace VrCommand.Unity
                 driver.rotationInput = new InputActionProperty(new InputAction("Head Rotation", InputActionType.Value, "<XRHMD>/centerEyeRotation"));
                 headTracking = Action("Head Tracking", "<XRHMD>/trackingState");
                 leftTracking = Action("Left Tracking", "<XRController>{LeftHand}/trackingState");
-                rightTracking = Action("Right Tracking", "<XRController>{RightHand}/trackingState");
+                rightAimTracking = Action("Right Aim Tracking", RightAimTrackingBinding);
                 headTracked = Action("Head Is Tracked", "<XRHMD>/isTracked");
                 leftTracked = Action("Left Is Tracked", "<XRController>{LeftHand}/isTracked");
-                rightTracked = Action("Right Is Tracked", "<XRController>{RightHand}/isTracked");
+                rightAimTracked = Action("Right Aim Is Tracked", RightAimTrackedBinding);
                 driver.trackingStateInput = new InputActionProperty(headTracking); driver.ignoreTrackingState = false;
                 leftPosition = Action("Left Position", "<XRController>{LeftHand}/devicePosition");
                 rightPosition = Action("Right Aim Position", "<XRController>{RightHand}/pointerPosition");
@@ -592,8 +594,8 @@ namespace VrCommand.Unity
             if (IsOwner) tacticalHud.Reset();
             PoseAccepted.OnValueChanged -= AcceptanceChanged;
             leftPosition?.Dispose(); rightPosition?.Dispose(); leftRotation?.Dispose(); rightRotation?.Dispose(); trigger?.Dispose(); reload?.Dispose();
-            headTracking?.Dispose(); leftTracking?.Dispose(); rightTracking?.Dispose();
-            headTracked?.Dispose(); leftTracked?.Dispose(); rightTracked?.Dispose();
+            headTracking?.Dispose(); leftTracking?.Dispose(); rightAimTracking?.Dispose();
+            headTracked?.Dispose(); leftTracked?.Dispose(); rightAimTracked?.Dispose();
             briefNext?.Dispose(); briefClose?.Dispose(); briefLicense?.Dispose(); briefingPanel.Dispose();
             firingRifle?.Dispose();firingRifle=null;
             bodyView?.Dispose();bodyView=null;bodyModels?.Dispose();bodyModels=null;

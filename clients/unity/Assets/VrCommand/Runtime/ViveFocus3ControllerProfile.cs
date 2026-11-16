@@ -32,8 +32,9 @@ namespace VrCommand.Unity
         [InputControlLayout(displayName = Product, commonUsages = new[] { "LeftHand", "RightHand" })]
         public sealed class ViveFocus3Controller : XRController
         {
-            [InputControl(layout = "Pose")] public PoseControl devicePose => GetChildControl<PoseControl>(nameof(devicePose));
-            [InputControl(layout = "Pose")] public PoseControl pointer => GetChildControl<PoseControl>(nameof(pointer));
+            // The Pose layout can come from OpenXR or the Input System package.
+            [InputControl(layout = "Pose")] public InputControl devicePose => GetChildControl(nameof(devicePose));
+            [InputControl(layout = "Pose")] public InputControl pointer => GetChildControl(nameof(pointer));
             [InputControl(useStateFrom = "devicePose/isTracked")] public new ButtonControl isTracked => base.isTracked;
             [InputControl(useStateFrom = "devicePose/trackingState")] public new IntegerControl trackingState => base.trackingState;
             [InputControl(useStateFrom = "devicePose/position")] public new Vector3Control devicePosition => base.devicePosition;
