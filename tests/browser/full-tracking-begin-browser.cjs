@@ -251,6 +251,26 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       check(disconnected.code === 'venue-begin-not-ready' && disconnected.roomIds.join() === '5'
         && (await api('/sessions')).every(session => session.state === 'Preparing'), `${mode} server identifies only the room with a disconnected seat`);
       await publishUntil(sources, false, () => start.isEnabled());
+      const posts = [];
+      const observeBegin = request => {
+        if (new URL(request.url()).pathname === '/api/venue/phase' && request.method() === 'POST') posts.push(request);
+      };
+      page.on('request', observeBegin);
+      try {
+        const confirmation = page.waitForEvent('dialog').then(async dialog => {
+          for (const source of sources) source.publish(source.snapshot, false, true);
+          await dialog.accept();
+        });
+        await start.click();
+        await confirmation;
+        await page.locator('#notice').filter({ hasText: /開場條件已變更|名冊或遊戲快照尚未就緒/ }).waitFor();
+        check(posts.length === 0 && await start.isDisabled() && await seatState(5, 2) === 'PoseUnavailable'
+          && JSON.stringify(await getFences()) === JSON.stringify(readyFences),
+          `${mode} reads the lost seat after confirmation and skips submitting Begin`);
+      } finally {
+        page.off('request', observeBegin);
+      }
+      await publishUntil(sources, false, () => start.isEnabled());
       let lostPacket;
       const phaseUrl = '**/api/venue/phase';
       const interrupt = async intercepted => {

@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-17 五房確認後重新核對開場狀態
+
+- 管理台 0.31.218 在主控關閉確認視窗後，重新讀取各房的開場快照。最新名冊或姿態未達原條件時，控制台停在送出前並更新房卡。舊版反例在此情況下把命令送到管理服務後才被拒絕。新版仍使用管理服務核對送出後發生的變更。 [開場說明](PLAYER_READINESS.md#五房追蹤驗收開場) · [舊版反例](../artifacts/desktop-guarded-openxr/20261117-021145-29c519fc/browser.log)
+- Windows 管理包已解壓並逐檔核對 568 項，119 項 Node 與 7 項套件測試通過。Quest USB 仍只列出檔案傳輸。 [Windows 管理包](../artifacts/venue-confirmation-readiness-031218/VRCommand-ControlServer-0.31.218.zip) · [逐檔核對](../artifacts/venue-confirmation-readiness-031218/verify.log) · [USB 快照](../artifacts/venue-confirmation-readiness-031218/usb-status.json)
+- 解壓版以 Windows 本機 IPC 分別完成 110 項開場及 162 項全館控制 Chromium 檢查。合併和混合獨立場均在確認視窗期間失去一席姿態，主控確認後房卡更新，兩場都沒有送出開場命令。若姿態在控制台送出後才變更，原伺服器仍拒絕並回傳受阻畫格。首輪共用管理實例留下先前驗收的封存，與取消結束案例預期的空封存衝突，兩組改在各自的新實例復驗。 [開場檢查](../artifacts/desktop-guarded-openxr/20261117-021838-6a436825/checks.json) · [全館回歸](../artifacts/desktop-guarded-openxr/20261117-021741-23d37e2f/checks.json)
+- 同機 Windows 原生合併及獨立場各 25 席，包含每輪一席 Unity OpenXR Mock Runtime。Chromium 在確認後取得房間就緒回應才送出同一開場條件。兩輪各 6 項通過，六場雙封存，共核對 569 格回放與 50 份戰績確認。管理 API 以本機 IPC 執行，兩輪程序均已清理。實體頭盔與跨機仍待驗。 [原生讀回](../artifacts/venue-confirmation-readiness-031218/native-readback.json)
+
 ## 2026-11-17 Quest 日誌收集依連線更新就緒
 
 - 原版只看到網路啟動即回報 `capture-ready`，即使玩家尚未連上。新版須讀到原遊戲程序的成功連線紀錄。斷線時移除該席，重連才恢復。`venue-capture-ready` 表示已讀取的日誌顯示所有選取席位連線有效，開場仍由主控台確認原入場和追蹤狀態。 [收集方式](QUEST3.md#收集-quest-場館驗收日誌) · [舊版反例](../artifacts/quest-capture-readiness-20261117/before.log)

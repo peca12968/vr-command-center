@@ -1078,6 +1078,7 @@ function applyVenuePermissions() {
 }
 async function venuePhase(action, { environment, enemyPolicy } = {}) {
   if (!master() || state.pending) return;
+  const epoch = state.epoch;
   const targets = venueTargets(action);
   const policy = action === 'Begin' ? venueBeginPolicy() : 'normal';
   if (!targets.length || (policy !== 'normal' && targets.flatMap(target => target.roomIds).length !== 5)
@@ -1089,6 +1090,18 @@ async function venuePhase(action, { environment, enemyPolicy } = {}) {
   const message = `${verb}房間 ${venueRoomText(targets)} 的 ${targets.length} 個場次？`
     + opening + (details ? '\n' + details : '') + (overridden ? `\n套用時會清除房間 ${overridden} 的分房策略。` : '');
   if (!confirm(action === 'End' ? message + '\n包含尚未開始的準備場次。結束後無法繼續原場次。' : message)) return;
+  if (action === 'Begin') {
+    const updated = await roomReadiness.recheck();
+    if (epoch !== state.epoch || !master() || state.pending) return;
+    if (!updated) {
+      notify('無法取得最新開場狀態。請重新整理後再確認。', true);
+      return;
+    }
+    if (targets.some(target => !roomReadiness.venueReady(target, action, policy))) {
+      notify('開場條件已變更。請核對各房最新狀態後再確認。', true);
+      return;
+    }
+  }
   state.pending = { kind: 'venue-phase', path: '/venue/phase', method: 'POST', requestId: uuid(),
     body: { action, targets: targets.map(({ sessionId, phaseSinceSequence, sessionSequence, environmentSinceSequence, enemiesSinceSequence,
       roomEnemiesSinceSequence }) => ({ sessionId, phaseSinceSequence, sessionSequence, environmentSinceSequence, enemiesSinceSequence,

@@ -651,16 +651,23 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     const current = () => controller === own && active && getState().epoch === epoch && getState().key === key;
     try {
       const response = await fetch('/api/rooms/readiness', { headers: { Authorization: 'Bearer ' + key }, signal: own.signal, cache: 'no-store' });
-      if (!current()) return;
-      if (response.status === 401) { unauthorized(); return; }
+      if (!current()) return false;
+      if (response.status === 401) { unauthorized(); return false; }
       if (!response.ok) throw new Error('Room readiness unavailable');
       const value = await response.json();
-      if (current()) { report = value; started = began; failed = false; }
-    } catch { if (current()) failed = true; }
+      if (!current()) return false;
+      report = value; started = began; failed = false;
+      return true;
+    } catch { if (current()) failed = true; return false; }
     finally {
       clearTimeout(timeout);
       if (current()) { controller = null; render(); }
     }
+  }
+  function recheck() {
+    if (!active || !getState().actor || document.visibilityState !== 'visible') return Promise.resolve(false);
+    controller?.abort();
+    return poll();
   }
   function reset() {
     controller?.abort(); controller = null; report = null; attempted = -Infinity; failed = false;
@@ -674,7 +681,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') update(); else reset(); });
   setInterval(update, 250);
-  return { update, venueReady, venueBegin, reviewedBegin, venueResume, settingFrame, settingStatus, trackingPause, vrResume, poseFrame, ticketSourceLive, ticketDestination,
+  return { update, recheck, venueReady, venueBegin, reviewedBegin, venueResume, settingFrame, settingStatus, trackingPause, vrResume, poseFrame, ticketSourceLive, ticketDestination,
     active(value) { active = value; if (value) update(); else reset(); } };
 }
 
