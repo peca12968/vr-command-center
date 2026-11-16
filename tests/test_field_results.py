@@ -1976,10 +1976,13 @@ class FieldResultsTests(unittest.TestCase):
                 with self.assertRaisesRegex(field.EvidenceError, 'identify another End batch'):
                     field.verify_venue(manifest_path)
 
-    def reconnect_window_fixture(self, root, mode, defect=None):
+    def reconnect_window_fixture(self, root, mode, defect=None, *, repeat=False):
         path, manifest, _ = venue_fixture(root, mode, with_journals=True)
         manifest['verifyReconnectHistory'] = True
         manifest['reconnectWindow'] = {'roomId': 5, 'seat': 2, 'firstUnavailableSequence': 20, 'recoveredSequence': 31}
+        if repeat:
+            manifest['reconnectWindows'] = [manifest.pop('reconnectWindow'),
+                                            {'roomId': 5, 'seat': 2, 'firstUnavailableSequence': 40, 'recoveredSequence': 51}]
         for entry in manifest['sessions']:
             session, _, endpoint = field.management_zip(root / entry['evidenceZip'])
             members = [{'id': row['id'], 'roomId': row['roomId'], 'health': 100, 'connected': True, 'rig': {'kind': 'Simulated'}}
@@ -1990,18 +1993,21 @@ class FieldResultsTests(unittest.TestCase):
                 original = log_path.read_text(encoding='utf-8')
                 startup = f"VR_NETWORK_STARTED role=Client started=True background=True port={endpoint['port']}\n"
                 if row is target and defect != 'no history':
-                    original = 'VR_CLIENT_CONNECTED id=99\nVR_CLIENT_DISCONNECTED\n' + original
+                    previous = (99, 98) if repeat and defect != 'one release' else (99,)
+                    original = ''.join(f'VR_CLIENT_CONNECTED id={connection}\nVR_CLIENT_DISCONNECTED\n'
+                                       for connection in previous) + original
                     server_path = root / entry['serverLog']
                     first, rest = server_path.read_text(encoding='utf-8').split('\n', 1)
-                    server_path.write_text(first + '\nVR_SERVER_ADMISSION_APPROVED id=99\n'
-                                           f"VR_SERVER_PEER id=99 endpoint={log['address']}:5123\n"
-                                           'VR_SERVER_CLIENT_LEFT id=99\n' + rest, encoding='utf-8')
+                    earlier = ''.join(f'VR_SERVER_ADMISSION_APPROVED id={connection}\n'
+                                      f"VR_SERVER_PEER id={connection} endpoint={log['address']}:{5200 + connection}\n"
+                                      f'VR_SERVER_CLIENT_LEFT id={connection}\n' for connection in previous)
+                    server_path.write_text(first + '\n' + earlier + rest, encoding='utf-8')
                 log_path.write_text(startup + original, encoding='utf-8')
 
             def edit(packet):
                 number = packet['sequence']
                 frame = packet['frame']
-                if target and 20 <= number < (32 if defect == 'no recovery' else 31):
+                if target and (20 <= number < (32 if defect == 'no recovery' else 31) or repeat and 40 <= number < 51):
                     lost = next(row for row in frame['players'] if row['id'] == target['id'])
                     lost.update(connected=False, rig={'kind': 'None'})
                 if number == 25 and 1 in session['roomIds'] and defect == 'peer drop':
@@ -2047,6 +2053,43 @@ class FieldResultsTests(unittest.TestCase):
                 path, _ = self.reconnect_window_fixture(Path(directory), mode, defect)
                 with self.assertRaisesRegex(field.EvidenceError, error):
                     field.verify_venue(path)
+
+    def test_venue_multiple_reconnect_windows_require_distinct_releases_and_verify_both(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                path, manifest = self.reconnect_window_fixture(Path(directory), mode, repeat=True)
+                if mode == 'Linked':
+                    manifest['reconnectWindows'].reverse()
+                    path.write_text(json.dumps(manifest), encoding='utf-8')
+                report = field.verify_venue(path)
+                self.assertNotIn('reconnectWindow', report)
+                rows = report['reconnectWindows']
+                self.assertEqual([(5, 2, 20, 31, 24), (5, 2, 40, 51, 24)],
+                                 [(row['roomId'], row['seat'], row['firstUnavailableSequence'],
+                                   row['recoveredSequence'], row['unaffectedSeats']) for row in rows])
+                self.assertEqual(2, report['reconnectHistory']['retiredConnections'])
+                self.assertEqual(25, report['serverAcknowledgements'])
+            with self.subTest(mode=mode, defect='one release'), tempfile.TemporaryDirectory() as directory:
+                path, _ = self.reconnect_window_fixture(Path(directory), mode, 'one release', repeat=True)
+                with self.assertRaisesRegex(field.EvidenceError, 'fewer verified retired connections'):
+                    field.verify_venue(path)
+
+    def test_venue_multiple_reconnect_windows_reject_conflicting_or_unbounded_selections(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path, manifest = self.reconnect_window_fixture(Path(directory), 'Linked', repeat=True)
+            first, second = manifest['reconnectWindows']
+            for changes, error in (
+                ({'verifyReconnectHistory': False}, 'requires verified reconnect history'),
+                ({'reconnectWindow': first}, 'Use either reconnectWindow or reconnectWindows'),
+                ({'reconnectWindows': []}, 'Provide 1 to 32 reconnect windows'),
+                ({'reconnectWindows': [first] * 33}, 'Provide 1 to 32 reconnect windows'),
+                ({'reconnectWindows': [first, first]}, 'repeat the same room, seat and frame boundaries'),
+                ({'reconnectWindows': [first, dict(second, firstUnavailableSequence=41)]}, 'does not isolate the selected seat'),
+            ):
+                with self.subTest(error=error):
+                    path.write_text(json.dumps(dict(manifest, **changes)), encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, error):
+                        field.verify_venue(path)
 
     def test_venue_reconnect_window_requires_bounded_selection_and_opt_in(self):
         with tempfile.TemporaryDirectory() as directory:

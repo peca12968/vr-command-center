@@ -976,6 +976,40 @@ class VenueReconnectWindow:
                 'beforeUtc': before.isoformat(), 'firstUnavailableUtc': first.isoformat(), 'recoveredUtc': recovered.isoformat()}
 
 
+class VenueReconnectWindows:
+    def __init__(self, selections):
+        require(type(selections) is list and 1 <= len(selections) <= 32,
+                'Provide 1 to 32 reconnect windows')
+        self.windows = [VenueReconnectWindow(selection) for selection in selections]
+        require(len({(window.room, window.seat, window.first, window.recovered) for window in self.windows}) == len(self.windows),
+                'Reconnect windows repeat the same room, seat and frame boundaries')
+
+    def watch(self, players, applied_end, final_sequence, *, tracked_only):
+        watchers = [window.watch(players, applied_end, final_sequence, tracked_only=tracked_only) for window in self.windows]
+
+        def observe(packet):
+            for read, _ in watchers:
+                read(packet)
+
+        def finish(capture):
+            for _, complete in watchers:
+                complete(capture)
+
+        return observe, finish
+
+    def summary(self, histories, players):
+        requested = Counter((window.room, window.seat) for window in self.windows)
+        retired = {(row['roomId'], row['seat']): row['retiredConnections'] for row in histories}
+        for (room, seat), count in sorted(requested.items()):
+            require(retired.get((room, seat), 0) >= count, f'Room {room} seat {seat} has fewer verified retired connections than reconnect windows')
+        rows = [window.summary(histories, players) for window in self.windows]
+        rows.sort(key=lambda row: datetime.fromisoformat(row['beforeUtc']))
+        for previous, following in zip(rows, rows[1:]):
+            require(datetime.fromisoformat(previous['recoveredUtc']) <= datetime.fromisoformat(following['beforeUtc']),
+                    'Reconnect windows overlap in the original capture time')
+        return rows
+
+
 def verify_world_journal(path, world, combat_sequence, through, applied_end, *, player_sources=None, guarded_begin=None,
                          players=None, concurrency=None, sealed_fires=None, reconnect_window=None, on_packet=None,
                          control_batches=(), quest_readiness=(), departed=None):
@@ -3335,10 +3369,14 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
                                         'verifiedSeats': len(matched),
                                         'connectionsVerified': sum(len(reconnect_sources[seat]) for seat in matched)}}
 
+    reconnect_fields = [field for field in ('reconnectWindow', 'reconnectWindows') if field in manifest]
+    require(len(reconnect_fields) <= 1, 'Use either reconnectWindow or reconnectWindows')
     reconnect_window = None
-    if 'reconnectWindow' in manifest:
-        require(verify_reconnect_history and journals, 'reconnectWindow requires verified reconnect history and the original world journals')
-        reconnect_window = VenueReconnectWindow(manifest['reconnectWindow'])
+    if reconnect_fields:
+        field, = reconnect_fields
+        require(verify_reconnect_history and journals, f'{field} requires verified reconnect history and the original world journals')
+        verifier = VenueReconnectWindow if field == 'reconnectWindow' else VenueReconnectWindows
+        reconnect_window = verifier(manifest[field])
     verify_tracking_begin = manifest.get('verifyTrackingBegin', False)
     verify_participation_begin = manifest.get('verifyParticipationBegin', False)
     require(type(verify_tracking_begin) is bool and type(verify_participation_begin) is bool
@@ -3766,7 +3804,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
             'reconnectedSeats': sorted(chain.from_iterable(row['reconnectedSeats'] for row in histories),
                                        key=lambda row: (row['roomId'], row['seat']))}
     if reconnect_window is not None:
-        reconnect_summary['reconnectWindow'] = reconnect_window.summary(reconnect_summary['reconnectHistory']['reconnectedSeats'], len(player_ids))
+        reconnect_summary[reconnect_fields[0]] = reconnect_window.summary(reconnect_summary['reconnectHistory']['reconnectedSeats'], len(player_ids))
     if reconnect_sources is not None:
         reconnect_summary.update(reconnect_source_summary(reconnect_summary['reconnectHistory']['reconnectedSeats']))
         require(reconnect_summary['reconnectSourcePlan']['verifiedSeats'] == len(reconnect_sources),

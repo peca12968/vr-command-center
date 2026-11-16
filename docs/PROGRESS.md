@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-17 五房封存核對多次重連
+
+- 五房封存清單可填 `reconnectWindows`，逐段核對選定席位的連線中斷、回放恢復與原戰績。每段核對其他席位及原始時間線，同一席提交多段須有足夠的原連線釋放次數。141 項封存工具測試通過。以先前 Windows 原生合併與獨立場的封存重讀，新陣列只有一段時與原單段格式相同，兩場各核對 25 份戰績確認，原 78 份證據檔雜湊相同。 [操作方式](EXTERNAL_CLIENTS.md#核對重連席位的回放區間) · [既有場次回讀](../artifacts/venue-repeated-reconnect-20261117/archived-readback.json) · [封存測試](../artifacts/venue-repeated-reconnect-20261117/field-tests.log)
+- Windows 0.50.12 搭配管理台 0.31.217，在同機各跑 25 席合併及五房獨立場，每輪由第 5 房第 5 席的 OpenXR Mock Runtime 程序斷線並以原入場身分重連兩次。兩輪各有 27 條原連線及 25 份最終戰績確認，六個場次雙封存，共核對 4,028 格回放。四段約 30.7 至 30.9 秒的中斷各有其餘 24 席持續有效，原席位保留已用的一發彈藥。合併首場停在開場 409，後續錄製正常收尾，回讀程式修正 IP 型別比較後用同一份錄製複驗。獨立場完整退出 0，兩輪結束後遊戲與管理子程序已清理。Quest USB 仍只有檔案傳輸介面。 [合併場](../artifacts/desktop-venue-openxr/20261117-013253-0cdf0bfd/closed-readback.json) · [獨立場](../artifacts/desktop-venue-openxr/20261117-013538-e0da382f/closed-readback.json) · [USB 快照](../artifacts/venue-repeated-reconnect-20261117/usb-status.json)
+
 ## 2026-11-17 Windows 套件啟動前防火牆查核
 
 - 玩家啟動器 1.17.2、伺服器啟動器 1.27.1 與管理台 0.31.217 更新套件內建唯讀防火牆查核。實際使用本機私人網路測試，新解壓路徑的玩家、伺服器及管理啟動都在建立子程序前退出；已核對的 F 槽遊戲路徑通過同一查核。正常套件完整性核對可在新路徑執行。Unity 建置也在 Package Manager 路徑有提示風險時先退出，Editor 與 Package Manager 的程序清單前後相符。 [操作方式](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試) · [三套啟動器的本機報告](../artifacts/windows-launcher-preflight-20261117/)
