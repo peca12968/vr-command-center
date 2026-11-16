@@ -2,6 +2,8 @@
 
 即時模擬與單房停止的操作方式見[硬體模擬閘道](HARDWARE.md#停止單房模擬閘道)。
 
+模擬器 0.2.22 支援以原管理憑證指紋連接場館 HTTPS，並隨包提供更新的 Windows 無人值守檢查。Windows ZIP 共 259,785 bytes，SHA-256 為 `51c645e382e326473e6ccf351c7b15f466fe4f53c4f3f7c47647740b38fb5bc2`。 [下載 0.2.22](../artifacts/hardware-packages/hardware-simulator-0.2.22-unattended-net10.zip) · [HTTPS 設定](HARDWARE.md#使用場館-https)
+
 模擬器 0.2.21 在 Windows 狀態檔發生暫時共用衝突時，讓原回饋排演繼續，並於停止報告落盤後重試終止狀態。Windows ZIP 共 258,352 bytes，SHA-256 為 `74451f71a1d3515e8de9a95ceac618fbec714a5500b878b9235fd621d3825e7d`。 [下載 0.2.21](../artifacts/hardware-packages/hardware-simulator-0.2.21-net10.zip) · [狀態查詢](HARDWARE.md#查看五房排演狀態)
 
 模擬器 0.2.20 在轉送前核對同一回覆及同一戰鬥串流的序號順序。套件包含模擬設備在 Windows 啟動時使用的兩個防火牆查核檔。Windows 測試套件含 10 筆清單，ZIP 共 257,871 bytes，SHA-256 為 `40ee931444f80e4c658dce7545ed39ed59155f0aeba97e1125e00c7c98045b64`。 [下載套件](../artifacts/hardware-packages/hardware-simulator-0.2.20-net10.zip) · [五房排演](HARDWARE.md#一次啟動與停止五房排演)

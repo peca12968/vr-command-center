@@ -2,10 +2,12 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using VrCommand.Core;
+using VrCommand.Simulation;
 
 internal static partial class LiveHardwareGateway
 {
@@ -25,9 +27,11 @@ internal static partial class LiveHardwareGateway
     private static readonly JsonSerializerOptions HeartbeatWire = new(Wire) { RespectRequiredConstructorParameters = true };
 
     private sealed record SeatDevice(Guid DeviceId, [property: JsonRequired] int Seat);
-    private sealed record SeatMap(int Version, string ManagementUrl, Guid SessionId, int RoomId, int MockPort, int Seconds, SeatDevice[] Devices);
+    private sealed record SeatMap(int Version, string ManagementUrl, Guid SessionId, int RoomId, int MockPort, int Seconds, SeatDevice[] Devices,
+        string? ManagementCertificateSha256 = null);
     private sealed record Binding(Guid DeviceId, Guid PlayerId, Guid AdmissionId, [property: JsonRequired] int Seat);
-    private sealed record Configuration(int Version, string ManagementUrl, Guid SessionId, int RoomId, int MockPort, int Seconds, Binding[] Bindings);
+    private sealed record Configuration(int Version, string ManagementUrl, Guid SessionId, int RoomId, int MockPort, int Seconds, Binding[] Bindings,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ManagementCertificateSha256 = null);
     private sealed record MockReply(int Version, string Kind, Guid ConnectionId, Guid? BatchId);
     private sealed record Delivery(Guid DeviceId, RoomHardwareSignal Signal);
     private sealed record Attempt(Guid ConnectionId, Guid BatchId, string Status, Delivery[] Deliveries);
@@ -75,15 +79,22 @@ internal static partial class LiveHardwareGateway
             throw new ArgumentException("Use a session, one room, a mock port and a bounded rehearsal duration.");
     }
 
-    private static HttpClient CreateManagementClient(string origin, string keyVariable = "VR_COMMAND_ROOM_KEY")
+    private static HttpClient CreateManagementClient(string origin, string? certificatePin, string keyVariable = "VR_COMMAND_ROOM_KEY")
     {
         if (!Uri.TryCreate(origin, UriKind.Absolute, out var api) || api.UserInfo.Length != 0 || api.Query.Length != 0
             || api.Fragment.Length != 0 || api.AbsolutePath != "/" || !(api.Scheme == "https" || api.Scheme == "http" && api.Host == "127.0.0.1"))
             throw new ArgumentException("Use an HTTPS management origin or 127.0.0.1 HTTP.");
+        if (certificatePin is not null && (api.Scheme != "https" || !ManagementCertificatePin.IsValid(certificatePin)))
+            throw new ArgumentException("A management certificate fingerprint requires HTTPS and 64 lowercase hexadecimal digits.");
         var key = Environment.GetEnvironmentVariable(keyVariable);
         if (string.IsNullOrWhiteSpace(key) || key.Length > 512 || key.Any(c => c <= 32 || c >= 127)) throw new ArgumentException("Set the required operator key in the environment.");
 
-        var client = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false, UseProxy = false })
+        var handler = new SocketsHttpHandler { AllowAutoRedirect = false, UseProxy = false };
+        if (certificatePin is not null)
+            handler.SslOptions.RemoteCertificateValidationCallback = (_, certificate, _, errors) =>
+                certificate is not null && (errors & ~SslPolicyErrors.RemoteCertificateChainErrors) == SslPolicyErrors.None
+                && ManagementCertificatePin.Matches(certificate.GetRawCertData(), certificatePin);
+        var client = new HttpClient(handler)
             { BaseAddress = api, Timeout = Timeout.InfiniteTimeSpan };
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key);
         return client;
@@ -102,8 +113,8 @@ internal static partial class LiveHardwareGateway
         ValidateRoom(map.SessionId, map.RoomId, map.MockPort, map.Seconds);
         if (map.Version != 1) throw new ArgumentException("Use version 1 seat maps.");
         ValidateDevices(map.Devices);
-        var config = new Configuration(2, map.ManagementUrl, map.SessionId, map.RoomId, map.MockPort, map.Seconds, []);
-        using var client = CreateManagementClient(map.ManagementUrl);
+        var config = new Configuration(2, map.ManagementUrl, map.SessionId, map.RoomId, map.MockPort, map.Seconds, [], map.ManagementCertificateSha256);
+        using var client = CreateManagementClient(config.ManagementUrl, config.ManagementCertificateSha256);
         await VerifyIdentity(client, map.RoomId);
         var page = (await Read(client, FeedbackRoute(config), config, null, CancellationToken.None)).Page;
         if (page.State == SessionState.Ended) throw new InvalidOperationException("The rehearsal session has ended.");
@@ -210,7 +221,7 @@ internal static partial class LiveHardwareGateway
     internal static async Task<int> Run(string input, string output, string? stopFile, bool statusEnabled, string? statusDirectory)
     {
         var config = ReadConfiguration(input);
-        using var client = CreateManagementClient(config.ManagementUrl);
+        using var client = CreateManagementClient(config.ManagementUrl, config.ManagementCertificateSha256);
         await VerifyIdentity(client, config.RoomId);
         using var leases = AcquireGatewayLeases(config);
         return await RunRoom(config, client, input, output, stopFile, statusEnabled, statusDirectory);

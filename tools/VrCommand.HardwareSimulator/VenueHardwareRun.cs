@@ -26,19 +26,20 @@ internal static partial class LiveHardwareGateway
         }).ToArray();
         var bindings = configs.SelectMany(entry => entry.Config.Bindings).ToArray();
         if (configs.Select(entry => entry.Config.ManagementUrl).Distinct(StringComparer.Ordinal).Count() != 1
+            || configs.Select(entry => entry.Config.ManagementCertificateSha256).Distinct(StringComparer.Ordinal).Count() != 1
             || configs.Select(entry => entry.Config.Seconds).Distinct().Count() != 1
             || configs.Select(entry => entry.Config.MockPort).Distinct().Count() != configs.Length
             || bindings.Select(binding => binding.DeviceId).Distinct().Count() != bindings.Length
             || bindings.Select(binding => binding.PlayerId).Distinct().Count() != bindings.Length
             || bindings.Select(binding => binding.AdmissionId).Distinct().Count() != bindings.Length)
-            throw new InvalidDataException("Expected one management origin and duration with distinct room resources.");
+            throw new InvalidDataException("Expected one management origin, certificate fingerprint and duration with distinct room resources.");
 
         var clients = new List<HttpClient>(configs.Length);
         var leases = new List<GatewayLeases>(configs.Length);
         try
         {
             foreach (var entry in configs)
-                clients.Add(CreateManagementClient(entry.Config.ManagementUrl,
+                clients.Add(CreateManagementClient(entry.Config.ManagementUrl, entry.Config.ManagementCertificateSha256,
                     FormattableString.Invariant($"VR_COMMAND_ROOM_{entry.Config.RoomId}_KEY")));
             await Task.WhenAll(configs.Select((entry, index) => VerifyIdentity(clients[index], entry.Config.RoomId)));
             try

@@ -4,7 +4,8 @@ using VrCommand.Core;
 
 internal static partial class LiveHardwareGateway
 {
-    private sealed record VenueMap(int Version, string ManagementUrl, [property: JsonRequired] SessionMode Mode, int Seconds, VenueRoomMap[] Rooms);
+    private sealed record VenueMap(int Version, string ManagementUrl, [property: JsonRequired] SessionMode Mode, int Seconds, VenueRoomMap[] Rooms,
+        string? ManagementCertificateSha256 = null);
     private sealed record VenueRoomMap(int RoomId, Guid SessionId, int MockPort, SeatDevice[] Devices);
     private sealed record VenueBindingManifest(int Version, [property: JsonRequired] SessionMode Mode, VenueBindingRoom[] Rooms);
     private sealed record VenueBindingRoom(int RoomId, Guid SessionId, long SessionSequence, string Configuration, int BoundSeats);
@@ -67,7 +68,7 @@ internal static partial class LiveHardwareGateway
             || devices.Select(device => device.DeviceId).Distinct().Count() != devices.Length)
             throw new ArgumentException("Use the expected topology and unique mock ports and device IDs across all five rooms.");
 
-        using var client = CreateManagementClient(map.ManagementUrl, "VR_COMMAND_MASTER_KEY");
+        using var client = CreateManagementClient(map.ManagementUrl, map.ManagementCertificateSha256, "VR_COMMAND_MASTER_KEY");
         var snapshot = await Get<VenueHardwareBindings>(client, "/api/venue/hardware-bindings", CancellationToken.None);
         if (snapshot.Version != 1 || snapshot.Mode != map.Mode || snapshot.Rooms is not { Length: SessionManager.RoomCount }
             || snapshot.Rooms.Any(room => room is null || room.SessionSequence < 1)
@@ -77,7 +78,7 @@ internal static partial class LiveHardwareGateway
         {
             if (room.SessionId != current.SessionId) throw new InvalidOperationException("A room belongs to a different session.");
             var bindings = ResolveBindings(room.Devices, ValidateBindingRoster(current.Bindings));
-            return (Configuration: new Configuration(2, map.ManagementUrl, room.SessionId, room.RoomId, room.MockPort, map.Seconds, bindings),
+            return (Configuration: new Configuration(2, map.ManagementUrl, room.SessionId, room.RoomId, room.MockPort, map.Seconds, bindings, map.ManagementCertificateSha256),
                 current.SessionSequence, FileName: FormattableString.Invariant($"room-{room.RoomId:00}.json"));
         }).ToArray();
         var bindingsAcrossRooms = entries.SelectMany(entry => entry.Configuration.Bindings).ToArray();

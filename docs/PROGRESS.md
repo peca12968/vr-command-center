@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 硬體模擬排演沿用場館 HTTPS 憑證
+
+- 模擬器 0.2.22 讓房控與主控對私有 HTTPS 管理服務使用相同葉憑證指紋。單房及五房產生的設定保存原指紋。使用本機管理服務、私有測試憑證及模擬設備，確認單房收到 1 筆回饋，五房合併和獨立各收到 25 筆。錯誤指紋、錯誤主機名稱、HTTP 附帶指紋、無信任路徑或五房指紋不一致均失敗。 [HTTPS 排演](../artifacts/hardware-management-https-0222/compiled-tls-3c8dc04a/checks.json) · [配置方式](HARDWARE.md#使用場館-https)
+- .NET 建置零警告零錯誤，1,115 項領域、38 項離線整合與 98 項 HTTP 排演檢查通過。新版 ZIP 解壓核對 10 個檔案，DLL 與模擬設備腳本和成功排演的檔案相同。解壓版另以執行過程的封存資料重讀兩種拓撲的 50 席模擬確認，兩份刻意更動指紋的交接 ZIP 均被拒絕。 [領域測試](../artifacts/hardware-management-https-0222/core.log) · [HTTP 排演](../artifacts/hardware-management-https-0222/http-live.log) · [解壓複驗](../artifacts/hardware-management-https-0222/release-readback.json)
+- 首次以舊候選 ZIP 解壓即時複驗時，獨立場等候握手逾時，後續兩次編譯版複跑也在等待狀態或握手時停止。現行無人值守規則已驗證可在模擬設備綁埠前跳過啟動，最後套件已完成離線複驗。Quest USB 仍只有檔案傳輸介面，廠商協議與實體回饋待驗。 [候選逾時紀錄](../artifacts/hardware-management-https-0222/tls-extracted.log) · [無人值守驗證](../artifacts/hardware-management-https-0222/extracted-mock-skipped.log) · [USB 快照](../artifacts/hardware-management-https-0222/usb-status.json)
+
 ## 2026-11-17 錄製補送沿用原管理 HTTPS 指紋
 
 - Windows 補送工具 0.1.1 從原伺服器設定讀取憑證指紋，HTTPS 戰鬥補送與 WSS 世界回放都核對原憑證。0.1.0 在本機私有測試憑證下無法連線。新版拒絕錯誤指紋、錯誤主機名稱、缺少指紋及 HTTP 帶有指紋，五種情況的管理錄製均維持原第 23 格。正確設定補回原第 24 格並完成雙封存，重送仍停在原第 24 格。 [HTTPS 與 WSS 驗證](../artifacts/recording-recovery-https-011/https-readback.json) · [操作方式](WINDOWS_SERVER_PACKAGE.md#遊戲程序退出後補送錄製)

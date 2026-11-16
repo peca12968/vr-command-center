@@ -3,9 +3,9 @@ import argparse,hashlib,json,shutil,uuid,zipfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 FILES=['VrCommand.HardwareSimulator.dll','VrCommand.HardwareSimulator.deps.json','VrCommand.HardwareSimulator.runtimeconfig.json','VrCommand.Core.dll','VrCommand.Simulation.dll']
-VERSION='0.2.21'
+VERSION='0.2.22'
 MOCK_FIREWALL_FILES=('windows_firewall.py','check-windows-firewall-notifications.ps1')
-LIVE_VERSIONS={*(f'0.2.{minor}' for minor in range(15)), '0.2.19', '0.2.20', VERSION}
+LIVE_VERSIONS={*(f'0.2.{minor}' for minor in range(15)), '0.2.19', '0.2.20', '0.2.21', VERSION}
 README=f'''VR Command 硬體回饋模擬器 {VERSION}
 
 需要 .NET 10 runtime，本機使用10.0.14驗證。這不是Unity玩家程式或廠商SDK。
@@ -14,6 +14,7 @@ dotnet VrCommand.HardwareSimulator.dll --input example.json --output <新的包�
 
 即時模式使用 Windows 管理包 0.31.27 以上與同房房控憑證。Python 3.12 可啟動本機模擬設備：
 python mock-device.py --room 1 --port 19101
+Windows 無人值守排演先設定 VR_COMMAND_UNATTENDED=1。模擬設備會在 Windows 入站通知仍啟用時顯示終端原因並略過啟動。
 在另一個終端設定 VR_COMMAND_ROOM_KEY，再執行：
 dotnet VrCommand.HardwareSimulator.dll --live <包外room-config.json> --output <新的包外report.json>
 加上 --status 可在終端查看逐行 JSON 狀態，例如暫停、握手、等待 ACK 及模擬設備失聯。每行只包含房號、狀態和累計數字，stopped 表示報告已寫出並關閉。
@@ -23,6 +24,7 @@ dotnet VrCommand.HardwareSimulator.dll --live <包外room-config.json> --output 
 搭配管理包 0.31.61 以上，可從座位／設備清單建立即時設定：
 dotnet VrCommand.HardwareSimulator.dll --bind-room <包外seat-map.json> --output <新的包外room-config.json>
 此命令使用本房房控金鑰讀取當前名冊。版本 2 即時設定在握手前及排演中核對原入場。名冊不符時以 binding-mismatch 結束，請核對座位後重新產生設定。
+HTTPS 排演可在單房或五房清單指定原管理憑證的 managementCertificateSha256。輸出的房間設定會保留此指紋。
 搭配管理包 0.31.94，可用 VR_COMMAND_MASTER_KEY 一次核對五房並輸出各房設定：
 dotnet VrCommand.HardwareSimulator.dll --bind-venue <包外venue-map.json> --output <新的包外資料夾>
 整批核對五房原場次、現行名冊與互不重複的模擬埠及設備 ID。正式排演仍各用房控金鑰。
@@ -46,8 +48,8 @@ dotnet VrCommand.HardwareSimulator.dll --verify-venue-zip <交接ZIP>
 同一輪房間排演會保留最近已核對的管理序號與檢查時間。任一值倒退時取消待確認批次，以 management-invalid-response 結束該房。
 同一管理回覆中的重複 eventId 或 reportId，以及新批次沿用本輪已嘗試送出的識別，均會在送出前以 management-invalid-response 結束該房。
 management-unavailable 可從 fault 區分 management-service-unavailable、management-timeout 與 management-transport。恢復正常時會清除故障碼。
-配置範例、模擬協議和操作方式見專案 docs/HARDWARE.md。憑證放在程序環境，設定與報告放在包外。
-即時模式以唯讀 HTTP 取事件，模擬連線僅使用 127.0.0.1 TCP。回覆只確認模擬批次，physicalDeliveryConfirmed 固定為 false。
+配置範例、模擬協議和操作方式見專案 docs/HARDWARE.md。操作金鑰放在程序環境，設定與報告放在包外。
+即時模式以唯讀 HTTP 或 HTTPS 取事件，模擬連線僅使用 127.0.0.1 TCP。回覆只確認模擬批次，physicalDeliveryConfirmed 固定為 false。
 閘道等待確認時會繼續檢查管理狀態。已暫停、結束或失效的批次會中止，模擬設備可用 --manual 的 observe-close 觀察該連線關閉。
 閘道只在場次執行且有戰鬥來源時握手。暫停也會關閉閒置連線，繼續後使用新連線和目前游標。
 
@@ -74,7 +76,7 @@ def verify(folder):
     if manifest.get('schemaVersion')!=1 or not valid_version:raise ValueError('Unsupported simulator package')
     expected=set(FILES)|{'example.json','README.txt'}
     if mode=='OfflineAndLiveSimulation':expected.add('mock-device.py')
-    if version in {'0.2.20', VERSION}:expected.update(MOCK_FIREWALL_FILES)
+    if version in {'0.2.20', '0.2.21', VERSION}:expected.update(MOCK_FIREWALL_FILES)
     if set(manifest['files'])!=expected:raise ValueError('Unexpected simulator package payload')
     actual={p.relative_to(folder).as_posix() for p in folder.rglob('*') if p.is_file()}
     if actual!=set(manifest['files'])|{'hardware-package.json'}:raise ValueError('Missing or additional package file')
