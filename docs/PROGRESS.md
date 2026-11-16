@@ -5,6 +5,7 @@
 - 管理台 0.31.219 在本房觀戰檢查錄製標頭內的物件房號及位置，並核對快照的事件玩家及射線起點。舊版在 Chromium 回應替換測試中顯示了帶有跨房物件的標頭。新版在顯示前拒絕該標頭，並在即時及逐格資料出現跨房事件時保留上一格。重新連線及逐格讀取仍可顯示服務保存的本房射擊。 [觀戰說明](WORLD_RECORDING.md#從房卡或全館收尾開啟) · [舊版反例](../artifacts/desktop-guarded-openxr/20261117-023137-e65b1da5/browser.log)
 - Windows 管理包逐檔核對 568 項，通過 119 項 Node、7 項套件及 200 項 Chromium 檢查。首次新版測試以回放專用事件表查即時射擊，改為核對即時畫布的原射線後完成全館 166 項。主控切房及對齊回放的 34 項在獨立管理實例通過。 [Windows 管理包](../artifacts/room-observation-031219/VRCommand-ControlServer-0.31.219.zip) · [全館回歸](../artifacts/desktop-guarded-openxr/20261117-023631-f9f726cc/checks.json) · [切房回歸](../artifacts/desktop-guarded-openxr/20261117-023549-3c00cb28/checks.json)
 - 用既有 Windows 原生合併及獨立場的封存副本重驗 10 次分房回放與 50 筆原戰績。比對原資料庫雜湊前後一致，管理 API 使用本機 IPC。Quest USB 仍只有檔案傳輸介面，頭盔實機及跨機待驗。 [封存讀回](../artifacts/room-observation-031219/native-readback.json) · [USB 快照](../artifacts/room-observation-031219/usb-status.json)
+- GitHub Actions 對 `f574ce9` 回報帳務或用量限制，工作沒有執行任何步驟。本機驗證結果來自上述 Windows 管理包。 [GitHub Actions 工作](https://github.com/peca12968/vr-command-center/actions/runs/43930888543/job/133522647707)
 
 ## 2026-11-17 無人值守診斷的啟動查核
 
