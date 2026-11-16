@@ -5,6 +5,7 @@
 - 0.2.20 在轉送前拒絕同一頁的重複序號，以及同一戰鬥串流跨批次的倒退。舊版讓合併場第五房的重複序號抵達本機模擬設備。新版的合併及獨立排演都只保留原一筆確認，受影響房間以 `management-invalid-response` 結束。原待確認批次、正常序號間隔及其他房間的模擬確認均有回歸。 [舊版反例](../artifacts/hardware-stream-order-0220/before/run-7c8e1854990a4954aebde164ec82d7ac/linked-stream-order.json) · [合併回讀](../artifacts/hardware-stream-order-0220/extracted-release-live/linked-stream-order.json) · [獨立回讀](../artifacts/hardware-stream-order-0220/extracted-release-live/independent-stream-order.json)
 - 發行包補入 `mock-device.py` 匯入的防火牆查核檔，解壓後可直接執行。首個候選少了兩個檔案，啟動時匯入失敗，現行套件驗證會拒絕該候選。最終 ZIP 逐檔核對 10 項，解壓後運行再核對仍一致，離線範例報告位元組相同。 [套件](../artifacts/hardware-packages/hardware-simulator-0.2.20-net10.zip) · [候選失敗](../artifacts/hardware-stream-order-0220/extracted-peer-before.log) · [執行後核對](../artifacts/hardware-stream-order-0220/verify-after-live.log)
 - .NET 解決方案建置零警告、零錯誤，38 項離線檢查通過。F 槽兩次即時排演分別停在終止狀態輪詢及無關房收件。改在本機 SSD 寫入即時狀態後，原編譯與解壓套件各完成 97 項，兩組程序均已清理，驗收檔保存於 F 槽。廠商協議與實體設備待驗。 [原編譯](../artifacts/hardware-stream-order-0220/compiled-release-live/checks.json) · [解壓複驗](../artifacts/hardware-stream-order-0220/extracted-release-live/checks.json) · [離線](../artifacts/hardware-stream-order-0220/offline.log)
+- GitHub Actions 對 `6668785` 回報帳務或用量限制，工作未啟動。 [GitHub Actions 工作](https://github.com/peca12968/vr-command-center/actions/runs/43938364510/job/133548883731)
 
 ## 2026-11-17 五房配票下載核對原始 ZIP
 
