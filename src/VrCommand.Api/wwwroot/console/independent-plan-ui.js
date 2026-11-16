@@ -111,17 +111,16 @@ export function mountIndependentPlan({ available, catalog, pinned, common, clima
   overview.addEventListener('toggle', renderMaps);
   return {
     render, enabled, setRevision,
-    restoreRoom(roomId, revision) {
+    restoreRooms(replacements) {
       if (!available()) return;
-      const target = rows[roomId - 1];
-      if (!enabled()) {
-        const shared = common();
-        toggle.checked = true;
-        for (const row of rows) if (row !== target) assign(row, shared);
+      const wasShared = !enabled(), shared = wasShared ? common() : null;
+      toggle.checked = true;
+      preview.value = String(replacements.keys().next().value);
+      for (const id of new Set([...replacements.values()].map(revision => revision.mission.id))) invalidate(id);
+      for (const row of rows) {
+        if (replacements.has(row.roomId)) assign(row, replacements.get(row.roomId));
+        else if (wasShared) assign(row, shared);
       }
-      preview.value = String(roomId);
-      invalidate(revision.mission.id);
-      assign(target, revision);
       changed();
     },
     restore(revisions) {

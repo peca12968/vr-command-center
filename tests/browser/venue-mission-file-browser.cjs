@@ -11,6 +11,8 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
   const save = page.locator('#download-venue-missions'), load = page.locator('#load-venue-missions');
   const preview = page.locator('#preview-venue-missions'), review = page.locator('#venue-missions-review');
   const applyRoom = page.locator('#use-venue-mission-room');
+  const applySelected = page.locator('#use-selected-venue-mission-rooms');
+  const roomCheckbox = room => review.locator(`[data-venue-mission-file-room="${room}"]`);
   const reviewRows = review.locator('tbody tr');
   const maps = page.locator('#venue-missions-maps'), mapRoom = page.locator('#venue-missions-map-room');
   const currentMap = maps.locator('[data-source=current]'), fileMap = maps.locator('[data-source=file]');
@@ -155,6 +157,20 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
     check(await page.locator('#launch-review-room').inputValue() === '1' && await create.isDisabled()
       && (await api('/sessions')).map(session => session.id).join() === blocker.id,
       'Applying a second room keeps earlier selections and creates no sessions');
+    assert(await applySelected.isDisabled() && await roomCheckbox(1).isDisabled());
+    await roomCheckbox(5).check(); await roomCheckbox(3).check();
+    await applySelected.click();
+    await status.filter({ hasText: '已套用房間 3、5' }).waitFor();
+    assert.deepEqual(await selected(), [a.id, b.id, a.id, head.id, b.id]);
+    check(await applySelected.isDisabled() && await draft.inputValue() === '691' && await create.isDisabled()
+      && (await api('/sessions')).map(session => session.id).join() === blocker.id,
+      'Applying checked rooms preserves the other exact assignments, the draft and the occupied-room gate');
+    await roomCheckbox(4).check();
+    await mode.selectOption('Linked');
+    assert(await applySelected.isHidden());
+    await mode.selectOption('IndependentSet');
+    check(!await roomCheckbox(4).isChecked() && await applySelected.isDisabled(),
+      'Changing topology clears checked file rooms without applying them');
     await mode.selectOption('Linked');
     const withInvalidLayout = structuredClone(independent.value);
     withInvalidLayout.rooms[4].missionId = invalidLayout.id;

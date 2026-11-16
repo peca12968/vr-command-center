@@ -617,14 +617,22 @@ function saveVenuePlan() {
 }
 function renderVenueMissionFileReview() {
   const review = venueMissionFileReview, panel = $('venue-missions-review'), list = $('venue-missions-review-rows');
+  const applySelected = $('use-selected-venue-mission-rooms');
   panel.hidden = !review || !master();
+  const mode = $('launch-mode');
+  const canSelect = !panel.hidden && mode.value === 'IndependentSet' && review.mode === 'IndependentSet';
+  if (!canSelect) review?.selectedRooms.clear();
+  applySelected.hidden = !canSelect;
+  applySelected.disabled = true;
   if (panel.hidden) {
     $('venue-missions-review-summary').textContent = '';
     list.replaceChildren();
     renderVenueMissionFileMaps();
     return;
   }
-  const mode = $('launch-mode'), current = configuredVenueRevisions(mode.value);
+  const current = configuredVenueRevisions(mode.value);
+  const locked = state.busy || !!state.pending;
+  const focusedRoom = document.activeElement?.dataset.venueMissionFileRoom;
   const modeName = value => [...mode.options].find(option => option.value === value)?.textContent ?? '';
   const changes = current.filter((revision, index) => revision?.mission.id !== review.revisions[index].mission.id).length;
   $('venue-missions-review-summary').textContent = `目前為${modeName(mode.value)}，檔案指定${modeName(review.mode)}。版本不同 ${changes} 房。`;
@@ -642,13 +650,33 @@ function renderVenueMissionFileReview() {
     const previousId = original?.mission.id ?? '', incomingId = incoming.mission.id;
     const layout = review.layouts.get(incomingId);
     const layoutText = !layout ? '暫未核對' : layout.applies && layout.canStart ? '檢查通過' : '配置須修正';
-    const entry = row([`房間 ${roomId}`, label(original), label(incoming), layoutText]);
+    const roomLabel = `房間 ${roomId}`;
+    let roomCell = roomLabel;
+    if (previousId === incomingId) review.selectedRooms.delete(roomId);
+    if (canSelect) {
+      const select = element('input'), choice = element('label', null, 'check');
+      select.type = 'checkbox'; select.disabled = locked || previousId === incomingId;
+      select.dataset.venueMissionFileRoom = String(roomId);
+      select.setAttribute('aria-label', `勾選房間 ${roomId} 的檔案版本`);
+      select.checked = review.selectedRooms.has(roomId);
+      select.addEventListener('change', () => {
+        if (select.checked) review.selectedRooms.add(roomId); else review.selectedRooms.delete(roomId);
+        applySelected.disabled = !review.selectedRooms.size;
+      });
+      choice.append(select, roomLabel);
+      roomCell = choice;
+    }
+    const entry = row([roomCell, label(original), label(incoming), layoutText]);
     entry.dataset.currentMission = previousId;
     entry.dataset.fileMission = incomingId;
     entry.dataset.changed = String(previousId !== incomingId);
     entry.cells[3].dataset.status = !layout ? 'unknown' : layout.applies && layout.canStart ? 'valid' : 'invalid';
     return entry;
   }));
+  if (canSelect) {
+    applySelected.disabled = locked || !review.selectedRooms.size;
+    if (focusedRoom) list.querySelector(`[data-venue-mission-file-room="${focusedRoom}"]`)?.focus();
+  }
   renderVenueMissionFileMaps(review, current, mode.value);
 }
 function renderVenueMissionFileMaps(review, current, mode) {
@@ -795,7 +823,7 @@ async function loadVenueMissionFile(previewOnly) {
       const layouts = await Promise.allSettled(ids.map(id => placement.inspectSaved({ id, mode,
         experienceMode: revisions.get(id).mission.definition.environment.mode })));
       if (!current()) return;
-      venueMissionFileReview = { file, mode: plan.mode, revisions: assigned, layouts: new Map(ids.map((id, index) =>
+      venueMissionFileReview = { file, mode: plan.mode, revisions: assigned, selectedRooms: new Set(), layouts: new Map(ids.map((id, index) =>
         [id, layouts[index].status === 'fulfilled' ? layouts[index].value : null])) };
       status.textContent = '已核對檔案版本。確認後可載入配置。';
       return;
@@ -804,17 +832,20 @@ async function loadVenueMissionFile(previewOnly) {
     status.textContent = '已載入五房任務配置。請核對場地，再建立準備場次。';
   }, true);
 }
-function useVenueMissionFileRoom() {
+function useVenueMissionFileRooms(rooms) {
   const review = venueMissionFileReview;
-  const button = $('use-venue-mission-room');
-  if (!master() || state.busy || state.pending || button.disabled || button.hidden
+  if (!master() || state.busy || state.pending
     || review?.mode !== 'IndependentSet' || $('launch-mode').value !== 'IndependentSet'
     || review.file !== $('venue-missions-file').files[0]) return;
-  const room = Number($('venue-missions-map-room').value);
-  const revision = review.revisions[room - 1];
-  roomPlan.restoreRoom(room, revision);
-  $('venue-missions-file-status').textContent = `已套用房間 ${room} 的任務版本。請核對場地，再建立準備場次。`;
-  $('venue-missions-map-room').focus();
+  const original = configuredVenueRevisions('IndependentSet');
+  const changedRooms = venueMissionRooms.filter(room => rooms.includes(room)
+    && original[room - 1]?.mission.id !== review.revisions[room - 1].mission.id);
+  if (!changedRooms.length) return;
+  const picker = $('venue-missions-map-room');
+  picker.value = String(changedRooms[0]);
+  roomPlan.restoreRooms(new Map(changedRooms.map(room => [room, review.revisions[room - 1]])));
+  $('venue-missions-file-status').textContent = `已套用房間 ${changedRooms.join('、')} 的任務版本。請核對場地，再建立準備場次。`;
+  picker.focus();
 }
 function launchPlan() {
   const mode = $('launch-mode').value, mixed = roomPlan.enabled();
@@ -2472,7 +2503,8 @@ $('venue-missions-file').addEventListener('change', () => {
 $('preview-venue-missions').addEventListener('click', () => loadVenueMissionFile(true));
 $('venue-missions-map-room').addEventListener('change', renderVenueMissionFileReview);
 $('load-venue-missions').addEventListener('click', () => loadVenueMissionFile(false));
-$('use-venue-mission-room').addEventListener('click', useVenueMissionFileRoom);
+$('use-venue-mission-room').addEventListener('click', () => useVenueMissionFileRooms([Number($('venue-missions-map-room').value)]));
+$('use-selected-venue-mission-rooms').addEventListener('click', () => useVenueMissionFileRooms([...(venueMissionFileReview?.selectedRooms ?? [])]));
 $('download-venue-missions').addEventListener('click', () => {
   const plan = venueMissionSelection();
   if ($('download-venue-missions').disabled || !plan) return;
