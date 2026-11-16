@@ -774,7 +774,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\room-01-seat-01
 
 原程序斷線且票券過期時，可先更新同一入場的票券，再由玩家按 B 重連。 [票券更新](QUEST_RECONNECT.md#保留遊戲程序並更新票券)
 
-在 Windows 遊戲伺服器啟動器 1.7 勾選「記錄本次玩家連線來源（場館驗收）」，或用 CLI 的 `--peer-diagnostics on` 保留 UDP 來源和戰績確認。驗收前先關閉上次場次的遊戲，再部署本場票券並重新啟動。頭盔經 USB 偵錯授權後，從 Wi-Fi 設定記下本次使用的 IPv4。每席遊戲啟動後立即用 Python 3.12 開始擷取。看到 `capture-ready` 後，依主控台原開場條件確認玩家入場和追蹤狀態。
+在 Windows 遊戲伺服器啟動器 1.7 勾選「記錄本次玩家連線來源（場館驗收）」，或用 CLI 的 `--peer-diagnostics on` 保留 UDP 來源和戰績確認。驗收前先關閉上次場次的遊戲，再部署本場票券並重新啟動。頭盔經 USB 偵錯授權後，從 Wi-Fi 設定記下本次使用的 IPv4。每席遊戲啟動後立即用 Python 3.12 開始擷取。工具從原遊戲程序讀到成功連線才顯示 `capture-ready`。若在最終戰績前讀到該席斷線，會顯示 `capture-disconnected`，直到讀到成功重連才再次就緒。開場仍依主控台確認原入場和追蹤狀態。
 
 ```powershell
 $adb = 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe'
@@ -801,7 +801,7 @@ python .\scripts\capture-quest-field-log.py --adb $adb `
     --output-directory .\quest-capture --seconds 1800
 ```
 
-預設要求完整 25 席。若名冊混有 VIVE，使用只列 Quest 席位的部署清單並加上 `--allow-partial-map`。擷取並行執行。所有選取席位都讀到原程序的啟動記錄，且此前沒有席位讀到最終戰績或發生擷取失敗時，工具才顯示 `venue-capture-ready`。主控再依管理台確認入場及追蹤後開場。若有席位先讀到最終戰績，工具仍繼續保存可核對的完整日誌。已入場玩家可沿用原部署包的票券資料核對日誌，包含擷取時已過期的原票券。需要重新入場時仍依遊戲伺服器的票券規則。
+預設要求完整 25 席。若名冊混有 VIVE，使用只列 Quest 席位的部署清單並加上 `--allow-partial-map`。擷取並行執行，`venue-capture-ready` 代表依已讀取的日誌，所有選取席位最近一次連線事件仍是成功連線。若引用要求 OpenXR 的部署報告，也須讀到該次啟動的 OpenXR 記錄。斷線席會從就緒名單移除，重連後可再觸發全館就緒。任何一席讀到最終戰績或擷取失敗後，全館停止發送新的就緒通知，其餘席位繼續擷取。已入場玩家可沿用原部署包的票券資料核對日誌，包含擷取時已過期的原票券。需要重新入場時仍依遊戲伺服器的票券規則。
 
 場次結束後，`capture-report.json` 依房號、席位及場次列出完整日誌、`logcatPid` 和 SHA-256。任一席失敗時，整批回傳退出碼 1，已完成的日誌與可用的 `.partial` 各自保留。
 

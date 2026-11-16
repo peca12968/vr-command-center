@@ -14,6 +14,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 import uuid
 import zipfile
@@ -526,6 +527,29 @@ if settings.get('keepRunning', True):
         readback = field.verify(*self.records, quest_player_logs=[(self.address, field.content(self.output), report['logcatPid'])])
         self.assertEqual(1, readback['questLogcatPlayers'])
         self.assertEqual(2, readback['serverAcknowledgements'])
+
+    def test_capture_waits_for_the_first_original_connection_before_reporting_ready(self):
+        port, admission = capture_tool.read_connection(self.original)
+        ready = []
+
+        async def lines():
+            yield logcat_line(f'VR_NETWORK_STARTED role=Client started=True background=False port={port}').encode()
+            self.assertEqual([], ready, 'Starting the client does not establish a connection')
+            yield logcat_line('VR_CLIENT_ADMISSION_REJECTED').encode()
+            self.assertEqual([], ready)
+            for message in self.player_log.splitlines():
+                yield logcat_line(message).encode()
+                if message.startswith('VR_CLIENT_CONNECTED '):
+                    self.assertEqual([7342], ready)
+
+        child = SimpleNamespace(stdout=SimpleNamespace(readline=lines().__anext__))
+
+        async def collect():
+            return await capture_tool.read_capture(child, self.adb, 7342, port, admission, io.BytesIO(),
+                                                   asyncio.get_running_loop().time() + 4, ready.append)
+
+        with patch.object(capture_tool, 'quest_pid', return_value=7342):
+            self.assertTrue(asyncio.run(collect())['complete'])
 
     def test_capture_rejects_stale_admission_on_same_port(self):
         self.prepare(quest_logcat(self.player_log.replace(id_for(14), id_for(99))).encode('utf-8'))

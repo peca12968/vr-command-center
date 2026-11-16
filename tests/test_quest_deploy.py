@@ -1488,7 +1488,7 @@ class QuestVenueTests(unittest.TestCase):
                 thread.join(timeout=5)
 
     def mock_capture_devices(self, rows, topology, *, held=False, wrong_seat=None, startup_gates=None,
-                             rebind_seat=None, transport_base=0):
+                             reconnect_gates=None, rebind_seat=None, transport_base=0):
         expected = {}
         transports = {serial: transport_base + index
                       for index, serial in enumerate(sorted(row['serial'] for row in rows), 1)}
@@ -1503,8 +1503,12 @@ class QuestVenueTests(unittest.TestCase):
             def line(message):
                 return f'11-09 14:30:00.000 7342 14325 I Unity   : {message}\r\n'.encode()
             startup = line(f'VR_NETWORK_STARTED role=Client started=True background=False port={port}')
-            ending = line(f'VR_CLIENT_CONNECTED id={index+1}') + line('VR_CLIENT_DEBRIEF_FINAL ' + json.dumps(result)) + line('VR_CLIENT_DISCONNECTED')
+            connected = line(f'VR_CLIENT_CONNECTED id={index+1}')
+            ending = line('VR_CLIENT_DEBRIEF_FINAL ' + json.dumps(result)) + line('VR_CLIENT_DISCONNECTED')
             gate = (startup_gates or {}).get((room, seat))
+            reconnect_gate = (reconnect_gates or {}).get((room, seat))
+            outage = line('VR_CLIENT_DISCONNECTED') if reconnect_gate else b''
+            restored = line(f'VR_CLIENT_CONNECTED id={index+101}') if reconnect_gate else b''
             (self.root / serial).write_text(f'''import json, sys, time
 from pathlib import Path
 if sys.argv[1:] == ['shell', 'pidof', 'com.vrcommand.quest']:
@@ -1526,6 +1530,16 @@ else:
         update = inventory.with_suffix('.tmp')
         update.write_text(json.dumps(current), encoding='utf-8')
         update.replace(inventory)
+    sys.stdout.buffer.write({connected + outage!r})
+    sys.stdout.buffer.flush()
+    if {reconnect_gate is not None!r}:
+        gate = Path({str(reconnect_gate)!r})
+        until = time.monotonic() + 25
+        while not gate.is_file() and time.monotonic() < until:
+            time.sleep(.05)
+        assert gate.is_file()
+        sys.stdout.buffer.write({restored!r})
+        sys.stdout.buffer.flush()
     until = time.monotonic() + 25
     while {held!r} and not Path('release').exists() and time.monotonic() < until:
         time.sleep(.05)
@@ -1533,7 +1547,7 @@ else:
     sys.stdout.buffer.flush()
     time.sleep(60)
 ''', encoding='utf-8')
-            expected[room, seat] = (str(session), port, startup + ending)
+            expected[room, seat] = (str(session), port, startup + connected + outage + restored + ending)
         return expected
 
     def capture_command(self, files, mapping, output, *flags):
@@ -1618,6 +1632,52 @@ else:
         self.assertEqual(25, json.loads(stdout)['capturedSeats'])
         for private in (configs[1]['room-01-seat-01.json']['joinTicket'], 'fixture-01', str(self.root)):
             self.assertNotIn(private, stdout + ''.join(lines) + json.dumps(report))
+
+    def test_venue_capture_only_announces_ready_when_disconnected_seat_rejoins(self):
+        files, _ = self.vr_bundle('Linked')
+        mapping, document = self.device_map()
+        rows = [row for row in document['seats'] if row['roomId'] == 1 and row['seat'] in (1, 2)]
+        mapping.write_text(json.dumps(dict(document, seats=rows)), encoding='utf-8')
+        output = self.root / 'reconnect capture'
+        start_second = self.root / 'start-second'
+        reconnect_first = self.root / 'reconnect-first'
+        expected = self.mock_capture_devices(rows, 'Linked', held=True, startup_gates={(1, 2): start_second},
+                                             reconnect_gates={(1, 1): reconnect_first})
+        disconnected, second_ready, venue_ready = Event(), Event(), Event()
+        stages = []
+        with subprocess.Popen(self.capture_command(files, mapping, output, '--allow-partial-map'), cwd=self.root,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8') as process:
+            def collect():
+                for line in process.stderr:
+                    row = json.loads(line)
+                    status = (row['stage'], row.get('seat'))
+                    stages.append(status)
+                    if status == ('capture-disconnected', 1):
+                        disconnected.set()
+                    elif status == ('capture-ready', 2):
+                        second_ready.set()
+                    elif status == ('venue-capture-ready', None):
+                        venue_ready.set()
+
+            collector = Thread(target=collect)
+            collector.start()
+            try:
+                self.assertTrue(disconnected.wait(15), stages)
+                start_second.touch()
+                self.assertTrue(second_ready.wait(10), stages)
+                reconnect_first.touch()
+                self.assertTrue(venue_ready.wait(10), stages)
+            finally:
+                start_second.touch()
+                reconnect_first.touch()
+                (self.root / 'release').touch()
+                process.wait(timeout=20)
+                collector.join(timeout=5)
+            self.assertEqual(0, process.returncode, stages)
+        self.assertEqual([('capture-ready', 1), ('capture-disconnected', 1), ('capture-ready', 2),
+                          ('capture-ready', 1), ('venue-capture-ready', None)], stages)
+        for seat in (1, 2):
+            self.assertEqual(expected[1, seat][2], (output / f'room-01-seat-{seat:02}-logcat.txt').read_bytes())
 
     def test_venue_capture_does_not_announce_ready_after_a_seat_already_finished(self):
         files, _ = self.vr_bundle('Linked')

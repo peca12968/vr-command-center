@@ -53,15 +53,18 @@ def quest_pid(adb, timeout):
     return int(pid)
 
 
-def report_ready(pid, **seat):
-    print(json.dumps({'stage': 'capture-ready', 'logcatPid': pid, **seat}), file=sys.stderr, flush=True)
+def report_capture_status(pid, *, stage='capture-ready', **seat):
+    print(json.dumps({'stage': stage, 'logcatPid': pid, **seat}), file=sys.stderr, flush=True)
 
 
-async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready, openxr=None, *, on_final=None):
+async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready, openxr=None, *,
+                       on_final=None, on_disconnected=None):
     startup_deadline = min(deadline, time.monotonic() + STARTUP_SECONDS)
     next_pid_check = time.monotonic() + PID_CHECK_SECONDS
     started = ready = final_seen = False
     xr_ready = openxr is None
+    connection = None
+    connection_ids = set()
     size = 0
     while True:
         now = time.monotonic()
@@ -73,7 +76,7 @@ async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready
             field.require(current == pid, 'The original Quest process changed')
             next_pid_check = time.monotonic() + PID_CHECK_SECONDS
             continue
-        read_deadline = min(deadline, next_pid_check, deadline if ready else startup_deadline)
+        read_deadline = min(deadline, next_pid_check, deadline if started and xr_ready else startup_deadline)
         try:
             line = await asyncio.wait_for(child.stdout.readline(), read_deadline - now)
         except TimeoutError:
@@ -93,11 +96,24 @@ async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready
             field.require(process == str(pid) and not started and field.client_startup_on_port(message, port),
                           'Quest startup differs from the original process or game port')
             started = True
-        elif message.startswith(field.PLAYER_MARKERS):
+        elif message.startswith(field.PLAYER_MARKERS) or message == 'VR_CLIENT_ADMISSION_REJECTED':
             field.require(process == str(pid) and started, 'Player marker is outside the original Quest startup or process')
-            if message.startswith('VR_CLIENT_DEBRIEF_FINAL '):
-                field.require(ready, 'Original Quest OpenXR launch marker is unavailable')
-                if not final_seen and on_final is not None:
+            if message.startswith('VR_CLIENT_CONNECTED'):
+                match = field.CONNECT.fullmatch(message)
+                field.require(match is not None and connection is None and not final_seen, 'Unexpected player connection marker')
+                connection = match.group(1)
+                field.require(connection not in connection_ids, 'Player connection number reused')
+                connection_ids.add(connection)
+            elif message in ('VR_CLIENT_DISCONNECTED', 'VR_CLIENT_ADMISSION_REJECTED'):
+                connection = None
+                if ready and not final_seen:
+                    ready = False
+                    if on_disconnected is not None:
+                        on_disconnected(pid)
+            elif message.startswith('VR_CLIENT_DEBRIEF_FINAL '):
+                field.require(xr_ready, 'Original Quest OpenXR launch marker is unavailable')
+                field.require(connection is not None and not final_seen, 'Player final result lacks a unique live connection')
+                if on_final is not None:
                     on_final()
                 final_seen = True
             if final_seen and message == 'VR_CLIENT_DISCONNECTED':
@@ -114,7 +130,7 @@ async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready
                 field.require(current == pid, 'The original Quest process changed')
                 return {'version': 1, 'complete': True, 'logcatPid': pid, 'port': port, 'roomId': admission['roomId'], 'bytes': size,
                         'sha256': hashlib.sha256(captured).hexdigest(), 'scope': 'quest-logcat-only'}
-        if started and xr_ready and not ready:
+        if started and xr_ready and connection is not None and not ready and not final_seen:
             ready = True
             on_ready(pid)
 
@@ -133,8 +149,8 @@ def check_device_identity(adb, expected, timeout):
                   'Quest device identity differs from the original deployment')
 
 
-async def capture(adb, port, admission, output, seconds, on_ready=report_ready, *,
-                  device_identity=None, openxr=None, on_final=None):
+async def capture(adb, port, admission, output, seconds, on_ready=report_capture_status, *,
+                  device_identity=None, openxr=None, on_final=None, on_disconnected=None):
     partial = output.with_name(output.name + '.partial')
     field.require(not os.path.lexists(output) and not os.path.lexists(partial), 'Choose a new capture output path')
     deadline = time.monotonic() + seconds
@@ -149,7 +165,8 @@ async def capture(adb, port, admission, output, seconds, on_ready=report_ready, 
                                                     '-v', 'threadtime', '-s', 'Unity:I',
                                                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
         try:
-            report = await read_capture(child, adb, pid, port, admission, log, deadline, on_ready, openxr, on_final=on_final)
+            report = await read_capture(child, adb, pid, port, admission, log, deadline, on_ready, openxr,
+                                        on_final=on_final, on_disconnected=on_disconnected)
         finally:
             if child.returncode is None:
                 try:
@@ -285,7 +302,7 @@ async def capture_venue(adb, plan, directory, seconds):
     deadline = time.monotonic() + seconds
     transports = await asyncio.to_thread(read_adb_transports, adb, seconds)
     directory.mkdir()
-    ready = 0
+    ready_seats = set()
     can_announce_ready = True
     partial_deployment = {'partialDeployment': True} if plan.get('partialDeployment') else {}
 
@@ -298,14 +315,18 @@ async def capture_venue(adb, plan, directory, seconds):
         source = dict(seat, sessionId=row['sessionId'], port=row['port'])
         admission = {key: row[key] for key in ('sessionId', 'playerId', 'admissionId', 'roomId')}
         log = directory / f"room-{seat['roomId']:02}-seat-{seat['seat']:02}-logcat.txt"
+        seat_key = (seat['roomId'], seat['seat'])
 
         def on_ready(pid):
-            nonlocal ready
-            report_ready(pid, **seat)
-            ready += 1
-            if ready == len(plan['seats']) and can_announce_ready:
-                print(json.dumps({'stage': 'venue-capture-ready', 'seats': ready, **partial_deployment}),
+            report_capture_status(pid, **seat)
+            ready_seats.add(seat_key)
+            if len(ready_seats) == len(plan['seats']) and can_announce_ready:
+                print(json.dumps({'stage': 'venue-capture-ready', 'seats': len(ready_seats), **partial_deployment}),
                       file=sys.stderr, flush=True)
+
+        def on_disconnected(pid):
+            ready_seats.discard(seat_key)
+            report_capture_status(pid, stage='capture-disconnected', **seat)
 
         try:
             target = select_adb_transport(adb, transports, row['serial'])
@@ -313,7 +334,7 @@ async def capture_venue(adb, plan, directory, seconds):
             field.require(remaining > 0, 'Capture timed out before checking the Quest process')
             report = await capture(target, source['port'], admission, log, remaining, on_ready,
                                    device_identity=row.get('deviceIdentity'), openxr=row.get('openXR'),
-                                   on_final=close_readiness)
+                                   on_final=close_readiness, on_disconnected=on_disconnected)
         except (field.EvidenceError, OSError, UnicodeError, ValueError, TimeoutError, RecursionError) as error:
             close_readiness()
             reason = str(error) if isinstance(error, (field.EvidenceError, AdbTransportError)) else 'Check ADB and the capture directory'
@@ -391,7 +412,8 @@ def main():
             target = select_adb_transport(adb, read_adb_transports(adb, args.seconds), args.serial)
             remaining = deadline - time.monotonic()
             field.require(remaining > 0, 'Capture timed out before checking the Quest process')
-            report = asyncio.run(capture(target, port, admission, args.output, remaining))
+            report = asyncio.run(capture(target, port, admission, args.output, remaining,
+                                         on_disconnected=lambda pid: report_capture_status(pid, stage='capture-disconnected')))
     except (field.EvidenceError, AdbTransportError) as error:
         parser.exit(1, f'Quest capture incomplete. {error}.\n')
     except (OSError, UnicodeError, ValueError, KeyError, TypeError, TimeoutError, RecursionError, KeyboardInterrupt):

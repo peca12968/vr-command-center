@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 Quest 日誌收集依連線更新就緒
+
+- 原版只看到網路啟動即回報 `capture-ready`，即使玩家尚未連上。新版須讀到原遊戲程序的成功連線紀錄。斷線時移除該席，重連才恢復。`venue-capture-ready` 表示已讀取的日誌顯示所有選取席位連線有效，開場仍由主控台確認原入場和追蹤狀態。 [收集方式](QUEST3.md#收集-quest-場館驗收日誌) · [舊版反例](../artifacts/quest-capture-readiness-20261117/before.log)
+- 13 項單席擷取及 3 項五房擷取專項通過，包含 25 席同輪擷取、先結束的席位及斷線重連。另以實際 Windows SDK ADB 用戶端連接同機兩席模擬裝置，驗證第一席重連前沒有全館就緒通知，並逐位元核對兩份擷取檔與 ADB 輸出。USB 偵錯介面仍為零。 [原生 ADB 結果](../artifacts/quest-capture-readiness-20261117/native-adb-readback.json) · [USB 診斷](../artifacts/quest-capture-readiness-20261117/usb-status.json)
+- 142 項封存回歸全數通過。84 項 Quest 回歸中，1 個 Windows PowerShell 腳本政策子案例略過。 [封存回歸](../artifacts/quest-capture-readiness-20261117/field-full.log) · [Quest 回歸](../artifacts/quest-capture-readiness-20261117/quest-full.log)
+
 ## 2026-11-17 Quest 原席位換票與校正回讀
 
 - `-RefreshPlayerTicket` 在同一裝置端指令內核對原連線檔、暫存票券和已安裝的原校正檔。更名前校正不符會保留原票券。更名後讀回正式檔，任一雜湊不符就以失敗退出，即使新票券已寫入。重送相同票券也會讀回正式檔才回報目前票券相同。線上確認沿用同一入場，換票期間保留原遊戲程序。 [票券更新說明](QUEST_RECONNECT.md#保留遊戲程序並更新票券) · [舊版反例](../artifacts/quest-ticket-verified-20261117/before.log)
