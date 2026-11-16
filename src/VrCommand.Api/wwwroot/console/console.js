@@ -57,7 +57,7 @@ const vrVenue = mountVrVenueTickets(() => state, api, download, roomReadiness.ti
 const venueServerPlan = mountVenueServerPlan(() => state, api, download);
 const venueLaunchReview = mountVenueLaunchReview(() => state, api, selectSession, focusRoster, roomReadiness.reviewedBegin,
   target => tab('world', target), openReviewedVenueClosure);
-const venueRoster = mountVenueRoster({ getState: () => state, canRegister: master, uuid, register: seats => run(async () => {
+const venueRoster = mountVenueRoster({ getState: () => state, canRegister: master, uuid, download, register: seats => run(async () => {
   state.pending = { kind: 'venue-roster-join', path: '/venue/roster-admissions', method: 'POST', body: { seats } };
   await sendPending();
 }) });

@@ -101,6 +101,12 @@
         <details id="venue-roster-admissions" class="panel" hidden>
           <summary>批次加入場館名冊</summary>
           <p class="hint">先建立準備場次，再填寫要登記的空席。空白席位略過。</p>
+          <div class="button-row">
+            <button id="venue-roster-template" type="button" class="quiet">下載 25 席範本</button>
+            <label>名冊 CSV<input id="venue-roster-csv" type="file" accept=".csv,text/csv" disabled></label>
+            <button id="venue-roster-import" type="button" class="secondary" disabled>帶入 CSV 草稿</button>
+          </div>
+          <p id="venue-roster-import-status" class="hint" role="status"></p>
           <div class="table-scroll">
             <table><caption class="sr-only">場館名冊登記</caption><thead><tr><th scope="col">房間與席位</th><th scope="col">玩家名稱</th><th scope="col">頭盔</th><th scope="col">狀態</th></tr></thead>
               <tbody id="venue-roster-seats"></tbody></table>
@@ -602,7 +608,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.227 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.228 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>
