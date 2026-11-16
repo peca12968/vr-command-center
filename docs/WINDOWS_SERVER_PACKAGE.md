@@ -405,6 +405,8 @@ python scripts/check-server-package.py '<解壓後的 VRCommand-GameServer>' `
 
 ### 無人值守的 Windows 測試
 
+背景開發執行可能連網的 Windows 測試前，先在同一 PowerShell 工作階段設定 `$env:VR_COMMAND_UNATTENDED = '1'`。防火牆查核會涵蓋網域、私人和公用網路設定檔，以便在測試期間切換網路時仍能避免這類視窗。任一啟用中的防火牆設定檔仍會發出入站通知時，即使程式已有入站規則，也會在啟動前退出並在終端機列出原因。可繼續執行離線建置、封裝和測試。一般入站規則查核仍適用於未設定這個變數的操作。
+
 Windows 依執行檔的完整路徑套用程式規則。即使只有同機測試，新解壓路徑的 `vrcommand.exe` 也可能觸發入站連線提示。自動測試用 `127.0.0.1`，並先核對實際 EXE 路徑在目前網路設定檔的既有規則。新路徑尚未確認時，可先跑建置、套件驗證及使用測試替身的檢查。 [Microsoft Windows 防火牆規則](https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/rules)
 
 桌面場館、Unity 啟動與入場測試，以及會啟動原生遊戲的套件和 GUI 驗證，會在開啟遊戲或啟動器前，自動核對執行檔路徑與所有啟用中的防火牆設定檔。`start-verified-venue.py` 在啟動五房前會檢查解壓包內的 `Launch-Server.exe` 與 `Runtime/VrCommand.exe`。離線 `--verify-only` 可直接執行。Unity Editor 建置、Quest 的 ADB 部署及擷取、Quest 單席與五房 UDP 探測也有啟動前檢查。使用 PowerShell 接收入站 UDP 的場館探測會檢查該 PowerShell 執行檔。

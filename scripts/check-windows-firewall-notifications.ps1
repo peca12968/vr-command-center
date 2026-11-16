@@ -14,6 +14,19 @@ if ($active -lt 1 -or $active -gt 7) {
     throw 'Could not determine the active Windows Firewall profiles.'
 }
 
+# Unattended runs require notification suppression even if a matching rule exists.
+# Include inactive profiles so a network change during startup does not reopen the prompt.
+if ($env:VR_COMMAND_UNATTENDED -eq '1') {
+    $notifyingProfiles = @($profiles.GetEnumerator() | Where-Object {
+        $policy.FirewallEnabled($_.Value) -and -not $policy.NotificationsDisabled($_.Value)
+    } | ForEach-Object Key)
+    if ($notifyingProfiles.Count) {
+        [Console]::Error.WriteLine("Unattended startup skipped for $($file.FullName). Windows Firewall inbound notifications are enabled on: $($notifyingProfiles -join ', ').")
+        exit 2
+    }
+    exit 0
+}
+
 # Both an allow rule and a block rule can settle the notification for a program.
 # The caller still verifies whether its loopback traffic works.
 $rules = @($policy.Rules | Where-Object {
