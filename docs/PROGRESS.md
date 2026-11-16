@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-17 匯出未確認戰績的席位清單
+
+- 管理台 0.31.224 可從全館或單房席位明細下載未確認清單 CSV。全館匯出須等有名冊的房間都能核對回條。每席保留原批次、場次、房席、管理與戰鬥及世界序號和七項戰績。CSV 使用 UTF-8 BOM、CRLF 與原試算表文字防護。 [操作方式](SESSION_CLOSURE.md#查看全館未確認席位)
+- 使用合併及獨立各 25 席的原封存副本，暫扣兩個原回條後以實際管理 API 分別補回。原始碼與解壓包各通過 18 項 Chromium 專項。驗證全館缺房、單房匯出、讀取期間停用、錯誤串流拒絕及回條更新。五份 CSV 在兩輪位元組相同，原封存雜湊均相同。首輪測試誤把場地檢查 POST 算成寫入，複驗依實際端點分辨，產品未改。 [獨立場](../artifacts/venue-unconfirmed-seats-031224/package-Independent/checks.json) · [合併場](../artifacts/venue-unconfirmed-seats-031224/package-Linked/checks.json) · [CSV 核對](../artifacts/venue-unconfirmed-seats-031224/csv-byte-readback.json)
+- 123 項 Node 測試通過，管理套件解壓核對 574 個檔案，與原 0.50.12 Windows 及 Quest 建置通過共同發行核對。管理 API 使用本機 IPC，測試未開 TCP 監聽或 UDP 端點。Quest USB 仍只有檔案傳輸介面，頭盔與跨機待驗。 [發行報告](../artifacts/venue-unconfirmed-seats-031224/venue-release.json) · [程序紀錄](../artifacts/venue-unconfirmed-seats-031224/package-Independent/runtime.json) · [USB 快照](../artifacts/venue-unconfirmed-seats-031224/usb-status.json)
+- GitHub Actions 對 `e5c4d6d` 回報帳務或用量限制，工作未啟動。 [GitHub Actions 工作](https://github.com/peca12968/vr-command-center/actions/runs/43959621036/job/133623203579)
+
 ## 2026-11-17 從五房配置檔套用單房任務版本
 
 - 管理台 0.31.223 的五房獨立準備可以從配置檔預覽套用選定房間。若原準備使用共用任務，會切換到逐房指定，並將原共用版本保留給另外四房。編輯草稿保留，目標房重新檢查場地。 [操作方式](MISSION_VERSIONS.md#在開場前保存五房任務配置) · [手機操作畫面](../artifacts/venue-mission-one-room-031223/package-browser/apply-room-mobile.png)
