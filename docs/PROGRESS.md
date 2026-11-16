@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 下載五房開場檢查清單
+
+- 管理台 0.31.231 的「全館場次控制」可下載逐房逐席開場 CSV。清單保留原場次與管理序號、開場政策、房席狀態和可確認的來源。下載前重新讀取並核對原目標。換場、讀取失敗或切換工作區時停止原下載，過期快照的席位改呈待確認。 [操作方式](PLAYER_READINESS.md#下載開場檢查清單)
+- 133 項 Node 測試通過。原始碼、解壓獨立場與解壓合併場各通過 11 項 Chromium 專項，涵蓋三種開場政策、25 席清單、房控隔離、空席與缺房、換場及過期。第一次同時跑三輪時，獨立場的模擬來源在讀取時已過期，CSV 保留待確認。用相同斷言單獨執行後通過。測試透過本機 IPC，TCP 監聽及 UDP 端點均為零，測試場次與程序已結束。 [獨立場](../artifacts/venue-begin-checklist-031231/final-independent-serial/checks.json) · [合併場](../artifacts/venue-begin-checklist-031231/final-package-Linked/checks.json) · [CSV 範例](../artifacts/venue-begin-checklist-031231/final-package-Linked/participation.csv)
+- Windows 管理包核對 589 個檔案，和既有 0.50.12 的 Windows 與 Quest 一起通過離線發行核對。GitHub Actions 對 `980fae5` 回報帳務或用量限制，工作未啟動。Quest 仍無 ADB 介面，實機與跨機驗收待完成。 [下載管理包](../artifacts/venue-begin-checklist-031231/VRCommand-ControlServer-0.31.231.zip) · [發行核對](../artifacts/venue-begin-checklist-031231/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43979424623)
+
 ## 2026-11-17 直接帶入五房環境與敵軍批次報告
 
 - `prepare-venue-field-manifest.py` 可直接帶入全館環境、全館敵軍及指定獨立房間的環境批次。輸出前會核對報告房號、原場次、原管理序號及有效執行畫格。建立清單後可沿用既有玩家收件與封存驗收流程。 [操作方式](EXTERNAL_CLIENTS.md#核對指定獨立房間的環境批次)
