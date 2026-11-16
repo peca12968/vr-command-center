@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 Windows 0.50.11 五房完整戰績核對
+
+- 同一組已通過防火牆查核的 Windows 0.50.11 遊戲和 0.31.184 管理包，使用 `--marksmanship --incoming-fire --incoming-environment --check-frame-review --check-policy-frames` 完成合併與獨立各 25 席的同機操作。實際管理 PID 只監聽迴環位址，管理包 567 檔在場後重查通過。 [操作方式](DESKTOP_EXERCISE.md#同場驗證玩家射擊與敵軍傷害) · [監聽證據](../artifacts/desktop-exercise/20261116-101307-6338207f/actual-api-listeners.json)
+- 實際程序退出 0，43 項檢查及六場雙封存通過。50 份原玩家戰績、六份場次 CSV、合併 ZIP 的全場及五房 CSV 和完整回放逐席相符。每席兩發兩中、一擊殺、中彈一次、損耗 20、剩餘健康 80，命中率均為 100%。回放共 3,073 格，44 個策略參考格及其中 12 個環境參考格相符。活動場次與殘留程序均為零，C 槽原始紀錄與 F 槽快照 174 檔雜湊相符。 [戰績重驗](../artifacts/desktop-exercise/20261116-101307-6338207f/native-full-debrief-verification.json) · [原始程序紀錄](../artifacts/native-full-debrief-7a404198.log)
+- 測試使用程式產生的 Windows 玩家輸入。Quest USB 仍未提供 ADB 偵錯介面，真人跨機 25 人、實體頭盔及廠商硬體待驗。
+
 ## 2026-11-16 Windows 0.50.11 原生五房 25 席測試
 
 - 桌面場館與五房動態測試新增 `--api-exe`，可直接用解壓後的管理包執行檔。啟動前各自檢查管理與 Unity 程序的實際路徑，測試管理服務綁定 `127.0.0.1`，資料寫入新建目錄。此輪使用現有通過查核的 0.31.184 管理包和 F 槽 0.50.11 遊戲。管理 PID 的實際 TCP 監聽只在迴環位址，管理包 567 檔在測試前後均通過完整性核對。 [操作方式](DESKTOP_EXERCISE.md#使用-windows-管理包執行無人值守測試) · [監聽證據](../artifacts/desktop-exercise/20261116-100648-dd67876c/actual-api-listeners.json)

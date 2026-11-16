@@ -54,6 +54,8 @@ python scripts/check-desktop-exercise.py --api-dll <API-DLL> --player-exe <Windo
 
 工具保留管理回條與原生畫格，從完整封存回放逐筆核對敵軍射線及同房受傷。每位原玩家須存活，耗彈、命中、擊殺、中彈、損耗、剩餘健康及命中率須與逐格戰績、最終 CSV 和個人戰績相符。此模式沿用本機 Windows 程式產生的操作輸入，與跨機、頭盔和真人容量分開驗收。
 
+使用 `--incoming-environment --check-policy-frames`，可同場核對雨夜與雷電設定、攻擊、停火與霧天白晝的原始時間線。Windows 0.50.11 搭配管理包 0.31.184，合併及獨立各 25 席已跑過這組選項，完整回放、六場 CSV 及合併場 ZIP 的全場與分房 CSV 均核對到原玩家戰績。 [五房原生核對](../artifacts/desktop-exercise/20261116-101307-6338207f/native-full-debrief-verification.json)
+
 ## 多人動態與正常管理命令組合
 
 功能a58a527的[CI41356457654](https://github.com/peca12968/vr-command-center/actions/runs/41356457654)完整success：772核心／459 HTTP／47 world、6 pipe／38離線硬體CLI、Python含11 exercise／素材、89 Node／296 Chromium。2 Windows限定skip非原生／Editor證據；console49／control13／hardware26及decoded log的完整hash見[PROGRESS](PROGRESS.md)，1513＋49＝1562 browser、nativeUI7＋2保持。後續文件skip ci，測試精確來源a58a527。
