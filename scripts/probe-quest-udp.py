@@ -127,11 +127,16 @@ def main():
         parser.error('Use one explicit ADB serial and valid probe bounds.')
     if args.report.exists() or not args.report.parent.is_dir():
         parser.error('Choose a new report file in an existing directory.')
+    from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
+
     try:
+        require_silent_windows_launch(args.adb)
         report = run_probe(args)
         with args.report.open('x', encoding='utf-8', newline='\n') as destination:
             json.dump(report, destination, separators=(',', ':'))
             destination.write('\n')
+    except WindowsFirewallLaunchError as error:
+        parser.exit(1, f'{error}\n')
     except (OSError, ValueError, subprocess.SubprocessError, KeyboardInterrupt):
         parser.exit(1, 'Quest UDP probe could not save a valid report. Check the device, APK, probe key and output path.\n')
     print(json.dumps({'complete': report['complete'], 'matched': report.get('matched', 0)}))

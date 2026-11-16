@@ -9,7 +9,7 @@ import importlib.util
 from pathlib import Path
 import sys
 from live_world_frame import read_live_frame
-from windows_firewall import require_silent_windows_launch
+from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
 
 root=Path(__file__).resolve().parent.parent
 parser=argparse.ArgumentParser(description=__doc__)
@@ -25,7 +25,10 @@ args=parser.parse_args()
 if os.name!='nt': raise RuntimeError('This fixture requires a Windows Unity player')
 if not args.player_exe.is_file() or not args.api_dll.is_file(): raise RuntimeError('Build the current Unity Desktop player and API before running this fixture')
 if not 500<=args.maximum_source_age_ms<=10000: raise ValueError('Source age threshold must be 500–10000 ms')
-require_silent_windows_launch(args.player_exe)
+try:
+    require_silent_windows_launch(args.player_exe)
+except WindowsFirewallLaunchError as error:
+    parser.exit(1, f'{error}\n')
 directory=root/'artifacts/unity-player-smoke'/(time.strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:8])
 directory.mkdir(parents=True,exist_ok=False)
 runtime_directory=directory

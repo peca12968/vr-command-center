@@ -599,6 +599,7 @@ def main():
 
     def verify_lan_preflight(value, label):
         powershell = Path(os.environ['WINDIR']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+        require_silent_windows_launch(powershell)
         script = [str(powershell), '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned',
                   '-File', str(ROOT/'scripts/check-lan-udp.ps1')]
         options = {'cwd': out, 'creationflags': subprocess.CREATE_NO_WINDOW}

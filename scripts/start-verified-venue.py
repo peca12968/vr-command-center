@@ -130,6 +130,12 @@ def launch(args):
         distinct = field.udp_preflight_distinct_roster(checked)
         original_preview = field.read_udp_launcher_document(preview, preview=True)
         field.require(original_preview[0] == binding['previewSha256'], 'The original Windows launcher preview changed')
+        from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
+
+        try:
+            require_silent_windows_launch(launcher.parent / 'Runtime' / 'VrCommand.exe')
+        except WindowsFirewallLaunchError as error:
+            raise field.EvidenceError(str(error)) from error
         own_launcher_processes()
         release_hash = None
         if release_args or any('registeredSeats' in row for row in original_preview[2].values()):

@@ -13,7 +13,9 @@ import subprocess
 import sys
 import tempfile
 import time
+from types import SimpleNamespace
 import unittest
+from unittest.mock import Mock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -473,6 +475,26 @@ class LanPreflightTests(unittest.TestCase):
         self.assertEqual({'status': 'udp-evidence-verified', 'mode': 'Linked', 'verifiedSources': 2,
                           'expectedSources': 2, 'unreadablePairs': 0, 'unmatchedPairs': 0, 'pendingSeats': []},
                          json.loads(success.stdout))
+
+        spec = importlib.util.spec_from_file_location('start_verified_venue', ROOT / 'scripts/start-verified-venue.py')
+        start = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(start)
+        launcher = self.root / 'Launch-Server.exe'
+        launcher.touch()
+        args = SimpleNamespace(verify_only=False, launcher=launcher, launch_plan=original, network_plan=generated,
+                               readiness=self.root / 'bound.json', require_distinct_remote_roster=False,
+                               retry_output=None, release_report=None, work=self.root / 'work',
+                               ready_report=self.root / 'ready-report.json', report=self.root / 'terminal-report.json',
+                               start_receipt=None)
+        guard = Mock(side_effect=RuntimeError('Windows Firewall may prompt'))
+        firewall = SimpleNamespace(WindowsFirewallLaunchError=RuntimeError, require_silent_windows_launch=guard)
+        with patch.dict(sys.modules, windows_firewall=firewall), patch.object(start, 'own_launcher_processes') as own:
+            with self.assertRaisesRegex(start.field.EvidenceError, 'Windows Firewall may prompt'):
+                start.launch(args)
+        guard.assert_called_once_with(launcher.parent / 'Runtime' / 'VrCommand.exe')
+        own.assert_not_called()
+        self.assertFalse(any(path.exists() for path in (args.work, args.ready_report, args.report)))
+
         for missing_roles in [('probe',), ('listener',), ('listener', 'probe')]:
             with self.subTest(missing_roles=missing_roles):
                 missing_original = json.loads((self.root / 'bound.json').read_bytes())

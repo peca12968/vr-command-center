@@ -387,7 +387,9 @@ python scripts/check-server-package.py '<解壓後的 VRCommand-GameServer>' `
 
 Windows 依執行檔的完整路徑套用程式規則。即使只有同機測試，新解壓路徑的 `vrcommand.exe` 也可能觸發入站連線提示。自動測試用 `127.0.0.1`，並先核對實際 EXE 路徑在目前網路設定檔的既有規則。新路徑尚未確認時，可先跑建置、套件驗證及使用測試替身的檢查。 [Microsoft Windows 防火牆規則](https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/rules)
 
-桌面場館、Unity 啟動與入場測試，以及會啟動原生遊戲的套件和 GUI 驗證，會在開啟遊戲或啟動器前，自動核對執行檔路徑與所有啟用中的防火牆設定檔。Unity Editor 建置與 Quest 的 ADB 部署及擷取也有啟動前檢查。若某個設定檔會顯示通知，且實際路徑缺少涵蓋入站 TCP 與 UDP 的程式規則，該次啟動會在終端機結束。這項檢查只讀取防火牆設定。可用同一支指令檢查其他執行檔的實際路徑。
+桌面場館、Unity 啟動與入場測試，以及會啟動原生遊戲的套件和 GUI 驗證，會在開啟遊戲或啟動器前，自動核對執行檔路徑與所有啟用中的防火牆設定檔。`start-verified-venue.py` 也會在啟動五房前檢查解壓包內的 `Runtime/VrCommand.exe`，離線 `--verify-only` 可直接執行。Unity Editor 建置、Quest 的 ADB 部署及擷取、Quest 單席與五房 UDP 探測也有啟動前檢查。使用 PowerShell 接收入站 UDP 的場館探測會檢查該 PowerShell 執行檔。
+
+若啟用通知的設定檔缺少涵蓋實際 EXE 的入站 TCP 與 UDP 規則，或查核無法完成，工具會在終端機回報並停止啟動。這項檢查只讀取防火牆設定。可用同一支指令檢查其他執行檔的實際路徑。
 
 ```powershell
 pwsh -NoProfile -NonInteractive -File .\scripts\check-windows-firewall-notifications.ps1 -Executable .\artifacts\desktop\VrCommand.exe

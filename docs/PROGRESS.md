@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-16 無人值守啟動補查
+
+- 五房查核後啟動、Quest 單席與五房 UDP 探測及伺服器包內的 PowerShell UDP 測試均先查當前 Windows 防火牆設定與實際執行檔路徑。五房離線查核可直接執行。查核失敗或逾時會停止該次啟動並在終端機回報。 [操作方式](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
+- F 槽原遊戲路徑的唯讀查核通過。0.50.11 新解壓路徑在目前的私人網路設定下有提示風險，啟動測試退出 1，`VrCommand.exe` 程序數前後均為零。Windows 私人網路防火牆與通知均保持啟用。17 項區網測試、19 項套件及發行測試、7 項 Quest 計畫及模擬 ADB 測試和 3 項 Quest USB 診斷測試通過。這輪未啟動 Unity 或部署 Quest。
+
 ## 2026-11-16 五房封存核對伺服器發行
 
 - `requireServerRelease` 可要求原場館發行報告與原 Windows 終止報告的 `serverManifestSha256` 一致。若提交經驗證的啟動回條，原預覽和就緒報告的摘要也必須相符。新版清單工具可在輸出前檢查這項條件。核對成立時，`venueRelease.server` 列出原摘要及場次數。 [操作方式](EXTERNAL_CLIENTS.md#核對五房伺服器發行版本)

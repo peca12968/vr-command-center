@@ -1,6 +1,6 @@
 # 開發指引
 
-2026-11-16 使用者要求無人值守開發時避免 Windows 安全性的防火牆允許視窗。同機測試優先綁定 `127.0.0.1`。桌面場館、Unity 啟動與入場測試、會啟動原生遊戲的套件／GUI 驗證、Unity Editor 建置及 Quest 部署與記錄擷取均有防火牆啟動前檢查。其他可能接收入站連線的程式也先用 `scripts/check-windows-firewall-notifications.ps1` 核對實際 EXE 路徑與目前網路設定檔。查核未通過時，繼續能在背景執行的建置、封裝及測試。自動測試避免觸發 Windows 提權確認。操作方式見 [Windows 伺服器包](docs/WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)。
+2026-11-16 使用者要求無人值守開發時避免 Windows 安全性的防火牆允許視窗。同機測試優先綁定 `127.0.0.1`。桌面場館、Unity 啟動與入場測試、會啟動原生遊戲的套件／GUI 驗證、五房查核後啟動、Unity Editor 建置、Quest 部署／記錄擷取及 UDP 探測均有防火牆啟動前檢查。其他可能接收入站連線的程式也先用 `scripts/check-windows-firewall-notifications.ps1` 核對實際 EXE 路徑與目前網路設定檔。查核未通過時，繼續能在背景執行的建置、封裝及測試。自動測試避免觸發 Windows 提權確認。操作方式見 [Windows 伺服器包](docs/WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)。
 
 2026-11-02 最終65b072d CI41367545805/job125030805195完整success：772/459/47/6pipe/38CLI/Python含14exercise/4server package/素材89Node296Chromium、2Win skip非Editor/native/GUI。console51 art13107449934 ZIP12027134 SHA83721495.../control13 13107449938 ZIP3920 SHAbebc5438.../hardware26 13107514651 ZIP22356 SHA6673f4ae.../log SHAf6297ac2...原ZIP/digest/逐檔hash核對，前c55與659成功/各failed保持。1768+51=1819browser/nativeUI11另列，held原1PUT fulfilledtrue/errornull及原15/30斷言不改，不證舊CI根因。CI精確65/helper native4bdf/package README c55，242/4ebd雙平台與新18/51601長場/server106/623/實際GUI64853保持；後文件skip ci，接受僅此PC里程碑，完整11active/實機跨機另驗。
 

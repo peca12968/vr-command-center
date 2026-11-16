@@ -290,6 +290,8 @@ def main():
         parser.error('Use valid probe sample and timeout bounds.')
     if (args.launch_plan is None) != (args.launcher_preview is None):
         parser.error('--launch-plan and --launcher-preview must be supplied together.')
+    from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
+
     try:
         directory = args.output_directory.resolve()
         launcher, preview = (launcher_proof(args.launch_plan, args.launcher_preview, directory)
@@ -298,10 +300,12 @@ def main():
         adb = args.adb.resolve(strict=True)
         powershell = (shutil.which('powershell.exe') if os.name == 'nt' else None) or shutil.which('pwsh')
         require(adb.is_file() and powershell is not None, 'ADB or PowerShell is missing.')
+        require_silent_windows_launch(adb)
+        require_silent_windows_launch(powershell)
         shell = [powershell, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned',
                  '-File', str(ROOT / 'check-lan-udp.ps1')]
         report = probe_venue(shell, adb, mode, groups, directory, args.count, args.timeout_ms, args.retry_report, launcher=launcher)
-    except field.EvidenceError as error:
+    except (field.EvidenceError, WindowsFirewallLaunchError) as error:
         parser.exit(1, f'Quest venue preflight rejected. {error}.\n')
     except (OSError, ValueError, argparse.ArgumentTypeError, TypeError, KeyError, RecursionError):
         parser.exit(1, 'Quest venue preflight could not start or save its report. Check the maps, retry report, tools and new output directory.\n')
