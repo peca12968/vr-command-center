@@ -19,7 +19,7 @@ internal sealed record VenueClosureSession(Guid SessionId, long AppliedAtSequenc
 internal sealed record VenueClosureBatch(Guid RequestId, DateTimeOffset RecordedAtUtc, VenueClosureSession[] Sessions);
 internal sealed record VenueDepartedPlayer(long LeftAtSequence, PlayerStatistics Statistics);
 internal sealed record VenueDepartedPlayers(Guid RequestId, Guid SessionId, Guid StreamId, long WorldSequence,
-    long FinalStreamSequence, long EndedAtSequence, VenueDepartedPlayer[] Players);
+    long FinalStreamSequence, long EndedAtSequence, long ThroughSequence, VenueDepartedPlayer[] Players);
 internal sealed record VenueClosureResponse(VenueClosureBatch? Batch,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueBattleScores? Scores,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueDebriefSummary? DebriefReceipts,
@@ -216,7 +216,7 @@ public sealed partial class WorldRecordings
             var players = evidence.RosterDepartures?.Players.Select(player => new VenueDepartedPlayer(player.LeftAtSequence,
                 scores[player.PlayerId])).ToArray() ?? [];
             return new(batchId, sessionId, stream.StreamId, row.Replay.ThroughSequence, stream.AcceptedSequence,
-                original.AppliedAtSequence, players);
+                original.AppliedAtSequence, evidence.Statistics.ThroughSequence, players);
         }
     }
 

@@ -11,6 +11,7 @@ import { mountVenueServerPlan } from './venue-server-plan-ui.js';
 import { mountVenueLaunchReview } from './venue-launch-review-ui.js';
 import { mountOperatorNetwork } from './operator-network-ui.js';
 import { mountReport, mountVenueReport, venueScoreFields } from './report-ui.js';
+import { matchesDebriefCsv } from './report-csv.js';
 import { mountVenueHistory } from './venue-history-ui.js';
 import { mountVenueDebriefSeats } from './venue-debrief-ui.js';
 import { beginSeatLabels, mountReadiness, mountRoomReadiness, usesTrackedVrStart } from './readiness-ui.js';
@@ -1151,10 +1152,48 @@ function venueDepartureScope(batch, session) {
 }
 
 function closeVenueDepartures() {
+  departureReview?.csvController?.abort();
   departureReview = null;
   $('venue-departed-players').hidden = $('venue-departed-table').hidden = true;
   $('venue-departed-rows').replaceChildren();
   $('venue-departed-status').textContent = '';
+}
+
+async function downloadVenueDeparture(request, player, current) {
+  if (!current() || state.busy || state.pending || request.csvController) return;
+  const { playerId, room } = player, controller = new AbortController();
+  request.csvController = controller;
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  const status = $('venue-departed-status');
+  const buttons = $('venue-departed-rows').querySelectorAll('[data-venue-departed-csv]');
+  for (const button of buttons) button.disabled = true;
+  status.textContent = '正在下載原封存戰績…';
+  try {
+    const response = await fetch(`/api/sessions/${room.sessionId}/players/${playerId}/report.csv`, {
+      headers: { Authorization: 'Bearer ' + state.key }, cache: 'no-store', signal: controller.signal
+    });
+    if (!current()) return;
+    if (response.status === 401) { logout(); return; }
+    const filename = `vr-command-report-v1-${room.sessionId}-player-${playerId}.csv`;
+    const type = response.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase();
+    const name = response.headers.get('Content-Disposition')?.match(/^attachment;\s*filename="?([^";\s]+)"?(?:;|$)/i)?.[1];
+    if (!response.ok || type !== 'text/csv' || name !== filename) throw new Error('Report mismatch');
+    const blob = await response.blob();
+    if (!current()) return;
+    if (blob.size < 1 || blob.size > 16 * 1024) throw new Error('Report size mismatch');
+    const bytes = await blob.arrayBuffer();
+    if (!current()) return;
+    if (controller.signal.aborted || !matchesDebriefCsv(bytes, player)) throw new Error('Archive mismatch');
+    download(filename, blob);
+    status.textContent = '已下載離場玩家的原封存戰績。';
+  } catch { if (current()) status.textContent = '暫時無法下載原封存戰績，可重新下載。'; }
+  finally {
+    clearTimeout(timeout);
+    if (current()) {
+      request.csvController = null;
+      for (const button of buttons) button.disabled = false;
+    }
+  }
 }
 
 async function openVenueDepartures(batch, session, scope) {
@@ -1174,6 +1213,7 @@ async function openVenueDepartures(batch, session, scope) {
     if (body?.requestId !== batch.requestId || body.sessionId !== session.sessionId
       || body.streamId !== session.replay.streamId || body.worldSequence !== session.replay.throughSequence
       || body.endedAtSequence !== session.appliedAtSequence || !Number.isSafeInteger(body.finalStreamSequence)
+      || !Number.isSafeInteger(body.throughSequence) || body.throughSequence < body.endedAtSequence
       || body.finalStreamSequence < 0 || !Array.isArray(body.players) || body.players.length !== session.rosterDepartureCount
       || new Set(body.players.map(player => player?.statistics?.playerId)).size !== body.players.length
       || !body.players.every(player => {
@@ -1185,6 +1225,13 @@ async function openVenueDepartures(batch, session, scope) {
           && Number.isInteger(score.health) && score.health >= 0 && score.health <= 100;
       })) throw new Error('Archive mismatch');
     $('venue-departed-rows').replaceChildren(...body.players.map(({ statistics: player }) => {
+      const csv = element('button', '下載 CSV', 'quiet small');
+      csv.type = 'button';
+      csv.dataset.venueDepartedCsv = player.playerId;
+      csv.setAttribute('aria-label', `下載房間 ${player.roomId} ${player.name} 的個人戰績 CSV`);
+      csv.addEventListener('click', () => downloadVenueDeparture(request, { playerId: player.playerId, name: player.name,
+        room: { sessionId: body.sessionId, streamId: body.streamId, roomId: player.roomId },
+        throughSequence: body.throughSequence, throughCombatSequence: body.finalStreamSequence, score: player }, current));
       const replay = element('button', '個人回放', 'quiet small');
       replay.type = 'button';
       replay.setAttribute('aria-label', `開啟房間 ${player.roomId} ${player.name} 的個人回放`);
@@ -1194,7 +1241,7 @@ async function openVenueDepartures(batch, session, scope) {
           roomId: player.roomId, throughSequence: body.worldSequence, throughCombatSequence: body.finalStreamSequence,
           playerId: player.playerId, playerName: player.name });
       });
-      return row([player.roomId, player.name, ...scores.map(key => player[key]), `${player.accuracyPercent}%`, player.health, replay]);
+      return row([player.roomId, player.name, ...scores.map(key => player[key]), `${player.accuracyPercent}%`, player.health, csv, replay]);
     }));
     status.textContent = '';
     $('venue-departed-table').hidden = false;

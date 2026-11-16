@@ -1395,7 +1395,9 @@ with zipfile.ZipFile(sys.argv[1]) as original, zipfile.ZipFile(sys.argv[2]) as c
       const targets = (await api('/venue/phase')).end;
       const batch = await api('/venue/phase', 'POST', { action: 'End', targets }, 'Master', 200, undefined, randomUUID());
       const departurePath = `/venue/closure/${batch.requestId}/sessions/${first.running.id}/departed-players`;
+      const reportPath = `/sessions/${first.running.id}/players/${departed.id}/report.csv`;
       await api(departurePath, 'GET', undefined, 'Master', 409);
+      await api(reportPath, 'GET', undefined, 'Master', 409);
       await api(fieldPath(batch.requestId), 'GET', undefined, 'Master', 409);
       for (const { sessionPath, publish, running } of sources) {
         active.delete(running.id);
@@ -1461,8 +1463,16 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
       const review = await api(departurePath);
       assert.deepEqual(review, { requestId: batch.requestId, sessionId: first.running.id, streamId: evidence.streamId,
         worldSequence: saved.sessions[0].replay.throughSequence, finalStreamSequence: 1, endedAtSequence: evidence.endedAtSequence,
+        throughSequence: target['statistics.json'].throughSequence,
         players: [{ leftAtSequence: evidence.players[0].leftAtSequence,
           statistics: target['statistics.json'].players.find(row => row.playerId === departed.id) }] });
+      await api(reportPath, 'GET', undefined, 'Room2', mode === 'Independent' ? 403 : 404);
+      await api(reportPath, 'GET', undefined, 'GameServer', 403);
+      const reportUrl = base + '/api' + reportPath;
+      const originalCsv = await fetch(reportUrl, auth);
+      assert.equal(originalCsv.status, 200);
+      assert.equal(originalCsv.headers.get('Cache-Control'), 'no-store');
+      const csvBytes = Buffer.from(await originalCsv.arrayBuffer());
       await login('Master');
       const openDeparture = archive(first.running.id).last().getByRole('button', { name: '查看離場玩家戰績（1）' });
       await openDeparture.waitFor();
@@ -1505,7 +1515,56 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
       await openDeparture.click();
       await departureTable.waitFor();
       const departureCells = await departureTable.locator('tbody td').allTextContents();
-      assert.deepEqual(departureCells, ['1', departed.name, '1', '0', '0', '0', '0', '0%', '100', '個人回放']);
+      assert.deepEqual(departureCells, ['1', departed.name, '1', '0', '0', '0', '0', '0%', '100', '下載 CSV', '個人回放']);
+      const csvButton = departureTable.getByRole('button', { name: `下載房間 1 ${departed.name} 的個人戰績 CSV` });
+      if (mode === 'Linked') {
+        const substituted = async route => {
+          const response = await route.fetch();
+          const changed = csvBytes.toString('utf8').replace(/,"100"\r\n$/, ',"99"\r\n');
+          assert.notEqual(changed, csvBytes.toString('utf8'));
+          await route.fulfill({ response, body: changed });
+        };
+        let wrongDownload = false;
+        const markDownload = () => { wrongDownload = true; };
+        page.on('download', markDownload);
+        await page.route(reportUrl, substituted);
+        try {
+          await csvButton.click();
+          await page.locator('#venue-departed-status').filter({ hasText: '暫時無法下載原封存戰績' }).waitFor();
+          check(!wrongDownload && await csvButton.isEnabled(), 'A changed departed score prevents the CSV download and allows retry');
+        } finally {
+          await page.unroute(reportUrl, substituted);
+          page.off('download', markDownload);
+        }
+        let release, reached;
+        const allowDelivery = new Promise(resolve => { release = resolve; });
+        const requested = new Promise(resolve => { reached = resolve; });
+        const held = async () => {
+          reached();
+          await allowDelivery;
+        };
+        await page.route(reportUrl, held);
+        try {
+          const aborted = page.waitForEvent('requestfailed', candidate => candidate.url() === reportUrl);
+          await csvButton.click();
+          await requested;
+          await page.locator('#venue-departed-close').click();
+          const canceled = await aborted;
+          check(canceled.failure()?.errorText === 'net::ERR_ABORTED' && await departureTable.isHidden(),
+            'Closing the departed player view cancels its pending CSV download');
+        } finally {
+          release();
+          await page.unroute(reportUrl, held);
+        }
+        await openDeparture.click();
+        await departureTable.waitFor();
+      }
+      const [downloaded] = await Promise.all([page.waitForEvent('download'), csvButton.click()]);
+      const filename = `vr-command-report-v1-${first.running.id}-player-${departed.id}.csv`;
+      assert.equal(downloaded.suggestedFilename(), filename);
+      assert.deepEqual(await fs.readFile(await downloaded.path()), csvBytes);
+      await downloaded.saveAs(path.join(screenshots, `venue-${mode.toLowerCase()}-departed.csv`));
+      check(true, `The ${mode} departed player download matches the original sealed personal CSV byte for byte`);
       if (mode === 'Linked') await page.locator('#venue-departed-players').screenshot({ path: path.join(screenshots, 'venue-departed-players.png') });
       await departureTable.getByRole('button', { name: `開啟房間 1 ${departed.name} 的個人回放` }).click();
       await page.locator('#world-review-player-name').filter({ hasText: departed.name }).waitFor();
