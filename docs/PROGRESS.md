@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 玩家回放跟隨鏡頭
+
+- 管理台 0.31.226 的網頁和單檔播放器可按房選擇匿名玩家，依保存的姿態跟隨。換房、換檔或平移會結束跟隨。角色暫未出現時保留鏡頭位置，等同一角色再出現。 [操作方式](WORLD_RECORDING.md#讓玩家開啟回放) · [離線播放器](../artifacts/player-replay-follow-031226/VRCommand-Player-Replay-0.31.226.html)
+- 從既有桌面自動輸入的獨立場與合併場封存副本，透過本機 IPC 原 API 分別匯出全場與分房片段。四份各 29 格逐格核對序號、時間與原玩家姿態，封存原檔雜湊一致。網頁與離線各通過 14 項跟隨檢查，其中跳轉與播放的鏡頭位移與原角色相符。角色缺席使用修改後的測試副本。先前 12 份匯出的事件跳轉也通過複驗。 [匯出證據](../artifacts/player-replay-follow-031226/exports.json) · [瀏覽器結果](../artifacts/player-replay-follow-031226/chromium-follow.json) · [手機畫面](../artifacts/player-replay-follow-031226/player-follow-mobile.png)
+- 124 項 Node 測試通過，管理套件 574 個檔案及原 0.50.12 雙平台通過共同發行核對。GitHub Actions 對 `9eb3530` 回報帳務或用量限制，工作未啟動。Quest USB 仍無 ADB 介面，實機與跨機待驗。 [管理包](../artifacts/player-replay-follow-031226/VRCommand-ControlServer-0.31.226.zip) · [發行報告](../artifacts/player-replay-follow-031226/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43965009494/job/133642015640)
+
 ## 2026-11-17 保存具名五房任務配置
 
 - 管理台 0.31.225 可將五房獨立或全連線的任務配置命名存入管理服務。載入清單項目會套用原模式及精確版本，保留任務草稿並重新檢查場地。 [操作方式](MISSION_VERSIONS.md#在開場前保存五房任務配置)

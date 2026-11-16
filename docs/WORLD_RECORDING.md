@@ -202,7 +202,7 @@ v0.16 新增 `environmentVersion:1`，依保存的 tick／環境重現雨、日�
 
 將 JSON 檔交給參與檢討的玩家，並提供管理服務的 `/console/player-replay.html` 網址。玩家在頁面選取檔案即可逐格或依原錄製時間播放，可調整速度、拖曳鏡頭、縮放及切換房間俯視。播放器在瀏覽器內讀檔，無須登入或上傳檔案。已交付的本機副本可持續開啟，請依場館的檔案交付規範處理。
 
-需要離開場館後觀看時，將單檔播放器 HTML 和原匯出的 JSON 一起交給玩家。用支援 WebGL 2 的桌面瀏覽器開啟 HTML，再選取 JSON 即可離線回看。播放器內含程式、樣式和 3D 素材，檔案不含任何場次資料。 [下載離線播放器](../artifacts/player-replay-events-031222/final/VRCommand-Player-Replay-0.31.222.html)
+需要離開場館後觀看時，將單檔播放器 HTML 和原匯出的 JSON 一起交給玩家。用支援 WebGL 2 的桌面瀏覽器開啟 HTML，再選取 JSON 即可離線回看。播放器內含程式、樣式和 3D 素材，檔案不含任何場次資料。 [下載離線播放器](../artifacts/player-replay-follow-031226/VRCommand-Player-Replay-0.31.226.html)
 
 Windows 管理包 0.31.190 可直接在「已保存的共用片段」按「下載離線播放器」，取得 `VRCommand-Player-Replay.html`。接著用原有的「下載玩家回放檔」取得要交付的 JSON。
 
