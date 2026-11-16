@@ -4,7 +4,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { randomBytes, randomUUID } = require('node:crypto');
 
-module.exports = async function missionTemplateBrowser({ context, api, tokens, directory, root, base, screenshots, check, captureErrors, availablePort }) {
+module.exports = async function missionTemplateBrowser({ context, api, tokens, directory, root, base, screenshots, check, captureErrors, availablePort, dotnet }) {
   const definition = { name: '  雨夜掩體範本  ', briefing: '第一行\r\n第二行 <掩體>\r\n', durationSeconds: 120,
     environment: { mode: 'VR', weather: 'Rain', timeOfDay: 'Night', lightning: true },
     enemies: { count: 2, behavior: 'Patrol', autoAttack: false },
@@ -56,7 +56,7 @@ module.exports = async function missionTemplateBrowser({ context, api, tokens, d
       SessionDataDirectory: path.join(directory, 'template-target-sessions'),
       OperatorKeys__Master: master, OperatorKeys__Room1: room, Logging__LogLevel__Default: 'Warning' });
     const dll = process.env.VR_COMMAND_API_DLL || path.join(root, 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll');
-    service = spawn('dotnet', [dll, '--urls', destination], { cwd: root, env, windowsHide: true, stdio: 'ignore' });
+    service = spawn(dotnet, [dll, '--urls', destination], { cwd: root, env, windowsHide: true, stdio: 'ignore' });
     exit = new Promise(resolve => { service.once('exit', resolve); service.once('error', resolve); });
     for (let attempt = 0; ; attempt++) {
       try { if ((await fetch(destination + '/health')).ok) break; } catch { /* Wait for this isolated API. */ }

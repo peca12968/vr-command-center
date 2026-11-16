@@ -7,6 +7,7 @@ const os = require('node:os');
 const net = require('node:net');
 const { spawn } = require('node:child_process');
 const { randomBytes, randomUUID } = require('node:crypto');
+const checkedLoopbackHost = require('./windows-firewall.cjs');
 const root = path.resolve(__dirname, '../..');
 let checks = 0;
 function check(condition, description) { assert.ok(condition, description); checks++; console.log('PASS:', description); }
@@ -17,6 +18,7 @@ async function availablePort() {
   const port = server.address().port; await new Promise(resolve => server.close(resolve)); return port;
 }
 async function main() {
+  const dotnet = checkedLoopbackHost(root);
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'vr-console-'));
   if (path.dirname(path.resolve(directory)) !== path.resolve(os.tmpdir()) || !path.basename(directory).startsWith('vr-console-')) throw new Error('Unsafe cleanup target');
   const screenshots = process.env.VR_COMMAND_BROWSER_ARTIFACTS ? path.resolve(process.env.VR_COMMAND_BROWSER_ARTIFACTS) : path.join(root, 'artifacts/console');
@@ -28,7 +30,7 @@ async function main() {
   Object.assign(environment, { DataDirectory: path.join(directory, 'missions'), SessionDataDirectory: path.join(directory, 'sessions'), ControlInstanceId: instanceId, ASPNETCORE_ENVIRONMENT: 'Production', Logging__LogLevel__Default: 'Warning' });
   for (const [role, value] of Object.entries(tokens)) environment['OperatorKeys__' + role] = value;
   const base = 'http://127.0.0.1:' + await availablePort();
-  const processApi = spawn('dotnet', [process.env.VR_COMMAND_API_DLL || path.join(root, 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll'), '--urls', base], { cwd: root, env: environment, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const processApi = spawn(dotnet, [process.env.VR_COMMAND_API_DLL || path.join(root, 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll'), '--urls', base], { cwd: root, env: environment, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   const apiStarted = performance.now(), apiTerminal = () => processApi.exitCode !== null || processApi.signalCode !== null;
   let apiLog = '';
   for (const stream of [processApi.stdout, processApi.stderr]) stream.on('data', data => { apiLog = (apiLog + data.toString()).slice(-6000); });
@@ -144,7 +146,7 @@ async function main() {
       await page.locator('#tab-missions').click(); await page.locator(`#edit-mission option[value="${mission.id}"]`).waitFor({ state: 'attached' });
       await page.locator('#load-mission').click(); await page.waitForFunction(name => document.querySelector('#draft-name').value === name, mission.definition.name);
       await require('./mission-browser.cjs')({ page, context, api, tokens, base, mission, session, screenshots, check });
-      await require('./mission-template-browser.cjs')({ context, api, tokens, directory, root, base, screenshots, check, captureErrors, availablePort });
+      await require('./mission-template-browser.cjs')({ context, api, tokens, directory, root, base, screenshots, check, captureErrors, availablePort, dotnet });
       check(browserErrors.length === 0, 'Mission versions have no uncaught browser or policy errors');
       await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed', scope: 'mission version comparison and exact launch with real API and Chromium' }, null, 2));
       console.log(`PASS: ${checks} focused mission version checks. Screenshots: ${screenshots}`); return;
@@ -619,7 +621,7 @@ async function main() {
     await require('./venue-scores-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./vr-participation-pause-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     await require('./full-tracking-begin-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
-    await require('./mission-template-browser.cjs')({ context, api, tokens, directory, root, base, screenshots, check, captureErrors, availablePort });
+    await require('./mission-template-browser.cjs')({ context, api, tokens, directory, root, base, screenshots, check, captureErrors, availablePort, dotnet });
     await require('./ticket-download-fence.cjs').checkTicketDownloadFence({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./archived-independent-plan-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./venue-mission-file-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });

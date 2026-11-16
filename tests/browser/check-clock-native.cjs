@@ -7,6 +7,7 @@ const os = require('node:os');
 const net = require('node:net');
 const { spawn } = require('node:child_process');
 const { chromium } = require('playwright');
+const checkedLoopbackHost = require('./windows-firewall.cjs');
 const root = path.resolve(__dirname, '../..');
 async function main() {
   const directory = path.resolve(process.argv[2] || '');
@@ -14,6 +15,7 @@ async function main() {
   assert.match(path.basename(directory), /^\d{8}-\d{6}-[a-f0-9]{8}$/);
   const native = JSON.parse(await fs.readFile(path.join(directory, 'checks.json'), 'utf8'));
   assert.equal(native.complete, true); assert.equal(native.headsets, 0);
+  const dotnet = checkedLoopbackHost(root);
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'vr-clock-observer-'));
   const runtime = path.join(temporary, 'runtime');
   await fs.cp(path.join(directory, 'runtime-snapshot'), runtime, { recursive: true, errorOnExist: true, force: false });
@@ -24,7 +26,7 @@ async function main() {
   const base = 'http://127.0.0.1:' + server.address().port; await new Promise(resolve => server.close(resolve));
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toLowerCase().startsWith('operatorkeys__') && !['operatorkeyfile', 'playerticketsigningkey'].includes(key.toLowerCase())));
   Object.assign(env, { DataDirectory: path.join(runtime, 'missions'), SessionDataDirectory: path.join(runtime, 'sessions'), OperatorKeyFile: path.join(directory, 'keys.json'), Logging__LogLevel__Default: 'Warning' });
-  const processApi = spawn('dotnet', [process.env.VR_COMMAND_API_DLL || path.join(root, 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll'), '--urls', base], { cwd: root, env, windowsHide: true, stdio: 'ignore' });
+  const processApi = spawn(dotnet, [process.env.VR_COMMAND_API_DLL || path.join(root, 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll'), '--urls', base], { cwd: root, env, windowsHide: true, stdio: 'ignore' });
   let browser; let checks = 0; const errors = [];
   const check = (value, label) => { assert.ok(value, label); checks++; console.log('PASS: ' + label); };
   try {

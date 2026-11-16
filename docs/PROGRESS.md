@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-16 核對回放搜尋命中的原事件
+
+- 控制台 0.31.211 在點選搜尋結果或跳轉前後事件時，會比對保存畫格的時間與篩選後的原事件識別。對照管理包 0.31.210 會接受以另一個射擊事件 ID 替換的畫格。新版在畫格、時間、玩家、種類和筆數都相同時仍會拒絕替換，關閉測試攔截後仍能開啟原射擊。 [對照測試](../artifacts/desktop-guarded-openxr/20261116-150213-e8e75b19/browser.log) · [新版瀏覽器紀錄](../artifacts/desktop-guarded-openxr/20261116-150754-b4b8c24b/browser.log)
+- 原始碼 `17a50bd` 的解壓管理包核對 568 檔，通過 160 項場館瀏覽器檢查、138 項世界串流驗證及 26 項 Node 測試。新解壓路徑未通過入站啟動查核，因此管理服務改用 Windows 本機 IPC，實查 TCP 監聽與 UDP 端點均為零。HTTP 串流驗證的首個 IPC 測試程式啟動失敗，第二次在 API 重啟時把舊的監聽日誌一併算入。改用獨立工作目錄並按每次啟動的日誌範圍核對後，138 項完整通過。 [防火牆查核](../artifacts/console-event-ids-20261116-150212/new-api-firewall.log) · [API 監聽](../artifacts/desktop-guarded-openxr/20261116-150754-b4b8c24b/api-runtime.json) · [串流驗證](../artifacts/console-event-ids-20261116-150212/world-smoke-final.log)
+- 同一個解壓管理包另通過 148 項即時觀戰與世界回放瀏覽器回歸。直接執行控制台及封存時鐘瀏覽器測試時，現在會先查核實際的 `dotnet.exe` 和 Node 執行檔。本機的兩支指令均在 `dotnet.exe` 未通過查核時回傳退出碼 1，且在建立測試監聽前結束。 [世界回放回歸](../artifacts/desktop-guarded-openxr/20261116-151053-67c38e7d/checks.json) · [控制台啟動查核](../artifacts/console-event-ids-20261116-150212/browser-firewall-preflight.log) · [時鐘啟動查核](../artifacts/console-event-ids-20261116-150212/clock-browser-firewall-preflight.log)
+- Windows 管理包 0.31.211 搭配現有的 Windows 0.50.12 玩家及伺服器和 Quest 0.50.12／77 通過離線發行核對。實體頭盔與跨機待驗。 [Windows 管理包](../artifacts/windows-control-event-ids-031211.zip) · [發行核對](../artifacts/console-event-ids-20261116-150212/venue-release.json)
+
 ## 2026-11-16 個人回放核對封存戰績
 
 - 控制台 0.31.210 在開啟個人回放前，逐欄核對尾端畫格中唯一原玩家的姓名、房間、耗彈、命中、擊殺、中彈、損耗、命中率和血量。一般任務統計、全館席位和離場玩家入口均核對。對照包 0.31.209 會開啟房號遭替換的回放。新版在畫格與封存序號一致時，仍拒絕替換玩家識別、房號與耗彈的測試回應。 [對照反例](../artifacts/desktop-guarded-openxr/20261116-145436-76183666/browser.log) · [拒絕畫面](../artifacts/desktop-guarded-openxr/20261116-145810-9c8e0b24/venue-departed-replay-score-refused.png)

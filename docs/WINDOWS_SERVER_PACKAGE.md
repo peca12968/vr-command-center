@@ -395,6 +395,8 @@ Unity 冒煙和入場測試會同時核對玩家程式與管理 API 的啟動程
 
 同機 UDP 轉送及管理 API 故障測試也會在啟動前檢查實際執行的 `python.exe`。`start-local.ps1` 先完成 Release 建置，再查核 Windows 管理程式。桌面場館、練習模式與操作員工具可用 `--api-exe` 指向已通過查核的管理包 `Runtime/VrCommand.Api.exe`。
 
+直接執行 `tests/browser/check.cjs` 或 `tests/browser/check-clock-native.cjs` 時，也會先查核負責測試連接埠的 Node 及實際啟動管理服務的 `dotnet.exe`。若要在新解壓路徑下測試管理服務，可以使用 [Windows 本機 IPC 測試流程](PLAYER_READINESS.md#windows-原生回歸)。本機 IPC 方式會檢查管理服務的 TCP 監聽與 UDP 端點均為零，迴環轉送使用已通過查核的 Python。
+
 直接執行 `check-lan-udp.ps1` 的 `Listen` 或 `Probe` 時，腳本在繫結埠前會檢查目前的 PowerShell 程序。配對報告及產生測試金鑰仍可離線執行。原生姿態測試、伺服器場次目錄測試和硬體模擬整合測試也會查核各自的迴環接收程式。硬體模擬的兩支整合測試皆可用 `--api-exe` 指向已通過查核的管理包。
 
 若啟用通知的設定檔缺少涵蓋實際 EXE 的入站 TCP 與 UDP 規則，或查核無法完成，工具會在終端機回報並停止啟動。這項檢查只讀取防火牆設定。可用同一支指令檢查其他執行檔的實際路徑。
