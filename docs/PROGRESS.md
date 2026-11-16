@@ -4,6 +4,7 @@
 
 - 五房查核後啟動、Quest 單席與五房 UDP 探測及伺服器包內的 PowerShell UDP 測試均先查當前 Windows 防火牆設定與實際執行檔路徑。五房離線查核可直接執行。查核失敗或逾時會停止該次啟動並在終端機回報。 [操作方式](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
 - F 槽原遊戲路徑的唯讀查核通過。0.50.11 新解壓路徑在目前的私人網路設定下有提示風險，啟動測試退出 1，`VrCommand.exe` 程序數前後均為零。Windows 私人網路防火牆與通知均保持啟用。17 項區網測試、19 項套件及發行測試、7 項 Quest 計畫及模擬 ADB 測試和 3 項 Quest USB 診斷測試通過。這輪未啟動 Unity 或部署 Quest。
+- 用未登記的暫存 `adb.exe` 路徑檢查兩個 Quest UDP 命令。兩者都在開啟 ADB 前退出 1，單席報告及五房輸出目錄均未建立。GitHub Actions 回報 `checks` 失敗，共零個步驟。上述結果來自本機。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43784901672/job/133030237531)
 
 ## 2026-11-16 五房封存核對伺服器發行
 
