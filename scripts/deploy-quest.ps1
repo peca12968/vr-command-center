@@ -38,6 +38,14 @@ $ErrorActionPreference = 'Stop'
 # Handle ADB exit codes here so both Windows PowerShell and PowerShell report the failing step.
 $PSNativeCommandUseErrorActionPreference = $false
 
+function Confirm-QuestAdbStartup([string]$MissingMessage) {
+    if (-not (Test-Path -LiteralPath $AdbPath -PathType Leaf)) { throw $MissingMessage }
+    if ($env:OS -eq 'Windows_NT' -and [IO.Path]::GetExtension($AdbPath) -eq '.exe') {
+        & (Join-Path $PSScriptRoot 'check-windows-firewall-notifications.ps1') -Executable $AdbPath
+        if ($LASTEXITCODE -ne 0) { throw 'ADB startup skipped after the Windows Firewall check.' }
+    }
+}
+
 function Read-DeploymentBytes([IO.Stream]$Stream, [long]$Size, [int]$Limit) {
     if ($Size -lt 1 -or $Size -gt $Limit) { throw 'Invalid file size.' }
     $reader = [IO.BinaryReader]::new($Stream, [Text.Encoding]::UTF8, $true)
@@ -1150,7 +1158,7 @@ function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, [s
 }
 
 function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, [string]$ExpectedHash, $Retry) {
-    if (-not (Test-Path -LiteralPath $AdbPath -PathType Leaf)) { throw 'Android platform-tools are not installed.' }
+    Confirm-QuestAdbStartup 'Android platform-tools are not installed.'
     $originalMap = $Map
     if ($Retry) { $Map = @($Map | Select-Object -Skip $Retry.Completed.Count) }
     $inventory = Get-QuestDeviceInventory
@@ -1324,7 +1332,7 @@ function Publish-QuestFile([string]$TargetSerial, [string]$Local, [string]$Stagi
 function Update-QuestPlayerTicket($ConnectionFile, $Ticket, $Target) {
     $fresh = $ConnectionFile.Document
     if ($Serial -cnotmatch '\A[A-Za-z0-9\[][A-Za-z0-9._:%\[\]-]{0,127}\z') { throw 'Use an explicit ADB serial for the Quest 3.' }
-    if (-not (Test-Path -LiteralPath $AdbPath -PathType Leaf)) { throw 'Provide the installed ADB executable.' }
+    Confirm-QuestAdbStartup 'Provide the installed ADB executable.'
     if ([Guid]::Empty -in @($Ticket.SessionId, $Ticket.PlayerId, $Ticket.AdmissionId)) { throw 'Use a player file for an original admission.' }
     $model = & $AdbPath -s $Serial shell getprop ro.product.model 2>$null
     if ($LASTEXITCODE -ne 0 -or ($model -join "`n").Trim() -cne 'Quest 3') { throw 'Select an authorized Meta Quest 3.' }
@@ -1453,7 +1461,7 @@ function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment
 
 function Invoke-QuestFirstLaunch([string]$Apk, $Release) {
     if ($Serial -cnotmatch '\A[A-Za-z0-9\[][A-Za-z0-9._:%\[\]-]{0,127}\z') { throw 'Use an explicit ADB serial for the Quest 3.' }
-    if (-not (Test-Path -LiteralPath $AdbPath -PathType Leaf)) { throw 'Provide the installed ADB executable.' }
+    Confirm-QuestAdbStartup 'Provide the installed ADB executable.'
     $inventory = Get-QuestDeviceInventory
     $deviceState = $inventory[$Serial]
     if ($deviceState -cne 'device') {
@@ -1749,8 +1757,8 @@ if ($CheckOnly) {
     return
 }
 
-if (-not (Test-Path -LiteralPath $AdbPath -PathType Leaf)) { throw 'Android platform-tools are not installed.' }
 if (-not (Test-Path -LiteralPath $apk -PathType Leaf)) { throw 'Build the Quest APK before deploying.' }
+Confirm-QuestAdbStartup 'Android platform-tools are not installed.'
 if (-not $Serial) {
     $devices = @(& $AdbPath devices | Select-String '^([^\s]+)\s+device$' | ForEach-Object { $_.Matches[0].Groups[1].Value })
     if ($LASTEXITCODE -ne 0) { throw 'Could not list authorized Android devices.' }

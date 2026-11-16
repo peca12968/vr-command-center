@@ -305,6 +305,8 @@ async def capture_venue(adb, plan, directory, seconds):
 
 
 def main():
+    from windows_firewall import require_silent_windows_launch
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--adb', required=True, type=Path, help='Path to the installed ADB executable')
     parser.add_argument('--serial', help='ADB serial of the already launched Quest')
@@ -321,6 +323,13 @@ def main():
     parser.add_argument('--output-directory', type=Path, help='New private directory for venue captures and the report')
     parser.add_argument('--seconds', type=int, default=1800, help='Total capture deadline, 1 through 7200 seconds')
     args = parser.parse_args()
+
+    def check_adb_startup():
+        try:
+            require_silent_windows_launch(args.adb)
+        except RuntimeError as error:
+            raise field.EvidenceError('ADB startup skipped by the Windows Firewall check') from error
+
     try:
         field.integer(args.seconds, 1, 7200)
         field.require(args.adb.is_file(), 'Provide the installed ADB executable')
@@ -339,11 +348,13 @@ def main():
                                        after=args.after_deployment_report)
             if args.retry_incomplete:
                 plan = retry_capture_plan(plan, args.retry_incomplete)
+            check_adb_startup()
             report = asyncio.run(capture_venue(adb, plan, args.output_directory, args.seconds))
         else:
             field.require(all(single), 'Use a serial, connection file and output log together')
             field.require(re.fullmatch(r'[A-Za-z0-9\[][A-Za-z0-9._:%\[\]-]{0,127}', args.serial), 'Use a valid explicit ADB serial')
             port, admission = read_connection(args.connection_file)
+            check_adb_startup()
             report = asyncio.run(capture([*adb, '-s', args.serial], port, admission, args.output, args.seconds))
     except field.EvidenceError as error:
         parser.exit(1, f'Quest capture incomplete. {error}.\n')

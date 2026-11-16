@@ -166,6 +166,8 @@ def verify_native(server_folder, runtime, output, keys, tls, request, mission, m
 
 
 def main():
+    from windows_firewall import require_silent_windows_launch
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('package', type=Path)
     parser.add_argument('--runtime-root', type=Path, required=True)
@@ -204,6 +206,7 @@ def main():
     server_folder = args.server_package.resolve() if args.server_package else None
     if server_folder:
         load_module('package-windows-server').verify(server_folder)
+        require_silent_windows_launch(server_folder / 'Runtime/VrCommand.exe')
     name = 'run-' + uuid.uuid4().hex
     output = ROOT / 'artifacts/control-https-checks' / name
     output.mkdir(parents=True)

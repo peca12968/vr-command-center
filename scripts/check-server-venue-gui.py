@@ -63,6 +63,8 @@ def child_servers(pid, executable):
 
 
 def main():
+    from windows_firewall import require_silent_windows_launch
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('package', type=Path)
     parser.add_argument('--control-package', type=Path, required=True)
@@ -78,6 +80,7 @@ def main():
     executable = (folder / 'Runtime/VrCommand.exe').resolve(strict=True)
     if manifest['launcherSourceSha256'] != gui_check.package.digest(ROOT / 'tools/WindowsServerLauncher/ServerLauncher.cs'):
         raise RuntimeError('Launcher package does not match the repository source')
+    require_silent_windows_launch(executable)
     out = ROOT / 'artifacts/server-venue-gui' / ('run-' + uuid.uuid4().hex)
     out.mkdir(parents=True)
     runtime = args.runtime_root.resolve() / out.name

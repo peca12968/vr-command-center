@@ -47,6 +47,7 @@ def source_fingerprint():
 
 def main():
     from admission_witness import BeginWitness, observer_fingerprint
+    from windows_firewall import require_silent_windows_launch
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--interactive', action='store_true')
     parser.add_argument('--server-trace', action='store_true', help='Opt in to the existing bounded Windows server timing trace; explicitly finish it before stopping its process')
@@ -60,6 +61,7 @@ def main():
     receipt = json.loads((args.player_exe.parent / 'build-receipt.json').read_text())
     if receipt['target'] != 'StandaloneWindows64' or receipt['sourceFingerprint'] != source_fingerprint():
         parser.error('Player receipt does not match current sources; build Desktop before this check')
+    require_silent_windows_launch(args.player_exe)
     directory = ROOT / 'artifacts/unity-admission' / (time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
     directory.mkdir(parents=True)
     runtime_directory = directory if args.runtime_root is None else args.runtime_root.resolve() / directory.name
@@ -195,7 +197,7 @@ def main():
         old_admission, old_ticket = invitation(state, players[0])
         _, peer_ticket = invitation(state, players[1])
         def client(ticket): return {'role': 'Client', 'address': '127.0.0.1', 'port': game_port, 'joinTicket': ticket}
-        launch('server', {'role': 'Server', 'address': '127.0.0.1', 'port': game_port, 'sessionId': session, 'managementApiUrl': base,
+        launch('server', {'role': 'Server', 'address': '127.0.0.1', 'listenAddress': '127.0.0.1', 'port': game_port, 'sessionId': session, 'managementApiUrl': base,
                           'gameServerKey': keys['GameServer'], 'telemetryOrigin': 'Simulation', 'telemetryDirectory': str(runtime_directory / 'telemetry')})
         wait_for(lambda: request(f'/api/sessions/{session}/world', optional=True), 90, 'server recording')
         launch('peer', client(peer_ticket)); persistent = launch('client', client(old_ticket), args.interactive)

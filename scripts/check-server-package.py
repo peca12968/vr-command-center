@@ -143,6 +143,8 @@ def reconcile_ai_damage(frames, owners, enabled_sequence, disabled_sequence):
     return {'damageEvents':damage_events,'players':totals}
 
 def main():
+    from windows_firewall import require_silent_windows_launch
+
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('package',type=Path);p.add_argument('--control-package',type=Path,required=True);p.add_argument('--runtime-root',type=Path,required=True);p.add_argument('--observe-closure-ui',action='store_true')
     p.add_argument('--player-package',type=Path,help='Launch five players per room from the API room ZIP, using this extracted player package')
     p.add_argument('--windows-release-report',type=Path,help='Pass the original release report through every packaged Windows launcher')
@@ -450,6 +452,9 @@ def main():
             if (release.get('verified') is not True or release.get('scope')!='offline-package-consistency'
                     or release.get('windows',{}).get('playerManifestSha256')!=windows_release_hash):
                 p.error('Release report must identify this original Windows player package')
+    require_silent_windows_launch(folder / 'Runtime/VrCommand.exe')
+    if player_folder:
+        require_silent_windows_launch(player_folder / 'VrCommand.exe')
     if args.openxr_mock_only or args.check_venue_openxr:
         unity=ROOT/'clients/unity'
         mock_package_version=read(unity/'Packages/manifest.json')['dependencies']['com.unity.xr.openxr']

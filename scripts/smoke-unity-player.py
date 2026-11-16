@@ -7,6 +7,7 @@ Private keys/configuration and evidence remain under ignored artifacts/.
 import argparse,json,os,secrets,socket,subprocess,time,urllib.error,urllib.request,uuid
 from datetime import datetime,timezone
 from pathlib import Path
+from windows_firewall import require_silent_windows_launch
 
 root=Path(__file__).resolve().parent.parent
 parser=argparse.ArgumentParser(description=__doc__)
@@ -19,6 +20,7 @@ args=parser.parse_args()
 if os.name!='nt': raise RuntimeError('This fixture requires a Windows Unity player')
 if not args.player_exe.is_file() or not args.api_dll.is_file(): raise RuntimeError('Build the current Unity Desktop player and API before running this fixture')
 if not 500<=args.maximum_source_age_ms<=10000: raise ValueError('Source age threshold must be 500–10000 ms')
+require_silent_windows_launch(args.player_exe)
 directory=root/'artifacts/unity-player-smoke'/(time.strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:8])
 directory.mkdir(parents=True,exist_ok=False)
 tokens={name:secrets.token_hex(32) for name in ['Master','GameServer']}
@@ -81,7 +83,7 @@ try:
     players=[str(uuid.uuid4()),str(uuid.uuid4())]
     for index,identity in enumerate(players):
         state=request('/api/sessions/'+session+'/players',{'playerId':identity,'name':'Desktop Simulation '+str(index+1),'roomId':client_rooms[index],'headset':'Quest3'})
-    launch('server',{'role':'Server','address':'127.0.0.1','port':game_port,'sessionId':session,'managementApiUrl':base,'gameServerKey':tokens['GameServer'],'telemetryOrigin':'Simulation','telemetryDirectory':str(directory/'telemetry')})
+    launch('server',{'role':'Server','address':'127.0.0.1','listenAddress':'127.0.0.1','port':game_port,'sessionId':session,'managementApiUrl':base,'gameServerKey':tokens['GameServer'],'telemetryOrigin':'Simulation','telemetryDirectory':str(directory/'telemetry')})
     wait_for(lambda:request('/api/sessions/'+session+'/world'),60,'Unity server world publication')
     for index,identity in enumerate(players):
         player=next(p for p in state['players'] if p['id']==identity)

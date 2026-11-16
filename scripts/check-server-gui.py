@@ -9,8 +9,11 @@ def read(p):return json.loads(p.read_text(encoding='utf-8'))
 def free(kind=socket.SOCK_STREAM):
     with socket.socket(socket.AF_INET,kind) as s:s.bind(('127.0.0.1',0));return s.getsockname()[1]
 def main():
+    from windows_firewall import require_silent_windows_launch
+
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('package',type=Path);p.add_argument('--control-package',type=Path,required=True);p.add_argument('--runtime-root',type=Path,required=True);p.add_argument('--check-peer-diagnostics',action='store_true',help='Join one native player and reconcile the GUI-enabled UDP evidence');args=p.parse_args()
     folder=args.package.resolve();manifest=package.verify(folder);assert manifest['launcherSourceSha256']==package.digest(ROOT/'tools/WindowsServerLauncher/ServerLauncher.cs')
+    require_silent_windows_launch(folder / 'Runtime/VrCommand.exe')
     out=ROOT/'artifacts/server-gui'/('run-'+uuid.uuid4().hex);out.mkdir(parents=True,exist_ok=False);runtime=args.runtime_root.resolve()/out.name;runtime.mkdir(parents=True,exist_ok=False);data=runtime/'control';port=free(socket.SOCK_DGRAM);api=None;api_witness=None;gui=None;witness=None;errors=[];observed=None;stopped=False;gui_report=None;gui_work=None;session=None;result=None;other_session=None
     client=None;client_log=runtime/'fixture-client.log'
     reports=Path(os.environ['LOCALAPPDATA'])/'VrCommand/GameServerReports';old=set(reports.glob('*.json')) if reports.exists() else set()

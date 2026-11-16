@@ -162,6 +162,8 @@ def check_local_profiler(folder, directory):
 
 
 def main():
+    from windows_firewall import require_silent_windows_launch
+
     parser = argparse.ArgumentParser(description=__doc__); parser.add_argument('package_directory', type=Path)
     parser.add_argument('--check-openxr-unavailable', action='store_true', help='Run a graphical player with a missing OpenXR runtime for that process')
     parser.add_argument('--openxr-mock-manifest', type=Path, help='Also run the file preflight against this existing Unity mock manifest')
@@ -174,6 +176,8 @@ def main():
     manifest = package.verify(folder)
     if manifest['launcherSourceSha256'] != package.digest(ROOT / 'tools/WindowsPlayerLauncher/PlayerLauncher.cs'):
         parser.error('Repackage the current launcher source before testing')
+    if args.check_openxr_unavailable or args.check_local_profiler or args.check_release_form:
+        require_silent_windows_launch(folder / 'VrCommand.exe')
     directory = ROOT / 'artifacts/player-package-checks' / (datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
     directory.mkdir(parents=True, exist_ok=False); findings = []
 

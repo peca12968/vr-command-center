@@ -72,16 +72,11 @@ def snapshot_runtime(source,destination):
 
 
 def verify_player(args):
+    from windows_firewall import require_silent_windows_launch
+
     if os.name != 'nt' or not args.player_exe.is_file() or not args.api_dll.is_file():
         raise RuntimeError('Build the Windows player and API first')
-    powershell = shutil.which('pwsh') or 'powershell.exe'
-    firewall = subprocess.run(
-        [powershell, '-NoLogo', '-NoProfile', '-NonInteractive', '-File',
-         str(ROOT / 'scripts/check-windows-firewall-notifications.ps1'), '-Executable', str(args.player_exe.resolve())],
-        creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, errors='replace', timeout=15,
-    )
-    if firewall.returncode != 0:
-        raise RuntimeError(f'Desktop player was not started. {firewall.stderr.strip()}')
+    require_silent_windows_launch(args.player_exe)
     spec = importlib.util.spec_from_file_location('native_admission', ROOT / 'scripts/check-unity-admission.py')
     checker = importlib.util.module_from_spec(spec); spec.loader.exec_module(checker)
     receipt = json.loads((args.player_exe.parent / 'build-receipt.json').read_text())

@@ -24,6 +24,8 @@ def free(kind=socket.SOCK_STREAM):
 
 
 def main():
+    from windows_firewall import require_silent_windows_launch
+
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('control-package', 'server-package', 'runtime-root'):
         parser.add_argument('--' + name, type=Path, required=True)
@@ -48,6 +50,7 @@ def main():
     control_root, server_root = args.control_package.resolve(), args.server_package.resolve()
     control_manifest = controls.package.verify(control_root)
     server_manifest = server_package.verify(server_root)
+    require_silent_windows_launch(server_root / 'Runtime/VrCommand.exe')
     run = 'run-' + uuid.uuid4().hex
     out = ROOT / 'artifacts' / 'packaged-management-restart' / run
     runtime = args.runtime_root.resolve() / run
