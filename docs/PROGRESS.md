@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 Windows 0.50.11 原生五房 25 席測試
+
+- 桌面場館與五房動態測試新增 `--api-exe`，可直接用解壓後的管理包執行檔。啟動前各自檢查管理與 Unity 程序的實際路徑，測試管理服務綁定 `127.0.0.1`，資料寫入新建目錄。此輪使用現有通過查核的 0.31.184 管理包和 F 槽 0.50.11 遊戲。管理 PID 的實際 TCP 監聽只在迴環位址，管理包 567 檔在測試前後均通過完整性核對。 [操作方式](DESKTOP_EXERCISE.md#使用-windows-管理包執行無人值守測試) · [監聽證據](../artifacts/desktop-exercise/20261116-100648-dd67876c/actual-api-listeners.json)
+- 合併與五房獨立各以 25 個 Unity 客戶端進行 40 秒同機測試，另執行即時天氣、日夜及敵軍命令並核對原保存畫格。38 項原生檢查、六場雙封存、50 份玩家戰績及六份 CSV 通過。完整回放共 4,854 格，32 個階段／環境／敵軍參考格相符。1,500 次連線探測全數回覆。最後活動場次及殘留程序均為零，C 槽原始紀錄與 F 槽快照 224 檔逐位元組一致。 [驗證摘要](../artifacts/desktop-exercise/20261116-100648-dd67876c/verification.json) · [原生紀錄](../artifacts/native-managed-exercise-aca2bca5.log)
+- 本機 124 項桌面測試通過。功能提交 `e2361a7` 已推送，GitHub Actions 未執行測試步驟。此場使用程式產生的 PC 操作，實體頭盔及跨機 25 人仍待驗，Quest USB 仍未提供 ADB 偵錯介面。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43790542852/job/133047710464)
+
 ## 2026-11-16 六批完整發行驗收
 
 - `prepare-venue-stages.py --require-complete-venue-release` 會在總清單固定原發行 JSON 的 SHA-256，要求六批的伺服器終止報告、Windows 玩家報告及 Quest 部署證據均核對同一份原檔。收件報告逐批列出缺少完整摘要的房間組合和房席，比對失敗時保留原證據檔名。舊總清單可沿用原設定。 [六批完整核對](EXTERNAL_CLIENTS.md#六批核對伺服器和每席的完整發行證據)
