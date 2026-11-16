@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 從 CSV 帶入五房名冊草稿
+
+- 管理台 0.31.228 提供 25 席 UTF-8 範本，可從 CSV 帶入房席、名稱與頭盔。瀏覽器先核對所有列及原準備場次。重複列、已占用席位、已有草稿和 MR 頭盔不符會阻止整份匯入，原草稿保留。帶入後可修改，確認登記才送交管理服務。 [操作方式](PLAYER_READINESS.md#批次加入場館名冊) · [25 席範本](../artifacts/venue-roster-csv-031228/package-independent/venue-roster-template.csv)
+- 原始碼獨立場 19 項、解壓包獨立場 19 項、合併場 18 項 Chromium 專項通過，包含檔案讀取期間房間換場、CSV 引號姓名、檔案限制及先匯入再手動修改。各輪在本機 IPC 以原批次登記流程核對實際 25 席與驗票，結束所有測試場次。三份範本下載的 SHA-256 一致。 [獨立場](../artifacts/venue-roster-csv-031228/package-independent/checks.json) · [合併場](../artifacts/venue-roster-csv-031228/package-linked/checks.json)
+- 128 項 Node 測試通過。Windows 管理包解壓核對 580 個檔案，與原 0.50.12 Windows／Quest 通過發行一致性檢查。GitHub Actions 對 `7e5edc7` 回報帳務或用量限制，工作未啟動。Quest USB 仍無 ADB 介面，實機及跨機待驗。 [管理包](../artifacts/venue-roster-csv-031228/VRCommand-ControlServer-0.31.228.zip) · [發行報告](../artifacts/venue-roster-csv-031228/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43968541014/job/133654264830)
+
 ## 2026-11-17 一次登記五房玩家名冊
 
 - 管理台 0.31.227 主控可在準備階段逐席填寫名稱與頭盔，一次登記最多 25 人。批次核對各席的原場次與空席，任一衝突會阻止整批寫入。結果未確認時可沿用各席的原請求重試。 [操作方式](PLAYER_READINESS.md#批次加入場館名冊)
