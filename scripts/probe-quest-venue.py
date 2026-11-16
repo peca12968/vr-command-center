@@ -1,5 +1,6 @@
 """Collect original Quest UDP preflight pairs before starting a five-room venue."""
 import argparse
+from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import datetime, timedelta, timezone
 import hashlib
 import importlib.util
@@ -12,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from threading import Event, Lock
 import time
 
 
@@ -229,45 +231,79 @@ def probe_venue(shell, adb, mode, groups, directory, count, timeout_ms, retry_re
     previous = read_retry(retry_report, mode, groups, plan_hash, count, timeout_ms, launcher) if retry_report else {}
     directory.mkdir()
     deadline = time.monotonic() + 20 * 60
-    results, exchanges = [], set()
-    interrupted = False
-    for group in groups:
-        seats = []
+    stopped = Event()
+    diagnostics = Lock()
+
+    def progress(seat):
+        row = {key: seat[key] for key in ('roomId', 'seat', 'complete', 'stage')}
+        with diagnostics:
+            print(json.dumps(row), file=sys.stderr, flush=True)
+
+    def probe_group(group):
+        seats, exchanges = [], set()
         for device in group['devices']:
             room, number = device['roomId'], device['seat']
-            seat = {'roomId': room, 'seat': number, 'complete': False, 'stage': 'not-attempted' if interrupted else 'budget'}
-            if not interrupted and time.monotonic() < deadline:
+            seat = {'roomId': room, 'seat': number, 'complete': False, 'stage': 'budget'}
+            if not stopped.is_set() and time.monotonic() < deadline:
                 try:
                     row = previous.get((room, number))
                     retained = reuse_seat(row, retry_report.parent, directory, group, device, count, timeout_ms, exchanges) if row else None
                     if retained is not None:
                         seat = retained
-                    elif time.monotonic() < deadline:
+                    elif not stopped.is_set() and time.monotonic() < deadline:
                         seat = probe_seat(shell, adb, directory, group, device, count, timeout_ms)
                 except KeyboardInterrupt:
-                    interrupted = True
+                    stopped.set()
                     seat['stage'] = 'interrupted'
+            if stopped.is_set() and seat['stage'] == 'budget':
+                seat['stage'] = 'not-attempted'
             if seat['complete']:
                 exchange = seat['exchangeSha256']
                 if exchange in exchanges:
                     seat.update(complete=False, stage='duplicate')
                 exchanges.add(exchange)
             seats.append(seat)
-            print(json.dumps({key: seat[key] for key in ('roomId', 'seat', 'complete', 'stage')}), file=sys.stderr, flush=True)
-        results.append({'roomIds': group['roomIds'], 'seats': seats})
+            progress(seat)
+        return {'roomIds': group['roomIds'], 'seats': seats}
 
+    if len(groups) == 1:
+        results = [probe_group(groups[0])]
+    else:
+        # Independent endpoints own different address/port bindings. A worker finishes
+        # its listener and Android cleanup before starting another seat on that binding.
+        with ThreadPoolExecutor(max_workers=len(groups), thread_name_prefix='quest-udp') as rooms:
+            tasks = []
+            try:
+                for group in groups:
+                    tasks.append(rooms.submit(probe_group, group))
+                while wait(tasks, timeout=.25).not_done:
+                    pass
+            except KeyboardInterrupt:
+                stopped.set()
+            results = [task.result() for task in tasks]
+        results.extend(probe_group(group) for group in groups[len(results):])
+
+    # Keep receipt order independent of which worker completed first.
     checked_at = datetime.now(timezone.utc)
+    exchanges = set()
     for group in results:
         for seat in group['seats']:
-            if seat['complete'] and not fresh(seat['completedAtUtc'], checked_at):
+            if not seat['complete']:
+                continue
+            exchange = seat['exchangeSha256']
+            if exchange in exchanges:
+                seat.update(complete=False, stage='duplicate')
+                progress(seat)
+            elif not fresh(seat['completedAtUtc'], checked_at):
                 seat.update(complete=False, stage='expired')
-                print(json.dumps({key: seat[key] for key in ('roomId', 'seat', 'complete', 'stage')}), file=sys.stderr, flush=True)
+                progress(seat)
+            exchanges.add(exchange)
         group['complete'] = all(seat['complete'] for seat in group['seats'])
         if group['complete']:
             group['udpSourcePreflights'] = [{key: seat[key] for key in ('listener', 'probe')} for seat in group['seats']]
     seats = [seat for group in results for seat in group['seats']]
     report = {'version': 1, 'scope': 'quest-udp-preflight-only', 'mode': mode, 'complete': all(seat['complete'] for seat in seats),
-              'planSha256': plan_hash, 'sampleCount': count, 'sampleTimeoutMs': timeout_ms, 'interrupted': interrupted,
+              'planSha256': plan_hash, 'sampleCount': count, 'sampleTimeoutMs': timeout_ms, 'interrupted': stopped.is_set(),
               'expectedSeats': len(seats), 'verifiedSeats': sum(seat['complete'] for seat in seats),
               'reusedSeats': sum(seat['stage'] == 'reused' for seat in seats), 'groups': results, **(launcher or {})}
     with (directory / 'preflight-report.json').open('x', encoding='utf-8', newline='\n') as output:

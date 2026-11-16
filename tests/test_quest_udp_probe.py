@@ -13,6 +13,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+from threading import Barrier, Event, Lock
 import time
 from types import SimpleNamespace
 import unittest
@@ -413,6 +414,7 @@ class QuestUdpVenuePlanTests(unittest.TestCase):
             quest_venue.probe_venue([], Path('adb'), mode, groups, output, 3, 900)
 
     def test_venue_interrupt_saves_partial_batch_and_rejects_changed_retry_map(self):
+        self.network.update(mode='Linked', endpoints=[{'roomIds': [1, 2, 3, 4, 5], 'address': '192.168.10.10', 'port': 7777}])
         mode, groups = self.plan()
         output = self.root / 'interrupted'
         first = {'roomId': 1, 'seat': 1, 'complete': True, 'stage': 'verified', 'exchangeSha256': 'a' * 64,
@@ -424,7 +426,7 @@ class QuestUdpVenuePlanTests(unittest.TestCase):
         self.assertTrue(result['interrupted'])
         self.assertFalse(result['complete'])
         self.assertEqual(1, result['verifiedSeats'])
-        self.assertEqual(['verified', 'interrupted', 'not-attempted', 'not-attempted', 'not-attempted'],
+        self.assertEqual(['verified', 'interrupted'] + ['not-attempted'] * 23,
                          [row['stage'] for row in result['groups'][0]['seats']])
         self.assertEqual(result, json.loads((output / 'preflight-report.json').read_bytes()))
         retry = self.root / 'retry'
@@ -432,6 +434,68 @@ class QuestUdpVenuePlanTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'original Quest plan and sample count'):
             quest_venue.probe_venue([], Path('adb'), mode, groups, retry, 3, 900, output / 'preflight-report.json')
         self.assertFalse(retry.exists())
+
+    def test_independent_rooms_probe_together_without_overlapping_seats_on_a_port(self):
+        mode, groups = self.plan()
+        output = self.root / 'parallel'
+        start = Barrier(5, timeout=5)
+        active, order = set(), {group['port']: [] for group in groups}
+        lock = Lock()
+
+        def probe(shell, adb, directory, group, device, count, timeout_ms):
+            port, seat = group['port'], device['seat']
+            with lock:
+                self.assertNotIn(port, active)
+                active.add(port)
+                order[port].append(seat)
+            if seat == 1:
+                start.wait()
+            with lock:
+                active.remove(port)
+            return {**{key: device[key] for key in ('roomId', 'seat')}, 'complete': True, 'stage': 'verified',
+                    'exchangeSha256': f'{port}-{seat}', 'listener': 'listener.ndjson', 'probe': 'probe.json',
+                    'completedAtUtc': (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()}
+
+        with patch.object(quest_venue, 'probe_seat', side_effect=probe), redirect_stderr(io.StringIO()) as diagnostics:
+            report = quest_venue.probe_venue([], Path('adb'), mode, groups, output, 3, 900)
+        self.assertEqual([[1, 2, 3, 4, 5]] * 5, list(order.values()))
+        self.assertEqual((True, 25), (report['complete'], report['verifiedSeats']))
+        self.assertEqual([[room] for room in range(1, 6)], [group['roomIds'] for group in report['groups']])
+        self.assertEqual(report, json.loads((output / 'preflight-report.json').read_bytes()))
+        rows = [json.loads(line) for line in diagnostics.getvalue().splitlines()]
+        self.assertEqual([(room, seat) for room in range(1, 6) for seat in range(1, 6)],
+                         sorted((row['roomId'], row['seat']) for row in rows))
+
+    def test_independent_interrupt_drains_each_active_port_before_saving(self):
+        mode, groups = self.plan()
+        output = self.root / 'parallel-interrupt'
+        start, drained = Barrier(6, timeout=5), []
+        stopped = Event()
+
+        def interrupt(*args, **kwargs):
+            start.wait()
+            raise KeyboardInterrupt
+
+        def probe(shell, adb, directory, group, device, count, timeout_ms):
+            room, seat = device['roomId'], device['seat']
+            self.assertEqual(1, seat)
+            start.wait()
+            self.assertTrue(stopped.wait(5))
+            self.assertFalse((output / 'preflight-report.json').exists())
+            drained.append(room)
+            return {'roomId': room, 'seat': seat, 'complete': True, 'stage': 'verified', 'exchangeSha256': f'{room}-{seat}',
+                    'listener': 'listener.ndjson', 'probe': 'probe.json',
+                    'completedAtUtc': (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()}
+
+        with (patch.object(quest_venue, 'Event', return_value=stopped), patch.object(quest_venue, 'wait', side_effect=interrupt),
+              patch.object(quest_venue, 'probe_seat', side_effect=probe) as probes, redirect_stderr(io.StringIO())):
+            report = quest_venue.probe_venue([], Path('adb'), mode, groups, output, 3, 900)
+        self.assertEqual([1, 2, 3, 4, 5], sorted(drained))
+        self.assertEqual(5, probes.call_count)
+        self.assertEqual((True, False, 5), (report['interrupted'], report['complete'], report['verifiedSeats']))
+        self.assertTrue(all(group['seats'][0]['stage'] == 'verified' for group in report['groups']))
+        self.assertTrue(all(seat['stage'] == 'not-attempted' for group in report['groups'] for seat in group['seats'][1:]))
+        self.assertEqual(report, json.loads((output / 'preflight-report.json').read_bytes()))
 
     def test_venue_retry_rejects_changed_or_missing_sample_timeout_before_probe(self):
         mode, groups = self.plan()

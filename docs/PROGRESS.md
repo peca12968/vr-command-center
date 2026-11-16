@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-16 五房獨立模式並行 Quest UDP 預檢
+
+- 五房獨立預檢會同時處理不同 UDP 端點，每個端點逐席完成 Windows 監聽、ADB 探測與清理。合併場維持同一端點逐席。中斷後停止安排新席，獨立場等已開始的探測收尾，再保存依房間與席位排序的報告。原取樣期限、完成條件及 30 分鐘有效窗沿用。 [操作方式](QUEST3.md#批次預檢五房-quest-席位)
+- 使用 Android SDK 的實際 ADB 用戶端、模擬 Android 服務及 Windows 迴環 UDP。相同 25 席、五埠、一席一個樣本的測試中，原版峰值同時 1 埠、耗時 34.219 秒，新版峰值 5 埠、耗時 9.579 秒。兩版均逐席核對 75 次 ADB 傳輸識別與 25 組原雙端檔案。新版每埠的五席依序完成。 [原版](../artifacts/quest-udp-parallel-20261116-1621/native-baseline.log) · [新版](../artifacts/quest-udp-parallel-20261116-1621/native-parallel.log)
+- 排演第 5 房第 3 席離線，首輪 24 席通過。模擬裝置回線後只執行該席的 ADB 探測，24 席沿用，49 份原檔逐位元相符，全館工具回讀 25 個來源。Windows 被動 USB 快照仍只列出 Quest 的檔案傳輸介面。 [補測與全館回讀](../artifacts/quest-udp-parallel-20261116-1621/native-retry.log) · [USB 快照](../artifacts/quest-udp-parallel-20261116-1621/usb-status.json)
+- 13 項 Quest UDP 與 19 項 LAN 回歸通過，涵蓋五埠重疊、同埠順序、作業中斷及完成前清理。Java 測試組因執行檔未通過 Windows 防火牆啟動前查核而略過。 [舊版並行測試反例](../artifacts/quest-udp-parallel-20261116-1621/before.log) · [Quest UDP 回歸](../artifacts/quest-udp-parallel-20261116-1621/quest-tests-locked.log) · [LAN 回歸](../artifacts/quest-udp-parallel-20261116-1621/lan-tests.log)
+
 ## 2026-11-16 離線重驗未完成的全館 UDP 預檢
 
 - `start-verified-venue.py --verify-only` 可讀取未完成的全館報告，重驗保留的原始來源、列出待補房席及未配對的輸入，並可用 `--retry-output` 另存補測報告。正式啟動仍要求完整的原始預檢。 [操作方式](EXTERNAL_CLIENTS.md#開場前核對五房-udp-報告)

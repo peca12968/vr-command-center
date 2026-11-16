@@ -148,7 +148,9 @@ python .\scripts\probe-quest-venue.py --adb $adb --device-map .\device-map.json 
   --network-plan .\quest-network.json --output-directory .\quest-udp-batch --count 5
 ```
 
-工具依房號和席位順序選定當次 ADB 連線、啟動 Windows 監聽、配對該台 Quest 的回覆，等原監聽程序結束再接續。每次用新的輸出資料夾，內有各席原始報告和 `preflight-report.json`。某席 ADB 連線中斷時仍會繼續其他席位。頭盔重連後可用原報告補測未通過席位。摘要列出失敗階段並以非零結束。每組端點的已安排席位全部通過時，該組才有 `udpSourcePreflights` 清單。批次在 20 分鐘後停止安排新探測，避免用盡封存核對的 30 分鐘啟動前有效窗。
+工具為每席選定當次 ADB 連線、啟動 Windows 監聽並配對該台 Quest 的回覆。五房獨立模式可同時探測最多五個端點。每個端點等上一席的監聽與清理完成，再按席位順序接續。合併模式的五房共用一個端點，按房間與席位順序測試。即時進度會依完成順序輸出，原始證據與 `preflight-report.json` 存在每次新建的輸出資料夾，報告按房間與席位排序。
+
+某席 ADB 連線中斷時仍會繼續其他席位。按 Ctrl+C 或達到 20 分鐘安排上限時，工具會停止安排新探測並保存報告。五房獨立模式會先等待已開始的探測依各自的時限完成及清理。頭盔重連後可用原報告補測未通過席位。未完成的批次會列出失敗階段並以非零結束。每組端點的席位全部通過後，該組才有 `udpSourcePreflights` 清單。原始報告仍須符合 30 分鐘啟動前有效窗。
 
 全部探測完成後，按原網路清單啟動遊戲伺服器。封存驗收清單可用 `udpPreflightBatch` 引用一份報告，或用 `udpPreflightBatches` 引用多份。混合 Windows 與 Quest 時，可在開場前用場館工具核對各席位的雙端報告，也可在封存驗收清單逐場補上 Windows 來源的 `udpSourcePreflights`。 [場館 UDP 核對](EXTERNAL_CLIENTS.md#開場前核對五房-udp-報告) · [封存核對](EXTERNAL_CLIENTS.md#核對每個玩家來源的-udp-預檢)
 
