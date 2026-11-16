@@ -269,6 +269,16 @@ python scripts/check-server-venue-gui.py <伺服器包目錄> --control-package 
 
 結果報告的 `managementRecovery` 提供 `outages`、`recoveries` 及 `longestMilliseconds`，可核對啟動器觀察到的讀取中斷。玩家戰績送達應另對原伺服器和玩家日誌。 [封存戰績核對](EXTERNAL_CLIENTS.md#核對封存戰績與-udp-來源)
 
+同機可用以下命令排演五房獨立場次。改成 `--topology linked` 可排演一個遊戲伺服器同時負責五房。桌面玩家預設每房一位，`--players-per-room 5` 可同時連上 25 個桌面客戶端。測試在新資料夾建立管理實例，只中斷自己啟動的管理 API。每輪核對原連線、全館結束命令、雙封存、戰績確認、完整回放及程序清理。啟動前會先讀取各接收入站連線的程式在本機的防火牆設定。 [無人值守的 Windows 測試](#無人值守的-windows-測試)
+
+```powershell
+python .\scripts\check-packaged-management-restart.py `
+  --control-package 'C:\packages\VrCommand-ControlServer' `
+  --server-package 'C:\packages\VrCommand-GameServer' `
+  --runtime-root (Join-Path $env:LOCALAPPDATA 'vr-restart-checks') `
+  --expect recover --topology independent --players-per-room 5
+```
+
 ## 遊戲程序退出後補送錄製
 
 Windows 錄製補送工具 0.1.0 使用原遊戲伺服器工作資料夾中的 `server-config.json`，以及設定指向的 `telemetry` 下同一場次的 `.journal` 與 `.worldlog`。遊戲程序退出後，先在原管理實例結束該場次並釋放房間，再解壓補送工具。原設定檔含該伺服器的 GameServer 金鑰，請與日誌一併私下保管。

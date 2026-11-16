@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 五房各 5 席的管理服務重啟
+
+- 用已通過 Windows 入站啟動查核的既有管理包 0.31.184、伺服器啟動器 1.23.0 與遊戲建置 `0ffc5aed7cf43`，分別執行五房合併及獨立。兩種模式各有 25 個本機桌面客戶端。管理 API 停止超過 8 秒期間，原遊戲程序與玩家連線均保持。重開同一管理實例後，六個遊戲伺服器各記錄一次恢復，觀察間隔為 9.264 至 9.791 秒。 [排演方式](WINDOWS_SERVER_PACKAGE.md#管理服務短暫中斷) · [回讀核對](../artifacts/venue-management-restart-20261116-174124/readback.json)
+- 合併 47 項、獨立 95 項通過。兩輪共 50 份原連線戰績確認、6 份 CSV 與 832 幀完整回放。各場回放包含中斷時固定活動時鐘的 Paused 幀，也保留後續 Running 幀。原全館 End 回條對應所有戰鬥及世界封存。測試程序均已清理，C 與 F 的 68 份已關閉日誌逐檔雜湊一致。 [合併](../artifacts/venue-management-restart-20261116-174124/linked.log) · [獨立](../artifacts/venue-management-restart-20261116-174124/independent.log)
+- 單房持續中斷通過 13 項。啟動器於觀察 15.294 秒後以未完成結束，留下原保存紀錄。首輪獨立測試在 Begin 收到 409。後續版本先等管理台確認五房就緒，再送一次原 Begin。另保留一次未跑完的合併試驗，同一時段 F 槽曾暫時無法存取。最終兩輪的範圍為上述 Windows 套件與同機桌面端。跨機、頭盔及廠商設備仍需實測。 [逾時檢查](../artifacts/venue-management-restart-20261116-174124/single.log) · [首輪 409](../artifacts/venue-management-restart-20261116-173430/independent.log) · [中斷的合併試驗](../artifacts/venue-management-restart-20261116-173550/linked.log)
+
 ## 2026-11-16 Windows 無人值守啟動
 
 - 外部玩家整合測試在啟動瀏覽器或玩家前，會核對這一輪實際使用的 `VrCommand.exe`。新解壓路徑的命令列與可攜包兩種測試入口都在防火牆查核後退出，兩場皆無啟動玩家程序。已核對的原路徑仍通過查核。管理 HTTPS、管理重啟及 OpenXR 測試也補上各自接收入站連線的程式查核。 [兩個入口的拒絕結果](../artifacts/windows-unattended-20261116-1730/browser-preflight.json) · [啟動前查核說明](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
