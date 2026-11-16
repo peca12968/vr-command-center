@@ -118,7 +118,7 @@ def main():
     p.add_argument('--player-exe', type=Path, default=Path(os.environ.get('VR_COMMAND_UNITY_PLAYER', ROOT / 'artifacts/desktop/VrCommand.exe')))
     p.add_argument('--api-dll', type=Path, default=Path(os.environ.get('VR_COMMAND_API_DLL', ROOT / 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
     args = p.parse_args(); args.duration = 300; args.visible_room = 3; args.job_workers = 2; args.check = False
-    module.verify_player(args); v = module.Venue(args); gates = []
+    module.verify_player(args, python_listener=True); v = module.Venue(args); gates = []
     try: run(v, gates)
     except BaseException as error: v.stage('failed', errorType=type(error).__name__); raise
     finally:

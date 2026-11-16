@@ -23,6 +23,8 @@ import urllib.request
 import uuid
 import zipfile
 
+from local_api import add_api_arguments, checked_api_command
+from windows_firewall import require_silent_windows_launch
 
 ROOT = Path(__file__).resolve().parents[1]
 HIDDEN = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
@@ -82,7 +84,7 @@ def authority_gate(port, owners):
             assert not worker.is_alive()
 
 
-def run(args):
+def run(args, api_command, api_cwd):
     out = args.evidence_root.resolve()/('run-'+uuid.uuid4().hex)
     out.mkdir(parents=True)
     print(json.dumps({'stage':'starting','directory':str(out)}), flush=True)
@@ -108,8 +110,8 @@ def run(args):
         findings.append(label)
         print('PASS: '+label, flush=True)
 
-    def start(command, environment):
-        process = subprocess.Popen(command, cwd=ROOT, env=environment, text=True, encoding='utf-8', stdin=subprocess.PIPE,
+    def start(command, environment, *, cwd=ROOT):
+        process = subprocess.Popen(command, cwd=cwd, env=environment, text=True, encoding='utf-8', stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=HIDDEN)
         processes.append(process)
         return process
@@ -157,7 +159,7 @@ def run(args):
         options = {**env, 'OperatorKeyFile':str(keyfile), 'DataDirectory':str(runtime/'missions'),
             'SessionDataDirectory':str(runtime/'sessions'), 'ControlPipeToken':token,
             'Logging__LogLevel__Default':'Warning', 'Logging__LogLevel__Microsoft.AspNetCore.Hosting.Diagnostics':'Information'}
-        api = start(['dotnet', str(args.api_dll.resolve()), '--urls', base], options)
+        api = start([*api_command, '--urls', base], options, cwd=api_cwd)
 
         def collect():
             for line in api.stdout:
@@ -1520,8 +1522,14 @@ def run(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--api-dll',type=Path,default=ROOT/'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')
+    add_api_arguments(parser)
     parser.add_argument('--simulator-dll',type=Path,default=ROOT/'tools/VrCommand.HardwareSimulator/bin/Release/net10.0/VrCommand.HardwareSimulator.dll')
     parser.add_argument('--mock-peer-script',type=Path,default=ROOT/'scripts/hardware-mock-peer.py')
     parser.add_argument('--evidence-root',type=Path,default=ROOT/'artifacts/live-hardware-gateway')
-    run(parser.parse_args())
+    args = parser.parse_args()
+    try:
+        api_command, api_cwd, _ = checked_api_command(args)
+        require_silent_windows_launch(sys.executable)
+    except (OSError, RuntimeError, ValueError) as error:
+        parser.exit(2, f'{error}\n')
+    run(args, api_command, api_cwd)

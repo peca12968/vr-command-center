@@ -1,10 +1,11 @@
 """Actual compiled Framework catalog/state checks against fresh owned management data; no UI input."""
-import argparse,hashlib,importlib.util,json,os,shutil,socket,subprocess,time,urllib.error,urllib.request,uuid
+import argparse,hashlib,importlib.util,json,os,shutil,socket,subprocess,sys,time,urllib.error,urllib.request,uuid
 from contextlib import contextmanager
 from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
+from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
 ROOT=Path(__file__).resolve().parents[1]
 def module(name,file):
     s=importlib.util.spec_from_file_location(name,ROOT/'scripts'/file);m=importlib.util.module_from_spec(s);s.loader.exec_module(m);return m
@@ -66,6 +67,11 @@ def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('package',type=Path);p.add_argument('--control-package',type=Path,required=True);p.add_argument('--runtime-root',type=Path,required=True);args=p.parse_args()
     if os.name!='nt':p.error('Actual Framework compiler/process checks require Windows')
     folder=args.package.resolve();manifest=package.verify(folder);assert manifest['launcherSourceSha256']==sha(ROOT/'tools/WindowsServerLauncher/ServerLauncher.cs');control.package.verify(args.control_package)
+    try:
+        require_silent_windows_launch(args.control_package / 'Runtime/VrCommand.Api.exe')
+        require_silent_windows_launch(sys.executable)
+    except WindowsFirewallLaunchError as error:
+        p.exit(2, f'{error}\n')
     out=ROOT/'artifacts/server-catalog'/('run-'+uuid.uuid4().hex);out.mkdir(parents=True,exist_ok=False);runtime=args.runtime_root.resolve()/out.name;runtime.mkdir(parents=True,exist_ok=False);data=runtime/'control';exe=folder/'Launch-Server.exe';api=None;witness=None;errors=[];checks=[];sessions=[]
     def save(name,value):(out/name).write_text(json.dumps(value,indent=2)+'\n',encoding='utf-8')
     def check(ok,name):

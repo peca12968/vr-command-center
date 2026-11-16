@@ -1,17 +1,23 @@
 """Offline device feedback replay from a real isolated API and ArenaSession outbox. No physical hardware I/O."""
 import argparse,hashlib,json,os,secrets,shutil,socket,subprocess,tempfile,threading,time,urllib.request,uuid
 from pathlib import Path
+from local_api import add_api_arguments, checked_api_command
 ROOT=Path(__file__).resolve().parents[1]
 def read(p):return json.loads(p.read_text(encoding='utf-8'))
 def sha(p):
     with p.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    for name,project in [('api','VrCommand.Api'),('simulator','VrCommand.HardwareSimulator'),('relay','VrCommand.TelemetryRelay')]:
-        default=ROOT/('src' if name=='api' else 'tools')/project/'bin/Release/net10.0'/(project+'.dll')
+    add_api_arguments(p)
+    for name,project in [('simulator','VrCommand.HardwareSimulator'),('relay','VrCommand.TelemetryRelay')]:
+        default=ROOT/'tools'/project/'bin/Release/net10.0'/(project+'.dll')
         p.add_argument('--'+name+'-dll',type=Path,default=default)
     p.add_argument('--runtime-root',type=Path);args=p.parse_args()
-    binaries=[args.api_dll.resolve(),args.simulator_dll.resolve(),args.relay_dll.resolve()]
+    try:
+        api_command, api_cwd, api_assembly = checked_api_command(args)
+    except (OSError, RuntimeError, ValueError) as error:
+        p.exit(2, f'{error}\n')
+    binaries=[api_assembly,args.simulator_dll.resolve(),args.relay_dll.resolve()]
     if not all(v.is_file() for v in binaries):p.error('Build the complete solution first')
     binary_files={name:{v.relative_to(binary.parent).as_posix():sha(v) for v in binary.parent.rglob('*') if v.is_file()} for name,binary in zip(['api','simulator','relay'],binaries)}
     out=ROOT/'artifacts/hardware-simulator'/('run-'+uuid.uuid4().hex);out.mkdir(parents=True)
@@ -41,7 +47,7 @@ def main():
         (out/(name+'.log')).write_text(text,encoding='utf-8');check(result.returncode==(0 if success else 1),name+' exit status')
         return result
     try:
-        process=subprocess.Popen(['dotnet',str(binaries[0]),'--urls',base],cwd=ROOT,env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+        process=subprocess.Popen([*api_command,'--urls',base],cwd=api_cwd,env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
         def collect():
             for line in iter(process.stdout.readline,b''):
                 logs.append(line.decode('utf-8',errors='replace'))
