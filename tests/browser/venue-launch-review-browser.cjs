@@ -66,7 +66,76 @@ async function choose(page, value) {
   await page.locator(input).setInputFiles({ name: 'launcher-result.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(value)) });
 }
 
-async function checkVenueLaunchReview({ context, api, tokens, base, screenshots, check, captureErrors, instanceId }) {
+async function checkVenueUdpReview({ context, tokens, base, screenshots, check, captureErrors, udpPreflightReport }) {
+  const page = await context.newPage();
+  captureErrors(page);
+  const roomIds = [1, 2, 3, 4, 5];
+  const report = { version: 1, scope: 'venue-udp-preflight-only', mode: 'Independent', network: 'private-lan-plan',
+    complete: false, checkedAtUtc: '2026-11-16T08:00:00+00:00', verifiedSources: 3, expectedSources: 5,
+    unmatchedPairs: 1, unreadablePairs: 1, retrySources: [{ pair: { listener: 'PRIVATE_UDP_FILE' } }],
+    groups: roomIds.map(roomId => ({ roomIds: [roomId], complete: ![2, 5].includes(roomId), sources: [
+      { seats: [{ roomId, seat: 1 }], status: roomId === 2 ? 'invalid-or-expired' : roomId === 5 ? 'missing' : 'verified',
+        ...(roomId === 2 ? { reason: 'expired' } : roomId === 5 ? { reason: 'unreadable-original', missingRole: 'probe' } : {}) }
+    ] })) };
+  const requests = [];
+  page.on('request', request => { if (request.url().endsWith('/api' + route)) requests.push(request.postDataJSON()); });
+  try {
+    await login(page, base, tokens.Room1);
+    check(await page.locator(panel).isHidden(), 'Only the master can open the UDP report review');
+    await login(page, base, tokens.Master);
+    await page.locator(panel + ' summary').click();
+    await choose(page, report);
+    await page.locator(button).click();
+    await page.locator(summary).filter({ hasText: '2 席待補測' }).waitFor();
+    check(await page.locator(rows).count() === 5 && !requests.length, 'UDP review lists the five rooms without calling the launch review endpoint');
+    assert.match(await page.locator(rows).nth(1).textContent(), /房間 2.*第 1 席.*已逾時/);
+    assert.match(await page.locator(rows).nth(4).textContent(), /房間 5.*第 1 席.*缺探測端/);
+    assert.match(await page.locator(summary).textContent(), /1 組未配對.*1 組無法讀取/);
+    check(!(await page.locator(panel).textContent()).includes('PRIVATE_UDP_FILE')
+      && await page.locator(panel + '-rooms button').count() === 0, 'UDP review displays only bounded seat status and exposes no launch controls');
+    await page.locator(panel).screenshot({ path: path.join(screenshots, 'venue-udp-preflight-review.png') });
+
+    const linked = { ...report, mode: 'Linked', network: 'same-host', complete: true, verifiedSources: 1, expectedSources: 1,
+      unmatchedPairs: 0, unreadablePairs: 0, groups: [{ roomIds, complete: true, sources: [
+        { seats: roomIds.map(roomId => ({ roomId, seat: 1 })), status: 'verified' }
+      ] }] };
+    await choose(page, linked);
+    await page.locator(button).click();
+    await page.locator(summary).filter({ hasText: '同機迴環' }).waitFor();
+    check(await page.locator(rows).filter({ hasText: '第 1 席已核對' }).count() === 5
+      && !(await page.locator(panel).textContent()).includes('缺探測端'), 'One linked source covers all recorded seats and clears the previous report');
+
+    await choose(page, { ...linked, complete: false, launcherPreview: { complete: false },
+      inbox: { issues: [{ status: 'missing-counterpart', files: ['PRIVATE_UDP_FILE'] }] } });
+    await page.locator(button).click();
+    await page.locator(summary).filter({ hasText: '啟動計畫與預覽待核對' }).waitFor();
+    check((await page.locator(summary).textContent()).includes('0 席待補測')
+      && (await page.locator(summary).textContent()).includes('1 個收件問題')
+      && !(await page.locator(panel).textContent()).includes('PRIVATE_UDP_FILE'),
+      'An incomplete report with every seat checked still identifies pending intake or plan issues');
+
+    const duplicate = structuredClone(linked);
+    duplicate.groups[0].sources[0].seats.push({ roomId: 5, seat: 1 });
+    await choose(page, duplicate);
+    await page.locator(button).click();
+    await page.locator(summary).filter({ hasText: '請選擇 64 KiB' }).waitFor();
+    check(await page.locator(rows).count() === 0 && !requests.length, 'A duplicate seat cannot show a valid UDP result');
+
+    if (udpPreflightReport) {
+      await page.locator(input).setInputFiles(udpPreflightReport);
+      await page.locator(button).click();
+      await page.locator(rows).nth(4).waitFor();
+      const status = await page.locator(summary).textContent();
+      check(!requests.length && status.includes('1/5 來源已核對') && status.includes('4 席待補測')
+        && (await page.locator(rows).first().textContent()).includes('第 1 席已核對'),
+        'The console opens the original UDP report from the command-line tool');
+      await page.locator(panel).screenshot({ path: path.join(screenshots, 'venue-udp-original-report.png') });
+    }
+  } finally { await page.close(); }
+}
+
+async function checkVenueLaunchReview({ context, api, tokens, base, screenshots, check, captureErrors, instanceId, udpPreflightReport }) {
+  await checkVenueUdpReview({ context, tokens, base, screenshots, check, captureErrors, udpPreflightReport });
   const page = await context.newPage();
   captureErrors(page);
   const launchId = randomUUID(), streamId = randomUUID();
@@ -323,7 +392,7 @@ async function checkVenueLaunchReview({ context, api, tokens, base, screenshots,
   }
 }
 
-module.exports = { checkVenueLaunchReview };
+module.exports = { checkVenueLaunchReview, checkVenueUdpReview };
 
 if (require.main === module) {
   (async () => {

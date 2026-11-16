@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-16 管理台 0.31.212 的 Windows ZIP 為 53,393,741 bytes，SHA-256 `f6eab938633620da662ac77c5e7dd0eec70083ec01e669db1415ce09732d0780`。主控可直接查看五房 UDP 預檢的待補席位與原因。 [管理包](../artifacts/venue-udp-console-20261116-1654/VRCommand-ControlServer-0.31.212.zip) · [操作說明](EXTERNAL_CLIENTS.md#補測未完成的全館-udp-預檢)
+
 2026-11-16 管理台 0.31.211 的 Windows ZIP 為 53,388,918 bytes，SHA-256 `2fb8140421c5529b9b9068c0717a97cd9f48f001cc5af8784a7b3823f25f49fe`。解壓核對 568 檔。從事件搜尋結果或前後跳轉開啟畫格時，會核對所選事件的原始識別。 [管理包](../artifacts/windows-control-event-ids-031211.zip) · [操作說明](WORLD_RECORDING.md)
 
 2026-11-16 管理台 0.31.210 的 Windows ZIP 為 53,388,035 bytes，SHA-256 `83bf8afb67f7a4aa7a30f21e1709340735eaa8cb0f31a695ac420a405ee437df`。解壓核對 568 檔。從戰績開啟個人回放時，會核對封存尾端的玩家與戰績。 [管理包](../artifacts/windows-control-player-replay-score-031210.zip) · [操作說明](REPORTS.md#從戰績開啟個人回放)

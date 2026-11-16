@@ -36,7 +36,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('package',type=Path);parser.add_argument('--runtime-root',type=Path,required=True);args=parser.parse_args()
     if os.name!='nt':parser.error('Run the actual Windows launcher on Windows')
     folder=args.package.resolve();manifest=package.verify(folder);exe=folder/'Start-Control.exe';assert manifest['launcherSourceSha256']==sha(ROOT/'tools/WindowsControlLauncher/ControlLauncher.cs')
-    expected_console = '0.31.211'
+    expected_console = '0.31.212'
     if manifest.get('consoleVersion') != expected_console:
         parser.error(f'This check requires console {expected_console}. The selected package has {manifest.get("consoleVersion")}.')
     require_silent_windows_launch(folder / 'Runtime/VrCommand.Api.exe')

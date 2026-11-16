@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 主控台檢視五房 UDP 待補席位
+
+- 管理台 0.31.212 的「核對全館預檢、啟動與封存」可直接讀取全館 UDP 預檢及補測報告。依房間及席位顯示已核對、逾時或缺少哪一端等狀態，也列出未配對、收件與計畫問題。檔案在瀏覽器本機解析，只有主控能開啟面板。 [操作說明](EXTERNAL_CLIENTS.md#補測未完成的全館-udp-預檢)
+- 使用實際本機 UDP 探測產生一個來源通過、四席待補的五房報告。新版在 Chromium 正確顯示 1/5 與四席待補；原版測試重現未顯示結果。另驗證合併場共用來源、原始路徑保留於本機、重複席位拒絕及原就緒和封存操作。實際發行目錄與 ZIP 解壓包各通過同一組 35 項瀏覽器檢查，另通過 119 項 Node 測試。管理服務使用 Windows 本機 IPC，查得零 TCP／UDP 監聽。 [原版反例](../artifacts/venue-udp-console-20261116-1654/before/browser.log) · [解壓包瀏覽器](../artifacts/venue-udp-console-20261116-1654/final-extracted/checks.json) · [實際預檢畫面](../artifacts/venue-udp-console-20261116-1654/final-extracted/venue-udp-original-report.png) · [Node 回歸](../artifacts/venue-udp-console-20261116-1654/node-tests.log)
+- 新管理包解壓核對 568 檔，與 Windows 伺服器啟動器 1.27、原 Windows 玩家包及 Quest 0.50.12 APK 完成共同發行核對。本輪驗證涵蓋管理台、檔案與本機預檢，頭盔和跨機遊戲待實測。 [管理包](../artifacts/venue-udp-console-20261116-1654/VRCommand-ControlServer-0.31.212.zip) · [共同發行報告](../artifacts/venue-udp-console-20261116-1654/venue-release.json)
+
 ## 2026-11-16 Windows 啟動器在公告前核對逐房 UDP 期限
 
 - 五房查核工具將原計畫的 SHA-256 與各房有效期限傳入啟動器 1.27。啟動時核對期限與原計畫，Windows 觀察到的 UDP 綁定若晚於該房期限，會阻止全館公告並清理本次程序。舊包沿用啟動前與收尾檢查。 [操作方式](WINDOWS_SERVER_PACKAGE.md#以-udp-預檢報告啟動五房)

@@ -19,6 +19,68 @@ const endpointStates = {
   published: '管理端已保存端點'
 };
 const sealStates = { matched: '雙封存序號相符', pending: '管理端尚未完成雙封存', mismatch: '原錄製來源或封存序號不符' };
+const udpSeatStates = {
+  verified: '已核對', missing: '缺少報告', 'duplicate-pair': '有重複報告',
+  'duplicate-exchange': '有重複交換', 'invalid-or-expired': '資料不符或已逾時'
+};
+const udpSeatReasons = {
+  expired: '已逾時', 'clock-ahead': '報告時間超前', 'changed-original': '原始檔已變更',
+  'invalid-report': '報告無效', 'unreadable-original': '原始檔無法讀取',
+  'exchange-mismatch': '雙端交換不符', 'binding-mismatch': '端點或來源不符'
+};
+const udpReportRoles = { listener: '缺監聽端報告', probe: '缺探測端報告' };
+const boundedCount = (value, limit) => Number.isInteger(value) && value >= 0 && value <= limit;
+const hasLabel = (labels, value) => typeof value === 'string' && Object.hasOwn(labels, value);
+
+function projectUdpPreflight(value) {
+  const { version, mode, network, complete, checkedAtUtc, groups, expectedSources, verifiedSources,
+    unreadablePairs, unmatchedPairs, inbox, launchBinding, launcherPreview } = value;
+  const independent = mode === 'Independent';
+  const planMatches = launchBinding?.complete ?? launcherPreview?.complete ?? true;
+  if (version !== 1 || !['Independent', 'Linked'].includes(mode) || !['same-host', 'private-lan-plan'].includes(network)
+      || typeof complete !== 'boolean' || typeof planMatches !== 'boolean' || typeof checkedAtUtc !== 'string'
+      || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,7})?(?:Z|\+00:00)$/.test(checkedAtUtc)
+      || !Number.isFinite(Date.parse(checkedAtUtc))
+      || !Array.isArray(groups) || groups.length !== (independent ? 5 : 1)
+      || !boundedCount(expectedSources, 25) || !boundedCount(verifiedSources, 25)
+      || !boundedCount(unreadablePairs, 50) || !boundedCount(unmatchedPairs, 50)
+      || (inbox !== undefined && (!Array.isArray(inbox?.issues) || inbox.issues.length > 100)))
+    throw new Error('Invalid UDP preflight');
+  const groupRooms = new Set(), seatRows = new Map(rooms.map(room => [room, new Map()]));
+  let sourceCount = 0, verifiedCount = 0, pending = 0;
+  for (const { roomIds, sources, complete: groupComplete } of groups) {
+    if (!Array.isArray(roomIds) || roomIds.length !== (independent ? 1 : 5)
+        || roomIds.some(room => !seatRows.has(room) || groupRooms.has(room)) || new Set(roomIds).size !== roomIds.length
+        || !Array.isArray(sources) || !sources.length || sources.length > 25)
+      throw new Error('Invalid UDP room group');
+    roomIds.forEach(room => groupRooms.add(room));
+    const firstVerified = verifiedCount;
+    for (const { seats, status, reason, missingRole } of sources) {
+      if (!hasLabel(udpSeatStates, status) || !Array.isArray(seats) || !seats.length || seats.length > 25
+          || (reason !== undefined && !hasLabel(udpSeatReasons, reason))
+          || (missingRole !== undefined && !hasLabel(udpReportRoles, missingRole))
+          || (status === 'verified' && (reason !== undefined || missingRole !== undefined)))
+        throw new Error('Invalid UDP source');
+      sourceCount++;
+      if (status === 'verified') verifiedCount++;
+      const label = udpReportRoles[missingRole] ?? udpSeatReasons[reason] ?? udpSeatStates[status];
+      for (const { roomId, seat } of seats) {
+        const room = seatRows.get(roomId);
+        if (!roomIds.includes(roomId) || !Number.isInteger(seat) || seat < 1 || seat > 5 || room.has(seat))
+          throw new Error('Invalid UDP seat');
+        room.set(seat, label);
+        if (status !== 'verified') pending++;
+      }
+    }
+    if (groupComplete !== (verifiedCount - firstVerified === sources.length)) throw new Error('Invalid UDP group status');
+  }
+  const inboxIssues = inbox?.issues.length ?? 0;
+  if (sourceCount !== expectedSources || verifiedCount !== verifiedSources || [...seatRows.values()].some(rows => !rows.size)
+      || complete !== (sourceCount === verifiedCount && !unreadablePairs && !unmatchedPairs && !inboxIssues && planMatches))
+    throw new Error('Invalid UDP report totals');
+  return { mode, network, checkedAtUtc, seatRows, verifiedSources, expectedSources, pending,
+    unmatchedPairs, unreadablePairs, inboxIssues, planMatches };
+}
 
 function projectSeal(result, roomIds, launchId) {
   const { schemaVersion, status, complete, childExited, cleanupCompleted, sessionId, streamId, finalWorld, finalCombatStream } = result;
@@ -176,6 +238,26 @@ export function mountVenueLaunchReview(getState, api, selectSession, focusRoster
       if (current()) { opening = false; update(); }
     }
   }
+  function showUdpPreflight(report) {
+    const label = report.mode === 'Linked' ? '五房合併' : '五房獨立';
+    const network = report.network === 'same-host' ? '同機迴環' : '場館私有網路';
+    const issues = [
+      report.unmatchedPairs && `${report.unmatchedPairs} 組未配對`,
+      report.unreadablePairs && `${report.unreadablePairs} 組無法讀取`,
+      report.inboxIssues && `${report.inboxIssues} 個收件問題`,
+      !report.planMatches && '啟動計畫與預覽待核對'
+    ].filter(Boolean);
+    $('summary').textContent = `原報告 · ${label} · ${network} · ${report.verifiedSources}/${report.expectedSources} 來源已核對 · ${report.pending} 席待補測`
+      + (issues.length ? ` · ${issues.join(' · ')}` : '') + ` · ${new Date(report.checkedAtUtc).toLocaleString('zh-TW')}。`;
+    $('rooms').replaceChildren(...[...report.seatRows].map(([roomId, seats]) => {
+      const row = document.createElement('li');
+      row.className = 'venue-launch-review-row';
+      row.textContent = `房間 ${roomId} · ${[...seats].sort(([left], [right]) => left - right)
+        .map(([seat, label]) => `第 ${seat} 席${label}`).join(' · ')}`;
+      return row;
+    }));
+  }
+
   function show(review, request) {
     const allUnbound = review.servers.every(row => row.phase === 'Preparing' && row.sourceState === 'unbound');
     const allLive = review.servers.every(row => row.phase === 'Preparing' && row.sourceState === 'original-source'
@@ -276,10 +358,17 @@ export function mountVenueLaunchReview(getState, api, selectSession, focusRoster
     try {
       let request;
       try {
-        if (!selected.size || selected.size > 65536) throw new Error('Invalid report size');
-        request = projectReport(JSON.parse(await selected.text()));
+        if (!selected.size || selected.size > 131072) throw new Error('Invalid report size');
+        const value = JSON.parse(await selected.text());
+        if (!current()) return;
+        if (value?.scope === 'venue-udp-preflight-only') {
+          showUdpPreflight(projectUdpPreflight(value));
+          return;
+        }
+        if (selected.size > 65536) throw new Error('Invalid launcher report size');
+        request = projectReport(value);
       } catch {
-        if (current()) $('summary').textContent = '請選擇 64 KiB 內的全館就緒檔、正常結束報告或含未確認狀態的第四版啟動報告。';
+        if (current()) $('summary').textContent = '請選擇 64 KiB 內的全館啟動或封存報告，或 128 KiB 內的全館 UDP 預檢報告。';
         return;
       }
       if (!current()) return;
