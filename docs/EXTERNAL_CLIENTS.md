@@ -69,7 +69,7 @@ python scripts/start-desktop-control.py --api-dll <本次API.dll> --runtime-root
 控制台 0.31.3 會在配票前核對連線目的地。請輸入四段十進位 IPv4，例如 `192.168.1.100`，每段使用標準數字格式，第一段介於 1–223，埠號介於 1024–65535。確認後按各玩家的「下載連線檔」，將檔案交給對應玩家。每張票券有效五分鐘，依本次 admission、房間與席位驗票。檔案包含 `role`、`address`、`port` 與 `joinTicket`。Windows 玩家也可執行下列命令。
 
 ```powershell
-& <同版VrCommand.exe> --vr-config <自己的玩家連線檔.json>
+.\scripts\start-windows-vr.ps1 -Executable '<同版VrCommand.exe>' -Config '<自己的玩家連線檔.json>'
 ```
 
 Quest仍使用[QUEST3](QUEST3.md)的部署方式，實機未驗。工具整場來源維持Simulation；external的`headsets`為null（工具不辨認遠端設備），不能因名冊Quest3分類或Tracked宣告就填成實測頭盔數。取得實機後的GameServer來源整合另驗，不在同一場混用來源。
@@ -948,7 +948,7 @@ Quest 0.50.11 起，原程序重連後會在新連線第一次進入執行中時
 自 0.46.0 起，Windows 開發版玩家程式可選用本機量測。以正常玩家票券入場，指定一個尚未存在的 JSON 完整路徑，其上層目錄須已存在。
 
 ```powershell
-& "<Windows玩家包路徑>/VrCommand.exe" --vr-config "<玩家連線檔.json>" --vr-link-metrics "<新量測檔的絕對路徑.json>"
+& "<Windows玩家包路徑>/Launch-Player.exe" --config "<玩家連線檔.json>" --launch --wait --link-metrics "<新量測檔的絕對路徑.json>" --log "<新日誌.txt>" --report "<新程序報告.json>"
 ```
 
 客戶端在收到 Running 狀態後，每約一秒送出一筆 NGO 不可靠訊息。伺服器只回覆已核准且仍連線的玩家，依連線限制回覆頻率。報表逐筆區分回覆、0.9 秒逾時與階段中斷。回覆時間用玩家端單調時鐘計算，包含兩端的遊戲排程與網路傳輸。Unity 更新次數及經過秒數另列，供計算更新頻率。報表以程序與連線編號對應本次玩家，採樣上限為 30 筆，啟動後最多等待 240 秒。提早結束或離線會留下未滿額的結果。

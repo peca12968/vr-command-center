@@ -46,7 +46,7 @@ WASD移動；方向鍵或按住右鍵拖曳瞄準；Space／左鍵射擊；R換�
 任務由控制人員開始、暫停與結束。啟動器顯示「正在等待最終戰績」時，請保留遊戲視窗。等待期間若中斷，可請控制人員從原場次確認戰績。
 同次入場斷線可在遊戲的Reconnect按鈕重新讀取原路徑的最新票券。
 
-Windows 開發版自 0.46.0 起可用 VrCommand.exe --vr-config 玩家連線檔 --vr-link-metrics 新JSON絕對路徑 選用連線量測。上層目錄須已存在。結果含往返時間、逾時與 Unity 更新次數。
+Windows 開發版自 0.46.0 起支援連線量測。指定新 JSON 絕對路徑，上層目錄須已存在。結果含往返時間、逾時與 Unity 更新次數。
 啟動器 1.5 可在 --launch --wait --log 新日誌 --report 新程序報告 加上 --link-metrics 新量測.json。程序結束時會在程序報告保存原日誌與量測檔的 SHA-256，供封存驗收核對。請保留三個原檔。
 啟動器 1.6 可在 --verify 或 --launch 加上 --release-report 原發行報告.json，逐檔核對場館交付的 Windows 玩家套件。
 啟動器 1.9 可在視窗選擇或貼上場館發行報告，核對後再開始遊戲。遊戲關閉後按「開啟本次紀錄資料夾」，保留同一次的 player.log 與 launch-report.json。

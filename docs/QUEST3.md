@@ -335,10 +335,10 @@ embedded package `com.vrcommand.simulation` 現為 0.11.0。Runtime asmdef 已�
 3. 啟動桌面伺服器（請替換 GUID 路徑）：
 
    ```powershell
-   & .\artifacts\desktop\VrCommand.exe --vr-config F:\Projects\vr-command-center\data\vr-connections\<場次ID>\server.json
+   .\scripts\start-windows-vr.ps1 -Config 'F:\Projects\vr-command-center\data\vr-connections\<場次ID>\server.json'
    ```
 
-   同一台桌面可用另一份玩家設定啟動 Client，WASD／按住滑鼠右鍵僅供桌面預覽；這不是 VR 移動功能驗收。
+   腳本會在防火牆可能顯示允許視窗時記錄原因並跳過啟動。同一台桌面可用另一份玩家設定啟動 Client。WASD／按住滑鼠右鍵可操作桌面預覽。
 4. Quest 3 須開啟開發者模式，USB 連接並在頭盔內授權 ADB。部署每台不同玩家設定：
 
    ```powershell
