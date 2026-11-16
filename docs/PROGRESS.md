@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 核對指定房間的環境執行畫格
+
+- 戰後驗收工具可在獨立場的 `SetEnvironment` 參照中指定 `roomIds`。原環境批次須完整對應所列房間及其原場次，每房都要有對應管理序號的有效執行畫格。全館與合併場可沿用原驗收設定。 [操作方式](EXTERNAL_CLIENTS.md#核對指定獨立房間的環境批次)
+- 以管理包 0.31.230 和本機 IPC 建立五間模擬場，保留原 API 的環境回覆、五房雙封存與驗收 ZIP。從已取得服務回條的來源封包建立測試日誌，各場四格。第 1、4 房在管理序號 5 的第 3 格確認雷雨、夜間及閃電。錯房、缺 `roomIds` 及錯管理序號的三份副本均被拒絕，原 ZIP、回覆與日誌 SHA-256 一致。玩家日誌、啟動器報告及 UDP 端點資料使用測試夾具，沒有啟動 Unity 或開啟實際 TCP／UDP 監聽。 [核對結果](../artifacts/scoped-environment-field-20261117/api-fixture-03/verified.json) · [拒絕紀錄](../artifacts/scoped-environment-field-20261117/api-fixture-03/integration-proof.json)
+- 戰後驗收工具的 147 項 Python 測試通過。用既有 Windows 0.50.6 原生封存離線重查未指定房號的全館格式。獨立及合併各 25 席、四批指令，合計 24 個原執行畫格及 1,670 格錄製均通過。GitHub Actions 對 `3891580` 回報帳務或用量限制，工作未啟動。Quest USB 仍無 ADB 介面，實機與跨機測試待驗。 [獨立場](../artifacts/scoped-environment-field-20261117/archived-independent-verified.json) · [合併場](../artifacts/scoped-environment-field-20261117/archived-linked-verified.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43975274906)
+
 ## 2026-11-17 在主控台查閱五房硬體模擬報告
 
 - 管理台 0.31.230 可由主控匯入五房核對工具的 JSON 摘要，檢視各房終止原因、模擬確認、取消及失敗數。含原設定的報告提供逐席結果。房間換場時更新場次比對，登出或離開工作區會清除摘要。檔案在瀏覽器內讀取。 [操作方式](HARDWARE.md#在主控台查看五房模擬摘要)
