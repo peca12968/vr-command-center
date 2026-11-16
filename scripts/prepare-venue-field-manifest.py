@@ -235,6 +235,9 @@ def prepare(args, output):
             field.require(type(digest) is str and re.fullmatch(r'[0-9a-f]{64}', digest),
                           'Windows evidence inbox requires the original Windows release report')
         manifest['venueReleaseReport'] = ref(release_path)
+    field.verify_venue_server_release(release, launch, required=args.require_server_release)
+    if args.require_server_release:
+        manifest['requireServerRelease'] = True
     if args.windows_inbox is not None:
         inbox = args.windows_inbox.resolve(strict=True)
         field.require(inbox.is_dir(), 'Windows evidence inbox must be a directory')
@@ -315,6 +318,7 @@ def main():
     parser.add_argument('--reconnect-source-plan', type=Path, help='Ordered IPv4 changes for seats in the original End batch')
     parser.add_argument('--udp-preflight-batch', action='append', type=Path)
     parser.add_argument('--verified-start-receipt', type=Path, help='Original Windows verified-start receipt')
+    parser.add_argument('--require-server-release', action='store_true', help='Require the terminal Windows server package to match the original venue release report')
     parser.add_argument('--room-alignment-bundle', type=Path, help='Original MR or mixed venue deployment ZIP')
     parser.add_argument('--quest-capture-report', action='append', type=Path, help='Original batch logcat capture report; repeat for separate batches')
     parser.add_argument('--quest-network-plan', type=Path, help='Original Quest IPv4 plan')
@@ -326,6 +330,8 @@ def main():
         parser.error('--reconnect-source-plan requires --venue-network-plan and --verify-reconnect-history')
     if args.windows_inbox is not None and args.venue_release_report is None:
         parser.error('--windows-inbox requires --venue-release-report')
+    if args.require_server_release and args.venue_release_report is None:
+        parser.error('--require-server-release requires --venue-release-report')
     if args.windows_seat_map is not None and args.windows_inbox is None:
         parser.error('--windows-seat-map requires --windows-inbox')
     if args.windows_station_addresses is not None and args.windows_seat_map is None:

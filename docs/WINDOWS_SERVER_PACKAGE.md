@@ -9,7 +9,7 @@
 & .\Launch-Server.exe --venue-check C:\Delivery\venue-plan.json --release-report C:\Delivery\venue-release.json --report C:\Delivery\venue-preview.json
 ```
 
-在 `--venue-run` 加入相同參數，即可於啟動時重新核對。完成核對的報告、五房預覽、就緒與收尾檔均可查到 `serverManifestSha256`。使用 `start-verified-venue.py` 時，將同一份 `--release-report` 帶入。工具會以相同報告重做預覽與啟動。 [產生原發行報告](EXTERNAL_CLIENTS.md#發送前離線核對交付套件)
+在 `--venue-run` 加入相同參數，即可於啟動時重新核對。完成核對的報告、五房預覽、就緒與收尾檔均可查到 `serverManifestSha256`。使用 `start-verified-venue.py` 時，將同一份 `--release-report` 帶入。工具會以相同報告重做預覽與啟動。 [產生原發行報告](EXTERNAL_CLIENTS.md#發送前離線核對交付套件) · [戰後核對伺服器發行](EXTERNAL_CLIENTS.md#核對五房伺服器發行版本)
 
 2026-11-16 `VRCommand-GameServer-0.50.11-1.24-win-x64.zip` 為 84,985,912 bytes，SHA-256 `3b6f84c96b05daba8b2f72202b7db13bcb0b3217feba4459adf1b5a395f00bbe`。解壓核對 331 筆清單，已和 Quest 0.50.11 核對來源及網路識別。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.11-1.24-win-x64.zip) · [發行報告](../artifacts/venue-release-quest-reconnect-0511.json)
 

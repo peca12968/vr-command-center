@@ -907,6 +907,12 @@ Quest 0.50.11 起，原程序重連後會在新連線第一次進入執行中時
 
 同一個 `verify-field-results.py --venue-manifest` 指令會核對所有席位。Windows 核對退出報告的清單雜湊、原日誌及伺服器確認的最終戰績。Quest 核對共用報告的 APK 雜湊、原部署、入場及戰績。缺少任何席位的原證據、換用其他席位的報告或使用不同發行包時，整批拒絕。成功摘要的 `venueRelease` 列出發行報告雜湊及各平台核對席位數。僅核對 Quest 時仍可沿用原有的 `questDeployments.releaseReport` 格式。實體設備與主機身分依現場驗收。
 
+### 核對五房伺服器發行版本
+
+同時提供 `venueReleaseReport` 和含 `serverManifestSha256` 的五房終止報告時，驗收會比對兩份檔案的伺服器清單摘要。成功時 `venueRelease.server` 會列出摘要及核對到的原場次數。若一併提交 `verifiedVenueStart`，也會比對啟動回條引用的原就緒檔與 UDP 報告引用的原預覽。任一檔案的摘要不同，驗收會失敗。
+
+本次驗收若要求伺服器發行證據，準備清單時同時指定 `--venue-release-report` 和 `--require-server-release`。手動建立的 `venue.json` 可填 `"requireServerRelease": true`。啟動時須用原發行報告執行五房命令，讓終止檔保存核對結果。 [五房啟動方式](WINDOWS_SERVER_PACKAGE.md#依場館發行報告核對伺服器包)
+
 ### 收集 Windows 玩家驗收 ZIP
 
 玩家以啟動器 1.10 核對本次發行並完成場次後，從「開啟本次紀錄資料夾」取出 `player-evidence.zip`。請把每位玩家的原 ZIP 放在同批私人資料夾，並記錄該電腦本次使用的 IPv4。在 `venue.json` 保留 `venueReleaseReport`，於 `windowsPlayers` 或逐場 `players` 使用下列格式。

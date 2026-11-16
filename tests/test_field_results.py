@@ -738,6 +738,38 @@ class FieldResultsTests(unittest.TestCase):
                     self.assertEqual({'kind': kind, 'name': original.name, 'status': 'sha256-mismatch'},
                                      raised.exception.evidence)
 
+    def test_verified_start_compares_server_release_in_ready_terminal_and_preview(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            preview, ready, terminal_path, readiness, receipt_path = (root / f'{name}.json' for name in
+                ('preview', 'ready', 'terminal', 'readiness', 'receipt'))
+            expected = '1' * 64
+            checked = '2026-11-09T00:00:00+00:00'
+            terminal = {'sha256': 'b' * 64, 'instanceId': id_for(1), 'launchId': id_for(2), 'serverManifestSha256': expected}
+
+            def write(path, value):
+                raw = json.dumps(value).encode()
+                path.write_bytes(raw)
+                return hashlib.sha256(raw).hexdigest()
+
+            def verify(ready_digest, preview_digest):
+                preview_hash = write(preview, {'serverManifestSha256': preview_digest})
+                ready_hash = write(ready, {'schemaVersion': 1, 'status': 'venue-ready', 'topology': 'Linked',
+                    'instanceId': id_for(1), 'servers': [], 'serverManifestSha256': ready_digest})
+                readiness_hash = write(readiness, {'scope': 'venue-udp-preflight-only', 'complete': True, 'mode': 'Linked',
+                    'checkedAtUtc': checked, 'launchBinding': {'preview': preview.name, 'previewSha256': preview_hash}})
+                write(receipt_path, {'version': 1, 'scope': 'verified-windows-venue-start', 'mode': 'Linked',
+                    'checkedAtUtc': checked, 'terminalSha256': terminal['sha256'], 'readyReport': ready.name,
+                    'readinessSha256': readiness_hash, 'readySha256': ready_hash})
+                return field.read_verified_venue_start(receipt_path, readiness, terminal, {}, 'Linked',
+                                                       terminal_path=terminal_path)
+
+            self.assertEqual(id_for(2), verify(expected, expected)['launchId'])
+            with self.assertRaisesRegex(field.EvidenceError, 'ready and terminal reports do not share'):
+                verify('2' * 64, expected)
+            with self.assertRaisesRegex(field.EvidenceError, 'launch preview does not match'):
+                verify(expected, '3' * 64)
+
     def test_staged_venue_checks_original_batches_and_has_one_report_per_mode_and_size(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -3694,6 +3726,58 @@ class FieldResultsTests(unittest.TestCase):
             release_path.write_text(json.dumps(release), encoding='utf-8')
             with self.assertRaisesRegex(field.EvidenceError, 'differs from the original release APK'):
                 field.verify_venue(path)
+
+    def test_server_release_matches_original_terminal_batch_for_both_topologies(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, closure = venue_fixture(root, mode, with_journals=True)
+                terminal_path, terminal, moved = self.terminal_venue_fixture(root, manifest, closure)
+                release_path = self.add_shared_release(root, manifest, 0)
+                release = json.loads(release_path.read_text(encoding='utf-8-sig'))
+                digest = '4' * 64
+                release['windows']['serverManifestSha256'] = digest
+                release_path.write_text(json.dumps(release), encoding='utf-8')
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                self.assertNotIn('server', field.verify_venue(path)['venueRelease'])
+                manifest['requireServerRelease'] = True
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'original release-bound terminal venue launch report'):
+                    field.verify_venue(path)
+
+                terminal['serverManifestSha256'] = digest
+                terminal_path.write_text(json.dumps(terminal), encoding='utf-8')
+                verified = field.verify_venue(path)
+                expected = {'serverManifestSha256': digest, 'sessionsVerified': len(manifest['sessions'])}
+                self.assertEqual(expected, verified['venueRelease']['server'])
+                self.assertEqual(25, verified['venueRelease']['windows']['seatsVerified'])
+
+                packed = self.pack_venue(root, manifest)
+                command = [sys.executable, str(SCRIPT.with_name('prepare-venue-field-manifest.py')),
+                           '--venue-bundle', str(root / packed['venueBundle']), '--launcher-report', str(terminal_path),
+                           '--topology', 'same-host', '--server-ip', manifest['serverIps'][0], '--server-work-root', str(moved),
+                           '--venue-release-report', str(release_path), '--require-server-release']
+                prepared_path = root / 'prepared.json'
+                written = subprocess.run([*command, '--output', str(prepared_path)], capture_output=True, encoding='utf-8', timeout=30)
+                self.assertEqual(0, written.returncode, written.stderr)
+                prepared = json.loads(prepared_path.read_bytes())
+                self.assertIs(prepared['requireServerRelease'], True)
+                players = {entry['sessionId']: entry['players'] for entry in manifest['sessions']}
+                for entry in prepared['sessions']:
+                    entry['players'] = players[entry['sessionId']]
+                prepared_path.write_text(json.dumps(prepared), encoding='utf-8')
+                self.assertEqual(expected, field.verify_venue(prepared_path)['venueRelease']['server'])
+
+                terminal['serverManifestSha256'] = '5' * 64
+                terminal_path.write_text(json.dumps(terminal), encoding='utf-8')
+                path.write_text(json.dumps(dict(manifest, requireServerRelease=False)), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'does not match the original venue server release'):
+                    field.verify_venue(path)
+                rejected_path = root / 'rejected.json'
+                failed = subprocess.run([*command, '--output', str(rejected_path)], capture_output=True, encoding='utf-8', timeout=30)
+                self.assertEqual(1, failed.returncode, failed.stderr)
+                self.assertIn('does not match the original venue server release', failed.stderr)
+                self.assertFalse(rejected_path.exists())
 
     def test_shared_venue_release_can_recheck_original_link_metrics_proof(self):
         with tempfile.TemporaryDirectory() as directory:
