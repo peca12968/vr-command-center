@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 從配置檔一次套用勾選房間
+
+- 管理台 0.31.234 在五房獨立的配置檔預覽可勾選多個房間。各房套用檔案中本房的精確保存版本，保留其他房的選擇及任務草稿。所選房間重新檢查場地，切換模式或更換檔案會清除勾選。 [操作方式](MISSION_VERSIONS.md#在開場前保存五房任務配置)
+- 原始碼及最終解壓包各通過 10 項 Chromium 專項。以本機 IPC 和實際管理 API，只套用第 2 房 MR 與第 3 房歷史 VR 配置，再保存及建立五個準備場次，逐房核對原任務版本、模式、任務時長、物件及環境。場地檢查未回覆時建立按鈕停用。首輪解壓測試把「尚無已保存」誤當保存完成，新測試改等具名回條後通過。最終五個測試場次已結束，管理程序無 TCP 或 UDP 端點。 [驗證結果](../artifacts/venue-mission-selection-031234/package-v2/checks.json)
+- Node 133 項通過。Windows 管理包逐檔核對 589 檔，與既有 Windows、Quest 0.50.12 套件通過離線發行核對。GitHub Actions 對 `c0846a8` 回報帳務或支出上限，工作未啟動。Quest USB 仍無 ADB 偵錯介面，實機與跨機驗收待完成。 [下載管理包](../artifacts/venue-mission-selection-031234/VRCommand-ControlServer-0.31.234.zip) · [發行核對](../artifacts/venue-mission-selection-031234/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43983456467)
+
 ## 2026-11-17 封存後結束即時觀戰
 
 - 管理台 0.31.233 在全景及分房收到最後一格後核對原錄製封存，保留畫格與鏡頭、更新錄製清單並提供從頭回放。若只有封存狀態，串流中斷時沿用原錄製重連。封存事件若先於對應畫格，保留現在畫面並提示。 [觀戰操作](WORLD_RECORDING.md#即時觀戰斷線後重新連接)
