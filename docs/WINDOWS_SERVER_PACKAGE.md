@@ -123,7 +123,7 @@ Unity 0.47.0 伺服器可搭配控制台 0.31.14。啟動器 1.5 可選擇待開
 
 ### 以 UDP 預檢報告啟動五房
 
-可先用 `start-verified-venue.py --verify-only --launch-plan .\venue-plan.json --network-plan .\venue-network.json --readiness .\venue-readiness.json` 重驗完整預檢所引用的原檔。成功回傳 `udp-evidence-verified`，發現雙端原檔缺失或已逾期時，回傳 `udp-evidence-incomplete` 和待補房號、席號，退出碼為 1。這一步只核對檔案和預檢有效期限，實際啟動仍會向管理服務確認最新名冊與場次。
+可先用 `start-verified-venue.py --verify-only --launch-plan .\venue-plan.json --network-plan .\venue-network.json --readiness .\venue-readiness.json` 重驗全館預檢引用的原檔。完整且有效時回傳 `udp-evidence-verified`。未完成的報告也可帶入。工具會重驗其中保留的原檔，回傳 `udp-evidence-incomplete`、待補房號與席號，以及未配對、無法讀取或仍待處理的收件問題數，退出碼為 1。這一步只核對檔案和預檢有效期限，實際啟動須提供完整報告並向管理服務確認最新名冊與場次。
 
 待補席位的 `reason` 可指出原檔無法讀取（`unreadable-original`）、超過 30 分鐘（`expired`）、量測時間未早於核對時間（`clock-ahead`）、雙端屬不同交換（`exchange-mismatch`）、端點不符（`binding-mismatch`）或報告無效（`invalid-report`）。若可從一端的完成報告確認原計畫中的來源，`missingRole` 會指出需補的 `listener`（監聽端）或 `probe`（探測端）。若雙端都無法確認，請依待補席位與無法讀取的配對數量查找原檔。
 
@@ -405,12 +405,12 @@ Unity 冒煙和入場測試會同時核對玩家程式與管理 API 的啟動程
 pwsh -NoProfile -NonInteractive -File .\scripts\check-windows-firewall-notifications.ps1 -Executable .\artifacts\desktop\VrCommand.exe
 ```
 
-測試電腦使用私人網路時，可以從系統管理員 PowerShell 一次關閉私人網路的入站提示，再核對 `NotifyOnListen` 為 `False`。防火牆與現有允許和封鎖規則繼續生效。 [Microsoft Windows 防火牆命令列設定](https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/configure-with-command-line)
+要在這台電腦關閉防火牆入站允許視窗，可從系統管理員 PowerShell 一次關閉三種網路設定檔的入站通知，再從有效設定核對 `NotifyOnListen`。若只需處理私人網路，將第一行的 `Domain,Private,Public` 改為 `Private`。 [Microsoft Windows 防火牆命令列設定](https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/configure-with-command-line)
 
 ```powershell
-Set-NetFirewallProfile -Profile Private -NotifyOnListen False
-Get-NetFirewallProfile -PolicyStore ActiveStore -Name Private |
-    Select-Object Enabled, NotifyOnListen, DefaultInboundAction
+Set-NetFirewallProfile -Profile Domain,Private,Public -NotifyOnListen False
+Get-NetFirewallProfile -PolicyStore ActiveStore |
+    Select-Object Name, Enabled, NotifyOnListen, DefaultInboundAction
 ```
 
 ## 操作流程與目前限制

@@ -836,15 +836,39 @@ class LanPreflightTests(unittest.TestCase):
         self.assertEqual([original, windows], [row['pair'] for row in report['retrySources']])
         verify = [sys.executable, str(ROOT / 'scripts/start-verified-venue.py'), '--verify-only',
                   '--launch-plan', str(launch), '--network-plan', str(plan), '--readiness']
-        blocked = subprocess.run([*verify, str(self.root / readiness)], capture_output=True, timeout=15)
+        saved_directory = self.root / 'rechecked'
+        saved_directory.mkdir()
+        saved = saved_directory / 'retry.json'
+        original_readiness = (self.root / readiness).read_bytes()
+        blocked = subprocess.run([*verify, str(self.root / readiness), '--retry-output', str(saved)],
+                                 capture_output=True, timeout=15)
         self.assertEqual(1, blocked.returncode, blocked.stderr)
+        self.assertTrue(blocked.stdout, blocked.stderr)
+        self.assertEqual({'status': 'udp-evidence-incomplete', 'mode': 'Linked', 'verifiedSources': 2,
+                          'expectedSources': 3, 'unreadablePairs': 0, 'unmatchedPairs': 0,
+                          'pendingSeats': [{'roomId': 2, 'seat': 1, 'status': 'missing'}], 'retryReportSaved': True},
+                         json.loads(blocked.stdout))
+        self.assertEqual(original_readiness, (self.root / readiness).read_bytes())
+        saved_report = json.loads(saved.read_bytes())
+        self.assertFalse(saved_report['complete'])
+        self.assertEqual([self.root / p['probe'] for p in (original, windows)], [
+            (saved.parent / row['pair']['probe']).resolve() for row in saved_report['retrySources']])
+        self.assertEqual(launch, (saved.parent / saved_report['launchBinding']['plan']).resolve())
+        spec = importlib.util.spec_from_file_location('start_verified_venue', ROOT / 'scripts/start-verified-venue.py')
+        start = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(start)
+        with patch.object(start, 'own_launcher_processes') as own, patch.object(start.subprocess, 'Popen') as child:
+            with self.assertRaisesRegex(start.field.EvidenceError, 'Provide a complete venue UDP readiness report'):
+                start.launch(SimpleNamespace(readiness=saved, verify_only=False))
+        own.assert_not_called()
+        child.assert_not_called()
 
         complete_batch = self.venue_json('recovered-quest.json', {
             **document, 'complete': True, 'verifiedSeats': 2, 'groups': [{
                 'roomIds': rooms, 'complete': True, 'seats': [dict(first, stage='reused'), verified_row(2, recovered, 'verified')],
                 'udpSourcePreflights': [original, recovered]}]})
         before = {path.name: path.read_bytes() for path in self.root.iterdir() if path.is_file()}
-        complete = self.venue_check(plan, 'complete-readiness.json', '--retry-report', self.root / readiness,
+        complete = self.venue_check(plan, 'complete-readiness.json', '--retry-report', saved,
                                     '--batch', complete_batch, *options)
         self.assertEqual((True, 3, 2), (complete['complete'], complete['verifiedSources'], complete['retainedSources']))
         opened = subprocess.run([*verify, str(self.root / 'complete-readiness.json')], capture_output=True, timeout=15)
@@ -857,6 +881,12 @@ class LanPreflightTests(unittest.TestCase):
         self.assertEqual((0, 1), (refused['verifiedSources'], refused['unmatchedPairs']))
         changed = self.root / original['probe']
         changed.write_bytes(before[changed.name] + b'\n')
+        changed_readiness = subprocess.run([*verify, str(saved)], capture_output=True, timeout=15)
+        self.assertEqual(1, changed_readiness.returncode, changed_readiness.stderr)
+        verdict = json.loads(changed_readiness.stdout)
+        self.assertEqual(1, verdict['verifiedSources'])
+        self.assertEqual([{'roomId': 1, 'seat': 1, 'status': 'invalid-or-expired', 'reason': 'changed-original'},
+                          {'roomId': 2, 'seat': 1, 'status': 'missing'}], verdict['pendingSeats'])
         stale = self.venue_check(plan, 'changed-readiness.json', '--batch', batch, *options, status=1)
         self.assertEqual('changed-original', stale['groups'][0]['sources'][0]['reason'])
         probe = json.loads(before[changed.name])
@@ -866,6 +896,53 @@ class LanPreflightTests(unittest.TestCase):
             'roomIds': rooms, 'complete': False, 'seats': [verified_row(1, original, 'verified'), failed]}]})
         slow = self.venue_check(plan, 'slow-readiness.json', '--batch', wrong_deadline, *options, status=1)
         self.assertEqual('invalid-report', slow['groups'][0]['sources'][0]['reason'])
+
+    def test_offline_inspection_preserves_unmatched_inputs_when_every_planned_source_is_verified(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reserved:
+            reserved.bind((LOOPBACK, 0))
+            port = reserved.getsockname()[1]
+        rooms = list(range(1, 6))
+        plan = self.venue_json('complete-roster-network.json', {'version': 1, 'mode': 'Linked',
+            'endpoints': [{'roomIds': rooms, 'address': LOOPBACK, 'port': port}],
+            'sources': [{'roomId': room, 'seat': 1, 'address': '127.0.0.2'} for room in rooms]})
+        launch_value, preview_value = guarded_documents('Linked', [port])
+        launch = self.venue_json('unmatched-launch.json', launch_value)
+        preview = self.venue_json('unmatched-preview.json', preview_value)
+        planned = self.venue_pair(port, '127.0.0.2', 'planned')
+        unmatched = self.venue_pair(port, '127.0.0.3', 'unmatched')
+        pairs = self.venue_json('candidate-pairs.json', {'version': 1, 'pairs': [planned, unmatched]})
+        options = ('--launch-plan', launch, '--launcher-preview', preview)
+        first = self.root / 'unmatched-readiness.json'
+        report = self.venue_check(plan, first.name, '--pairs', pairs, *options, status=1)
+        self.assertEqual((False, 1, 1), (report['complete'], report['verifiedSources'], report['unmatchedPairs']))
+
+        saved = self.root / 'rechecked-unmatched.json'
+        command = [sys.executable, str(ROOT / 'scripts/start-verified-venue.py'), '--verify-only',
+                   '--launch-plan', str(launch), '--network-plan', str(plan), '--readiness', str(first),
+                   '--retry-output', str(saved)]
+        rejected = subprocess.run(command, capture_output=True, timeout=15)
+        self.assertEqual(1, rejected.returncode, rejected.stderr)
+        detail = json.loads(rejected.stdout)
+        self.assertEqual(('udp-evidence-incomplete', 1, [], True),
+                         (detail['status'], detail['unmatchedPairs'], detail['pendingSeats'], detail['retryReportSaved']))
+        retained = json.loads(saved.read_bytes())
+        self.assertEqual((False, 1, planned), (retained['complete'], retained['unmatchedPairs'], retained['retrySources'][0]['pair']))
+        complete = self.venue_check(plan, 'resolved-readiness.json', '--retry-report', saved, *options)
+        self.assertEqual((True, 1, 0), (complete['complete'], complete['retainedSources'], complete['unmatchedPairs']))
+
+        inbox = self.root / 'inbox'
+        inbox.mkdir()
+        shutil.copyfile(self.root / unmatched['probe'], inbox / 'unpaired-probe.json')
+        only_planned = self.venue_json('planned-pairs.json', {'version': 1, 'pairs': [planned]})
+        inbox_readiness = self.root / 'inbox-readiness.json'
+        inbox_report = self.venue_check(plan, inbox_readiness.name, '--pairs', only_planned, '--inbox', inbox, *options, status=1)
+        inbox_retry = self.root / 'rechecked-inbox.json'
+        inputs = command[:-3] + [str(inbox_readiness), '--retry-output', str(inbox_retry)]
+        result = subprocess.run(inputs, capture_output=True, timeout=15)
+        self.assertEqual(1, result.returncode, result.stderr)
+        detail = json.loads(result.stdout)
+        self.assertEqual(('udp-evidence-incomplete', 1, []), (detail['status'], detail['inboxIssues'], detail['pendingSeats']))
+        self.assertEqual(inbox_report['inbox'], json.loads(inbox_retry.read_bytes())['inbox'])
 
     def test_venue_independent_requires_a_pair_per_port_for_the_same_source(self):
         ports = []

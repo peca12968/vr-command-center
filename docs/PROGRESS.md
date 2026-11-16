@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-16 離線重驗未完成的全館 UDP 預檢
+
+- `start-verified-venue.py --verify-only` 可讀取未完成的全館報告，重驗保留的原始來源、列出待補房席及未配對的輸入，並可用 `--retry-output` 另存補測報告。正式啟動仍要求完整的原始預檢。 [操作方式](EXTERNAL_CLIENTS.md#開場前核對五房-udp-報告)
+- 以 Windows 迴環 UDP 和模擬 Android 的既有雙端資料重驗。合併場先確認 2 個來源，回報第 1 房第 1 席待補，補測後確認 3 個來源。獨立五房先確認 24 個來源，回報第 5 房第 5 席待補，補測後確認 25 個來源。兩場共 72 份原始檔案的雜湊核對一致。Quest USB 被動檢查仍只列出檔案傳輸介面，頭盔與跨機待驗。 [兩種模式回讀](../artifacts/venue-offline-retry-20261116-1608/offline-readback.log) · [USB 快照](../artifacts/venue-offline-retry-20261116-1608/usb-status.json)
+- 19 項 LAN 回歸通過，包含已改動的原始檔案、席位完整但仍有未配對來源、收件資料夾缺少對應端，以及未完成報告在啟動前遭拒。 [LAN 回歸](../artifacts/venue-offline-retry-20261116-1608/lan-final.log)
+- 新路徑的 `VrCommand.exe` 在防火牆查核回傳 2，原生冒煙工具在遊戲啟動前以退出碼 1 結束。觀察到該路徑的遊戲程序為零，也沒有建立執行目錄。修改 Windows 入站通知設定需要系統管理員權限，目前普通權限的終端機讀回通知為啟用。 [啟動查核結果](../artifacts/windows-notification-check-20261116-161700/result.json) · [一次設定方式](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
+
 ## 2026-11-16 全館預檢可保留 Quest 批次已通過的來源
 
 - 全館工具的 `--batch` 可讀取未完成的 Quest 批次，按原房席、端點與預定來源重驗已通過的雙端檔案。核對原雜湊、交換摘要、樣本數及原報告記錄的等待上限。缺少有效報告的席位仍列在全館報告並擋住開場。補測帶入未完成的全館報告及最新 Quest 報告時，相同路徑與原始雜湊的雙端檔案合計一次。 [操作方式](EXTERNAL_CLIENTS.md#開場前核對五房-udp-報告)

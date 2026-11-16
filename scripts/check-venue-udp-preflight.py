@@ -224,7 +224,7 @@ def read_retry(path, mode, plan_hash):
     return report, hashlib.sha256(raw).hexdigest()
 
 
-def retained_sources(path, report, mode, expected, launch_check, binding, checked_at):
+def retained_sources(path, report, mode, expected, launch_check, binding, checked_at, *, explain_failures=False):
     prior = field.read_udp_launch_binding(report, path.parent, mode)
     field.require(report.get('launcherPreview') == launch_check and (prior is None) == (binding is None)
                   and (prior is None or all(prior[0][key] == binding[key] for key in ('planSha256', 'previewSha256'))),
@@ -232,7 +232,7 @@ def retained_sources(path, report, mode, expected, launch_check, binding, checke
     rows = report.get('retrySources')
     field.require(type(rows) is list and 0 <= len(rows) <= len(expected), 'Retry report lacks its original verified sources')
     by_seats = {tuple(seats): address for address, seats in expected.items()}
-    valid, seen, previous_pairs = {}, set(), set()
+    valid, rejected, seen, previous_pairs = {}, {}, set(), set()
     for row in rows:
         field.require(type(row) is dict and set(row) == {'seats', 'pair', 'exchangeSha256', 'pairSha256'},
                       'Invalid verified source in retry report')
@@ -246,19 +246,22 @@ def retained_sources(path, report, mode, expected, launch_check, binding, checke
         try:
             paths = read_pair(row['pair'], path.parent)
             previous_pairs.add(paths)
-            field.require(probe_identity(paths[1]) == address, 'Retry reports name a different UDP source')
             hashes = field.udp_pair_hashes(paths)
-            field.require(hashes == row['pairSha256'], 'Retry pair differs from its original files')
-            summary, _ = verify_source(address, paths, checked_at, hashes)
+            if hashes != row['pairSha256']:
+                rejected[address] = 'changed-original'
+                continue
+            field.require(probe_identity(paths[1]) == address, 'Retry reports name a different UDP source')
+            summary, _ = verify_source(address, paths, checked_at, hashes, failure_reason=explain_failures)
             field.require(summary['exchangeSha256'] == row['exchangeSha256'], 'Retry exchange differs from the original pair')
-        except (OSError, ValueError, KeyError, TypeError, RecursionError):
+        except (OSError, ValueError, KeyError, TypeError, RecursionError) as error:
+            rejected[address] = getattr(error, 'reason', None) or 'invalid-report'
             continue
         valid[address] = paths, summary, hashes
-    return valid, seen - valid.keys(), previous_pairs
+    return valid, rejected, previous_pairs
 
 
 def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, launch_plan=None, retry_report=None, inbox=None,
-                *, require_distinct_remote_roster=False, explain_failures=False):
+                *, require_distinct_remote_roster=False, explain_failures=False, inspect_retry=False):
     document, raw = field.read_quest_document(plan)
     mode, endpoints, sources = field.parse_quest_network_plan(document, allow_shared_sources=True)
     inventory_checked = 'serverIps' in document
@@ -299,9 +302,10 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
         field.require_distinct_remote_sources(sources, endpoints.values())
         require_distinct_remote_roster = True
     if prior is not None:
-        retained, expired, previous_pairs = retained_sources(retry_report, prior, mode, expected, launch_check, binding, checked_at)
+        retained, rejected, previous_pairs = retained_sources(retry_report, prior, mode, expected, launch_check, binding,
+                                                              checked_at, explain_failures=explain_failures)
     else:
-        retained, expired, previous_pairs, prior_hash = {}, set(), set(), None
+        retained, rejected, previous_pairs, prior_hash = {}, {}, set(), None
     observed = defaultdict(list)
     path_counts = Counter()
     for address, (paths, _, _) in retained.items():
@@ -310,6 +314,19 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
     unmatched = unreadable = 0
     unreadable_sources = defaultdict(set)
     inbox_summary = None
+    if inspect_retry:
+        # This is an inspection of the old inputs. Only an explicit retry can resolve their issues.
+        field.require(prior is not None, 'Use an incomplete report for offline inspection')
+        unmatched = field.integer(prior.get('unmatchedPairs'), 0, 50)
+        unreadable = field.integer(prior.get('unreadablePairs'), 0, 50)
+        if 'inbox' in prior:
+            inbox_summary = prior['inbox']
+            field.require(type(inbox_summary) is dict and set(inbox_summary) == {'files', 'pairedExchanges', 'issues'}
+                          and type(inbox_summary['issues']) is list and len(inbox_summary['issues']) <= 100
+                          and all(type(issue) is dict for issue in inbox_summary['issues']),
+                          'Invalid UDP retry inbox summary')
+            field.integer(inbox_summary['files'], 0, 100)
+            field.integer(inbox_summary['pairedExchanges'], 0, 50)
     if inbox is not None:
         inbox_pairs, inbox_summary = load_inbox(inbox, expected)
     else:
@@ -360,8 +377,10 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
         row = results[address] = {'seats': seats, 'status': 'missing'}
         choices = observed[address]
         if not choices:
-            if address in expired:
+            if address in rejected:
                 row['status'] = 'invalid-or-expired'
+                if explain_failures:
+                    row['reason'] = rejected[address]
             elif address in unreadable_sources:
                 row['reason'] = 'unreadable-original'
                 if len(unreadable_sources[address]) == 1:
@@ -412,6 +431,7 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
 
     inbox_complete = inbox_summary is None or not inbox_summary['issues']
     complete = not (unmatched or unreadable) and inbox_complete and all(group['complete'] for group in groups) and launch_matches
+    field.require(not inspect_retry or not complete, 'Incomplete readiness has no outstanding UDP sources or report issues')
     return {'version': 1, 'scope': 'venue-udp-preflight-only', 'mode': mode,
             'networkPlanSha256': plan_hash,
             'network': 'same-host' if True in address_modes else 'private-lan-plan',

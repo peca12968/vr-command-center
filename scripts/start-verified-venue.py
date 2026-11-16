@@ -55,7 +55,9 @@ def launch(args):
         original = field.limited_read(stream)
     report = field.read_json(original.decode('utf-8-sig'))
     field.require(type(report) is dict and report.get('scope') == 'venue-udp-preflight-only'
-                  and report.get('complete') is True, 'Provide a complete venue UDP readiness report')
+                  and type(report.get('complete')) is bool, 'Provide a venue UDP readiness report')
+    inspect_retry = not report['complete']
+    field.require(args.verify_only or not inspect_retry, 'Provide a complete venue UDP readiness report')
     distinct = field.udp_preflight_distinct_roster(report) or args.require_distinct_remote_roster
     proof = field.read_udp_launch_binding(report, readiness.parent, report.get('mode'))
     field.require(proof is not None, 'Provide a readiness report bound to the original Windows plan and preview')
@@ -99,8 +101,10 @@ def launch(args):
         field.require(len(network_raw) <= field.MAX_QUEST_PLAN_BYTES, 'The network plan is too large')
         network = Path(directory) / 'venue-network.json'
         network.write_bytes(network_raw)
-        checked = preflight.check_venue(network, None, [readiness], retry_output or readiness, preview, snapshot,
-                                        require_distinct_remote_roster=distinct, explain_failures=args.verify_only)
+        checked = preflight.check_venue(network, None, [] if inspect_retry else [readiness], retry_output or readiness,
+                                        preview, snapshot, retry_report=readiness if inspect_retry else None,
+                                        require_distinct_remote_roster=distinct, explain_failures=args.verify_only,
+                                        inspect_retry=inspect_retry)
         with readiness.open('rb') as stream:
             field.require(checked['networkPlanSha256'] == report.get('networkPlanSha256')
                           and field.limited_read(stream) == original
@@ -124,6 +128,7 @@ def launch(args):
                               'expectedSources': checked['expectedSources'], 'unreadablePairs': checked['unreadablePairs'],
                               'unmatchedPairs': checked['unmatchedPairs'],
                               'pendingSeats': sorted(pending, key=lambda seat: (seat['roomId'], seat['seat'])),
+                              **({'inboxIssues': len(checked['inbox']['issues'])} if 'inbox' in checked else {}),
                               **({'retryReportSaved': True} if retry_output is not None and not checked['complete'] else {})}), flush=True)
             return 0 if checked['complete'] else 1
         field.require(checked['complete'], 'UDP readiness is no longer complete or within its original time window')
@@ -201,7 +206,8 @@ def write_start_receipt(path, ready_path, result_path, readiness, original, chec
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--verify-only', action='store_true', help='Recheck archived UDP evidence without contacting management or starting Windows')
+    parser.add_argument('--verify-only', action='store_true',
+                        help='Inspect complete or incomplete UDP readiness without contacting management or starting Windows')
     parser.add_argument('--retry-output', type=Path, help='With --verify-only, save an incomplete report for check-venue-udp-preflight.py --retry-report')
     parser.add_argument('--launcher', type=Path)
     parser.add_argument('--release-report', type=Path, help='Original release report supplied to both the fresh preview and Windows launch')
