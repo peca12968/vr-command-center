@@ -1,4 +1,4 @@
-import { MAX_REPLAY_BYTES, playerReplayEventFrames, readPlayerReplay, sourcePaused, sourceTransitions } from './player-replay-model.js';
+import { MAX_REPLAY_BYTES, playerReplayEventFrames, playerReplayPlayers, readPlayerReplay, sourcePaused, sourceTransitions } from './player-replay-model.js';
 import { recordedClock } from './mission-clock.js';
 import { eventNames } from './world-event-names.js';
 
@@ -8,6 +8,7 @@ const canvas = document.getElementById('replay-canvas');
 const loop = $('loop');
 const frameNumber = $('number');
 const eventKind = $('event-kind');
+const room = $('room'), follow = $('follow'), followStatus = $('follow-status');
 for (const [kind, label] of Object.entries(eventNames)) eventKind.add(new Option(label, kind));
 const loopPauseMilliseconds = 300;
 const weatherNames = { Clear: '晴朗', Rain: '下雨', Fog: '濃霧', Storm: '暴風雨' };
@@ -15,6 +16,7 @@ const phaseNames = { Preparing: '準備中', Running: '執行中', Paused: '已�
 let replay, scene, index = 0, cursor = 0, lastTime = 0, animation = 0, epoch = 0;
 let restartAt = null;
 let eventFrames = [], matchingEvents = [];
+let replayPlayers = [];
 
 function message(text, error = false) {
   $('message').textContent = text;
@@ -53,9 +55,37 @@ function filterEvents() {
   showFrameEvents();
 }
 
+function clearFollow() {
+  if (!follow.value) return;
+  follow.value = '';
+  followStatus.textContent = '';
+  scene.follow = false;
+  scene.select('');
+}
+
+function showFollowOptions() {
+  const selectedRoom = room.value;
+  const options = replayPlayers.filter(player => selectedRoom === 'all' || player.roomId === Number(selectedRoom));
+  follow.replaceChildren(new Option('不跟隨', ''), ...options.map(({ id, roomId, number }) =>
+    new Option(`房間 ${roomId} · 玩家 ${number}`, id)));
+  follow.disabled = options.length === 0;
+  followStatus.textContent = options.length ? '' : '這個範圍沒有玩家。';
+}
+
+function updateFollow(frame) {
+  const id = follow.value;
+  if (!id) return;
+  const present = frame.players.some(player => player.id === id && (room.value === 'all' || player.roomId === Number(room.value)));
+  scene.selected = present ? 'p:' + id : '';
+  scene.follow = present;
+  const status = present ? '' : '這一格沒有原角色，鏡頭停留在目前位置。';
+  if (followStatus.textContent !== status) followStatus.textContent = status;
+}
+
 function show(next, continuous = false) {
   const { packets } = replay;
   const packet = packets[next];
+  updateFollow(packet.frame);
   scene.show(packet.frame, packets[next - 1]?.frame, packet.events.filter(event => event.hasRay),
     { weather: packet.weather, lightning: packet.lightning }, continuous);
   index = next;
@@ -99,12 +129,14 @@ $('file').addEventListener('change', async () => {
     if (!scene) {
       const { ReplayScene } = await import('./replay-scene.js');
       if (own !== epoch) return;
-      scene = new ReplayScene(canvas, key => scene.select(key), () => {});
+      scene = new ReplayScene(canvas, key => { if (!follow.value) scene.select(key); }, clearFollow);
     }
     scene.load(candidate.header);
     const rooms = candidate.header.roomIds;
-    $('room').replaceChildren(...rooms.map(room => new Option('房間 ' + room, room)));
-    if (rooms.length > 1) $('room').prepend(new Option('全場俯視', 'all', true, true));
+    room.replaceChildren(...rooms.map(id => new Option('房間 ' + id, id)));
+    if (rooms.length > 1) room.prepend(new Option('全場俯視', 'all', true, true));
+    replayPlayers = playerReplayPlayers(candidate.packets);
+    showFollowOptions();
     replay = candidate;
     frameNumber.min = candidate.startFrame;
     frameNumber.max = candidate.endFrame;
@@ -119,7 +151,7 @@ $('file').addEventListener('change', async () => {
     timeline.max = candidate.packets.length - 1;
     $('view').hidden = false;
     scene.resize();
-    scene.preset('top', $('room').value);
+    scene.preset('top', room.value);
     eventFrames = playerReplayEventFrames(candidate.packets);
     filterEvents();
     show(0);
@@ -183,5 +215,22 @@ $('transition').addEventListener('change', event => {
   if (event.target.value !== '') openFrame(Number(event.target.value));
   event.target.value = '';
 });
-$('room').addEventListener('change', () => scene?.preset('top', $('room').value));
+room.addEventListener('change', () => {
+  if (!replay) return;
+  clearFollow();
+  showFollowOptions();
+  scene.preset('top', room.value);
+});
+follow.addEventListener('change', () => {
+  if (!replay) return;
+  if (!follow.value) {
+    scene.follow = false;
+    scene.select('');
+    followStatus.textContent = '';
+    return;
+  }
+  updateFollow(replay.packets[index].frame);
+  if (scene.follow) scene.radius = Math.min(scene.radius, scene.fitRadius(7));
+  scene.draw();
+});
 document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });

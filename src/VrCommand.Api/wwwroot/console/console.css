@@ -103,7 +103,7 @@
 #prop-layer [data-layout-trial]{opacity:.28}
 #player-replay-title,#player-replay-source{overflow-wrap:anywhere}
 .event-list .venue-launch-review-row{flex-direction:column;align-items:flex-start;gap:8px;overflow-wrap:anywhere}
-.replay-event-tools select{width:auto}
+.replay-event-tools select,.replay-follow-tools select{width:auto}
 @media(max-width:600px){.replay-event-tools label{flex-basis:100%}.replay-event-tools button{flex:1}}
 .venue-launch-review-row .button-row{width:100%;align-items:stretch}
 .venue-launch-room-readiness{flex:1 1 190px;min-width:0;padding:8px;border:1px solid var(--line);border-radius:4px}

@@ -21,7 +21,7 @@
       <h2 id="player-replay-title"></h2>
       <p id="player-replay-source" class="muted"></p>
       <div id="replay-viewport">
-        <canvas id="replay-canvas" aria-label="回放 3D 場景，可拖曳旋轉及滾輪縮放"></canvas>
+        <canvas id="replay-canvas" tabindex="0" aria-label="回放 3D 場景，可拖曳旋轉、方向鍵平移及滾輪縮放"></canvas>
         <div class="replay-overlay"><span id="player-replay-weather"></span><span id="player-replay-frame"></span></div>
       </div>
       <div class="replay-transport">
@@ -33,6 +33,10 @@
         <label class="check"><input id="player-replay-loop" type="checkbox">循環播放</label>
         <output id="player-replay-time"></output>
         <output id="player-replay-clock" hidden></output>
+      </div>
+      <div class="replay-transport replay-follow-tools">
+        <label>跟隨玩家<select id="player-replay-follow"></select></label>
+        <output id="player-replay-follow-status" role="status"></output>
       </div>
       <label>時間軸<input id="replay-timeline" type="range" min="0" value="0" step="1"></label>
       <form id="player-replay-jump" class="replay-transport">

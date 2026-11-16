@@ -75,6 +75,20 @@ export function sourcePaused(packet) {
   return packet?.suspended === true && packet.frame.phase === 'Paused';
 }
 
+export function playerReplayPlayers(packets) {
+  const players = new Map();
+  const roomCounts = new Map();
+  for (const { frame } of packets) {
+    for (const { id, roomId } of frame.players) {
+      if (players.has(id)) continue;
+      const number = (roomCounts.get(roomId) ?? 0) + 1;
+      roomCounts.set(roomId, number);
+      players.set(id, { id, roomId, number });
+    }
+  }
+  return [...players.values()].sort((left, right) => left.roomId - right.roomId || left.number - right.number);
+}
+
 export function playerReplayEventFrames(packets) {
   const frames = [];
   for (const [index, packet] of packets.entries()) {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { playerReplayEventFrames, readPlayerReplay, sourcePaused, sourceTransitions } from '../../src/VrCommand.Api/wwwroot/console/player-replay-model.js';
+import { playerReplayEventFrames, playerReplayPlayers, readPlayerReplay, sourcePaused, sourceTransitions } from '../../src/VrCommand.Api/wwwroot/console/player-replay-model.js';
 
 const point = { x: 0, y: 0, z: 0 };
 const actor = '71100000-0000-0000-0000-000000000000';
@@ -32,6 +32,17 @@ test('indexes only known saved events by their original frame in both file forma
     assert.deepEqual(playerReplayEventFrames(data.packets), [{ index: 0, counts: { ShotHit: 2, PlayerDamaged: 1 } }]);
     assert.deepEqual(playerReplayEventFrames(data.packets.slice(1)), []);
   }
+});
+
+test('numbers players by their first appearance within each room, keeping the same label after a gap', () => {
+  const a = { id: 'room-five-a', roomId: 5 };
+  const b = { id: 'room-three-a', roomId: 3 };
+  const c = { id: 'room-five-b', roomId: 5 };
+  const packets = [[a, b], [b, c], [c, a, b]].map(players => ({ frame: { players } }));
+  assert.deepEqual(playerReplayPlayers(packets), [
+    { ...b, number: 1 }, { ...a, number: 1 }, { ...c, number: 2 }
+  ]);
+  assert.deepEqual(playerReplayPlayers([{ frame: { players: [] } }]), []);
 });
 
 test('finds saved source pauses and running recoveries without counting an operator pause', () => {
