@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 受阻回放返回全館開場檢查
+
+- 管理台 0.31.209 在受阻快照提供「返回全館開場檢查」，把焦點移回全館控制標題。25 席合併與 VR／MR 混合五房的瀏覽器測試核對原開場條件、席位仍失效時停用開始、恢復後不經手動重新整理即可確認開場。若原快照比對遭拒，仍可返回；一般觀戰頁隱藏此動作。 [合併返回按鈕](../artifacts/desktop-guarded-openxr/20261116-143931-ce153a4f/refused-begin-linked-return.png) · [混合場返回按鈕](../artifacts/desktop-guarded-openxr/20261116-143931-ce153a4f/refused-begin-mixed-return.png)
+- 對照包 0.31.208 通過原受阻畫格核對後，等新按鈕逾時。首個無介面 Chromium 啟動因 Vulkan 初始化失敗結束，改用本機 Chrome 後完成對照。新包通過 50 項開場專測、101 項雙政策瀏覽器檢查及 32 項 Node 測試，解壓核對 568 檔。管理 API 使用本機 IPC，核對原程序無 TCP 監聽或 UDP 端點，兩輪已清理。 [原包對照](../artifacts/desktop-guarded-openxr/20261116-143711-1732cc58/browser.log) · [開場專測](../artifacts/desktop-guarded-openxr/20261116-143931-ce153a4f/checks.json) · [雙政策回歸](../artifacts/desktop-guarded-openxr/20261116-144024-bead66fd/checks.json) · [管理包](../artifacts/windows-control-return-opening-031209.zip)
+- 來源 `1620a25` 的管理包與現有 Windows 玩家及伺服器 0.50.12、Quest 0.50.12／77 通過離線發行核對。瀏覽器使用測試快照，實體頭盔、跨機和 MR 場地仍待驗收。 [發行核對](../artifacts/console-return-opening-20261116-143637/venue-release.json)
+
 ## 2026-11-16 Quest UDP 補測沿用原等待上限
 
 - 舊版接受把每包等待上限由 900 ms 改為 200 ms 的重試，也接受未記錄上限的報告。新版會保存 `sampleTimeoutMs`，在建立輸出目錄及探測前核對原值。沿用的每席雙端報告須再核對各筆 RTT。較舊的報告仍可供離線驗收，需要補測時另開始新批次。 [舊版反例](../artifacts/quest-udp-timeout-20261116-142923/before.log) · [補測方式](QUEST3.md#重試-quest-udp-預檢席位)
