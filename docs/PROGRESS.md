@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-16 Quest 單席安裝與票券更新沿用原 ADB 連線
+
+- 首次安裝與續測、單席 VR／MR 部署及票券更新改用同一套 ADB 連線選擇。先確認指定序號或唯一已授權裝置及其連線識別，再沿用該連線核對型號、安裝、傳檔、切換設定及觀察啟動。預檢會拒絕缺少或重複的連線識別。 [首次安裝](QUEST3.md#首次安裝與啟動檢查) · [票券更新](QUEST_RECONNECT.md#保留遊戲程序並更新票券)
+- 模擬原頭盔在型號查詢、首次安裝套件清單查詢或票券原檔讀取後斷線。對照版把後續安裝或傳輸指令送向接手同一 ADB 名稱的裝置。新版使三條流程停止在失效的原連線，保留原正式設定，替代裝置未收到指令。 [舊版反例](../artifacts/quest-single-adb-20261116-1528/before.log) · [部署回歸](../artifacts/quest-single-adb-20261116-1528/deploy-suite.log)
+- 部署套件執行 76 項測試，Windows PowerShell 5.1 的單一子案例因本機腳本政策略過。3 項 USB 診斷測試通過。以本機 Android SDK 的 `adb.exe` 及獨立迴環 ADB 測試服務跑單席部署，實際看到型號查詢及安裝前查詢都使用同一連線識別。模擬服務切斷原連線後，部署退出碼為 1。 [實際 ADB 用戶端紀錄](../artifacts/quest-single-adb-20261116-1528/native-adb-deploy.log) · [USB 診斷測試](../artifacts/quest-single-adb-20261116-1528/usb-tests.log)
+- 現有 Quest APK 0.50.12／77 的 SHA-256 與原發行報告相符。Windows 被動 USB 快照仍只列出 1 個檔案傳輸介面、0 個 ADB 介面，頭盔安裝與實機入場待驗。 [APK 核對](../artifacts/quest-single-adb-20261116-1528/apk-readback.json) · [USB 快照](../artifacts/quest-single-adb-20261116-1528/usb-status.json)
+
 ## 2026-11-16 Quest 五房部署沿用同一條 ADB 連線
 
 - 五房的完整與部分裝置清單以 `adb devices -l` 確認每席的連線識別，再用該識別核對頭盔身分、APK、檔案、遊戲啟動與 OpenXR。預檢會拒絕缺少連線識別或識別重複的項目。 [部署方式](QUEST3.md#用裝置清單部署-25-席)

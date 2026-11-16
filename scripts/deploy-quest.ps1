@@ -52,7 +52,7 @@ function Invoke-QuestAdb([string[]]$ArgumentList, [int]$MaximumMilliseconds = 0)
         & $AdbPath @ArgumentList
         return
     }
-    $command = if ($ArgumentList[0] -in '-s','-t') { $ArgumentList[2] } else { $ArgumentList[0] }
+    $command = if ($ArgumentList[0] -ceq '-t') { $ArgumentList[2] } else { $ArgumentList[0] }
     $operation = if ($command -eq 'shell' -and $ArgumentList[3] -eq 'am' -and $ArgumentList[4] -eq 'start') { 'activity launch' }
         elseif ($command -in 'install', 'devices', 'push', 'pull', 'logcat') { $command }
         else { 'shell command' }
@@ -892,9 +892,8 @@ function Confirm-TrackedSeats($Venue, [object[]]$Map, [switch]$IncludeAllHeadset
     return $report
 }
 
-function Get-QuestDeviceInventory([switch]$WithTransport) {
-    $arguments = if ($WithTransport) { @('devices', '-l') } else { @('devices') }
-    $lines = @(Invoke-QuestAdb $arguments)
+function Get-QuestDeviceInventory {
+    $lines = @(Invoke-QuestAdb @('devices', '-l'))
     if ($LASTEXITCODE -ne 0) { throw 'Could not list authorized Android devices.' }
     $inventory = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::Ordinal)
     $seenTransports = [Collections.Generic.HashSet[long]]::new()
@@ -903,13 +902,11 @@ function Get-QuestDeviceInventory([switch]$WithTransport) {
         if ($line -ceq 'List of devices attached' -or $line -cnotmatch '\A(\S+)[ \t]+(\S+)(?:[ \t]+(.*))?\z') { continue }
         $key = $Matches[1]; $status = $Matches[2]
         $transportId = 0L
-        if ($WithTransport) {
-            $fields = @($Matches[3] -csplit '[ \t]+' | Where-Object { $_ -clike 'transport_id:*' })
-            if ($fields.Count -eq 1 -and $fields[0] -cmatch '\Atransport_id:([1-9][0-9]{0,18})\z' -and
-                [long]::TryParse($Matches[1], [ref]$transportId)) {
-                if (-not $seenTransports.Add($transportId)) { [void]$duplicateTransports.Add($transportId) }
-            } elseif ($status -ceq 'device') { $status = 'transport-unavailable' }
-        }
+        $fields = @($Matches[3] -csplit '[ \t]+' | Where-Object { $_ -clike 'transport_id:*' })
+        if ($fields.Count -eq 1 -and $fields[0] -cmatch '\Atransport_id:([1-9][0-9]{0,18})\z' -and
+            [long]::TryParse($Matches[1], [ref]$transportId)) {
+            if (-not $seenTransports.Add($transportId)) { [void]$duplicateTransports.Add($transportId) }
+        } elseif ($status -ceq 'device') { $status = 'transport-unavailable' }
         if ($inventory.ContainsKey($key)) { $status = 'ambiguous' }
         $inventory[$key] = @{ Status = $status; TransportId = $transportId }
     }
@@ -917,6 +914,32 @@ function Get-QuestDeviceInventory([switch]$WithTransport) {
         if ($device.Status -ceq 'device' -and $duplicateTransports.Contains($device.TransportId)) { $device.Status = 'transport-ambiguous' }
     }
     return ,$inventory
+}
+
+function Get-SingleQuestTarget([string]$RequestedSerial) {
+    if ($RequestedSerial -and $RequestedSerial -cnotmatch '\A[A-Za-z0-9\[][A-Za-z0-9._:%\[\]-]{0,127}\z') {
+        throw 'Use an explicit ADB serial for the Quest 3.'
+    }
+    Confirm-QuestAdbStartup 'Provide the installed ADB executable.'
+    $inventory = Get-QuestDeviceInventory
+    if (-not $RequestedSerial) {
+        $available = @($inventory.GetEnumerator() | Where-Object {
+            $_.Value.Status -cin @('device', 'ambiguous', 'transport-unavailable', 'transport-ambiguous')
+        })
+        if ($available.Count -ne 1) {
+            throw 'Connect and authorize one Quest 3, or specify -Serial explicitly. On Windows, check USB and ADB with scripts/check-quest-usb.ps1.'
+        }
+        $RequestedSerial = $available[0].Key
+    }
+    $device = $inventory[$RequestedSerial]
+    if ($device.Status -cne 'device') {
+        $status = if ($device.Status -cin @('unauthorized', 'offline', 'ambiguous', 'transport-unavailable', 'transport-ambiguous')) {
+            $device.Status
+        } else { 'missing or unavailable' }
+        throw "Quest 3 ADB state: $status. On Windows, use scripts/check-quest-usb.ps1 to distinguish USB enumeration from ADB authorization."
+    }
+    # Keep using this transport even if the same serial becomes visible on a new connection.
+    return @('-t', [string]$device.TransportId)
 }
 
 function Read-QuestRelease([string]$Path) {
@@ -1229,7 +1252,7 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
     Confirm-QuestAdbStartup 'Android platform-tools are not installed.'
     $originalMap = $Map
     if ($Retry) { $Map = @($Map | Select-Object -Skip $Retry.Completed.Count) }
-    $inventory = Get-QuestDeviceInventory -WithTransport
+    $inventory = Get-QuestDeviceInventory
     $devices = @($Map | ForEach-Object {
         $preflightSeat = $_
         try { Get-MappedQuestStatus $preflightSeat $inventory $VersionCode $ExpectedHash }
@@ -1412,10 +1435,9 @@ function Publish-QuestFile([string[]]$Target, [string]$Local, [string]$Staging, 
 
 function Update-QuestPlayerTicket($ConnectionFile, $Ticket, $Target) {
     $fresh = $ConnectionFile.Document
-    if ($Serial -cnotmatch '\A[A-Za-z0-9\[][A-Za-z0-9._:%\[\]-]{0,127}\z') { throw 'Use an explicit ADB serial for the Quest 3.' }
-    Confirm-QuestAdbStartup 'Provide the installed ADB executable.'
     if ([Guid]::Empty -in @($Ticket.SessionId, $Ticket.PlayerId, $Ticket.AdmissionId)) { throw 'Use a player file for an original admission.' }
-    $model = Invoke-QuestAdb @('-s', $Serial, 'shell', 'getprop', 'ro.product.model') 2>$null
+    $deviceTarget = Get-SingleQuestTarget $Serial
+    $model = Invoke-QuestAdb ($deviceTarget + @('shell', 'getprop', 'ro.product.model')) 2>$null
     if ($LASTEXITCODE -ne 0 -or ($model -join "`n").Trim() -cne 'Quest 3') { throw 'Select an authorized Meta Quest 3.' }
 
     $remote = '/sdcard/Android/data/com.vrcommand.quest/files'
@@ -1424,7 +1446,7 @@ function Update-QuestPlayerTicket($ConnectionFile, $Ticket, $Target) {
     $alignmentPath = $null
     $local = [IO.Path]::GetTempFileName()
     try {
-        Invoke-QuestAdb @('-s', $Serial, 'pull', $destination, $local) *> $null
+        Invoke-QuestAdb ($deviceTarget + @('pull', $destination, $local)) *> $null
         if ($LASTEXITCODE -ne 0) { throw 'Could not read the original player configuration on the selected Quest.' }
         $original = Read-DeploymentJson $local 4096 'installed Quest configuration'
         $current = $original.Document
@@ -1447,7 +1469,7 @@ function Update-QuestPlayerTicket($ConnectionFile, $Ticket, $Target) {
                 $alignmentPath = "$remote/vr-room-alignment-$($Ticket.AlignmentHash).json"
                 $alignmentCopy = [IO.Path]::GetTempFileName()
                 try {
-                    Invoke-QuestAdb @('-s', $Serial, 'pull', $alignmentPath, $alignmentCopy) *> $null
+                    Invoke-QuestAdb ($deviceTarget + @('pull', $alignmentPath, $alignmentCopy)) *> $null
                     if ($LASTEXITCODE -ne 0) { throw 'Could not read the original locked MR alignment on the selected Quest.' }
                     $alignment = Read-RoomAlignment $alignmentCopy $Ticket.RoomId
                     if ($alignment.Hash -cne $Ticket.AlignmentHash) { throw 'The installed MR alignment does not match the locked hash.' }
@@ -1461,9 +1483,9 @@ function Update-QuestPlayerTicket($ConnectionFile, $Ticket, $Target) {
             $current.joinTicket = $Fresh.joinTicket
             [IO.File]::WriteAllText($local, ($current | ConvertTo-Json -Depth 4 -Compress))
             $staging = "$remote/vr-connection-$([Guid]::NewGuid().ToString('N')).tmp"
-            Publish-QuestFile @('-s', $Serial) $local $staging $destination 'Player ticket file' $expectedHash -BeforeActivation {
+            Publish-QuestFile $deviceTarget $local $staging $destination 'Player ticket file' $expectedHash -BeforeActivation {
                 if ($liveSeat) { Confirm-QuestPlayerReadback $liveSeat }
-                if ($alignmentPath) { Confirm-QuestFileHash @('-s', $Serial) $alignmentPath $Ticket.AlignmentHash 'Original locked MR alignment' }
+                if ($alignmentPath) { Confirm-QuestFileHash $deviceTarget $alignmentPath $Ticket.AlignmentHash 'Original locked MR alignment' }
             }
         }
     } finally { Remove-Item -LiteralPath $local }
@@ -1541,19 +1563,12 @@ function Set-QuestConnection([string[]]$Target, $Config, $Ticket, $Alignment, [s
 }
 
 function Invoke-QuestFirstLaunch([string]$Apk, $Release) {
-    if ($Serial -cnotmatch '\A[A-Za-z0-9\[][A-Za-z0-9._:%\[\]-]{0,127}\z') { throw 'Use an explicit ADB serial for the Quest 3.' }
-    Confirm-QuestAdbStartup 'Provide the installed ADB executable.'
-    $inventory = Get-QuestDeviceInventory
-    $deviceState = $inventory[$Serial].Status
-    if ($deviceState -cne 'device') {
-        if ($deviceState -cnotin @('unauthorized','offline','ambiguous')) { $deviceState = 'missing or unavailable' }
-        throw "Quest 3 ADB state: $deviceState. On Windows, use scripts/check-quest-usb.ps1 to distinguish USB enumeration from ADB authorization."
-    }
-    $model = @(Invoke-QuestAdb @('-s', $Serial, 'shell', 'getprop', 'ro.product.model') 2>$null)
+    $deviceTarget = Get-SingleQuestTarget $Serial
+    $model = @(Invoke-QuestAdb ($deviceTarget + @('shell', 'getprop', 'ro.product.model')) 2>$null)
     if ($LASTEXITCODE -ne 0 -or $model.Count -ne 1 -or $model[0].Trim() -cne 'Quest 3') { throw 'Select an authorized Meta Quest 3.' }
 
     $package = 'com.vrcommand.quest'
-    $installed = @(Invoke-QuestAdb @('-s', $Serial, 'shell', 'pm', 'list', 'packages', '-u', '--user', 'current', $package) 2>$null)
+    $installed = @(Invoke-QuestAdb ($deviceTarget + @('shell', 'pm', 'list', 'packages', '-u', '--user', 'current', $package)) 2>$null)
     if ($LASTEXITCODE -ne 0) { throw 'Could not check if the app is already present.' }
     $appPresent = $installed -ccontains "package:$package"
     if ($ResumeSmokeTest) {
@@ -1562,19 +1577,19 @@ function Invoke-QuestFirstLaunch([string]$Apk, $Release) {
         if ($appPresent) { throw 'The first-launch test requires a headset without an existing VR Command app. Use -ResumeSmokeTest to check the matching APK without a player configuration.' }
         $stagedApk = New-VerifiedQuestApk $Apk $Release.sha256
         try {
-            $install = @(Invoke-QuestAdb @('-s', $Serial, 'install', '-R', '--user', 'current', '--pkg', $package, $stagedApk) 2>$null)
+            $install = @(Invoke-QuestAdb ($deviceTarget + @('install', '-R', '--user', 'current', '--pkg', $package, $stagedApk)) 2>$null)
             if ($LASTEXITCODE -ne 0 -or $install -cnotcontains 'Success') { throw 'Quest APK installation did not return Success.' }
         } finally { Remove-Item -LiteralPath $stagedApk -ErrorAction SilentlyContinue }
     }
-    if ((Get-QuestApkStatus @('-s', $Serial) $Release.sha256) -cne 'ready') { throw 'Installed Quest APK could not be verified against the release report.' }
+    if ((Get-QuestApkStatus $deviceTarget $Release.sha256) -cne 'ready') { throw 'Installed Quest APK could not be verified against the release report.' }
 
     $config = '/sdcard/Android/data/com.vrcommand.quest/files/vr-connection.json'
-    Invoke-QuestAdb @('-s', $Serial, 'shell', 'test', '!', '-e', $config) | Out-Null
+    Invoke-QuestAdb ($deviceTarget + @('shell', 'test', '!', '-e', $config)) | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not confirm the Quest has no existing player configuration. App launch was skipped.' }
-    $activity = Get-QuestLauncherActivity @('-s', $Serial)
+    $activity = Get-QuestLauncherActivity $deviceTarget
     $nonce = if ($RequireOpenXR) { [Guid]::NewGuid().ToString('N') }
-    Start-QuestCheckedActivity @('-s', $Serial) $activity $nonce -Restart:$ResumeSmokeTest
-    $observation = Read-QuestLaunchedProcess @('-s', $Serial) $nonce
+    Start-QuestCheckedActivity $deviceTarget $activity $nonce -Restart:$ResumeSmokeTest
+    $observation = Read-QuestLaunchedProcess $deviceTarget $nonce
     $report = [ordered]@{
         phase = 'quest-first-launch'; status = 'process-observed'; model = 'Quest 3'; versionCode = $Release.versionCode
         apkVerified = $true; apkSha256 = $Release.sha256; venueReleaseReportSha256 = $Release.reportSha256
@@ -1850,18 +1865,12 @@ if ($CheckOnly) {
 }
 
 if (-not (Test-Path -LiteralPath $apk -PathType Leaf)) { throw 'Build the Quest APK before deploying.' }
-Confirm-QuestAdbStartup 'Android platform-tools are not installed.'
-if (-not $Serial) {
-    $devices = @(Invoke-QuestAdb @('devices') | Select-String '^([^\s]+)\s+device$' | ForEach-Object { $_.Matches[0].Groups[1].Value })
-    if ($LASTEXITCODE -ne 0) { throw 'Could not list authorized Android devices.' }
-    if ($devices.Count -ne 1) { throw 'Connect and authorize one Quest 3, or specify -Serial explicitly. On Windows, check USB and ADB with scripts/check-quest-usb.ps1.' }
-    $Serial = $devices[0]
-}
 $deploymentLock = Enter-QuestDeployment
 $stagedApk = $null
 $deployment = @{}
 try {
-    $model = Invoke-QuestAdb @('-s', $Serial, 'shell', 'getprop', 'ro.product.model')
+    $deviceTarget = Get-SingleQuestTarget $Serial
+    $model = Invoke-QuestAdb ($deviceTarget + @('shell', 'getprop', 'ro.product.model'))
     if ($LASTEXITCODE -ne 0) { throw 'Could not identify the selected Android device. On Windows, check USB and ADB with scripts/check-quest-usb.ps1.' }
     $model = ([string]$model).Trim()
     if ($model -ne 'Quest 3') { throw 'Selected device is not a Meta Quest 3. No app was installed.' }
@@ -1871,14 +1880,14 @@ try {
         $apk = $stagedApk
     }
     if ($liveSeat) { Confirm-QuestPlayerReadback $liveSeat }
-    if ($RequireOpenXR) { Invoke-QuestAdb @('-s', $Serial, 'install', '-r', $apk) *> $null }
-    else { Invoke-QuestAdb @('-s', $Serial, 'install', '-r', $apk) }
+    if ($RequireOpenXR) { Invoke-QuestAdb ($deviceTarget + @('install', '-r', $apk)) *> $null }
+    else { Invoke-QuestAdb ($deviceTarget + @('install', '-r', $apk)) }
     if ($LASTEXITCODE -ne 0) { throw 'APK installation failed.' }
-    if ($release -and (Get-QuestApkStatus @('-s', $Serial) $release.sha256) -cne 'ready') {
+    if ($release -and (Get-QuestApkStatus $deviceTarget $release.sha256) -cne 'ready') {
         throw 'Installed Quest APK could not be verified against the release report.'
     }
     if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') { Confirm-VenueReadback $venue -RequireLiveSource }
-    Set-QuestConnection @('-s', $Serial) $config $ticket $alignment -UsePassthrough:$Passthrough -RequestMixedReality:$isMixedReality `
+    Set-QuestConnection $deviceTarget $config $ticket $alignment -UsePassthrough:$Passthrough -RequestMixedReality:$isMixedReality `
         -LiveVenue $(if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') { $venue }) -LiveSeat $liveSeat -Deployment $deployment
 } finally {
     $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose()

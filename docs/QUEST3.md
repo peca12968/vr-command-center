@@ -56,6 +56,8 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -SmokeTest -Serial '<ADB 序號
 
 工具核對指定 Quest 3，在目前 Android 使用者下安裝 APK，並讀回裝置上的 APK 雜湊。沒有既有玩家設定時，工具等待 Android 確認啟動，接著讀取該程序的 Unity 與 AndroidRuntime 日誌，並在三秒後重查原程序。成功輸出 JSON 的 `status` 為 `process-observed`。`unityLogLines` 是查到的 Unity 日誌列數，允許為零。預設遇到既有安裝會停止。
 
+首次安裝、續測、單席部署與票券更新會在每次執行開始時從 `adb devices -l` 取得該裝置的 ADB 連線識別。從型號檢查到最後一步均使用這條連線。原連線消失後，本次指令會停止，可在原頭盔重新連線後用新的一輪核對。若同時有多台已授權裝置，單席部署須用 `-Serial` 指定目標。缺少或重複的連線識別會在寫入前回報 `transport-unavailable` 或 `transport-ambiguous`。 [ADB 命令參考](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/docs/user/adb.1.md)
+
 部署工具對原生 ADB 指令設有期限。安裝最多 180 秒，檔案傳輸與 `am start` 各 30 秒，其他指令通常 10 秒。逾時時結束本次 ADB 用戶端並回報，已啟用的 ADB 服務繼續供其他操作使用。若安裝或檔案切換逾時，請先核對頭盔上的現行版本及設定再重試。批次預檢可在各席列出 `adb-timeout`，部署中的逾時會保留失敗步驟。
 
 如果 APK 安裝完成後遇到暫時的啟動或日誌錯誤，可在原命令加上 `-ResumeSmokeTest`。工具先核對已安裝 APK 的雜湊與原發行報告一致，並確認沒有玩家連線設定，才停止該遊戲程序並重新啟動。應用程式資料會保留。成功回條的 `installedThisRun` 在這次續測為 `false`，本輪完成首次安裝時為 `true`。 [Android 啟動指令](https://developer.android.com/tools/adb#am)

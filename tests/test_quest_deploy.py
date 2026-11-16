@@ -27,14 +27,32 @@ ADB_FIXTURE = r"""
 $remote = Join-Path $env:QUEST_TEST_ROOT 'remote'
 $installedApp = Join-Path $env:QUEST_TEST_ROOT 'installed-app'
 $probeNonce = Join-Path $env:QUEST_TEST_ROOT 'openxr-probe'
+$disconnected = Join-Path $env:QUEST_TEST_ROOT 'disconnected'
 [IO.File]::AppendAllText((Join-Path $env:QUEST_TEST_ROOT 'adb.log'), (($args -join ' ') + "`n"))
 if ($args[0] -eq 'devices') {
     "List of devices attached"
-    "other`tunauthorized"
-    "fixture`tdevice"
+    if ($args[1] -ceq '-l') {
+        'other   unauthorized transport_id:42'
+        switch ($env:QUEST_TEST_FAIL) {
+            'missing-transport' { 'fixture   device' }
+            'duplicate-transport' { 'fixture   device transport_id:42' }
+            'multiple-authorized' { 'fixture   device transport_id:41'; 'spare   device transport_id:43' }
+            default { 'fixture   device product:quest3 model:Quest_3 transport_id:41' }
+        }
+    } else {
+        "other`tunauthorized"
+        "fixture`tdevice"
+    }
     exit 0
 }
-if ($args[0] -ne '-s' -or $args[1] -ne 'fixture') { exit 99 }
+if ($args[0] -ceq '-t' -and $args[1] -ceq '41') {
+    if ([IO.File]::Exists($disconnected)) { exit 1 }
+} elseif ($args[0] -ceq '-s' -and $args[1] -ceq 'fixture') {
+    if ([IO.File]::Exists($disconnected)) {
+        [IO.File]::AppendAllText((Join-Path $env:QUEST_TEST_ROOT 'replacement.log'), (($args -join ' ') + "`n"))
+        exit 1
+    }
+} else { exit 99 }
 switch ($args[2]) {
     'install' {
         if ($env:QUEST_TEST_RELEASE_HASH) {
@@ -73,6 +91,7 @@ switch ($args[2]) {
         $path = Join-Path $remote $Matches[1]
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { exit 1 }
         Copy-Item -LiteralPath $path -Destination $args[4]
+        if ($env:QUEST_TEST_FAIL -eq 'disconnect-after-pull') { [IO.File]::WriteAllText($disconnected, 'original transport gone') }
         exit 0
     }
     'shell' {
@@ -86,11 +105,13 @@ switch ($args[2]) {
             'getprop' {
                 if ($env:QUEST_TEST_FAIL -eq 'getprop') { exit 1 }
                 if ($env:QUEST_TEST_FAIL -eq 'model') { 'Quest 2' } else { 'Quest 3' }
+                if ($env:QUEST_TEST_FAIL -eq 'disconnect-after-model') { [IO.File]::WriteAllText($disconnected, 'original transport gone') }
                 exit 0
             }
             'pm' {
                 if (($args[4..9] -join ' ') -ceq 'list packages -u --user current com.vrcommand.quest') {
                     if (Test-Path -LiteralPath $installedApp) { 'package:com.vrcommand.quest' }
+                    if ($env:QUEST_TEST_FAIL -eq 'disconnect-after-inventory') { [IO.File]::WriteAllText($disconnected, 'original transport gone') }
                     exit 0
                 }
                 if (($args[4..13] -join ' ') -ceq 'resolve-activity --brief --user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p com.vrcommand.quest') {
@@ -329,6 +350,55 @@ class QuestDeployTests(unittest.TestCase):
         apk.parent.mkdir(parents=True)
         apk.write_bytes(b'mock APK')
 
+    def test_single_quest_operations_keep_the_original_transport_on_disconnect(self):
+        self.provision_apk()
+        run_cases = (
+            ('deploy', lambda: self.run_script('-Serial', 'fixture', failure='disconnect-after-model'),
+             'APK installation failed', ' install -r '),
+            ('first-launch', lambda: self.run_smoke(failure='disconnect-after-inventory'),
+             'installation did not return Success', ' install -R '),
+            ('ticket-refresh', lambda: self.run_refresh('disconnect-after-pull'),
+             'could not be copied', ' push '),
+        )
+        for operation, invoke, message, attempted in run_cases:
+            with self.subTest(operation=operation):
+                for name in ('adb.log', 'disconnected', 'replacement.log'):
+                    (self.root / name).unlink(missing_ok=True)
+                active = self.remote / 'vr-connection.json'
+                if operation == 'ticket-refresh':
+                    self.ticket_refresh(self.expiry - 300)
+                original = active.read_bytes() if active.exists() else None
+                result = invoke()
+                self.assertNotEqual(0, result.returncode)
+                replacement = self.root / 'replacement.log'
+                self.assertEqual('', replacement.read_text(encoding='utf-8') if replacement.exists() else '',
+                                 'An old serial must not deliver a command to a new transport')
+                self.assert_rejected(result, message)
+                commands = self.commands.read_text(encoding='utf-8').splitlines()
+                self.assertEqual('devices -l', commands[0])
+                self.assertTrue(all(line.startswith('-t 41 ') for line in commands[1:]))
+                self.assertEqual(1, sum(attempted in line for line in commands))
+                self.assertEqual(original, active.read_bytes() if active.exists() else None)
+
+    def test_single_quest_selection_requires_one_usable_transport(self):
+        self.provision_apk()
+        for fault, message in (
+            ('missing-transport', 'ADB state: transport-unavailable'),
+            ('duplicate-transport', 'ADB state: transport-ambiguous'),
+            ('multiple-authorized', 'specify -Serial explicitly'),
+        ):
+            with self.subTest(fault=fault):
+                self.commands.unlink(missing_ok=True)
+                self.assert_rejected(self.run_script(failure=fault), message)
+                self.assertEqual(['devices -l'], self.commands.read_text(encoding='utf-8').splitlines())
+        self.commands.unlink()
+        chosen = self.run_script('-Serial', 'fixture', failure='multiple-authorized')
+        self.assertEqual(0, chosen.returncode, chosen.stderr)
+        commands = self.commands.read_text(encoding='utf-8').splitlines()
+        self.assertEqual('devices -l', commands[0])
+        self.assertTrue(all(line.startswith('-t 41 ') for line in commands[1:]))
+        self.assertIn(' shell monkey ', commands[-1])
+
     @contextmanager
     def live_quest_check(self, config):
         requests = []
@@ -454,8 +524,9 @@ class QuestDeployTests(unittest.TestCase):
         failed = self.run_script(*flags, '-Serial', 'fixture', failure='installed-apk-mismatch', release_hash=expected)
         self.assert_rejected(failed, 'Installed Quest APK could not be verified')
         commands = self.commands.read_text(encoding='utf-8').splitlines()
-        self.assertEqual(4, len(commands))
-        staged = commands[1].split(' install -r ', 1)[1]
+        self.assertEqual(5, len(commands))
+        self.assertEqual('devices -l', commands[0])
+        staged = commands[2].split(' install -r ', 1)[1]
         self.assertNotEqual(str(apk), staged)
         self.assertFalse(Path(staged).exists())
         self.assertTrue(commands[-1].endswith('sha256sum /data/app/fixture/base.apk'))
@@ -634,7 +705,7 @@ class QuestDeployTests(unittest.TestCase):
                 commands = self.commands.read_text(encoding='utf-8')
                 if serial != 'fixture':
                     self.assertIn('scripts/check-quest-usb.ps1', result.stderr)
-                    self.assertEqual(commands.splitlines(), ['devices'])
+                    self.assertEqual(commands.splitlines(), ['devices -l'])
                 self.assertEqual(install, ' install ' in commands)
                 self.assertEqual(launch, ' am start ' in commands)
                 self.assertNotIn(' push ', commands)
@@ -685,7 +756,9 @@ class QuestDeployTests(unittest.TestCase):
                 self.assertEqual(dict(installed, joinTicket=fresh['joinTicket']), json.loads(current.read_bytes()))
                 self.assertEqual(self.plan.read_bytes(), alignment.read_bytes())
                 commands = self.commands.read_text(encoding='utf-8').splitlines()
-                self.assertEqual(4, len(commands))
+                self.assertEqual(5, len(commands))
+                self.assertEqual('devices -l', commands[0])
+                self.assertTrue(all(command.startswith('-t 41 ') for command in commands[1:]))
                 for phrase in ('getprop', 'pull', 'push', 'sha256sum'):
                     self.assertTrue(any(phrase in command for command in commands), commands)
                 self.assertNotIn(fresh['joinTicket'], result.stdout + result.stderr + '\n'.join(commands))
@@ -695,7 +768,7 @@ class QuestDeployTests(unittest.TestCase):
                 repeat = self.run_refresh()
                 self.assertEqual(0, repeat.returncode, repeat.stderr)
                 self.assertEqual('ticket-file-current', json.loads(repeat.stdout)['status'])
-                self.assertEqual(2, len(self.commands.read_text(encoding='utf-8').splitlines()))
+                self.assertEqual(3, len(self.commands.read_text(encoding='utf-8').splitlines()))
                 self.assertEqual(raw, current.read_bytes())
                 self.assertFalse(list(self.remote.glob('*.tmp')))
 
@@ -850,7 +923,7 @@ class QuestDeployTests(unittest.TestCase):
         configured = json.loads((self.remote / 'vr-connection.json').read_bytes())
         self.assertEqual({**self.player,'roomAlignmentSha256':digest,'questPassthrough':True,'requestMixedReality':True}, configured)
         commands = self.commands.read_text(encoding='utf-8').splitlines()
-        self.assertEqual('devices', commands[0])
+        self.assertEqual('devices -l', commands[0])
         alignment_readback = next(i for i, line in enumerate(commands) if 'shell sha256sum' in line and line.endswith(f'/vr-room-alignment-{digest}.json'))
         staged_config = next(i for i, line in enumerate(commands) if 'shell sha256sum' in line and '/vr-connection-' in line and line.endswith('.tmp'))
         stop = next(i for i, line in enumerate(commands) if 'shell am force-stop' in line)
@@ -2933,7 +3006,8 @@ else:
         self.assertEqual(files['room-04-alignment.json'], (remote / name).read_bytes())
         self.assertEqual({'vr-connection.json', name}, {file.name for file in remote.iterdir()})
         commands = (self.root / 'adb.log').read_text(encoding='utf-8').splitlines()
-        self.assertTrue(all(command.startswith('-s fixture ') for command in commands))
+        self.assertEqual('devices -l', commands[0])
+        self.assertTrue(all(command.startswith('-t 41 ') for command in commands[1:]))
         self.assertEqual(2, sum(' push ' in command for command in commands))
         self.assertIn('shell monkey', commands[-1])
         self.assertNotIn(config['joinTicket'], result.stdout + result.stderr + ''.join(commands))
@@ -3055,7 +3129,7 @@ else:
             self.assertFalse(list(remote.glob('*.tmp')))
             self.assertEqual(b'previous connection', (remote / 'vr-connection.json').read_bytes())
         else:
-            self.assertEqual(2, len(commands))
+            self.assertEqual(3, len(commands))
             self.assertFalse(list(remote.iterdir()))
         self.assertEqual(expected, reads)
 
