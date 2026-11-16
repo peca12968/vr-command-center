@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 依全館 UDP 報告補測未通過的 Quest 席位
+
+- `probe-quest-venue.py --venue-retry-report` 核對原網路清單、啟動計畫、預覽及仍有效的雙端證據，再選出原裝置對照表內待補測的 Quest 席位。若該對照表沒有待補席位，工具會在存取 ADB 前結束，並保留其他待補席位的數量。 [操作說明](QUEST3.md#從全館報告選出-quest-補測席位)
+- 使用 Windows 迴環、實際 Android SDK ADB 用戶端及模擬 Quest，分別排演五房獨立及合併各 25 席。兩場各只補第 5 房第 5 席，獨立來源核對從 9 增至 10，合併從 5 增至 6。兩場共 44 份原檔雜湊相符，開場離線重驗通過。 [補測紀錄](../artifacts/quest-venue-retest-20261116-1705/native-mixed-readback.json)
+- 已發行的管理台 0.31.212 在 Chromium 開啟兩場四份原報告，均正確顯示第 5 房第 5 席由缺少報告變為已核對，資料留在瀏覽器。22 項 LAN 與 13 項 Quest UDP 回歸通過，另驗證原預覽換檔會被拒絕。Java 測試組因防火牆啟動前查核而略過，頭盔及跨機遊戲仍待驗收。 [主控台讀回](../artifacts/quest-venue-retest-20261116-1705/console-roundtrip/checks.json) · [LAN 回歸](../artifacts/quest-venue-retest-20261116-1705/lan.log) · [Quest 回歸](../artifacts/quest-venue-retest-20261116-1705/quest.log)
+
 ## 2026-11-16 主控台檢視五房 UDP 待補席位
 
 - 管理台 0.31.212 的「核對全館預檢、啟動與封存」可直接讀取全館 UDP 預檢及補測報告。依房間及席位顯示已核對、逾時或缺少哪一端等狀態，也列出未配對、收件與計畫問題。檔案在瀏覽器本機解析，只有主控能開啟面板。 [操作說明](EXTERNAL_CLIENTS.md#補測未完成的全館-udp-預檢)

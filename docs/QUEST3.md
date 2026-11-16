@@ -176,6 +176,19 @@ python .\scripts\probe-quest-venue.py --adb $adb --device-map .\device-map.json 
 
 完成後用新一輪的 `preflight-report.json` 做場館核對。它仍會引用先前有效的原始雙端報告，請保留各輪資料夾與原相對位置。若更換裝置、來源 IPv4 或所用端點，請用更新的清單開始新批次。
 
+### 從全館報告選出 Quest 補測席位
+
+混用 Windows 與 Quest 時，可用未完成的全館 UDP 報告補測。這個流程使用全館原始網路清單、原裝置對照表，以及原報告引用的啟動計畫與預覽。工具會重新核對有效期限和雙端檔案，只探測仍待補測且在對照表內的 Quest 席位。其他待補席位的數量會列在 `pendingOtherSeats`。若映射的 Quest 席位均仍有效，工具會回報 `no-quest-retest` 並在存取 ADB 前結束。
+
+```powershell
+python .\scripts\probe-quest-venue.py --adb $adb --device-map .\device-map.json `
+  --network-plan .\venue-network.json --venue-retry-report .\venue-readiness.json `
+  --launch-plan .\venue-plan.json --launcher-preview .\venue-preview.json `
+  --output-directory .\quest-venue-retest
+```
+
+新資料夾的 `preflight-report.json` 包含本輪補測的席位。用全館工具的 `--retry-report .\venue-readiness.json` 加上 `--batch .\quest-venue-retest\preflight-report.json`，以相同網路清單及原啟動檔重驗、合併。若仍有 Windows 缺件，可加上該批新增的雙端報告。 [全館補測](EXTERNAL_CLIENTS.md#補測未完成的全館-udp-預檢)
+
 ## 追蹤恢復後的武器輸入
 
 0.50.12／77 以右手指向姿態的位置與旋轉追蹤判定能否發布頭手姿態及處理武器輸入。握持姿態仍有效但指向追蹤失效時，玩家要等指向追蹤恢復，再放開並按下扳機或換彈鍵。此版已建置 ARM64 APK 並核對簽章，頭盔待驗。 [Quest APK](../artifacts/quest/VrCommand.apk) · [共同發行核對](../artifacts/vive-release-05012-fb9bcabe/venue-release.json)

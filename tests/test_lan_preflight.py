@@ -435,6 +435,63 @@ class LanPreflightTests(unittest.TestCase):
         self.assertTrue(report.is_file(), result.stderr)
         return json.loads(report.read_text(encoding='utf-8'))
 
+    def test_quest_retry_targets_only_current_pending_seats_from_a_full_venue_report(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reserve:
+            reserve.bind((LOOPBACK, 0))
+            first_port = reserve.getsockname()[1]
+        ports = [first_port, *[port for port in range(7777, 7782) if port != first_port][:4]]
+        launch_value, preview_value = guarded_documents('Independent', ports)
+        launch = self.venue_json('venue-launch.json', launch_value)
+        preview = self.venue_json('venue-preview.json', preview_value)
+        network = self.venue_json('venue-network.json', {'version': 1, 'mode': 'Independent', 'endpoints': [
+            {'roomIds': [room], 'address': LOOPBACK, 'port': port} for room, port in enumerate(ports, 1)],
+            'sources': [{'roomId': room, 'seat': 1, 'address': f'127.0.0.{room + 1}'} for room in range(1, 6)]})
+        pair = self.venue_pair(first_port, '127.0.0.2', 'venue-verified')
+        pairs = self.venue_json('venue-pairs.json', {'version': 1, 'pairs': [pair]})
+        readiness = self.root / 'venue-incomplete.json'
+        report = self.venue_check(network, readiness.name, '--pairs', pairs, '--launch-plan', launch,
+                                 '--launcher-preview', preview, status=1)
+        self.assertEqual(1, report['verifiedSources'])
+        evidence = {path: path.read_bytes() for path in (network, launch, preview, readiness, *(self.root / name for name in pair.values()))}
+        device = {'roomId': 1, 'seat': 1, 'serial': 'fixture-one'}
+        mapping = self.venue_json('mapped.json', {'version': 1, 'seats': [device]})
+        output = self.root / 'quest-retest'
+        cli = [sys.executable, str(ROOT / 'scripts/probe-quest-venue.py'), '--network-plan', str(network),
+               '--device-map', str(mapping), '--venue-retry-report', str(readiness), '--launch-plan', str(launch),
+               '--launcher-preview', str(preview), '--adb', str(self.root / 'absent-adb.exe'), '--output-directory', str(output)]
+        no_op = subprocess.run(cli, capture_output=True, text=True, timeout=20)
+        self.assertEqual(0, no_op.returncode, no_op.stderr)
+        self.assertEqual({'status': 'no-quest-retest', 'pendingOtherSeats': 4}, json.loads(no_op.stdout))
+        self.assertFalse(output.exists())
+        network.write_bytes(evidence[network] + b'\n')
+        wrong_network = subprocess.run(cli, capture_output=True, text=True, timeout=20)
+        self.assertEqual(1, wrong_network.returncode, wrong_network.stdout)
+        self.assertIn('same original venue network plan', wrong_network.stderr)
+        self.assertFalse(output.exists())
+        network.write_bytes(evidence[network])
+
+        spec = importlib.util.spec_from_file_location('quest_venue_probe', ROOT / 'scripts/probe-quest-venue.py')
+        probe = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(probe)
+        mapping = self.venue_json('mapped.json', {'version': 1, 'seats': [device, {'roomId': 5, 'seat': 1, 'serial': 'fixture-five'}]})
+        launcher, _ = probe.launcher_proof(launch, preview, output)
+        retry_args = (mapping, network, readiness, output, launch, preview, launcher)
+        mode, groups, outside = probe.load_venue_retry(*retry_args)
+        self.assertEqual(('Independent', [[5]], 3), (mode, [group['roomIds'] for group in groups], outside))
+        self.assertEqual([{'roomId': 5, 'seat': 1, 'serial': 'fixture-five', 'address': '127.0.0.6'}], groups[0]['devices'])
+        modified = self.root / pair['probe']
+        modified.write_bytes(evidence[modified] + b'\n')
+        _, changed, outside = probe.load_venue_retry(*retry_args)
+        self.assertEqual(([[1], [5]], 3), ([group['roomIds'] for group in changed], outside))
+        modified.write_bytes(evidence[modified])
+        changed_preview = self.root / 'changed-preview.json'
+        changed_preview.write_bytes(evidence[preview] + b'\n')
+        changed_launcher, _ = probe.launcher_proof(launch, changed_preview, output)
+        with self.assertRaisesRegex(probe.field.EvidenceError, 'same original Windows plan and preview'):
+            probe.load_venue_retry(mapping, network, readiness, output, launch, changed_preview, changed_launcher)
+        self.assertEqual(evidence, {path: path.read_bytes() for path in evidence})
+        self.assertFalse(output.exists())
+
     def test_verified_start_checks_udp_evidence_after_the_live_preview_and_at_binding(self):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reserve:
             reserve.bind((LOOPBACK, 0))

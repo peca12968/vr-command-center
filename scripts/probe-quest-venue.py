@@ -21,9 +21,10 @@ ROOT = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location('quest_udp', ROOT / 'probe-quest-udp.py')
 quest_udp = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(quest_udp)
-FIELD_SPEC = importlib.util.spec_from_file_location('field_results', ROOT / 'verify-field-results.py')
-field = importlib.util.module_from_spec(FIELD_SPEC)
-FIELD_SPEC.loader.exec_module(field)
+PREFLIGHT_SPEC = importlib.util.spec_from_file_location('venue_preflight', ROOT / 'check-venue-udp-preflight.py')
+preflight = importlib.util.module_from_spec(PREFLIGHT_SPEC)
+PREFLIGHT_SPEC.loader.exec_module(preflight)
+field = preflight.field
 CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 PREFLIGHT_WINDOW = timedelta(minutes=30)
 
@@ -52,13 +53,35 @@ def load_plan(device_map_path, network_plan_path, *, launcher_preview=None):
         for group in checked['groups']:
             field.require(not group['issues'], 'Quest network plan differs from the Windows endpoint for room(s) '
                           + ', '.join(map(str, group['roomIds'])) + ' (' + ', '.join(group['issues']) + ')')
+    return mode, group_devices(endpoints, sources, serials)
+
+
+def group_devices(endpoints, sources, serials):
     groups = []
     for rooms, (address, port) in sorted(endpoints.items()):
         devices = [{'roomId': room, 'seat': seat, 'serial': serials[room, seat], 'address': sources[room, seat]}
                    for room, seat in sorted(serials) if room in rooms]
         if devices:
             groups.append({'roomIds': list(rooms), 'address': address, 'port': port, 'devices': devices})
-    return mode, groups
+    return groups
+
+
+def load_venue_retry(device_map, network_plan, retry_report, output, launch_plan=None, preview=None, launcher=None):
+    serials = field.read_quest_device_map(device_map)
+    document, raw = field.read_quest_document(network_plan)
+    mode, endpoints, sources = field.parse_quest_network_plan(document, allow_shared_sources=True)
+    field.require(serials.keys() <= sources.keys(), 'Every mapped Quest seat must exist in the original venue network plan')
+    checked = preflight.check_venue(network_plan, None, [], output, launcher_preview=preview, launch_plan=launch_plan,
+                                    retry_report=retry_report, inspect_retry=True)
+    field.require(checked['networkPlanSha256'] == hashlib.sha256(raw).hexdigest(), 'The original venue network plan changed during recheck')
+    if launcher is not None:
+        field.require(all(checked['launchBinding'][key] == launcher['launchBinding'][key] for key in ('planSha256', 'previewSha256')),
+                      'The original Windows plan or preview changed during recheck')
+    pending = {(seat['roomId'], seat['seat']) for group in checked['groups'] for source in group['sources']
+               if source['status'] != 'verified' for seat in source['seats']}
+    selected = {seat: serial for seat, serial in serials.items() if seat in pending}
+    field.require(len({sources[seat] for seat in selected}) == len(selected), 'Use a distinct IPv4 for each pending mapped Quest seat')
+    return mode, group_devices(endpoints, sources, selected), len(pending - serials.keys())
 
 
 def path_reference(path, directory):
@@ -320,7 +343,10 @@ def main():
     parser.add_argument('--launch-plan', type=Path, help='Original revision-guarded Windows launch plan')
     parser.add_argument('--launcher-preview', type=Path, help='Original successful Windows launcher preview')
     parser.add_argument('--output-directory', required=True, type=Path)
-    parser.add_argument('--retry-report', type=Path, help='Original batch report to retain fresh, verified seats from')
+    retry = parser.add_mutually_exclusive_group()
+    retry.add_argument('--retry-report', type=Path, help='Original Quest batch report to retain fresh, verified seats from')
+    retry.add_argument('--venue-retry-report', type=Path,
+                       help='Incomplete full-venue report to recheck and probe only pending mapped Quest seats')
     parser.add_argument('--count', type=int, default=5)
     parser.add_argument('--timeout-ms', type=int, default=900)
     args = parser.parse_args()
@@ -334,7 +360,15 @@ def main():
         directory = args.output_directory.resolve()
         launcher, preview = (launcher_proof(args.launch_plan, args.launcher_preview, directory)
                              if args.launch_plan is not None else (None, None))
-        mode, groups = load_plan(args.device_map, args.network_plan, launcher_preview=preview)
+        if args.venue_retry_report is None:
+            mode, groups = load_plan(args.device_map, args.network_plan, launcher_preview=preview)
+        else:
+            mode, groups, pending_other_seats = load_venue_retry(
+                args.device_map, args.network_plan, args.venue_retry_report, directory / 'preflight-report.json',
+                args.launch_plan, args.launcher_preview, launcher)
+            if not groups:
+                print(json.dumps({'status': 'no-quest-retest', 'pendingOtherSeats': pending_other_seats}))
+                return 0
         adb = args.adb.resolve(strict=True)
         powershell = (shutil.which('powershell.exe') if os.name == 'nt' else None) or shutil.which('pwsh')
         require(adb.is_file() and powershell is not None, 'ADB or PowerShell is missing.')
@@ -347,7 +381,10 @@ def main():
         parser.exit(1, f'Quest venue preflight rejected. {error}.\n')
     except (OSError, ValueError, argparse.ArgumentTypeError, TypeError, KeyError, RecursionError):
         parser.exit(1, 'Quest venue preflight could not start or save its report. Check the maps, retry report, tools and new output directory.\n')
-    print(json.dumps({key: report[key] for key in ('complete', 'expectedSeats', 'verifiedSeats', 'reusedSeats', 'interrupted')}))
+    summary = {key: report[key] for key in ('complete', 'expectedSeats', 'verifiedSeats', 'reusedSeats', 'interrupted')}
+    if args.venue_retry_report is not None:
+        summary['pendingOtherSeats'] = pending_other_seats
+    print(json.dumps(summary))
     return 0 if report['complete'] else 1
 
 
