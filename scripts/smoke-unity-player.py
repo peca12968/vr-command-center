@@ -5,8 +5,10 @@ The clients use the player's existing desktop synthetic head/hand controls.
 Private keys/configuration and evidence remain under ignored artifacts/.
 """
 import argparse,json,os,secrets,socket,subprocess,time,urllib.error,urllib.request,uuid
-from datetime import datetime,timezone
+import importlib.util
 from pathlib import Path
+import sys
+from live_world_frame import read_live_frame
 from windows_firewall import require_silent_windows_launch
 
 root=Path(__file__).resolve().parent.parent
@@ -16,6 +18,9 @@ parser.add_argument('--api-dll',type=Path,default=Path(os.environ.get('VR_COMMAN
 parser.add_argument('--seconds',type=int,default=8,choices=range(8,61))
 parser.add_argument('--linked',action='store_true',help='Link all five rooms, with one real desktop client in room 1 and another in room 5')
 parser.add_argument('--maximum-source-age-ms',type=int,default=1500)
+storage=parser.add_mutually_exclusive_group()
+storage.add_argument('--runtime-root',type=Path,help='Directory for new runtime files; default is local application data')
+storage.add_argument('--runtime-on-artifact-drive',action='store_true',help='Use the artifact drive for active journals to test that storage')
 args=parser.parse_args()
 if os.name!='nt': raise RuntimeError('This fixture requires a Windows Unity player')
 if not args.player_exe.is_file() or not args.api_dll.is_file(): raise RuntimeError('Build the current Unity Desktop player and API before running this fixture')
@@ -23,6 +28,11 @@ if not 500<=args.maximum_source_age_ms<=10000: raise ValueError('Source age thre
 require_silent_windows_launch(args.player_exe)
 directory=root/'artifacts/unity-player-smoke'/(time.strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:8])
 directory.mkdir(parents=True,exist_ok=False)
+runtime_directory=directory
+if not args.runtime_on_artifact_drive:
+    runtime_root=args.runtime_root or Path(os.environ['LOCALAPPDATA'])/'VrCommand'/'UnitySmokeRuns'
+    runtime_directory=runtime_root.resolve()/directory.name
+    if runtime_directory!=directory: runtime_directory.mkdir(parents=True,exist_ok=False)
 tokens={name:secrets.token_hex(32) for name in ['Master','GameServer']}
 (directory/'keys.json').write_text(json.dumps({'OperatorKeys':tokens}),encoding='utf-8')
 with socket.socket() as probe:
@@ -31,11 +41,11 @@ with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as probe:
     probe.bind(('127.0.0.1',0)); game_port=probe.getsockname()[1]
 base=f'http://127.0.0.1:{http_port}'
 environment={k:v for k,v in os.environ.items() if not k.lower().startswith('operatorkeys__') and k.lower() not in ['operatorkeyfile','playerticketsigningkey']}
-environment.update(DataDirectory=str(directory/'missions'),SessionDataDirectory=str(directory/'sessions'),OperatorKeyFile=str(directory/'keys.json'),Logging__LogLevel__Default='Warning')
+environment.update(DataDirectory=str(runtime_directory/'missions'),SessionDataDirectory=str(runtime_directory/'sessions'),OperatorKeyFile=str(directory/'keys.json'),Logging__LogLevel__Default='Warning')
 api_log=(directory/'api.log').open('wb')
 processes=[]
 session=None
-source_ages=[]
+observations=[]
 def request(route,body=None,admission=None):
     headers={'Authorization':'Bearer '+tokens['Master'],'Content-Type':'application/json'}
     if admission: headers['If-Match-Admission']=admission
@@ -44,19 +54,15 @@ def request(route,body=None,admission=None):
 def control(action):
     return request('/api/sessions/'+session+'/commands',{'commandId':str(uuid.uuid4()),'action':action})
 def live_frame():
-    world=request('/api/sessions/'+session+'/world')
     with urllib.request.urlopen(urllib.request.Request(base+'/api/sessions/'+session+'/world/watch?mode=live',headers={'Authorization':'Bearer '+tokens['Master']}),timeout=5) as response:
-        kind=''
-        for _ in range(60):
-            line=response.readline().decode().strip()
-            if line.startswith('event: '): kind=line[7:]
-            if kind=='frame' and line.startswith('data: '):
-                frame=json.loads(line[6:])
-                age=(datetime.now(timezone.utc)-datetime.fromisoformat(world['capturedAtUtc'])).total_seconds()
-                source_ages.append(age)
-                (directory/'progress.json').write_text(json.dumps({'capturedAtUtc':world['capturedAtUtc'],'acceptedSequence':world['acceptedSequence'],'tick':frame['packet']['frame']['tick'],'phase':frame['packet']['frame']['phase'],'sourceAgeSeconds':age,'wallTimeUtc':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())}),encoding='utf-8')
-                return frame
-    return None
+        sample=read_live_frame(response,session)
+    if sample is None: return None
+    frame, observation=sample
+    if observation['sourceAgeSeconds'] is None: raise RuntimeError('Native source capture UTC is missing')
+    observation.update(tick=frame['packet']['frame']['tick'],phase=frame['packet']['frame']['phase'])
+    observations.append(observation)
+    (directory/'progress.json').write_text(json.dumps(observation),encoding='utf-8')
+    return frame
 def launch(name,config):
     path=directory/(name+'.json'); path.write_text(json.dumps(config),encoding='utf-8')
     process=subprocess.Popen([str(args.player_exe.resolve()),'-batchmode','-nographics','-logFile',str(directory/(name+'.log')),'--vr-config',str(path)],cwd=args.player_exe.resolve().parent,creationflags=subprocess.CREATE_NO_WINDOW)
@@ -83,7 +89,7 @@ try:
     players=[str(uuid.uuid4()),str(uuid.uuid4())]
     for index,identity in enumerate(players):
         state=request('/api/sessions/'+session+'/players',{'playerId':identity,'name':'Desktop Simulation '+str(index+1),'roomId':client_rooms[index],'headset':'Quest3'})
-    launch('server',{'role':'Server','address':'127.0.0.1','listenAddress':'127.0.0.1','port':game_port,'sessionId':session,'managementApiUrl':base,'gameServerKey':tokens['GameServer'],'telemetryOrigin':'Simulation','telemetryDirectory':str(directory/'telemetry')})
+    launch('server',{'role':'Server','address':'127.0.0.1','listenAddress':'127.0.0.1','port':game_port,'sessionId':session,'managementApiUrl':base,'gameServerKey':tokens['GameServer'],'telemetryOrigin':'Simulation','telemetryDirectory':str(runtime_directory/'telemetry')})
     wait_for(lambda:request('/api/sessions/'+session+'/world'),60,'Unity server world publication')
     for index,identity in enumerate(players):
         player=next(p for p in state['players'] if p['id']==identity)
@@ -93,11 +99,14 @@ try:
         frame=live_frame()
         return frame if frame and sum(p['connected'] and p['rig']['kind']=='Simulated' for p in frame['packet']['frame']['players'])==2 else None
     connected=wait_for(both_connected,90,'two authenticated native clients with synthetic rigs')
-    source_ages.clear()
+    observations.clear()
     control('Begin')
     target_tick=args.seconds*20
     running=wait_for(lambda: (frame if (frame:=live_frame()) and frame['packet']['frame']['tick']>=target_tick else None),args.seconds*3+40,'native running world boundary')
-    assert source_ages and max(source_ages)<args.maximum_source_age_ms/1000, 'Native live source exceeded its freshness threshold: '+str(max(source_ages))
+    peak_running_age=max(observations,key=lambda row:row['sourceAgeSeconds'])
+    if peak_running_age['sourceAgeSeconds']>=args.maximum_source_age_ms/1000:
+        (directory/'freshness-failure.json').write_text(json.dumps(peak_running_age),encoding='utf-8')
+        raise RuntimeError('Native live source exceeded its freshness threshold: '+str(peak_running_age['sourceAgeSeconds']))
     control('Pause')
     paused=wait_for(lambda: (frame if (frame:=live_frame()) and frame['packet']['frame']['phase']=='Paused' else None),15,'native pause')
     tick=paused['packet']['frame']['tick']; time.sleep(.5)
@@ -111,13 +120,12 @@ try:
     assert world['header']['roomIds']==room_ids
     assert sorted(player['roomId'] for player in stats['players'])==sorted(client_rooms)
     final=live_frame()
-    assert final['packet']['frame']['phase']=='Ended'
+    assert final['packet']['frame']['phase']=='Ended' and final['packet']['sequence']==world['acceptedSequence']
     assert sorted(final['statistics'],key=lambda p:p['playerId'])==sorted(stats['players'],key=lambda p:p['playerId']), 'Native replay statistics disagree with the sealed ledger'
     assert request('/api/sessions')==[]
-    summary={'sessionId':session,'source':'Actual Unity Windows server + 2 desktop clients; Simulation rigs','headsets':0,'world':world,'statistics':stats,'connectedFrame':connected['packet']['sequence'],'runningTick':running['packet']['frame']['tick'],'pausedTick':tick,'maximumObservedSourceAgeSeconds':max(source_ages),'activeSessions':0,'mode':'Linked' if args.linked else 'Independent','clientRooms':client_rooms}
-    (directory/'summary.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
-    print(json.dumps({'success':True,'directory':str(directory),'frames':world['acceptedSequence'],'players':len(stats['players']),'tick':tick,'maximumSourceAgeSeconds':summary['maximumObservedSourceAgeSeconds'],'headsets':0}),flush=True)
+    summary={'sessionId':session,'source':'Actual Unity Windows server + 2 desktop clients; Simulation rigs','headsets':0,'world':world,'statistics':stats,'connectedFrame':connected['packet']['sequence'],'runningTick':running['packet']['frame']['tick'],'pausedTick':tick,'maximumObservedSourceAgeSeconds':peak_running_age['sourceAgeSeconds'],'oldestRunningObservation':peak_running_age,'activeSessions':0,'mode':'Linked' if args.linked else 'Independent','clientRooms':client_rooms,'runtimeDirectory':str(runtime_directory)}
 finally:
+    failed=sys.exc_info()[0] is not None
     if session:
         try:control('End')
         except Exception:pass
@@ -128,3 +136,14 @@ finally:
             except subprocess.TimeoutExpired:process.kill();process.wait(timeout=5)
     api_log.close()
     (root/'artifacts/latest-unity-player-smoke-path.txt').write_text(str(directory),encoding='utf-8')
+    if runtime_directory!=directory:
+        try:
+            spec=importlib.util.spec_from_file_location('smoke_venue',root/'scripts/start-desktop-venue.py')
+            venue=importlib.util.module_from_spec(spec); spec.loader.exec_module(venue)
+            venue.snapshot_runtime(runtime_directory,directory/'runtime-snapshot')
+        except Exception:
+            print('Runtime snapshot failed; original remains at '+str(runtime_directory),file=sys.stderr,flush=True)
+            if not failed: raise
+
+(directory/'summary.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
+print(json.dumps({'success':True,'directory':str(directory),'frames':world['acceptedSequence'],'players':len(stats['players']),'tick':tick,'maximumSourceAgeSeconds':summary['maximumObservedSourceAgeSeconds'],'headsets':0}),flush=True)

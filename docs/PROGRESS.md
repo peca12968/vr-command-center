@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 Windows 觀戰取樣與 SSD 快測
+
+- Windows 快測與桌面場館以同一條 SSE 串流的錄影起始 UTC 和收到畫格的經過毫秒數，計算該畫格的來源年齡。保留原 1.5 秒門檻。F 槽對照場的 141 筆樣本中，舊查詢與 SSE 的畫格序號全部相同，兩種測法相差最多 0.523 毫秒。該輪記錄世界寫入佇列滿載、玩家入場被拒及最後畫格停在第 82 格。原始 journal 的 82 格均已回覆，整場未封存。 [取樣對照](../artifacts/unity-player-smoke/20261116-080748-f40cb112/sse-pairing-observation.ndjson) · [閉檔分析](../artifacts/unity-player-smoke/20261116-080748-f40cb112/world-journal-analysis.json)
+- 即時 SQLite 和 Unity 記錄移至本機 SSD，所有受測程序退出後將證據複製回 F 槽。合併與獨立各驗證兩個原生桌面客戶端、敵軍造成的已確認傷害、暫停與雙封存，分別通過 155 與 126 格，來源最大年齡為 0.168112 與 0.165813 秒。每場 C／F 各 14 份檔案雜湊相符，最高延遲與封存末格均經原始 journal 逐欄核對。 [SSD 驗證摘要](../artifacts/native-smoke-ssd-validation-20261116.json) · [操作方式](NATIVE_VALIDATION.md#真正-windows-伺服器與兩個客戶端)
+- 同一新版快測及 API／Unity 執行檔在 `--runtime-on-artifact-drive` 對照場拒絕通過。兩位玩家完成入場，第 141 格的實測年齡達 21.405574 秒。原始 journal 持久寫入 346 格，停止時本機累計回覆至第 142 格，尚有 204 格未回覆，場次未封存。此結果保留 F 槽寫入問題，SQLite、Unity 紀錄與裝置的個別影響仍待分別量測。 [延遲畫格](../artifacts/unity-player-smoke/20261116-081342-310c1ed5/freshness-failure.json) · [閉檔分析](../artifacts/unity-player-smoke/20261116-081342-310c1ed5/world-journal-analysis.json)
+
 ## 2026-11-16 無人值守的 Windows 測試
 
 - 桌面、套件與原生 GUI 測試在開啟 Unity 前先核對實際執行檔路徑。Unity Editor 與 Quest ADB 工具也加入啟動前檢查。風險或檢查失敗會回報到終端機。Windows 防火牆規則及通知設定未調整。 [操作方式](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)

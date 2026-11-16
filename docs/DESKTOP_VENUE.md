@@ -20,7 +20,7 @@ python scripts/start-desktop-venue.py --check --runtime-root $venueData
 
 本機 F 槽是 USB 硬碟，五房持續持久寫入時觀戰曾落後約 14 秒，未達原有 1.5 秒門檻；降低工作執行緒或移除場景物件都未解決。4 KiB 持久寫入的短測平均 F 槽 17.17 ms、C 槽 NVMe 1.75 ms，並非完整磁碟基準或效能保證。上述命令明確選用 SSD 保存本次全新隔離 SQLite／journal，程式碼與播放器仍在 F 槽，沒有關閉 durable flush、丟棄幀或放寬門檻。
 
-`--runtime-root` 未指定時，資料仍位於 F 槽自己的 artifacts 目錄；工具不會暗中搬動正式資料。指定時會建立帶時間／識別的新目錄，拒絕覆寫既有目錄。全部自有寫入程序停止後，將完整 runtime 複製到 F 槽該次 `runtime-snapshot/`，保留 SSD 原件；不移動或刪除任何既有預覽資料。這是已驗證的 SSD 配置，不能宣稱 F 槽 USB 硬碟已通過五房新鮮度驗收。
+執行中 SQLite 與 Unity 原始記錄預設寫入 `%LOCALAPPDATA%/VrCommand/DesktopVenueRuns` 下的新目錄。本機可用 `--runtime-root` 指定 SSD 路徑，或用 `--runtime-on-artifact-drive` 明確測試 F 槽的即時寫入。全部自有寫入程序停止後，工具將讀到的原始 runtime 檔案複製到 F 槽該次 `runtime-snapshot/`，原件留在執行時使用的路徑。
 
 每個 Unity 程序預設兩個 job worker，可用 `--job-workers 1..16` 明確指定並記錄；[Unity 官方參數說明](https://docs.unity.com/en-us/engine/6000.3/script-reference/unity/jobs/lowlevel/unsafe/jobsutility/jobworkermaximumcount)。此設定不是目前延遲修正的證據；同樣兩個 worker 的 F 槽試跑仍失敗。
 

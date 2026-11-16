@@ -8,7 +8,7 @@ from pathlib import Path
 
 def observer_fingerprint():
     digest = hashlib.sha256()
-    for name in ('check-unity-admission.py', 'admission_witness.py', 'start-desktop-venue.py'):
+    for name in ('check-unity-admission.py', 'admission_witness.py', 'start-desktop-venue.py', 'live_world_frame.py'):
         digest.update(name.encode()); digest.update((Path(__file__).parent / name).read_bytes())
     return digest.hexdigest()
 

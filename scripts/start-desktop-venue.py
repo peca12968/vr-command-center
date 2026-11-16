@@ -237,25 +237,22 @@ class Venue:
     def client_config(entry, ticket): return {'role': 'Client', 'address': '127.0.0.1', 'port': entry['port'], 'joinTicket': ticket}
 
     def frame(self, entry, measure=False):
-        metadata = self.request(f'/api/sessions/{entry["id"]}/world') if measure else None
+        from live_world_frame import read_live_frame
+
         message = urllib.request.Request(self.base + f'/api/sessions/{entry["id"]}/world/watch?mode=live', headers={'Authorization': 'Bearer ' + self.tokens['Master']})
         with urllib.request.urlopen(message, timeout=5) as response:
-            kind = ''
-            for _ in range(60):
-                line = response.readline().decode().strip()
-                if line.startswith('event: '): kind = line[7:]
-                if kind == 'frame' and line.startswith('data: '):
-                    value = json.loads(line[6:])
-                    if measure:
-                        if not metadata['capturedAtUtc']: raise RuntimeError('Native source capture UTC is missing')
-                        age = (datetime.now(timezone.utc) - datetime.fromisoformat(metadata['capturedAtUtc'])).total_seconds()
-                        entry['sourceAges'].append(age)
-                        if not -1 <= age < 1.5:
-                            self.save('freshness-failure.json', {'round': entry['name'], 'metadata': metadata, 'receivedFrame': value, 'sourceAgeSeconds': age})
-                            raise RuntimeError(f'{entry["name"]} source age {age}s exceeds the original 1.5s limit')
-                    self.save(entry['name'] + '-latest-frame.json', value)
-                    return value
-        raise RuntimeError('No live frame for ' + entry['name'])
+            sample = read_live_frame(response, entry['id'])
+        if sample is None: raise RuntimeError('No live frame for ' + entry['name'])
+        value, observation = sample
+        if measure:
+            age = observation['sourceAgeSeconds']
+            if age is None: raise RuntimeError('Native source capture UTC is missing')
+            entry['sourceAges'].append(age)
+            if not -1 <= age < 1.5:
+                self.save('freshness-failure.json', {'round': entry['name'], 'observation': observation, 'receivedFrame': value, 'sourceAgeSeconds': age})
+                raise RuntimeError(f'{entry["name"]} source age {age}s exceeds the original 1.5s limit')
+        self.save(entry['name'] + '-latest-frame.json', value)
+        return value
 
     def connected(self, entry):
         value = self.frame(entry); players = value['packet']['frame']['players']
@@ -524,7 +521,9 @@ def main():
     parser.add_argument('--check-reprepare-ui', action='store_true', help='Create the replacement through the room controller browser after saving a newer mission version')
     parser.add_argument('--check-session-replay-ui', action='store_true', help='Open the original independent and scoped linked replays in the room controller browser')
     parser.add_argument('--job-workers', type=int, choices=range(1,17), default=2, help='Unity job workers per native process; recorded in evidence')
-    parser.add_argument('--runtime-root', type=Path, help='Optional SSD directory for fresh isolated SQLite / journals; closed snapshot is copied back to F artifacts')
+    storage = parser.add_mutually_exclusive_group()
+    storage.add_argument('--runtime-root', type=Path, help='Directory for new runtime files; default is local application data')
+    storage.add_argument('--runtime-on-artifact-drive', action='store_true', help='Use the artifact drive for active journals to test that storage')
     args = parser.parse_args()
     if args.check_reprepare_ui and (not args.check or not shutil.which('node')):
         parser.error('--check-reprepare-ui requires --check and Chromium')
@@ -533,6 +532,8 @@ def main():
     try: verify_player(args)
     except (OSError, RuntimeError, ValueError) as error: parser.error(str(error))
     if args.check: args.visible_room = 0
+    if args.runtime_root is None and not args.runtime_on_artifact_drive:
+        args.runtime_root = Path(os.environ['LOCALAPPDATA']) / 'VrCommand' / 'DesktopVenueRuns'
     venue = Venue(args)
     try:
         venue.stage('starting', source='Simulation', headsets=0, runtimeDirectory=str(venue.runtime_directory))

@@ -36,9 +36,9 @@ python scripts/smoke-unity-player.py --linked
 
 工具啟動自己的隔離 API／SQLite、全新 Master／GameServer 憑證、一個真正 Windows Unity server 及兩個真正 Unity client，使用 v2 票券與 UDP／NGO。預設房間 5 獨立；--linked 合併五房，兩個客戶端分別加入房間 1／5。玩家雖使用契約內的 Quest3 分類，實際都是桌面合成頭手，origin 明確為 Simulation，沒有頭盔或硬體連接。
 
-驗證兩位玩家入場及 Simulated rig、Running tick、敵軍 AI 的已確認傷害、暫停凍結、End 後戰鬥與世界精確封存、回放末幀／統計一致及活動場次清空。預設以本機共同 UTC 驗證取樣的 Running 來源年齡小於控制台既有 1.5 秒門檻；這是本機 smoke 條件，不是跨網路或 25 人的 SLA。
+驗證兩位玩家入場及 Simulated rig、Running tick、敵軍 AI 的已確認傷害、暫停凍結、End 後戰鬥與世界精確封存、回放末幀／統計一致及活動場次清空。以同一條 SSE 串流的錄影起始 UTC 加上實際收到畫格的經過毫秒數，計算該格的來源年齡。Begin 後取樣須符合既有 1.5 秒門檻，適用於同機快測。
 
-所有鍵、連線檔、API／player log、journal 與 summary 留在 Git 忽略的 artifacts/unity-player-smoke；不輸出憑證。工具只結束自己建立的場次與程序，不讀取／修改正式預覽資料。這是 -batchmode -nographics 執行，不含 GPU 畫面、鍵鼠射擊操作、音量聽感或實體追蹤驗收。
+即時寫入的 SQLite 與 Unity 原始 journal 預設放在 `%LOCALAPPDATA%/VrCommand/UnitySmokeRuns`。可用 `--runtime-root` 指定另一個本機 SSD 資料夾，或用 `--runtime-on-artifact-drive` 明確測試專案所在磁碟的即時寫入。所有受測程序退出後，工具將原始檔複製到 `artifacts/unity-player-smoke` 下該輪的 `runtime-snapshot`，與摘要、程式記錄及私有測試設定一同保存。工具只結束自己建立的場次與程序。`-batchmode -nographics` 的驗收範圍為同機模擬入場、觀戰、統計與封存。
 
 ## 觀戰排隊修正
 
