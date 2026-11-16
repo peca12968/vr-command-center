@@ -92,6 +92,23 @@
           <ul id="venue-launch-review-rooms" class="event-list" aria-label="原場次來源與核對結果"></ul>
           <p id="venue-launch-review-roster-status" class="hint" role="status"></p>
         </details>
+        <details id="venue-hardware-review-panel" class="panel" hidden>
+          <summary>五房硬體模擬排演報告</summary>
+          <p class="hint">選擇核對工具輸出的五房 JSON 摘要。結果為模擬回饋，檔案在瀏覽器內讀取。</p>
+          <label>排演摘要 JSON<input id="venue-hardware-review-file" type="file" accept=".json,application/json"></label>
+          <p id="venue-hardware-review-message" class="hint" role="status"></p>
+          <div id="venue-hardware-review-results" hidden>
+            <p id="venue-hardware-review-summary" role="status"></p><p id="venue-hardware-review-matches" class="hint"></p>
+            <div class="table-scroll" tabindex="0" aria-label="五房排演結果">
+              <table><thead><tr><th scope="col">房間</th><th scope="col">原場次</th><th scope="col">排演結果</th><th scope="col">終止原因</th><th scope="col">模擬確認</th><th scope="col">取消</th><th scope="col">模擬失敗</th><th scope="col">目前場次</th></tr></thead><tbody id="venue-hardware-review-rooms"></tbody></table>
+            </div>
+            <label>逐席檢視房間<select id="venue-hardware-review-room"></select></label>
+            <p id="venue-hardware-review-seat-status" class="hint" role="status"></p>
+            <div id="venue-hardware-review-seat-table" class="table-scroll" tabindex="0" aria-label="本房逐席模擬結果" hidden>
+              <table><thead><tr><th scope="col">席位</th><th scope="col">模擬確認</th><th scope="col">取消</th><th scope="col">模擬失敗</th></tr></thead><tbody id="venue-hardware-review-seats"></tbody></table>
+            </div>
+          </div>
+        </details>
         <section id="venue-live-tracking" class="panel" aria-labelledby="venue-live-tracking-title" hidden>
           <h3 id="venue-live-tracking-title">執行中五房追蹤</h3>
           <p id="venue-live-tracking-summary" class="hint" role="status"></p>
@@ -610,7 +627,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.229 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.230 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

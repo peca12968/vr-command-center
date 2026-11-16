@@ -9,6 +9,7 @@ import { mountMrVenueBundle } from './mr-venue-bundle-ui.js';
 import { mountVrVenueTickets } from './vr-venue-tickets-ui.js';
 import { mountVenueServerPlan } from './venue-server-plan-ui.js';
 import { mountVenueLaunchReview } from './venue-launch-review-ui.js';
+import { mountVenueHardwareReview } from './venue-hardware-review-ui.js';
 import { mountVenueRoster } from './venue-roster-ui.js';
 import { mountVenueClimateScope } from './venue-climate-scope-ui.js';
 import { mountOperatorNetwork } from './operator-network-ui.js';
@@ -58,6 +59,7 @@ const vrVenue = mountVrVenueTickets(() => state, api, download, roomReadiness.ti
 const venueServerPlan = mountVenueServerPlan(() => state, api, download);
 const venueLaunchReview = mountVenueLaunchReview(() => state, api, selectSession, focusRoster, roomReadiness.reviewedBegin,
   target => tab('world', target), openReviewedVenueClosure);
+const venueHardwareReview = mountVenueHardwareReview(() => state, master);
 const venueRoster = mountVenueRoster({ getState: () => state, canRegister: master, uuid, download, register: seats => run(async () => {
   state.pending = { kind: 'venue-roster-join', path: '/venue/roster-admissions', method: 'POST', body: { seats } };
   await sendPending();
@@ -277,6 +279,7 @@ function logout() {
   vrVenue.active(false);
   venueServerPlan.active(false);
   venueLaunchReview.active(false);
+  venueHardwareReview.active(false);
   operatorNetwork.active(false);
   replay.active(false); replay.reset(); world.active(false); world.reset(); readiness.active(false); readiness.reset(); roomReadiness.active(false); connections.active(false); connections.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = null; state.session = null; state.pending = null;
@@ -380,6 +383,7 @@ async function refreshData(epoch) {
   const ownRooms = rooms.filter(r => ownsRoom(r.id));
   fillOptions('launch-room', ownRooms.map(r => [String(r.id), `房間 ${r.id}${r.sessionId ? '（使用中）' : '（空閒）'}`]));
   renderRooms();
+  venueHardwareReview.update();
   const selected = state.selected, previous = state.session;
   if (selected) {
     const { session, statistics, recentEvents, roomEnemyPolicySequences: policySequences, settingRevisions } = await api('/sessions/' + selected + '/overview');
@@ -2390,6 +2394,7 @@ function tab(name, worldTarget = null) {
   vrVenue.active(name === 'operations');
   venueServerPlan.active(name === 'operations');
   venueLaunchReview.active(name === 'operations');
+  venueHardwareReview.active(name === 'operations');
   operatorNetwork.active(name === 'operations');
 }
 $('world-return-venue-begin').addEventListener('click', () => {
