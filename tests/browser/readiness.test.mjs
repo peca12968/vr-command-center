@@ -18,12 +18,31 @@ test('The Begin rejection describes only verified blocked seats and keeps the ro
   const details = { roomId: 5, worldSequence: 18, seats: [
     { seat: 2, state: 'PoseUnavailable' }, { seat: 3, state: 'PoseUnavailable' }, { seat: 5, state: 'Vacant' }
   ] };
-  assert.equal(venueBeginRejection(ids, [details]), summary + '拒絕時房間 5 第 2、3 席姿態未就緒，第 5 席未編列。');
-  assert.equal(venueBeginRejection(ids), summary);
+  assert.deepEqual(venueBeginRejection(ids, [details]),
+    { message: summary + '拒絕時房間 5 第 2、3 席姿態未就緒，第 5 席未編列。', reviews: [] });
+  assert.deepEqual(venueBeginRejection(ids), { message: summary, reviews: [] });
   for (const invalid of [[{ ...details, roomId: 1 }], [{ ...details, worldSequence: 0 }],
     [{ ...details, seats: [{ seat: 2, state: 'Tracked' }] }], [{ ...details, seats: [details.seats[0], details.seats[0]] }]]) {
-    assert.equal(venueBeginRejection(ids, invalid), summary);
+    assert.deepEqual(venueBeginRejection(ids, invalid), { message: summary, reviews: [] });
   }
+});
+test('A denied Begin replay requires the submitted revision, room and original roster', () => {
+  const sessionId = '51234567-0000-4000-8000-000000000000', streamId = '91234567-0000-4000-8000-000000000000';
+  const playerId = '01234567-0000-4000-8000-000000000000';
+  const frame = { sessionId, streamId, origin: 'Simulation', observedSequence: 6, elapsedMilliseconds: 2170,
+    players: [{ seat: 2, playerId }] };
+  const room = { roomId: 5, worldSequence: 17, frame, seats: [{ seat: 2, state: 'PoseUnavailable' }] };
+  const fences = [{ sessionId, sessionSequence: 6 }];
+  const rooms = [{ id: 5, sessionId }];
+  const review = venueBeginRejection([5], [room], fences, rooms).reviews;
+  assert.equal(review.length, 1);
+  assert.equal(review[0].streamId, streamId);
+  assert.equal(review[0].observerRoomId, 5);
+  assert.equal(review[0].witness.roster.get(2), playerId);
+  assert.equal(venueBeginRejection([5], [room], [{ sessionId, sessionSequence: 7 }], rooms).reviews.length, 0);
+  assert.equal(venueBeginRejection([5], [room], fences, [{ id: 4, sessionId }]).reviews.length, 0);
+  const substituted = { ...room, frame: { ...frame, players: [{ seat: 3, playerId }] } };
+  assert.equal(venueBeginRejection([5], [substituted], fences, rooms).reviews.length, 0);
 });
 test('The read-only pose frame requires the fresh original room, stream, revision and seat', () => {
   const room = { id: 1, sessionId: session.id, playerCount: 1, capacity: 5 };

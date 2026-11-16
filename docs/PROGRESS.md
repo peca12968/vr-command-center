@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 回放五房開場的受阻畫格
+
+- 控制台 0.31.208 可從拒絕訊息直接開啟受阻房間的原準備畫格。回放限原房間及單一畫格，呈現前核對錄製來源、所送管理序號、擷取偏移與該席未就緒的原因。拒絕畫格的座標及姿態仍取自原世界錄製。 [操作說明](PLAYER_READINESS.md#五房追蹤驗收開場) · [Windows 管理包](../artifacts/windows-control-blocked-frame-031208.zip)
+- 從 Windows ZIP 解壓核對 568 檔，ZIP SHA-256 為 `23f49486c20370da16702ec320e58d45866fbc63eeaeb88946e94dcdc0bca9a9`。97 項 Chromium、32 項就緒與收尾 Node 測試及 1,115 項 .NET 領域測試通過。瀏覽器核對合併與混合獨立場的第 5 房第 2 席，並拒絕顯示同格被換成就緒姿態的測試回應。瀏覽器混合場使用模擬 VR／MR 快照。 [拒絕入口](../artifacts/desktop-guarded-openxr/20261116-133952-3fae1367/full-participation-linked-refused-seat.png) · [原畫格](../artifacts/desktop-guarded-openxr/20261116-133952-3fae1367/refused-begin-linked-frame.png) · [瀏覽器結果](../artifacts/desktop-guarded-openxr/20261116-133952-3fae1367/checks.json)
+- Windows 0.50.12 每輪使用 24 個桌面玩家及一個 OpenXR 模擬追蹤席。合併原第 71 格和獨立第 5 房原第 72 格與開場拒絕回條逐項對上。六場雙封存共 502 格、50 筆原戰績確認及 36 個 C／F 同雜湊資料檔。檔案讀回以原世界日誌標頭校驗場次及來源，頭盔實機與跨機玩家仍待驗收。 [合併讀回](../artifacts/desktop-venue-openxr/20261116-134041-ceec47dc/blocked-frame-readback.json) · [獨立讀回](../artifacts/desktop-venue-openxr/20261116-134058-1876d577/blocked-frame-readback.json)
+
 ## 2026-11-16 五房開場拒絕顯示受阻席位
 
 - 控制台 0.31.207 會在兩種五房滿席政策的拒絕訊息列出受阻席位與原因。新版 API 0.31.0 保留 `venue-begin-not-ready` 和 `roomIds`，有原有效快照時加上 `blockedRooms`、原世界序號及席位原因。過期來源只提供房號。 [操作說明](PLAYER_READINESS.md#五房追蹤驗收開場) · [Windows 管理包](../artifacts/windows-control-blocked-seats-031207.zip)

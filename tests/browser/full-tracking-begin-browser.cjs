@@ -203,13 +203,13 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       check(disconnected.code === 'venue-begin-not-ready' && disconnected.roomIds.join() === '5'
         && (await api('/sessions')).every(session => session.state === 'Preparing'), `${mode} server identifies only the room with a disconnected seat`);
       await publishUntil(sources, false, () => start.isEnabled());
-      let lostSequence;
+      let lostPacket;
       const phaseUrl = '**/api/venue/phase';
       const interrupt = async intercepted => {
         if (intercepted.request().method() === 'POST') {
           for (const source of sources) {
             const frame = source.publish(source.snapshot, false, true);
-            if (source === last) lostSequence = frame.sequence;
+            if (source === last) lostPacket = frame;
           }
         }
         await intercepted.continue();
@@ -221,7 +221,13 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         await start.click();
         const reply = await refused;
         const body = await reply.json();
-        assert.deepEqual(body.blockedRooms, [{ roomId: 5, worldSequence: lostSequence, seats: [{ seat: 2, state: 'PoseUnavailable' }] }]);
+        const roomPlayers = last.snapshot.players.filter(player => player.roomId === 5)
+          .sort((a, b) => a.seat - b.seat).map(player => ({ seat: player.seat + 1, playerId: player.id }));
+        assert.deepEqual(body.blockedRooms, [
+          { roomId: 5, worldSequence: lostPacket.sequence, seats: [{ seat: 2, state: 'PoseUnavailable' }],
+            frame: { sessionId: forRoom(5).id, streamId: last.streamId, origin: 'Simulation',
+              observedSequence: lostPacket.observedSequence, elapsedMilliseconds: lostPacket.elapsedMilliseconds, players: roomPlayers } }
+        ]);
         const notice = page.locator('#notice').filter({ hasText: '拒絕時房間 5 第 2 席姿態未就緒。' });
         await notice.waitFor();
         await notice.screenshot({ path: path.join(screenshots, `full-participation-${mode.toLowerCase()}-refused-seat.png`) });
@@ -229,6 +235,42 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
           `${mode} keeps the original fences and tells the operator which seat failed when sending Begin`);
       } finally {
         await page.unroute(phaseUrl, interrupt);
+      }
+      const review = page.getByRole('button', { name: '檢視房間 5 開場受阻快照', exact: true });
+      const reviewRoute = url => url.pathname === `/api/sessions/${forRoom(5).id}/world/watch`
+        && url.searchParams.get('mode') === 'replay';
+      const reviewed = page.waitForRequest(request => reviewRoute(new URL(request.url())));
+      await review.click();
+      const replayQuery = new URL((await reviewed).url()).searchParams;
+      assert.equal(replayQuery.get('observerRoomId'), '5');
+      assert.equal(replayQuery.get('fromFrame'), String(lostPacket.sequence));
+      assert.equal(replayQuery.get('throughFrame'), String(lostPacket.sequence));
+      await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${lostPacket.sequence} 格的開場受阻快照` }).waitFor();
+      check(await canvas.getAttribute('data-sequence') === String(lostPacket.sequence)
+        && await page.locator('#world-recording').inputValue() === forRoom(5).id
+        && await page.locator('#world-room').inputValue() === '5'
+        && JSON.stringify(await getFences()) === JSON.stringify(readyFences),
+        `${mode} opens the exact refused Preparing frame for the original room and makes no write`);
+      await page.locator('#world-viewport').screenshot({ path: path.join(screenshots, `refused-begin-${mode.toLowerCase()}-frame.png`) });
+      await page.locator('#tab-operations').click();
+      if (mode === 'Linked') {
+        await page.route(reviewRoute, async intercepted => {
+          const response = await intercepted.fetch();
+          const body = (await response.text()).replace(/event: frame\ndata: (.+)/, (_, raw) => {
+            const value = JSON.parse(raw);
+            const rejectedId = last.snapshot.players.find(player => player.roomId === 5 && player.seat === 1).id;
+            const pose = value.packet.frame.players.find(player => player.id === rejectedId);
+            pose.connected = true;
+            pose.rig.kind = 'Tracked';
+            return 'event: frame\ndata: ' + JSON.stringify(value);
+          });
+          await intercepted.fulfill({ response, body });
+        }, { times: 1 });
+        await review.click();
+        await page.locator('#world-message').filter({ hasText: '回應快照的開場受阻或指令序號不同' }).waitFor();
+        check(await page.locator('#world-player').isHidden() && JSON.stringify(await getFences()) === JSON.stringify(readyFences),
+          'A changed pose at the same frame number cannot be shown as the original rejected seat');
+        await page.locator('#tab-operations').click();
       }
       await page.locator('#refresh').click();
       await publishUntil(sources, false, () => start.isEnabled());

@@ -53,7 +53,10 @@ public record RoomEnemyPopulation(int Present, int Alive);
 public record RoomVenueBegin(string State, int[] WaitingSeats,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomVenueBeginSeat[]? Seats = null);
 public record RoomVenueBeginSeat(int Seat, string State);
-internal sealed record VenueBeginBlockedRoom(int RoomId, long WorldSequence, RoomVenueBeginSeat[] Seats);
+internal sealed record VenueBeginFramePlayer(int Seat, Guid PlayerId);
+internal sealed record VenueBeginBlockedFrame(Guid SessionId, Guid StreamId, string Origin, long ObservedSequence,
+    long ElapsedMilliseconds, VenueBeginFramePlayer[] Players);
+internal sealed record VenueBeginBlockedRoom(int RoomId, long WorldSequence, RoomVenueBeginSeat[] Seats, VenueBeginBlockedFrame Frame);
 internal sealed class VenueBeginSeatDetailsException(VenueBeginNotReadyException rejection, VenueBeginBlockedRoom[] blockedRooms)
     : InvalidOperationException(rejection.Message, rejection)
 {
@@ -166,7 +169,7 @@ public sealed partial class WorldRecordings
                 var blockedRooms = new List<VenueBeginBlockedRoom>();
                 foreach (var (target, report, _) in reports)
                 {
-                    if (ready.GetValueOrDefault(target.SessionId)?.BeginFrame is not { } frame) continue;
+                    if (ready.GetValueOrDefault(target.SessionId)?.BeginFrame is not { } frame || report.Origin is not { } origin) continue;
                     var trackedRequired = requireFullTracking || report.MrStartState is not null;
                     foreach (var room in target.RoomIds.Where(rejection.RoomIds.Contains))
                     {
@@ -174,7 +177,10 @@ public sealed partial class WorldRecordings
                         var blockedSeats = Enumerable.Range(1, SessionManager.PlayersPerRoom)
                             .Select(seat => BlockedBeginSeat(seat, roster.GetValueOrDefault(seat), trackedRequired))
                             .OfType<RoomVenueBeginSeat>().ToArray();
-                        if (blockedSeats.Length > 0) blockedRooms.Add(new(room, frame.WorldSequence, blockedSeats));
+                        if (blockedSeats.Length == 0) continue;
+                        var players = roster.OrderBy(row => row.Key).Select(row => new VenueBeginFramePlayer(row.Key, row.Value.PlayerId)).ToArray();
+                        blockedRooms.Add(new(room, frame.WorldSequence, blockedSeats, new(target.SessionId, frame.StreamId,
+                            origin, report.ObservedSequence, frame.ElapsedMilliseconds, players)));
                     }
                 }
                 if (blockedRooms.Count == 0) throw;

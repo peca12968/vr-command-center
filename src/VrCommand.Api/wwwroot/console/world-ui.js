@@ -22,7 +22,7 @@ const recordingId = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const hasRecordedPose = player => player.connected && (player.rig.kind === 'Simulated' || player.rig.kind === 'Tracked');
 const isBeginWitness = witness => ['tracking-begin', 'participation-begin', 'tracked-vr-start'].includes(witness?.kind);
 const witnessLabels = { enemies: '敵軍', environment: '環境', 'tracking-begin': '追蹤開場', 'participation-begin': '有效姿態開場',
-  'pose-interruption': '姿態中斷', 'tracked-vr-start': '本場追蹤開場' };
+  'pose-interruption': '姿態中斷', 'tracked-vr-start': '本場追蹤開場', 'blocked-begin': '開場受阻' };
 
 export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips, download) {
   let active = false, scene, controller, epoch = 0, listEpoch = 0, listController, info, frame, geometry = '', mode = '', connected = false, received = 0;
@@ -954,6 +954,24 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
           && (players[0].connected === false || (players[0].connected === true && players[0].rig?.kind === 'None'));
       });
     }
+    if (kind === 'blocked-begin') {
+      const { observedSequence, roster, seats } = target.witness;
+      const frame = packet.frame;
+      if (packet.observedSequence !== observedSequence || packet.elapsedMilliseconds !== elapsedMilliseconds
+        || packet.suspended !== false || frame?.phase !== 'Preparing' || frame.tick !== 0 || !Array.isArray(frame.players)) return false;
+      const players = new Map(frame.players.map(player => [player.id, player]));
+      const roomRoster = new Set(roster.values());
+      if (players.size !== frame.players.length || frame.players.some(player => player.roomId !== target.roomId || !roomRoster.has(player.id))) return false;
+      return seats.every(({ seat, state }) => {
+        const id = roster.get(seat), body = players.get(id);
+        if (state === 'Vacant') return id === undefined;
+        if (state === 'AwaitingAdmission' || state === 'AwaitingPose') return !body;
+        if (!body) return false;
+        if (state === 'Eliminated') return body.health === 0;
+        if (state === 'PoseUnavailable') return body.health > 0 && !hasRecordedPose(body);
+        return state === 'NeedsTracking' && body.health > 0 && body.connected === true && body.rig?.kind === 'Simulated';
+      });
+    }
     if (isBeginWitness(target.witness)) {
       const frame = packet.frame;
       if (kind === 'tracked-vr-start') {
@@ -1004,8 +1022,9 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
       const players = value.packet.frame.players;
       const tracked = players.filter(player => player.rig.kind === 'Tracked').length;
       text += ` 此格追蹤 ${tracked} 席、合成 ${players.length - tracked} 席。`;
-    } else if (witness.kind === 'pose-interruption') {
-      text += ` 房間 ${target.roomId} · 席位 ${witness.seats.join('、')}。`;
+    } else if (witness.kind === 'pose-interruption' || witness.kind === 'blocked-begin') {
+      const seats = witness.kind === 'blocked-begin' ? witness.seats.map(seat => seat.seat) : witness.seats;
+      text += ` 房間 ${target.roomId} · 席位 ${seats.join('、')}。`;
     } else if (witness.kind === 'enemies' && witness.exactObserved) {
       text += ` 本房在場 ${witness.population.present} 名、存活 ${witness.population.alive} 名。`;
     }

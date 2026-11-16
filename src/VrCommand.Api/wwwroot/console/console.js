@@ -90,10 +90,23 @@ let archivedPlan = null;
 let departureReview = null;
 let roomEnemyDraft = null, roomEnemyPolicySequences = null;
 
-function notify(message, error = false) {
-  $('notice').textContent = message;
-  $('notice').classList.toggle('error', error);
-  $('notice').hidden = !message;
+function notify(message, error = false, reviews = []) {
+  const notice = $('notice');
+  notice.textContent = message;
+  notice.classList.toggle('error', error);
+  notice.hidden = !message;
+  if (!reviews.length || !master()) return;
+  const epoch = state.epoch;
+  const actions = element('div', '', 'button-row');
+  for (const target of reviews) {
+    const button = element('button', `檢視房間 ${target.roomId} 開場受阻快照`, 'quiet small');
+    button.type = 'button';
+    button.addEventListener('click', () => {
+      if (state.epoch === epoch && master() && !state.busy && !state.pending && notice.contains(button)) tab('world', target);
+    });
+    actions.append(button);
+  }
+  notice.append(actions);
 }
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -133,7 +146,7 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
     const content = responseType === 'blob' && response.ok ? await response.blob() : await response.text();
     if (epoch !== state.epoch) throw new Error('登入狀態已變更，已忽略舊回應。');
     if (!response.ok) {
-      let message = '操作未完成，請重新整理後確認。', layout, code, maxCount, roomIds, roomId, workstationIssues, blockedRooms;
+      let message = '操作未完成，請重新整理後確認。', layout, code, maxCount, roomIds, roomId, workstationIssues, blockedRooms, reviews;
       try { const data = JSON.parse(content); message = data.error || message; layout = data.layout; code = data.code; maxCount = data.maxCount; roomIds = data.roomIds; roomId = data.roomId;
         if (code === 'operator-network-witnesses-rejected') workstationIssues = data.issues;
         if (code === 'venue-begin-not-ready') blockedRooms = data.blockedRooms;
@@ -161,14 +174,17 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
         else if (code === 'setting-revision-changed') message = '場次設定已變更。草稿仍保留，請載入目前設定再編輯。';
         else if (code === 'venue-pause-not-observed' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 尚未回傳有效的暫停快照，本批場次維持暫停。`;
         else if (code === 'venue-resume-not-ready' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 的 MR 追蹤尚未就緒，本批場次維持暫停。`;
-        else if (code === 'venue-begin-not-ready') message = venueBeginRejection(roomIds, blockedRooms);
+        else if (code === 'venue-begin-not-ready') {
+          const fences = path === '/venue/phase' && method === 'POST' && body?.action === 'Begin' ? body.targets : [];
+          ({ message, reviews } = venueBeginRejection(roomIds, blockedRooms, fences, state.rooms));
+        }
         else message = path.startsWith('/missions') ? '任務版本已變更或原請求內容不一致；草稿仍保留，可載入最新版或另存新任務。' : '場次狀態或名額已變更，請重新整理並確認後再操作。';
       }
       if (layout) message = Number.isInteger(roomId) ? `房間 ${roomId} 的場地未通過檢查，五場都未建立。請修正並保存新版本。`
         : '場地配置未通過檢查，請修正並保存新版本後再開場。';
       if (code === 'enemy-capacity-exceeded' && Number.isInteger(maxCount)) message = `此場地最多可設定 ${maxCount} 名敵軍。請調低目標數量後再套用。`;
       const error = new Error(message); error.status = response.status; error.layout = layout; error.code = code; error.roomId = roomId;
-      error.workstationIssues = workstationIssues; throw error;
+      error.workstationIssues = workstationIssues; error.beginReviews = reviews; throw error;
     }
     if (responseType === 'blob') return content;
     return content ? JSON.parse(content) : null;
@@ -194,7 +210,7 @@ async function run(action, independentRead = false) {
   }
   catch (error) {
     const message = error.status || error instanceof MissionVersionMismatch ? error.message : '連線或操作結果未確認，請重新整理查看。';
-    notify(message + (state.pending && !error.status ? ' 可使用「重試確認結果」確認原命令。' : ''), true);
+    notify(message + (state.pending && !error.status ? ' 可使用「重試確認結果」確認原命令。' : ''), true, error.beginReviews);
   }
   finally { state.busy = false; applyPermissions(); }
 }

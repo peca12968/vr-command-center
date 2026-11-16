@@ -11,10 +11,10 @@ export const beginSeatLabels = { Vacant: '未編列', AwaitingAdmission: '等待
   AwaitingPose: '等待姿態', PoseUnavailable: '姿態未就緒', Eliminated: '已淘汰', Tracked: '追蹤就緒',
   Simulated: '合成姿態就緒', NeedsTracking: '合成姿態 · 需追蹤', Unknown: '待確認', NotPreparing: '尚無準備場次' };
 
-export function venueBeginRejection(roomIds, blockedRooms) {
+export function venueBeginRejection(roomIds, blockedRooms, fences = [], rooms = []) {
   if (!Array.isArray(roomIds) || !roomIds.length || roomIds.length > 5 || !roomIds.every((room, index) =>
     Number.isInteger(room) && room >= 1 && room <= 5 && (!index || roomIds[index - 1] < room))) {
-    return '名冊或遊戲快照尚未就緒，本批場次維持準備中。';
+    return { message: '名冊或遊戲快照尚未就緒，本批場次維持準備中。', reviews: [] };
   }
   const message = `房間 ${roomIds.join('、')} 的名冊或遊戲快照尚未就緒，本批場次維持準備中。`;
   const states = ['Vacant', 'AwaitingAdmission', 'AwaitingPose', 'PoseUnavailable', 'Eliminated', 'NeedsTracking'];
@@ -23,7 +23,7 @@ export function venueBeginRejection(roomIds, blockedRooms) {
       && Number.isSafeInteger(room.worldSequence) && room.worldSequence > 0
       && Array.isArray(room.seats) && room.seats.length > 0 && room.seats.length <= 5
       && room.seats.every((seat, position) => Number.isInteger(seat?.seat) && seat.seat >= 1 && seat.seat <= 5
-        && (!position || room.seats[position - 1].seat < seat.seat) && states.includes(seat.state)))) return message;
+        && (!position || room.seats[position - 1].seat < seat.seat) && states.includes(seat.state)))) return { message, reviews: [] };
   const details = blockedRooms.map(room => {
     const seatsByState = new Map();
     for (const { seat, state } of room.seats) {
@@ -33,7 +33,26 @@ export function venueBeginRejection(roomIds, blockedRooms) {
     const summaries = Array.from(seatsByState, ([state, seats]) => `第 ${seats.join('、')} 席${beginSeatLabels[state]}`);
     return `拒絕時房間 ${room.roomId} ${summaries.join('，')}。`;
   });
-  return message + details.join('');
+  const id = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+  const reviews = [];
+  for (const { roomId, worldSequence, seats, frame } of blockedRooms) {
+    if (!frame || !id.test(frame.sessionId) || !id.test(frame.streamId) || !['GameServer', 'Simulation'].includes(frame.origin)
+      || !Number.isSafeInteger(frame.observedSequence) || frame.observedSequence < 1
+      || !fences.some(fence => fence.sessionId === frame.sessionId && fence.sessionSequence === frame.observedSequence)
+      || !rooms.some(room => room.id === roomId && room.sessionId === frame.sessionId)
+      || !Number.isSafeInteger(frame.elapsedMilliseconds) || frame.elapsedMilliseconds < 0
+      || !Array.isArray(frame.players) || frame.players.length > 5
+      || !frame.players.every((player, index) => Number.isInteger(player?.seat) && player.seat >= 1 && player.seat <= 5
+        && (!index || frame.players[index - 1].seat < player.seat) && id.test(player.playerId))
+      || new Set(frame.players.map(player => player.playerId)).size !== frame.players.length) continue;
+    const roster = new Map(frame.players.map(player => [player.seat, player.playerId]));
+    if (!seats.every(seat => roster.has(seat.seat) === (seat.state !== 'Vacant'))) continue;
+    reviews.push({ mode: 'replay', sessionId: frame.sessionId, streamId: frame.streamId, origin: frame.origin,
+      roomId, observerRoomId: roomId, complete: false, throughSequence: worldSequence,
+      witness: { kind: 'blocked-begin', observedSequence: frame.observedSequence, elapsedMilliseconds: frame.elapsedMilliseconds,
+        roster, seats } });
+  }
+  return { message: message + details.join(''), reviews };
 }
 
 function venueBeginSeats(details, registered, capacity, trackedRequired) {
