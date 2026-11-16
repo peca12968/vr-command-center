@@ -5,6 +5,7 @@
 - 桌面場館、入場、套件及瀏覽器操作等自動測試在各次原生遊戲啟動前重新查核 `VrCommand.exe` 的實際路徑及目前的網路設定檔。伺服器啟動器 1.27.2 在建立原生子程序前也會查核。Windows 現行設定拒絕新路徑的測試執行檔。Python 及 .NET Framework 啟動器皆回傳 2，子程序未執行。 [拒絕路徑驗證](../artifacts/windows-unattended-launch-20261117/live-firewall-rejection.json) · [無人值守操作](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
 - 129 項桌面回歸通過，其中包括第一個子程序通過查核、第二個子程序因情境變更而未啟動。既有固定路徑通過一台 Unity 伺服器、兩台桌面玩家及 114 幀的迴環測試。 [回歸](../artifacts/windows-unattended-launch-20261117/desktop-tests.log) · [同機連線](../artifacts/unity-player-smoke/20261117-033616-5ee4fa2d/summary.json)
 - Windows 伺服器包 0.50.12／1.27.2 解壓後核對 331 項，新啟動器的離線查核也通過。這次原生連線使用既有固定路徑，新解壓包完成離線驗證。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.12-1.27.2-win-x64.zip) · [啟動器核對](../artifacts/windows-unattended-launch-20261117/launcher-offline-verification.json)
+- GitHub Actions 對 `0fbda5a` 回報帳務或用量限制，工作未啟動。 [GitHub Actions 工作](https://github.com/peca12968/vr-command-center/actions/runs/43941916507/job/133561374095)
 
 ## 2026-11-17 Windows 模擬閘道狀態檔競用
 
