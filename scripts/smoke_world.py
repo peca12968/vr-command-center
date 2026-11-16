@@ -134,6 +134,13 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory, ExitStack() a
                 return kind, json.loads(data)
         raise AssertionError("Missing SSE event")
 
+    def next_live_event(response):
+        for _ in range(5):
+            item = event(response)
+            if item[0] != "status":
+                return item
+        raise AssertionError("Only heartbeats arrived while waiting for the next live event")
+
     try:
         process = start()
         check(request("/api/world-recordings") == [], "No fabricated world recording appears at startup")
@@ -695,19 +702,30 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory, ExitStack() a
                       and scoped_frame["packet"]["frame"]["enemies"] == [] and scoped_frame["packet"]["events"] == []
                       and [row["playerId"] for row in scoped_frame["statistics"]] == [other_player],
                       "Linked live room access omits foreign bodies, enemies, events and statistics")
-            end = request(overkill_session + "/commands", method="POST",
-                          body={"commandId": str(uuid4()), "action": "End"})["session"]["sequence"]
-            request(overkill_session + "/combat-stream/seal", "GameServer", method="POST",
-                    body={"streamId": damage_stream, "finalSequence": 2})
-            terminal_damage_frame = damage_frame(4, 2, "Ended", end, 0)
-            reply = damage_publisher.send({"type": "frame", "payload": terminal_damage_frame})
-            assert reply["type"] == "ack", reply
-            sealed = damage_publisher.send({"type": "seal", "finalSequence": 4})
-            assert sealed["type"] == "ack", sealed
-            check(sealed["info"]["complete"],
-                  "A recorded overkill seals through the original WebSocket publisher after combat seal")
+                end = request(overkill_session + "/commands", method="POST",
+                              body={"commandId": str(uuid4()), "action": "End"})["session"]["sequence"]
+                request(overkill_session + "/combat-stream/seal", "GameServer", method="POST",
+                        body={"streamId": damage_stream, "finalSequence": 2})
+                terminal_damage_frame = damage_frame(4, 2, "Ended", end, 0)
+                reply = damage_publisher.send({"type": "frame", "payload": terminal_damage_frame})
+                assert reply["type"] == "ack", reply
+                terminal_frame = request(overkill_world + "/frames/4?observerRoomId=1", "Room1")
+                check(next_live_event(live_room) == ("frame", terminal_frame) and not reply["info"]["complete"],
+                      "A scoped live viewer receives the Ended frame while the recording awaits sealing")
+                sealed = damage_publisher.send({"type": "seal", "finalSequence": 4})
+                assert sealed["type"] == "ack", sealed
+                check(sealed["info"]["complete"],
+                      "A recorded overkill seals through the original WebSocket publisher after combat seal")
+                scoped_seal = request(overkill_world + "?observerRoomId=1", "Room1")
+                check(next_live_event(live_room) == ("complete", scoped_seal) and live_room.readline() == b"",
+                      "An active scoped live stream sends its original seal and closes without duplicating the last frame")
         finally:
             damage_publisher.close()
+        with request(overkill_world + "/watch") as sealed_live:
+            check(event(sealed_live) == ("header", sealed["info"])
+                  and event(sealed_live) == ("frame", request(overkill_world + "/frames/4"))
+                  and event(sealed_live) == ("complete", sealed["info"]) and sealed_live.readline() == b"",
+                  "Opening a sealed full observation returns exactly its final frame and its seal, then closes")
         damage_stats = request(overkill_session + "/statistics")["players"]
         damage_stats = [row for row in damage_stats if row["playerId"] == damage_player]
         damage_view = request(overkill_world + "/frames/3?observerRoomId=5", "Room5")

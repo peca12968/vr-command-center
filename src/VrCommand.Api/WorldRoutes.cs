@@ -339,7 +339,8 @@ public static class WorldRoutes
                 }
                 if (heartbeat.ElapsedMilliseconds >= 1000)
                 { await Send("status", WorldRecordings.ObservationInfo(info, observerRoomId)); heartbeat.Restart(); }
-                if (replay && (saved || info.Complete) && sequence > info.AcceptedSequence)
+                if (replay ? (saved || info.Complete) && sequence > info.AcceptedSequence
+                    : info.Complete && sent == info.AcceptedSequence)
                 { await Send(saved ? "saved-end" : "complete", WorldRecordings.ObservationInfo(info, observerRoomId)); return; }
                 await Task.Delay(delay, cancellation);
             }
