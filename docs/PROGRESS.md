@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-16 場館發行核對延伸到五房遊戲伺服器
+
+- Windows 伺服器啟動器 1.25 在離線核對、五房預覽及批次啟動支援 `--release-report`。與 Windows 玩家包及 Quest APK 共用發行報告，另比對伺服器清單的原始 SHA-256 與所有檔案。五房的就緒及收尾檔保存該摘要，`start-verified-venue.py` 使用同一份報告重做預覽與啟動。 [使用方式](WINDOWS_SERVER_PACKAGE.md#依場館發行報告核對伺服器包)
+- 實際解壓版通過 15 項 Windows CLI 檢查。兩端接受同一份新發行報告。缺少伺服器摘要、其他套件、重新封裝清單或檔案異動均遭拒。獨立與合併的錯誤報告在查詢管理服務前退出，未建立工作目錄或就緒檔。新解壓路徑的防火牆檢查仍有提示風險，此輪未執行正確包的五房 UDP 預覽或 Unity 啟動。另有 10 項發行、10 項伺服器包及 17 項區域網路檢查通過。 [Windows 測試](../artifacts/server-release-gate-validation-1250-05011.json)
+- 同批採用管理台 0.31.206、既有遊戲 0.50.11 與原 Quest 76 APK。兩個 Windows ZIP 各核對 331 個清單檔案，324 個共用遊戲檔逐位元組一致。APK 重新核對 ARM64、OpenXR 及 v2 簽章，並用管理服務簽發的席位檔完成 Quest CLI `-CheckOnly`，確認本機 APK 與同一報告相符。USB 偵錯介面仍為零，這輪沒有啟動 ADB 或安裝頭盔。 [共同發行報告](../artifacts/venue-release-server-gate-1250-05011.json) · [伺服器 ZIP](../artifacts/windows-server-release-gate-1250-05011.zip) · [玩家 ZIP](../artifacts/windows-player-release-gate-05011.zip) · [Quest 離線核對](../artifacts/quest-server-release-gate-check-1250-05011.json)
+- 功能提交 `f0d4d59` 已推送。GitHub Actions 因帳務或支出上限未啟動，步驟數為零。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43782864638/job/133023804941)
+
 ## 2026-11-16 從全館收尾下載離場玩家個人戰績
 
 - 控制台 0.31.206 在原批次的「離場玩家戰績」提供「下載 CSV」。沿用原場次的個人報表，下載前核對檔名、場次、房間、玩家、管理與戰鬥封存序號及七項戰績數值。關閉明細會取消下載。 [操作方式](SESSION_CLOSURE.md#離場玩家戰績) · [畫面](../artifacts/console-departed-csv-031206-package/venue-departed-players.png)
