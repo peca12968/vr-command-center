@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 五房開場與封存核對同一份發行報告
+
+- Windows 啟動器 1.26 在離線核對、五房預覽、就緒及收尾報告記錄整份場館發行報告的 SHA-256。開場腳本會拒絕遺漏或換用發行報告，即使伺服器套件摘要相同。封存驗收及六批收件檢查亦比對報告原檔，並以 `venue-release-report-mismatch` 指出不符的證據。 [Windows 啟動方式](WINDOWS_SERVER_PACKAGE.md#依場館發行報告核對伺服器包) · [封存操作](EXTERNAL_CLIENTS.md#核對五房伺服器發行版本)
+- 解壓 1.26 後與 0.50.11 Windows 玩家包、Quest ARM64 APK 及 0.31.206 管理包重新離線核對。伺服器和玩家各核對 331 檔，共用 324 個遊戲檔逐位元組相符。實際啟動器用五個離線案例驗證報告摘要，包括變更 Quest 摘要及僅改換行的原始位元組。首輪 Framework 編譯遭區域變數名稱衝突而停止，修正後產生正式 ZIP。 [新版伺服器 ZIP](../artifacts/windows-server-release-report-1260-05011.zip) · [共同發行報告](../artifacts/venue-release-server-report-1260-05011.json) · [離線核對](../artifacts/venue-release-report-validation-1a6cd2f7/validation.json)
+- 本機 136 項封存、17 項區網、9 項發行及 10 項伺服器套件測試通過。封存的三項專項在最後調整後重跑通過。舊 0.50.7 的 18 場啟動回條、36 件原輸入及六批 80 份戰績確認重新核對，舊六批摘要逐位元組相符。新解壓路徑未通過防火牆啟動前檢查，未開啟五房遊戲。Quest USB 偵錯介面仍為零。功能提交 `6dc1324` 已推送，GitHub Actions 未執行測試步驟。 [舊場讀回](../artifacts/venue-release-report-validation-1a6cd2f7/legacy-start-readback.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43786713582/job/133035886188)
+
 ## 2026-11-16 六批驗收核對同一伺服器發行
 
 - `prepare-venue-stages.py --require-server-release` 讓 5、10、25 人的獨立與合併批次使用同一份原場館發行報告，並核對各批原五房終止檔的伺服器清單摘要。收件報告逐批標示缺少摘要或摘要不符。通過的批次列出摘要及原場次數。 [操作方式](EXTERNAL_CLIENTS.md#六批核對同一份-windows-伺服器發行)
