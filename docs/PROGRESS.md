@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 在原管理台驗證 VR 追蹤開場與回放
+
+- 管理包 0.31.206 搭配 Windows 0.50.12 與 Unity Mock Runtime，以無介面 Chromium 登入第一房房控。畫面從 1／1 席更新到 0／1 席，點開場回傳 HTTP 409 並顯示追蹤未就緒，管理序號保持 3。追蹤恢復後再次點擊，在序號 4 開場。重送該次瀏覽器的原命令取得重複回條，並確認原生遊戲第 74 格已進入執行中。 [拒絕畫面](../artifacts/desktop-guarded-openxr/20261116-131052-d7631a0c/console-tracking-lost.png) · [接受回條](../artifacts/desktop-guarded-openxr/20261116-131052-d7631a0c/accepted-begin.json)
+- 封存後，房控以「回看本場追蹤開場」在上帝俯視停到原第 70 格，前進至第 71 格再返回第 70 格。限定單格的串流內容與驗收 ZIP 指向的準備畫格逐欄相符。10 項檢查、79 格封存、原玩家終場確認，C 槽與 F 槽 14 檔雜湊相符。活動場次及殘留程序均為零。 [回放畫面](../artifacts/desktop-guarded-openxr/20261116-131052-d7631a0c/console-original-opening.png) · [原回放比對](../artifacts/desktop-guarded-openxr/20261116-131052-d7631a0c/console-replay.json) · [重跑方式](PLAYER_READINESS.md#windows-原生回歸)
+- 首輪測試對獨立場多要求 `observerRoomId`，第二輪誤把單格片段的 `saved-end` 預期為整場的 `complete`。保留原失敗，按原聲明的錄製房間及片段邊界重新核對。預設 API 測試另重跑通過 8 項，原請求在追蹤恢復後可用相同命令 ID 重送。管理服務沿用 Windows 本機 IPC，本輪為單機模擬追蹤，頭盔實機及跨機待驗。 [首輪](../artifacts/desktop-guarded-openxr/20261116-130713-da4a8b3d/console.log) · [第二輪](../artifacts/desktop-guarded-openxr/20261116-130835-2bc0d5c6/console.log) · [預設分支](../artifacts/desktop-guarded-openxr/20261116-131106-ce123c24/accepted-begin.json)
+
 ## 2026-11-16 原生 Unity 驗證管理台追蹤開場
 
 - 管理包 0.31.206 的 568 項清單完整核對後，以 Windows 本機 IPC 啟動原 API。實查原管理程序的 TCP 監聽及 UDP 端點均為零，由已通過防火牆查核的 Python 迴環轉送接上 Windows 0.50.12。使用 Unity Mock Runtime。 [重跑方式](PLAYER_READINESS.md#windows-原生回歸) · [原程序監聽](../artifacts/desktop-guarded-openxr/20261116-125322-fa3a2e53/api-runtime.json)

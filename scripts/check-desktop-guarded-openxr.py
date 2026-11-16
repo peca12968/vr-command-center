@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import http.client
 import importlib.util
+import json
 import os
 from pathlib import Path
 import shutil
@@ -88,9 +89,52 @@ class GuardedVenue(desktop.Venue):
                 self.endpoint.unlink(missing_ok=True)
 
 
-def verify(venue, args):
+class RoomConsole:
+    def __init__(self, venue):
+        self.venue = venue
+        self.process = None
+
+    def start(self, entry, revision):
+        driver = desktop.ROOT / 'tests/browser/check-guarded-openxr-native.cjs'
+        with (self.venue.directory / 'console.log').open('wb') as log:
+            self.process = subprocess.Popen([self.venue.args.node, str(driver)], cwd=driver.parent,
+                                            stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT,
+                                            creationflags=subprocess.CREATE_NO_WINDOW)
+        config = {'base': self.venue.base, 'token': self.venue.tokens['Room1'], 'sessionId': entry['id'],
+                  'revision': revision, 'output': str(self.venue.directory)}
+        with self.process.stdin as pipe:
+            pipe.write(json.dumps(config).encode('utf-8'))
+        self.wait('ready')
+
+    def wait(self, step):
+        def report():
+            path = self.venue.directory / f'console-{step}.json'
+            if path.is_file():
+                return desktop.read_json(path)
+            if self.process.poll() is not None:
+                raise RuntimeError(f'Console exited before {step}; see console.log')
+            return None
+
+        return self.venue.wait(report, 25, f'original console {step}')
+
+    def close(self):
+        if self.process is None:
+            return
+        if self.process.poll() is None:
+            (self.venue.directory / 'console-stop.request').touch()
+        try:
+            self.process.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            taskkill = Path(os.environ['SystemRoot']) / 'System32/taskkill.exe'
+            subprocess.run([str(taskkill), '/PID', str(self.process.pid), '/T', '/F'], check=True, timeout=5,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+            self.process.wait(timeout=5)
+            raise RuntimeError('Console and its browser exceeded their shutdown limit')
+
+
+def verify(venue, args, console=None):
     venue.start()
-    mission = venue.mission(1)
+    mission = venue.mission(1, name='第一房 VR 追蹤開場（Mock Runtime）', briefing='Windows 原生 OpenXR 測試場次')
     entry = venue.create(mission, [1], 'guarded-openxr', role='Room1', origin='GameServer', headset='ViveXr')
     session = '/api/sessions/' + entry['id']
     player, = entry['players']
@@ -144,13 +188,20 @@ def verify(venue, args):
 
     first = readiness(True, ['0 7'])
     venue.save('before-loss.json', first)
+    revision = first['readiness']['sessionSequence']
+    if console is not None:
+        console.start(entry, revision)
     loss.touch(exist_ok=False)
     missing = readiness(False, ['0 7', '1 7'], first['packet']['sequence'])
     venue.save('tracking-lost.json', missing)
-    revision = first['readiness']['sessionSequence']
     assert revision == missing['readiness']['sessionSequence']
-    command = {'commandId': str(uuid.uuid4()), 'expectedSequence': revision, 'requireTrackedStart': True}
-    blocked = venue.command(entry, 'Begin', expected=409, **command)
+    if console is None:
+        command = {'commandId': str(uuid.uuid4()), 'expectedSequence': revision, 'requireTrackedStart': True}
+        blocked = venue.command(entry, 'Begin', expected=409, **command)
+    else:
+        rejected = console.wait('rejected')
+        command, blocked = rejected['intent'], rejected['response']
+        assert rejected['status'] == 409
     assert blocked['code'] == 'tracked-vr-start-not-ready'
     state = venue.state(entry)
     assert state['state'] == 'Preparing' and state['sequence'] == revision
@@ -159,8 +210,16 @@ def verify(venue, args):
     recovered = readiness(True, ['0 7', '1 7', '0 7'], missing['packet']['sequence'])
     assert recovered['readiness']['sessionSequence'] == revision
     venue.save('tracking-recovered.json', recovered)
-    receipt = venue.command(entry, 'Begin', **command)
-    duplicate = venue.command(entry, 'Begin', **command)
+    if console is None:
+        receipt = venue.command(entry, 'Begin', **command)
+        duplicate = venue.command(entry, 'Begin', **command)
+    else:
+        accepted = console.wait('accepted')
+        accepted_intent, receipt = accepted['intent'], accepted['response']
+        assert accepted['status'] == 200 and accepted_intent['commandId'] != command['commandId']
+        assert accepted_intent['action'] == 'Begin' and accepted_intent['requireTrackedStart'] is True
+        assert accepted_intent['expectedSequence'] == revision
+        duplicate = venue.command(entry, **accepted_intent)
     assert receipt['duplicate'] is False and duplicate['duplicate'] is True
     assert receipt['appliedAtSequence'] == duplicate['appliedAtSequence'] > revision
     venue.save('accepted-begin.json', {'accepted': receipt, 'duplicate': duplicate})
@@ -191,9 +250,16 @@ def verify(venue, args):
     assert witness['frame']['players'][0]['rig']['kind'] == 'Tracked' and witness['frame']['players'][0]['connected'] is True
     assert sealed['world']['header']['streamId'] == stream and records[1]['players'] == sealed['statistics']['players']
     venue.save('original-opening.json', {'evidence': evidence, 'packet': witness})
+    if console is not None:
+        venue.save('console-replay-request.json', {'worldSequence': opening['worldSequence'], 'closedFrames': sealed['world']['acceptedSequence']})
+        replay = console.wait('replay')
+        assert replay['sessionId'] == entry['id'] and replay['frameSequence'] == opening['worldSequence']
+        assert replay['streamId'] == stream and replay['packet'] == witness
+        assert console.process.wait(timeout=15) == 0
+        venue.evidence.extend(('Room1 console readiness transition and guarded Begin clicks', 'Room1 console reopened original Preparing frame'))
     assert venue.wait_for_player_results(entry)['allAcknowledged']
     venue.evidence.extend(('tracked Preparing', 'lost tracked aim', 'Begin rejected', 'tracked aim restored',
-                          'same Begin accepted and deduplicated', 'native Running', 'exported original opening', 'final result acknowledged'))
+                          'Begin accepted and deduplicated', 'native Running', 'exported original opening', 'final result acknowledged'))
     venue.summary(source='Windows native Unity and management 0.31; Unity Mock Runtime; IPC-only management process')
     return sealed, records, evidence
 
@@ -222,6 +288,7 @@ def main():
     parser.add_argument('--mock-dll', type=Path, required=True)
     parser.add_argument('--pose-dll', type=Path, required=True)
     parser.add_argument('--runtime-root', type=Path, required=True)
+    parser.add_argument('--room-console', action='store_true', help='Exercise the shipped room console in headless Chromium')
     args = parser.parse_args()
     args.duration, args.job_workers, args.check = 300, 2, False
     try:
@@ -237,14 +304,23 @@ def main():
         args.pose_dll = args.pose_dll.resolve(strict=True)
         desktop.verify_player(args)
         require_silent_windows_launch(sys.executable)
+        if args.room_console:
+            args.node = shutil.which('node')
+            if not args.node:
+                raise ValueError('Install Node and the browser test dependencies for --room-console')
     except (OSError, RuntimeError, ValueError) as error:
         parser.error(str(error))
     venue = GuardedVenue(args)
+    console = RoomConsole(venue) if args.room_console else None
     try:
-        sealed, records, evidence = verify(venue, args)
+        sealed, records, evidence = verify(venue, args, console)
     finally:
-        if not venue.cleanup():
-            raise RuntimeError('See cleanup.json for guarded test cleanup errors')
+        try:
+            if console is not None:
+                console.close()
+        finally:
+            if not venue.cleanup():
+                raise RuntimeError('See cleanup.json for guarded test cleanup errors')
     verify_closed(venue, sealed, records, evidence)
     venue.stage('passed', checks=len(venue.evidence), closedJournalVerified=True)
 

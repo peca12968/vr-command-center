@@ -23,6 +23,8 @@ python scripts/check-desktop-guarded-openxr.py `
 
 測試管理程序以 Kestrel 的本機 Unix domain socket 啟動，確認其 TCP 監聽和 UDP 端點均為零，再透過已通過防火牆查核的 Python 迴環位址連接 Unity。選用短的本機資料根目錄以容納 Windows IPC 路徑。 [Kestrel 本機 socket](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/servers/kestrel/endpoints?view=aspnetcore-10.0)
 
+裝好 `tests/browser` 的 Node 相依套件及 Playwright Chromium 後，可在上方指令加 `--room-console`。無介面的瀏覽器使用第一房房控開啟原套件管理台。畫面從 1／1 席更新為 0／1 席時，實際點擊開場並核對拒絕提示。追蹤恢復後再次點擊，以新的命令開場，再原樣重送這筆已成功的命令查驗重複回條。雙封存後從任務收尾開啟原開場畫格，核對第一房錄製及原世界序號，並驗證逐格前進及返回開場畫格。
+
 ## 從房卡查看姿態中斷快照
 
 控制台 0.31.86 在執行中的 VR 或 MR 場次確認本房有存活席位失去有效姿態時，提供「檢視姿態中斷快照」。按鈕開啟原錄製，在該房的原畫格停住，並標示受影響席位。房控可查看本房，主控可查看五房。畫面中的已淘汰席位不列為中斷。

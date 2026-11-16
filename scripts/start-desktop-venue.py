@@ -191,9 +191,10 @@ class Venue:
             except subprocess.TimeoutExpired: process.kill(); process.wait(timeout=5)
         del self.processes[name]
 
-    def mission(self, room):
+    def mission(self, room, *, name=None, briefing=None):
         weather, night = [('Clear', False), ('Fog', False), ('Rain', True), ('Storm', True), ('Clear', True)][room - 1]
-        definition = {'name': f'Room {room} PC venue - Simulation', 'briefing': 'Independent native desktop room, synthetic rigs; no headset',
+        definition = {'name': f'Room {room} PC venue - Simulation' if name is None else name,
+            'briefing': 'Independent native desktop room, synthetic rigs; no headset' if briefing is None else briefing,
             'durationSeconds': self.args.duration, 'environment': {'mode': 'VR', 'weather': weather, 'timeOfDay': 'Night' if night else 'Day', 'lightning': weather == 'Storm'},
             'enemies': {'count': room, 'behavior': 'Hold', 'autoAttack': False},
             'props': [{'assetId': 'barrel' if index % 2 else 'sandbag', 'position': {'x': (index - (room - 1) / 2) * 2, 'y': 0, 'z': 3}, 'yawDegrees': room * 15} for index in range(room)]}
