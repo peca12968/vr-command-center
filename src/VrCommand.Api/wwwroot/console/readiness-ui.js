@@ -11,6 +11,31 @@ export const beginSeatLabels = { Vacant: '未編列', AwaitingAdmission: '等待
   AwaitingPose: '等待姿態', PoseUnavailable: '姿態未就緒', Eliminated: '已淘汰', Tracked: '追蹤就緒',
   Simulated: '合成姿態就緒', NeedsTracking: '合成姿態 · 需追蹤', Unknown: '待確認', NotPreparing: '尚無準備場次' };
 
+export function venueBeginRejection(roomIds, blockedRooms) {
+  if (!Array.isArray(roomIds) || !roomIds.length || roomIds.length > 5 || !roomIds.every((room, index) =>
+    Number.isInteger(room) && room >= 1 && room <= 5 && (!index || roomIds[index - 1] < room))) {
+    return '名冊或遊戲快照尚未就緒，本批場次維持準備中。';
+  }
+  const message = `房間 ${roomIds.join('、')} 的名冊或遊戲快照尚未就緒，本批場次維持準備中。`;
+  const states = ['Vacant', 'AwaitingAdmission', 'AwaitingPose', 'PoseUnavailable', 'Eliminated', 'NeedsTracking'];
+  if (!Array.isArray(blockedRooms) || blockedRooms.length > roomIds.length || !blockedRooms.every((room, index) =>
+    roomIds.includes(room?.roomId) && (!index || blockedRooms[index - 1].roomId < room.roomId)
+      && Number.isSafeInteger(room.worldSequence) && room.worldSequence > 0
+      && Array.isArray(room.seats) && room.seats.length > 0 && room.seats.length <= 5
+      && room.seats.every((seat, position) => Number.isInteger(seat?.seat) && seat.seat >= 1 && seat.seat <= 5
+        && (!position || room.seats[position - 1].seat < seat.seat) && states.includes(seat.state)))) return message;
+  const details = blockedRooms.map(room => {
+    const seatsByState = new Map();
+    for (const { seat, state } of room.seats) {
+      if (!seatsByState.has(state)) seatsByState.set(state, []);
+      seatsByState.get(state).push(seat);
+    }
+    const summaries = Array.from(seatsByState, ([state, seats]) => `第 ${seats.join('、')} 席${beginSeatLabels[state]}`);
+    return `拒絕時房間 ${room.roomId} ${summaries.join('，')}。`;
+  });
+  return message + details.join('');
+}
+
 function venueBeginSeats(details, registered, capacity, trackedRequired) {
   const seats = details?.seats;
   if (!Array.isArray(seats) || seats.length !== registered || !seats.every((row, index) => Number.isInteger(row?.seat)

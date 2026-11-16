@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-16 五房開場拒絕顯示受阻席位
+
+- 控制台 0.31.207 會在兩種五房滿席政策的拒絕訊息列出受阻席位與原因。新版 API 0.31.0 保留 `venue-begin-not-ready` 和 `roomIds`，有原有效快照時加上 `blockedRooms`、原世界序號及席位原因。過期來源只提供房號。 [操作說明](PLAYER_READINESS.md#五房追蹤驗收開場) · [Windows 管理包](../artifacts/windows-control-blocked-seats-031207.zip)
+- 從新版 ZIP 解壓驗證 568 個檔案，ZIP SHA-256 為 `6e33d2148b9333e779b4e4490db0da81f7369675a4a6e2355d4cb33aa6758c19`。Chromium 94 項、就緒畫面單元測試 24 項及 .NET 領域測試 1,115 項通過。瀏覽器在送出合併或獨立場的開始請求時發布第 5 房第 2 席失效，畫面顯示原拒絕原因，場次版本維持準備中。混合獨立場的 VR／MR 來源在瀏覽器測試中使用模擬資料。 [合併畫面](../artifacts/desktop-guarded-openxr/20261116-133030-124bfbc9/full-participation-linked-refused-seat.png) · [獨立畫面](../artifacts/desktop-guarded-openxr/20261116-133030-124bfbc9/full-participation-mixed-refused-seat.png) · [瀏覽器結果](../artifacts/desktop-guarded-openxr/20261116-133030-124bfbc9/checks.json)
+- Windows 0.50.12 以每輪 24 個桌面玩家加一個 OpenXR 模擬追蹤席重跑兩種拓撲。第 5 房第 5 席失效時，拒絕回條分別指向原第 73、68 格。六場雙封存共 503 格，50 筆伺服器戰績確認、36 個 C／F 原始資料檔雜湊一致，活動場次及殘留程序均為零。 [合併回條](../artifacts/desktop-venue-openxr/20261116-133113-0871f9da/rejected-start.json) · [獨立回條](../artifacts/desktop-venue-openxr/20261116-133129-7d48ef6c/rejected-start.json)
+- 首輪瀏覽器已通過新增的拒絕畫面，後續環境調整的即時追蹤回歸讀到未帶席位統計的回應而退出。測試改為以同一管理版本持續發布新鮮畫格，並在原期限內核對場次及房間資料。Windows 管理服務使用本機 IPC，頭盔與跨機操作待驗。 [首輪紀錄](../artifacts/desktop-guarded-openxr/20261116-132848-d29ab87a/browser.log)
+
 ## 2026-11-16 五房 25 席有效姿態的開場驗證
 
 - Windows 0.50.12 與管理包 0.31.206 完成合併和獨立兩種同機排演。每輪有 24 個桌面玩家端及第 5 房第 5 席的 Unity OpenXR Mock Runtime。全追蹤政策拒絕含合成姿態的五房。該席失去右手指向時，有效姿態政策只回報第 5 房，所有場次保持原準備序號。同一場館開場請求在追蹤恢復後成功，原樣重送只取得重複回條。 [合併拒絕](../artifacts/desktop-venue-openxr/20261116-132044-e28095d4/rejected-start.json) · [獨立拒絕](../artifacts/desktop-venue-openxr/20261116-132059-649a50db/rejected-start.json) · [重跑方式](PLAYER_READINESS.md#五房各-5-席有效姿態開場)

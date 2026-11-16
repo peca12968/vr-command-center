@@ -102,6 +102,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         weather: 'Clear', lightning: false, throughCombatSequence: 0, events: [],
         frame: { phase: snapshot.state, night: false, tick: snapshot.state === 'Preparing' ? 0 : 1, throughSequence: 0, players } };
       assert.equal(send({ type: 'frame', payload: packet }).acceptedSequence, sequence);
+      return packet;
     } };
   }
   async function publishUntil(sources, tracked, condition, loseTracking = false) {
@@ -138,6 +139,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       const payload = { action: 'Begin', targets, requireFullParticipation: true };
       for (const source of sources) source.publish(source.snapshot, false);
       const missing = await api('/venue/phase', 'POST', payload, 'Master', 409, undefined, randomUUID());
+      assert.deepEqual(missing.blockedRooms?.map(({ roomId, seats }) => ({ roomId, seats })),
+        [{ roomId: 5, seats: [{ seat: 5, state: 'Vacant' }] }]);
       check(missing.code === 'venue-begin-not-ready' && missing.roomIds.join() === '5'
         && (await api('/sessions')).every(session => session.state === 'Preparing'),
       `${mode} full participation rejects the original 24-seat roster atomically`);
@@ -199,6 +202,35 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       const disconnected = await api('/venue/phase', 'POST', { ...payload, targets: readyFences }, 'Master', 409, undefined, randomUUID());
       check(disconnected.code === 'venue-begin-not-ready' && disconnected.roomIds.join() === '5'
         && (await api('/sessions')).every(session => session.state === 'Preparing'), `${mode} server identifies only the room with a disconnected seat`);
+      await publishUntil(sources, false, () => start.isEnabled());
+      let lostSequence;
+      const phaseUrl = '**/api/venue/phase';
+      const interrupt = async intercepted => {
+        if (intercepted.request().method() === 'POST') {
+          for (const source of sources) {
+            const frame = source.publish(source.snapshot, false, true);
+            if (source === last) lostSequence = frame.sequence;
+          }
+        }
+        await intercepted.continue();
+      };
+      await page.route(phaseUrl, interrupt);
+      try {
+        const refused = page.waitForResponse(response => response.url().endsWith('/api/venue/phase') && response.request().method() === 'POST');
+        page.once('dialog', dialog => dialog.accept());
+        await start.click();
+        const reply = await refused;
+        const body = await reply.json();
+        assert.deepEqual(body.blockedRooms, [{ roomId: 5, worldSequence: lostSequence, seats: [{ seat: 2, state: 'PoseUnavailable' }] }]);
+        const notice = page.locator('#notice').filter({ hasText: '拒絕時房間 5 第 2 席姿態未就緒。' });
+        await notice.waitFor();
+        await notice.screenshot({ path: path.join(screenshots, `full-participation-${mode.toLowerCase()}-refused-seat.png`) });
+        check(reply.status() === 409 && JSON.stringify(await getFences()) === JSON.stringify(readyFences),
+          `${mode} keeps the original fences and tells the operator which seat failed when sending Begin`);
+      } finally {
+        await page.unroute(phaseUrl, interrupt);
+      }
+      await page.locator('#refresh').click();
       await publishUntil(sources, false, () => start.isEnabled());
       const receiptPromise = page.waitForResponse(response => response.url().endsWith('/api/venue/phase') && response.request().method() === 'POST');
       const confirmation = page.waitForEvent('dialog').then(async dialog => { assert.match(dialog.message(), /25 席已連線且姿態有效/); await dialog.accept(); });
@@ -320,10 +352,16 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         await status(1).filter({ hasText: '快照已過期' }).waitFor();
         check(!(await status(1).innerText()).includes('錄製來源') && await start.isDisabled(),
           'The preparing source label expires with the original readiness sample');
+        const stale = await api('/venue/phase', 'POST', { action: 'Begin', targets: await getFences(), requireFullTracking: true },
+          'Master', 409, undefined, randomUUID());
+        check(stale.roomIds.join() === '1,2,3,4,5' && stale.blockedRooms === undefined,
+          'A stale Linked snapshot never diagnoses individual seats in the rejection');
       }
       const targets = await getFences();
       for (const source of sources) source.publish(source.snapshot, false);
       const rejected = await api('/venue/phase', 'POST', { action: 'Begin', targets, requireFullTracking: true }, 'Master', 409, undefined, randomUUID());
+      assert.deepEqual(rejected.blockedRooms?.map(({ roomId, seats }) => ({ roomId, seats })),
+        [{ roomId: 1, seats: [{ seat: 5, state: 'NeedsTracking' }] }, { roomId: 5, seats: [{ seat: 5, state: 'Vacant' }] }]);
       check(rejected.code === 'venue-begin-not-ready' && rejected.roomIds.join() === '1,5'
         && (await api('/sessions')).every(session => session.state === 'Preparing'), `${mode} rejects the entire current Begin with exactly rooms 1 and 5`);
       const last = sources.find(source => source.route === `/sessions/${forRoom(5).id}`);
@@ -397,11 +435,14 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       const first = sources.find(source => source.route === `/sessions/${forRoom(1).id}`);
       const changed = await api(first.route + '/commands', 'POST', { commandId: randomUUID(), action: 'SetEnvironment',
         environment: first.snapshot.environment });
-      first.publish(first.snapshot, true);
-      const readback = await api(first.route + '/readiness');
-      check(readback.observedSequence < changed.appliedAtSequence
-        && (await api('/rooms/readiness')).rooms.find(room => room.roomId === 1).venueTracking.trackedSeats.length === 5,
-        `${mode} preserves current tracking through an unrelated environment revision`);
+      await publishUntil(sources, true, async () => {
+        const readback = await api(first.route + '/readiness');
+        const room = (await api('/rooms/readiness')).rooms.find(room => room.roomId === 1);
+        return readback.sourceState === 'Fresh' && readback.sessionSequence === changed.appliedAtSequence
+          && readback.observedSequence === first.snapshot.sequence && readback.observedSequence < changed.appliedAtSequence
+          && room?.sessionSequence === changed.appliedAtSequence && room.venueTracking?.trackedSeats.join() === '1,2,3,4,5';
+      });
+      check(true, `${mode} preserves current tracking through an unrelated environment revision`);
       await api(first.route + '/commands', 'POST', { commandId: randomUUID(), action: 'Pause' });
       const resumed = await api(first.route + '/commands', 'POST', { commandId: randomUUID(), action: 'Resume' });
       await page.locator('#refresh').click();

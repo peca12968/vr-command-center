@@ -14,7 +14,7 @@ import { mountReport, mountVenueReport, venueScoreFields } from './report-ui.js'
 import { matchesDebriefCsv } from './report-csv.js';
 import { mountVenueHistory } from './venue-history-ui.js';
 import { mountVenueDebriefSeats } from './venue-debrief-ui.js';
-import { beginSeatLabels, mountReadiness, mountRoomReadiness, usesTrackedVrStart } from './readiness-ui.js';
+import { beginSeatLabels, mountReadiness, mountRoomReadiness, usesTrackedVrStart, venueBeginRejection } from './readiness-ui.js';
 import { mountConnections, validDestination } from './connection-ui.js';
 import { mountClosure } from './closure-ui.js';
 import { placementHistory } from './placement-history.js';
@@ -133,9 +133,10 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
     const content = responseType === 'blob' && response.ok ? await response.blob() : await response.text();
     if (epoch !== state.epoch) throw new Error('登入狀態已變更，已忽略舊回應。');
     if (!response.ok) {
-      let message = '操作未完成，請重新整理後確認。', layout, code, maxCount, roomIds, roomId, workstationIssues;
+      let message = '操作未完成，請重新整理後確認。', layout, code, maxCount, roomIds, roomId, workstationIssues, blockedRooms;
       try { const data = JSON.parse(content); message = data.error || message; layout = data.layout; code = data.code; maxCount = data.maxCount; roomIds = data.roomIds; roomId = data.roomId;
         if (code === 'operator-network-witnesses-rejected') workstationIssues = data.issues;
+        if (code === 'venue-begin-not-ready') blockedRooms = data.blockedRooms;
       } catch { /* Non-domain errors have no stable JSON contract. */ }
       if (response.status === 401) { logout(); message = '憑證無效或已更換，請重新登入。'; }
       if (response.status === 403) message = '目前身分沒有此操作權限。';
@@ -160,7 +161,7 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
         else if (code === 'setting-revision-changed') message = '場次設定已變更。草稿仍保留，請載入目前設定再編輯。';
         else if (code === 'venue-pause-not-observed' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 尚未回傳有效的暫停快照，本批場次維持暫停。`;
         else if (code === 'venue-resume-not-ready' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 的 MR 追蹤尚未就緒，本批場次維持暫停。`;
-        else if (code === 'venue-begin-not-ready' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 的名冊或遊戲快照尚未就緒，本批場次維持準備中。`;
+        else if (code === 'venue-begin-not-ready') message = venueBeginRejection(roomIds, blockedRooms);
         else message = path.startsWith('/missions') ? '任務版本已變更或原請求內容不一致；草稿仍保留，可載入最新版或另存新任務。' : '場次狀態或名額已變更，請重新整理並確認後再操作。';
       }
       if (layout) message = Number.isInteger(roomId) ? `房間 ${roomId} 的場地未通過檢查，五場都未建立。請修正並保存新版本。`

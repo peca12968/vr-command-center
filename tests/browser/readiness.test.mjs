@@ -6,12 +6,25 @@ const missionClock = await readFile(new URL('../../src/VrCommand.Api/wwwroot/con
 const connection = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/connection-ui.js', import.meta.url), 'utf8');
 const dataModule = source => 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
 const { readinessView, roomReadinessView, roomEndpointText, roomTicketDestination, roomTicketSourceLive, mrReadinessView, roomMissionTimeView, roomVenuePhaseView,
-  roomMrTrackingPauseTarget, roomMrPauseView, venueTrackingRow, roomPoseFrameTarget } =
+  roomMrTrackingPauseTarget, roomMrPauseView, venueTrackingRow, roomPoseFrameTarget, venueBeginRejection } =
   await import(dataModule(code.replace('./mission-clock.js', dataModule(missionClock)).replace('./connection-ui.js', dataModule(connection))));
 const player = { id: 'player', admissionId: 'first', roomId: 1, seat: 0 };
 const session = { id: 'session', sequence: 10, state: 'Preparing', players: [player] };
 const report = { version: 1, sessionId: 'session', sessionSequence: 10, sourceState: 'Fresh', sourceAgeMilliseconds: 10, origin: 'Simulation',
   players: [{ playerId: 'player', admissionId: 'first', roomId: 1, seat: 0, state: 'Participating', rigKind: 'Simulated', canParticipate: true }] };
+test('The Begin rejection describes only verified blocked seats and keeps the room summary for older responses', () => {
+  const ids = [2, 5];
+  const summary = '房間 2、5 的名冊或遊戲快照尚未就緒，本批場次維持準備中。';
+  const details = { roomId: 5, worldSequence: 18, seats: [
+    { seat: 2, state: 'PoseUnavailable' }, { seat: 3, state: 'PoseUnavailable' }, { seat: 5, state: 'Vacant' }
+  ] };
+  assert.equal(venueBeginRejection(ids, [details]), summary + '拒絕時房間 5 第 2、3 席姿態未就緒，第 5 席未編列。');
+  assert.equal(venueBeginRejection(ids), summary);
+  for (const invalid of [[{ ...details, roomId: 1 }], [{ ...details, worldSequence: 0 }],
+    [{ ...details, seats: [{ seat: 2, state: 'Tracked' }] }], [{ ...details, seats: [details.seats[0], details.seats[0]] }]]) {
+    assert.equal(venueBeginRejection(ids, invalid), summary);
+  }
+});
 test('The read-only pose frame requires the fresh original room, stream, revision and seat', () => {
   const room = { id: 1, sessionId: session.id, playerCount: 1, capacity: 5 };
   const running = { ...session, state: 'Running', mode: 'Linked', roomIds: [1, 2, 3, 4, 5], combatStream: { streamId: 'stream' } };
