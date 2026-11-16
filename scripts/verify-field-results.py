@@ -2301,9 +2301,15 @@ def udp_preflight_batch(batch, path, mode, expected_rooms, *, expected_sessions=
 def read_quest_capture_report(path, mode):
     report = read_quest_plan_file(path)
     fields = {'version', 'complete', 'topology', 'expectedSeats', 'capturedSeats', 'scope', 'seats'}
-    require(fields <= report.keys() <= fields | {'deploymentSha256', 'partialDeployment'}
+    require(fields <= report.keys() <= fields | {'deploymentSha256', 'partialDeployment', 'captureBinding'}
             and type(report['complete']) is bool and report['topology'] == mode and report['scope'] == 'quest-logcat-only',
             'Quest capture report has an invalid format or the wrong topology')
+    if 'captureBinding' in report:
+        binding = report['captureBinding']
+        require(type(binding) is dict and set(binding) == {'venueSha256', 'salt', 'mapSha256'}
+                and all(type(binding[key]) is str and re.fullmatch(pattern, binding[key]) for key, pattern in
+                        (('venueSha256', r'[0-9a-f]{64}'), ('salt', r'[0-9a-f]{32}'), ('mapSha256', r'[0-9a-f]{64}'))),
+                'Invalid original ZIP and device map binding in Quest capture report')
     if 'deploymentSha256' in report:
         digest = report['deploymentSha256']
         require(type(digest) is str and re.fullmatch(r'[0-9a-f]{64}', digest), 'Invalid original Quest deployment digest in capture report')

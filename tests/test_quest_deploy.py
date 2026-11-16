@@ -1107,8 +1107,8 @@ class QuestVenueTests(unittest.TestCase):
         files['venue.json'] = json.dumps(manifest).encode()
         return files, seats
 
-    def write_bundle(self, files):
-        bundle = self.root / 'quest-mr-venue.zip'
+    def write_bundle(self, files, name='quest-mr-venue.zip'):
+        bundle = self.root / name
         with zipfile.ZipFile(bundle, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
             for name, data in files.items():
                 archive.writestr(name, data)
@@ -1408,10 +1408,15 @@ else:
         retry = list(command)
         retry[retry.index('--output-directory') + 1] = str(retry_output)
         retry += ['--allow-partial-map', '--retry-incomplete', str(output / 'capture-report.json')]
+        document['seats'].reverse()
+        mapping.write_text(json.dumps(document), encoding='utf-8')
         finished = subprocess.run(retry, cwd=self.root, capture_output=True, encoding='utf-8', timeout=20)
         self.assertEqual(0, finished.returncode, finished.stderr)
         recovered = json.loads((retry_output / 'capture-report.json').read_bytes())
         self.assertEqual((True, 1, 1), (recovered['complete'], recovered['expectedSeats'], recovered['capturedSeats']))
+        self.assertEqual(report['captureBinding'], recovered['captureBinding'])
+        bundle = Path(command[command.index('--venue-bundle') + 1])
+        self.assertEqual(hashlib.sha256(bundle.read_bytes()).hexdigest(), report['captureBinding']['venueSha256'])
         seat, = recovered['seats']
         self.assertEqual((2, 3), (seat['roomId'], seat['seat']))
         self.assertEqual(expected[2, 3][2], (retry_output / seat['log']).read_bytes())
@@ -1428,6 +1433,57 @@ else:
         self.assertEqual(1, rejected.returncode, rejected.stderr)
         self.assertIn('does not match the original deployment seats', rejected.stderr)
         self.assertFalse(unstarted.exists())
+
+    def test_capture_retry_rejects_changed_zip_or_device_assignment_before_adb(self):
+        files, _ = self.mixed_bundle()
+        mapping, document = self.device_map()
+        document['seats'] = [row for row in document['seats'] if (row['roomId'], row['seat']) in {(2, 3), (5, 4)}]
+        mapping.write_text(json.dumps(document), encoding='utf-8')
+        self.mock_capture_devices(document['seats'], 'Independent', wrong_seat=(2, 3))
+        output = self.root / 'capture first'
+        command = self.capture_command(files, mapping, output) + ['--allow-partial-map']
+        original = subprocess.run(command, cwd=self.root, capture_output=True, encoding='utf-8', timeout=20)
+        self.assertEqual(1, original.returncode, original.stderr)
+        report_path = output / 'capture-report.json'
+        report = json.loads(report_path.read_bytes())
+        self.assertEqual(1, report['capturedSeats'])
+        originals = {path.name: path.read_bytes() for path in output.iterdir()}
+
+        for change in ('venue-bundle', 'device-map'):
+            with self.subTest(change=change):
+                if change == 'venue-bundle':
+                    admission = self.admissions[7]
+                    self.admissions[7] = uuid.uuid4()
+                    revised, _ = self.mixed_bundle()
+                    replacement = self.write_bundle(revised, 'reissued-venue.zip')
+                    self.mock_capture_devices(document['seats'], 'Independent')
+                    self.admissions[7] = admission
+                else:
+                    rows = [{**row, 'serial': 'replacement-headset'} if (row['roomId'], row['seat']) == (2, 3)
+                            else row for row in document['seats']]
+                    replacement = self.root / 'reassigned-device-map.json'
+                    replacement.write_text(json.dumps({**document, 'seats': rows}), encoding='utf-8')
+                    self.mock_capture_devices(rows, 'Independent')
+                retry_output = self.root / f'retry changed {change}'
+                retry = [*command, '--retry-incomplete', str(report_path)]
+                retry[retry.index(f'--{change}') + 1] = str(replacement)
+                retry[retry.index('--output-directory') + 1] = str(retry_output)
+                result = subprocess.run(retry, cwd=self.root, capture_output=True, encoding='utf-8', timeout=20)
+                self.assertEqual(1, result.returncode, result.stderr)
+                self.assertIn('original venue ZIP and Quest device map', result.stderr)
+                self.assertFalse(retry_output.exists())
+
+        legacy_path = self.root / 'legacy-capture.json'
+        del report['captureBinding']
+        legacy_path.write_text(json.dumps(report), encoding='utf-8')
+        retry_output = self.root / 'unbound legacy retry'
+        retry = [*command, '--retry-incomplete', str(legacy_path)]
+        retry[retry.index('--output-directory') + 1] = str(retry_output)
+        result = subprocess.run(retry, cwd=self.root, capture_output=True, encoding='utf-8', timeout=20)
+        self.assertEqual(1, result.returncode, result.stderr)
+        self.assertIn('prior Quest capture lacks an original ZIP and device map binding', result.stderr)
+        self.assertFalse(retry_output.exists())
+        self.assertEqual(originals, {path.name: path.read_bytes() for path in output.iterdir()})
 
     def run_fleet(self, files, mapping, *flags, faults=None, environment=None, fleet_root=None, release=None):
         env = {**os.environ, **(environment or {}), 'VR_QUEST_FLEET_FIXTURE': str(fleet_root or self.root),

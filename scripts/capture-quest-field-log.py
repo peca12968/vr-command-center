@@ -186,12 +186,26 @@ def venue_plan(bundle, device_map, partial):
     return field.read_json(result.stdout.decode('utf-8-sig'))
 
 
+def capture_binding(plan, salt):
+    device_map = {(row['roomId'], row['seat']): row['serial'] for row in plan['seats']}
+    return {'venueSha256': plan['venueSha256'], 'salt': salt,
+            'mapSha256': field.quest_deployment_map_fingerprint(salt, device_map)}
+
+
 def retry_capture_plan(plan, report_path):
     report = field.read_quest_capture_report(report_path, plan['topology'])
     field.require(report.get('deploymentSha256') == plan.get('deploymentSha256'),
                   'Retry with the same original Quest deployment report as the first capture')
     field.require(report.get('partialDeployment') == plan.get('partialDeployment'),
                   'Retry with the same deployed-seat capture option as the first capture')
+    binding = report.get('captureBinding')
+    if binding is None:
+        field.require('deploymentSha256' in report,
+                      'The prior Quest capture lacks an original ZIP and device map binding; start a new capture')
+        binding = capture_binding(plan, uuid.uuid4().hex)
+    else:
+        field.require(binding == capture_binding(plan, binding['salt']),
+                      'Retry with the original venue ZIP and Quest device map for the first capture')
     seats = {(row['roomId'], row['seat']): row for row in plan['seats']}
     retry = []
     for row in report['seats']:
@@ -201,7 +215,7 @@ def retry_capture_plan(plan, report_path):
         if not row['complete']:
             retry.append(original)
     field.require(retry, 'Prior Quest capture report has no incomplete seats')
-    return {**plan, 'seats': retry}
+    return {**plan, 'seats': retry, 'captureBinding': binding}
 
 
 def bind_deployment(plan, path, *, completed_only=False, after=None):
@@ -263,6 +277,9 @@ def bind_deployment(plan, path, *, completed_only=False, after=None):
 
 
 async def capture_venue(adb, plan, directory, seconds):
+    binding = plan.get('captureBinding')
+    if binding is None:
+        binding = capture_binding(plan, uuid.uuid4().hex)
     directory.mkdir()
     ready = 0
     can_announce_ready = True
@@ -303,6 +320,7 @@ async def capture_venue(adb, plan, directory, seconds):
     captured = sum(row['complete'] for row in seats)
     summary = {'version': 1, 'complete': captured == len(seats), 'topology': plan['topology'],
                'expectedSeats': len(seats), 'capturedSeats': captured, 'scope': 'quest-logcat-only', **partial_deployment}
+    summary['captureBinding'] = binding
     if 'deploymentSha256' in plan:
         summary['deploymentSha256'] = plan['deploymentSha256']
     with (directory / 'capture-report.json').open('x', encoding='utf-8') as report:

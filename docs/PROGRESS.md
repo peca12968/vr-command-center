@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-16 Quest 擷取重試鎖定原部署包與裝置
+
+- 原版曾在同一場次與 UDP 埠的第 2 房第 3 席接受兩種替換：換成重新配票的部署 ZIP，或沿用票券但改對應的 ADB 裝置。兩種替換均以退出碼 0 發布日誌。新報告保存原 ZIP SHA-256 與加鹽的席位裝置指紋，重試在啟動 ADB 及建立輸出目錄前核對。原包配合僅調整列順序的裝置表仍可只補抓失敗席，並保存相同指紋與原日誌。 [舊版反例](../artifacts/quest-capture-binding-20261116-142214/before.log) · [擷取回歸](../artifacts/quest-capture-binding-20261116-142214/capture-tests.log)
+- 舊報告仍可參與封存驗收。有原部署報告 SHA-256 的舊擷取，可沿用相同經核對的部署報告重試。缺少可核對來源的舊擷取會要求另開始一次。138 項完整場館封存測試、4 項擷取測試及 1 項部署續跑整合通過。驗證使用替身，Quest 3 的 USB 偵錯介面仍未列出。 [重試方式](QUEST3.md#重試未完成的-quest-擷取席位) · [場館測試](../artifacts/quest-capture-binding-20261116-142214/field-tests.log) · [部署續跑](../artifacts/quest-capture-binding-20261116-142214/deployment-retry.log) · [USB 狀態](../artifacts/quest-capture-binding-20261116-142214/usb-status.json)
+
 ## 2026-11-16 五房 Quest 擷取就緒提示
 
 - 在五房合併的 25 席替身排演中，讓第 5 房第 5 席等到第 1 房第 1 席已保存最終戰績與斷線日誌，再回報啟動。舊版仍輸出 `venue-capture-ready`。新版在讀到任何選定席位的最終戰績時停止播報整批就緒，後續日誌照常收錄。回歸核對 25 份原文與各自 SHA-256。另一次正常等候收尾的 25 席仍收到整批就緒提示。 [舊版反例](../artifacts/quest-capture-ready-20261116-141408/before.log) · [新舊情境複驗](../artifacts/quest-capture-ready-20261116-141408/targeted.log) · [操作說明](QUEST3.md#一次擷取五房-quest-日誌)

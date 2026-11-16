@@ -332,7 +332,7 @@ else:
         directory = root / f'capture batch {index + 1}'
         seats = mapped[index::batches]
         if use_capture_tool:
-            plan = {'version': 1, 'topology': mode, 'seats': seats}
+            plan = {'version': 1, 'topology': mode, 'seats': seats, 'venueSha256': '1' * 64}
             with redirect_stderr(io.StringIO()):
                 result = asyncio.run(capture_tool.capture_venue([sys.executable, str(adb)], plan, directory, 25))
             assert result['complete'] is (not interrupt_first) and result['capturedSeats'] == len(seats) - int(interrupt_first)
@@ -4219,6 +4219,18 @@ class FieldResultsTests(unittest.TestCase):
 
                 with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'same original Quest deployment report'):
                     capture_tool.retry_capture_plan({'topology': mode, 'seats': [], 'deploymentSha256': '4' * 64}, capture_path)
+                legacy_path = root / 'legacy-partial-capture.json'
+                rows = report['seats']
+                failed = {key: rows[0][key] for key in ('roomId', 'seat', 'sessionId', 'port')}
+                legacy_path.write_text(json.dumps({**report, 'complete': False, 'capturedSeats': len(rows) - 1,
+                                                   'seats': [dict(failed, complete=False, reason='ADB ended'), *rows[1:]]}),
+                                       encoding='utf-8')
+                plan = {'topology': mode, 'venueSha256': deployment['retry']['venueSha256'],
+                        'deploymentSha256': report['deploymentSha256'],
+                        'seats': [dict(row, serial=f'mock-{index}') for index, row in enumerate(rows)]}
+                retry = capture_tool.retry_capture_plan(plan, legacy_path)
+                self.assertEqual(plan['seats'][:1], retry['seats'])
+                self.assertEqual(plan['venueSha256'], retry['captureBinding']['venueSha256'])
                 path.write_text(json.dumps({key: value for key, value in manifest.items() if key != 'questDeployments'}), encoding='utf-8')
                 with self.assertRaisesRegex(field.EvidenceError, 'original Quest deployment reports referenced'):
                     field.verify_venue(path)
