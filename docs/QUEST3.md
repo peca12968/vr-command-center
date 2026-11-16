@@ -516,7 +516,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 
 #### 啟動前核對裝置檔案
 
-單席與整批部署都會先傳送並核對 MR 原校正檔，再驗證暫存的玩家連線檔。兩項核對通過且票券仍有效時，才停止遊戲。切換指令在裝置上再次核對暫存檔的 SHA-256，通過才更名至正式路徑。若遊戲停止後才發現暫存連線檔被改動，工具會保留原有正式檔。批次報告將該席標為 `file-verification-failed`，步驟為 `activate-connection`。切換成功後再次核對正式路徑，通過才送出啟動指令。批次沿用裝置上已安裝的 APK，單席流程另含 APK 安裝階段。 [ADB 遠端指令](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/docs/user/adb.1.md)
+單席與整批部署都會先傳送並核對 MR 原校正檔，再驗證暫存的玩家連線檔。兩項核對通過且票券仍有效時，才停止遊戲。更名之前，同一個裝置端指令會核對暫存連線檔及它所引用的原校正檔 SHA-256。任一檔案不符時，原正式連線檔仍在，批次報告將該席標為 `file-verification-failed`，步驟為 `activate-connection`。切換成功後，工具會再次核對正式連線檔及校正檔，兩項通過才送出啟動指令。批次沿用裝置上已安裝的 APK，單席流程另含 APK 安裝階段。 [ADB 遠端指令](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/docs/user/adb.1.md)
 
 線上部署會在暫存連線檔通過 SHA-256 核對後，再向管理服務核對原五房來源、端點及入場。核對失敗時會嘗試移除該席暫存連線檔。部署工具會保留正式連線檔，並略過該席的停止及啟動指令。整批回報 `venue-check-failed`，已完成席位保留，後續席位維持 `not-attempted`。來源恢復後可依原報告重試。 [重試操作](#從原部署報告重試未完成席位)
 
@@ -530,8 +530,8 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 | `verify-live-venue-before-stop` | 暫存檔已驗證，但最新線上核對失敗。正式連線檔仍為原檔，尚未送出停止或啟動指令。 |
 | `check-expiry-before-staging`、`check-expiry-before-stop` | 票券已過期，尚未送出停止指令或切換連線檔。請下載目前部署包。 |
 | `stop-game` | 停止指令失敗，尚未切換連線檔。請確認遊戲程序狀態。 |
-| `activate-connection` | 停止指令已成功。若回報檔案驗證失敗，暫存檔在更名前的核對未通過，原正式檔仍在。其他切換錯誤須查驗裝置目前的正式檔。 |
-| `verify-active-connection` | 新連線檔已切換，正式路徑的最終驗證失敗。 |
+| `activate-connection` | 停止指令已成功。若回報檔案驗證失敗，暫存連線檔或校正檔在更名前的核對未通過，原正式連線檔仍在。其他切換錯誤須查驗裝置目前的正式檔。 |
+| `verify-active-connection` | 新連線檔已切換，正式連線檔或校正檔的最終驗證失敗，工具停在啟動前。 |
 | `clean-local-connection`、`check-expiry-before-launch` | 新連線檔已切換並通過驗證，尚未送出啟動。後者須取得新票券。 |
 | `launch-game` | 新連線檔已通過驗證，Android 未確認啟動指定的遊戲活動。 |
 

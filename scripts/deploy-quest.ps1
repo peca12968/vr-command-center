@@ -1402,7 +1402,8 @@ function Confirm-QuestFileHash([string[]]$Target, [string]$Path, [string]$Expect
 }
 
 function Publish-QuestFile([string[]]$Target, [string]$Local, [string]$Staging, [string]$Destination, [string]$Description,
-    [string]$ExpectedHash, [string]$ContentHash, [scriptblock]$BeforeActivation, [hashtable]$ConnectionDeployment) {
+    [string]$ExpectedHash, [string]$ContentHash, [scriptblock]$BeforeActivation, [hashtable]$ConnectionDeployment,
+    [hashtable]$RequiredAlignment) {
     $stagedHash = if ($ContentHash) { $ContentHash } else { (Get-FileHash -LiteralPath $Local -Algorithm SHA256).Hash.ToLowerInvariant() }
     try {
         Invoke-QuestAdb ($Target + @('push', $Local, $Staging)) | Out-Null
@@ -1416,16 +1417,24 @@ function Publish-QuestFile([string[]]$Target, [string]$Local, [string]$Staging, 
             if ($LASTEXITCODE -ne 0) { throw 'Could not confirm ticket replacement. Check the selected device and read its current configuration before retrying.' }
         } else {
             if ($null -ne $ConnectionDeployment) { $ConnectionDeployment.Step = 'activate-connection' }
-            # The staged bytes may change while checking the live source or stopping the app.
-            $command = 'staged=$(sha256sum ''{0}'') && [ "${{staged%% *}}" = ''{1}'' ] || exit 42; mv -f ''{0}'' ''{2}''' `
-                -f $Staging, $stagedHash, $Destination
+            # Recheck the staged bytes and their alignment dependency after stopping the app.
+            $command = 'staged=$(sha256sum ''{0}'') && [ "${{staged%% *}}" = ''{1}'' ] || exit 42; ' -f $Staging, $stagedHash
+            if ($RequiredAlignment) {
+                $command += 'alignment=$(sha256sum ''{0}'') && [ "${{alignment%% *}}" = ''{1}'' ] || exit 43; ' `
+                    -f $RequiredAlignment.Path, $RequiredAlignment.Hash
+            }
+            $command += 'mv -f ''{0}'' ''{1}''' -f $Staging, $Destination
             Invoke-QuestAdb ($Target + @('shell', $command)) *> $null
             if ($LASTEXITCODE -eq 42) {
                 throw [IO.InvalidDataException]::new("$Description could not be verified on the selected Quest.")
             }
+            if ($LASTEXITCODE -eq 43) {
+                throw [IO.InvalidDataException]::new('Room alignment file could not be verified on the selected Quest.')
+            }
             if ($LASTEXITCODE -ne 0) { throw "$Description could not be activated." }
             if ($null -ne $ConnectionDeployment) { $ConnectionDeployment.Step = 'verify-active-connection' }
             Confirm-QuestFileHash $Target $Destination $stagedHash $Description
+            if ($RequiredAlignment) { Confirm-QuestFileHash $Target $RequiredAlignment.Path $RequiredAlignment.Hash 'Room alignment file' }
         }
     } catch {
         $publishError = $_
@@ -1511,14 +1520,16 @@ function Set-QuestConnection([string[]]$Target, $Config, $Ticket, $Alignment, [s
     Invoke-QuestAdb ($Target + @('shell', 'mkdir', '-p', $remoteDirectory)) | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'App data directory could not be prepared.' }
     $deploymentId = [Guid]::NewGuid().ToString('N')
+    $requiredAlignment = $null
     if ($Alignment) {
         $Deployment.Step = 'stage-alignment'
         $alignmentHash = $Alignment.Hash
+        $requiredAlignment = @{ Path = "$remoteDirectory/vr-room-alignment-$alignmentHash.json"; Hash = $alignmentHash }
         $stagedAlignment = [IO.Path]::GetTempFileName()
         try {
             [IO.File]::WriteAllBytes($stagedAlignment, $Alignment.Bytes)
             Publish-QuestFile $Target $stagedAlignment "$remoteDirectory/vr-room-alignment-$deploymentId.tmp" `
-                "$remoteDirectory/vr-room-alignment-$alignmentHash.json" 'Room alignment file' -ContentHash $alignmentHash
+                $requiredAlignment.Path 'Room alignment file' -ContentHash $alignmentHash
         } finally { Remove-Item -LiteralPath $stagedAlignment }
         if (-not $Ticket.AlignmentHash) { $Config | Add-Member -NotePropertyName 'roomAlignmentSha256' -NotePropertyValue $alignmentHash }
     }
@@ -1534,7 +1545,8 @@ function Set-QuestConnection([string[]]$Target, $Config, $Ticket, $Alignment, [s
         [IO.File]::WriteAllText($stagedConfig, ($Config | ConvertTo-Json -Depth 4 -Compress))
         # The active config is the commit point. Its referenced alignment is already verified by hash.
         Publish-QuestFile $Target $stagedConfig "$remoteDirectory/vr-connection-$deploymentId.tmp" `
-            "$remoteDirectory/vr-connection.json" 'Player connection file' -ConnectionDeployment $Deployment -BeforeActivation {
+            "$remoteDirectory/vr-connection.json" 'Player connection file' -ConnectionDeployment $Deployment `
+            -RequiredAlignment $requiredAlignment -BeforeActivation {
                 if ($LiveVenue) {
                     $Deployment.Step = 'verify-live-venue-before-stop'
                     Confirm-VenueReadback $LiveVenue -RequireLiveSource

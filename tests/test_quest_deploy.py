@@ -118,6 +118,11 @@ switch ($args[2]) {
                 if ($LASTEXITCODE -eq 0 -and $isConnection -and $env:QUEST_TEST_FAIL -eq 'config-active-changed') {
                     [IO.File]::AppendAllText((Join-Path $remote 'vr-connection.json'), "`n")
                 }
+                if ($LASTEXITCODE -eq 0 -and $isConnection -and $env:QUEST_TEST_FAIL -eq 'alignment-changed-after-activation') {
+                    $alignment = Get-ChildItem -LiteralPath $remote -Filter 'vr-room-alignment-*.json' -File
+                    if (@($alignment).Count -ne 1) { exit 96 }
+                    [IO.File]::AppendAllText($alignment.FullName, "`n")
+                }
                 exit $LASTEXITCODE
             }
             'getprop' {
@@ -178,6 +183,11 @@ switch ($args[2]) {
                     $staging = Get-ChildItem -LiteralPath $remote -Filter 'vr-connection-*.tmp' -File
                     if (@($staging).Count -ne 1) { exit 96 }
                     [IO.File]::AppendAllText($staging.FullName, "`n")
+                }
+                if ($args[4] -ceq 'force-stop' -and $env:QUEST_TEST_FAIL -ceq 'alignment-changed-at-stop') {
+                    $alignment = Get-ChildItem -LiteralPath $remote -Filter 'vr-room-alignment-*.json' -File
+                    if (@($alignment).Count -ne 1) { exit 96 }
+                    [IO.File]::AppendAllText($alignment.FullName, "`n")
                 }
                 if ($args[4] -ceq 'start') {
                     $activity = if ($env:QUEST_TEST_FAIL -eq 'launch-short') { 'com.vrcommand.quest/com.vrcommand.quest.MainActivity' }
@@ -1071,6 +1081,27 @@ class QuestDeployTests(unittest.TestCase):
                 result = run('-Serial', 'fixture', failure='config-changed-at-stop')
                 self.assert_rejected(result, 'Player connection file could not be verified')
                 self.assertTrue(active.read_bytes() == original, 'Late mutation replaced the original connection file')
+                self.assertFalse(list(self.remote.glob('*.tmp')))
+                commands = self.commands.read_text(encoding='utf-8')
+                self.assertIn('-t 41 shell am force-stop com.vrcommand.quest', commands)
+                self.assertNotIn('shell am start', commands)
+
+    def test_mr_alignment_stays_locked_through_connection_activation(self):
+        self.provision_apk()
+        active = self.remote / 'vr-connection.json'
+        original = b'previous configuration'
+        for fault, preserve in (('alignment-changed-at-stop', True), ('alignment-changed-after-activation', False)):
+            with self.subTest(fault=fault):
+                self.commands.unlink(missing_ok=True)
+                active.write_bytes(original)
+                result = self.run_mr('-Serial', 'fixture', failure=fault)
+                self.assert_rejected(result, 'Room alignment file could not be verified')
+                if preserve:
+                    self.assertEqual(original, active.read_bytes())
+                else:
+                    installed = json.loads(active.read_bytes())
+                    self.assertEqual(self.player['joinTicket'], installed['joinTicket'])
+                    self.assertEqual(hashlib.sha256(self.plan.read_bytes()).hexdigest(), installed['roomAlignmentSha256'])
                 self.assertFalse(list(self.remote.glob('*.tmp')))
                 commands = self.commands.read_text(encoding='utf-8')
                 self.assertIn('-t 41 shell am force-stop com.vrcommand.quest', commands)
@@ -2613,7 +2644,9 @@ else:
             ('force-stop', 'deployment-failed', 'stop-game'),
             ('config-move', 'deployment-failed', 'activate-connection'),
             ('config-changed-at-stop', 'file-verification-failed', 'activate-connection'),
+            ('alignment-changed-at-stop', 'file-verification-failed', 'activate-connection'),
             ('config-active-changed', 'file-verification-failed', 'verify-active-connection'),
+            ('alignment-changed-after-activation', 'file-verification-failed', 'verify-active-connection'),
             ('launch', 'deployment-failed', 'launch-game'),
         )
         for fault, status, step in cases:
@@ -3048,15 +3081,16 @@ else:
         self.assertEqual([True] * 3 + [None] * (count - 3), [row.get('filesVerified') for row in report['devices']])
         self.assertEqual([None] * 3 + [failed_step] + [None] * (count - 4), [row.get('failedStep') for row in report['devices']])
         expected_write_checks = 6 if fault in ('identity-changed', 'apk-changed') else 7
-        if fault in ('force-stop', 'config-move', 'config-changed-at-stop', 'config-active-changed', 'launch',
-                     'source-stale-after-staging', 'disconnect-after-staging'):
+        after_stop = ('force-stop', 'config-move', 'config-changed-at-stop', 'config-active-changed',
+                      'alignment-changed-at-stop', 'alignment-changed-after-activation', 'launch')
+        if fault in (*after_stop, 'source-stale-after-staging', 'disconnect-after-staging'):
             expected_write_checks += 1
         self.assertEqual(['/api/mr-deployment/venue-check', f'/api/sessions/{session}/connection-endpoint']
                          + ['/api/mr-deployment/venue-check'] * expected_write_checks, calls)
         self.assertEqual(expected_write_checks, len(write_checks))
         self.assertTrue(all(proof == write_checks[0] for proof in write_checks))
         active = (before / 'vr-connection.json').read_bytes()
-        if fault in ('config-active-changed', 'launch'):
+        if fault in ('config-active-changed', 'alignment-changed-after-activation', 'launch'):
             self.assertEqual(seats[1]['room-01-seat-04.json']['joinTicket'], json.loads(active)['joinTicket'])
             self.assertEqual(fault == 'config-active-changed', active.endswith(b'\n'))
         else:
@@ -3079,7 +3113,7 @@ else:
             self.assertTrue(all('admissionId' not in row for row in report['devices'][3:]))
             self.assertEqual(2, sum(line.startswith('-s fixture-04 shell pm path ') for line in commands))
             self.assertFalse(any(line.startswith('-s fixture-04 shell mkdir ') for line in commands))
-        self.assertEqual(fault in ('force-stop', 'config-move', 'config-changed-at-stop', 'config-active-changed', 'launch'),
+        self.assertEqual(fault in after_stop,
                          any(line.startswith('-s fixture-04 shell am force-stop ') for line in commands))
         if fault == 'source-stale-after-staging':
             self.assertTrue(any(line.startswith('-s fixture-04 shell sha256sum ') and '/vr-connection-' in line for line in commands))

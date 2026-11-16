@@ -113,6 +113,11 @@ switch -CaseSensitive ($args[3]) {
         if ($LASTEXITCODE -eq 0 -and $isConnection -and $fault -ceq 'config-active-changed') {
             [IO.File]::AppendAllText((Join-Path $device 'vr-connection.json'), "`n")
         }
+        if ($LASTEXITCODE -eq 0 -and $isConnection -and $fault -ceq 'alignment-changed-after-activation') {
+            $alignment = Get-ChildItem -LiteralPath $device -Filter 'vr-room-alignment-*.json' -File
+            if (@($alignment).Count -ne 1) { exit 96 }
+            [IO.File]::AppendAllText($alignment.FullName, "`n")
+        }
         exit $LASTEXITCODE
     }
     'sha256sum' {
@@ -161,6 +166,11 @@ switch -CaseSensitive ($args[3]) {
             $staging = Get-ChildItem -LiteralPath $device -Filter 'vr-connection-*.tmp' -File
             if (@($staging).Count -ne 1) { exit 96 }
             [IO.File]::AppendAllText($staging.FullName, "`n")
+        }
+        if ($args[4] -ceq 'force-stop' -and $fault -ceq 'alignment-changed-at-stop') {
+            $alignment = Get-ChildItem -LiteralPath $device -Filter 'vr-room-alignment-*.json' -File
+            if (@($alignment).Count -ne 1) { exit 96 }
+            [IO.File]::AppendAllText($alignment.FullName, "`n")
         }
         if ($args[4] -ceq 'start') {
             $activity = 'com.vrcommand.quest/com.unity3d.player.UnityPlayerActivity'

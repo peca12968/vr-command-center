@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 Quest MR 連線切換重新核對校正檔
+
+- 單席及批次部署會在裝置端更名前核對暫存連線檔與它引用的原校正檔，切換後再核對兩份正式檔才啟動。舊版在停止遊戲時改動校正檔，或在連線檔更名後改動，兩種情況都會接受。新版前者保留原正式連線檔，後者停在最終核對，批次均保留已成功席位。 [部署方式](QUEST3.md#啟動前核對裝置檔案) · [舊版反例](../artifacts/quest-mr-activation-20261117/before.log)
+- 使用 Windows Android SDK 的實際 ADB 用戶端連線至同機模擬裝置，以 PowerShell 7 和 Windows PowerShell 5.1 各完成正常、停止時改檔及更名後改檔三種情況。停止時改檔由裝置端回傳 43，六次均已清理暫存檔。Quest APK 版碼 77 的 SHA-256 與先前驗簽產物一致。USB 偵錯介面數仍為零，安裝、追蹤及入場待實機。 [ADB 回讀](../artifacts/quest-mr-activation-20261117/native-adb-readback.json) · [USB 快照](../artifacts/quest-mr-activation-20261117/usb-status.json)
+- 部署回歸 80 項，79 項通過，1 個 Windows PowerShell 腳本政策子案例略過。批次回歸驗證兩種改檔時機均保留前三個成功席位，並在失敗席位的對應步驟停止。三項 USB 診斷回歸通過。 [部署回歸](../artifacts/quest-mr-activation-20261117/full.log) · [USB 回歸](../artifacts/quest-mr-activation-20261117/usb-tests.log)
+
 ## 2026-11-17 五房封存核對多次重連
 
 - 五房封存清單可填 `reconnectWindows`，逐段核對選定席位的連線中斷、回放恢復與原戰績。每段核對其他席位及原始時間線，同一席提交多段須有足夠的原連線釋放次數。141 項封存工具測試通過。以先前 Windows 原生合併與獨立場的封存重讀，新陣列只有一段時與原單段格式相同，兩場各核對 25 份戰績確認，原 78 份證據檔雜湊相同。 [操作方式](EXTERNAL_CLIENTS.md#核對重連席位的回放區間) · [既有場次回讀](../artifacts/venue-repeated-reconnect-20261117/archived-readback.json) · [封存測試](../artifacts/venue-repeated-reconnect-20261117/field-tests.log)
