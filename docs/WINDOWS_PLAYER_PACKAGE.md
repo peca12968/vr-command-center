@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-16 啟動器 1.17.1／Windows 遊戲 0.50.12 的 ZIP 為 84,955,866 位元組，SHA-256 `293ff3db322dd0e76c0896096a124de67a6f8f749fe7298ba842718fc1d8f962`。解壓核對 331 筆清單。命令列啟動錯誤寫入指定報告或終端機，程式以錯誤碼退出。 [玩家包](../artifacts/windows-unattended-20261116-1730/VRCommand-Player-0.50.12-launcher-1.17.1-win-x64.zip) · [離線檢查](../artifacts/windows-unattended-20261116-1730/launcher-offline.log)
+
 2026-11-16 啟動器 1.17／Windows 遊戲 0.50.11 的 ZIP 為 84,952,986 位元組，SHA-256 `dd985b0aed61f4cbe5e00b548c08bff4dc653df35997dacc3805beefc740d171`。解壓核對 331 筆清單。程序報告與驗收 ZIP 記錄原場館發行檔的摘要。 [玩家包](../artifacts/windows-player-release-report-1170-05011.zip) · [共同發行報告](../artifacts/venue-release-windows-player-report-1170-05011.json)
 
 2026-11-16 `VRCommand-Player-0.50.11-1.16-win-x64.zip` 為 84,952,780 bytes，SHA-256 `06f7964eb7e887fc9345df1d47eb0d45933202d6a8e35045cf8d2f9c33bf28bd`。解壓核對 331 筆清單，已和 Quest 0.50.11 核對來源及網路識別。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.11-1.16-win-x64.zip) · [發行報告](../artifacts/venue-release-quest-reconnect-0511.json)

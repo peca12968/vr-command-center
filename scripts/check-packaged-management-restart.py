@@ -51,6 +51,7 @@ def main():
     control_manifest = controls.package.verify(control_root)
     server_manifest = server_package.verify(server_root)
     require_silent_windows_launch(control_root / 'Runtime/VrCommand.Api.exe')
+    require_silent_windows_launch(server_root / 'Launch-Server.exe')
     require_silent_windows_launch(server_root / 'Runtime/VrCommand.exe')
     run = 'run-' + uuid.uuid4().hex
     out = ROOT / 'artifacts' / 'packaged-management-restart' / run

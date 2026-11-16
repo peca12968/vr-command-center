@@ -520,7 +520,7 @@ internal static class PlayerLauncher
             if (report != null && !File.Exists(report) && !report.StartsWith(Root, StringComparison.OrdinalIgnoreCase) && !SamePath(report, config)
                 && !SamePath(report, log) && !SamePath(report, linkMetrics) && !SamePath(report, releasePath) && !SamePath(report, evidenceZip))
                 try { Report(report, new { status = "rejected", reason = "Package, connection file or launch options are invalid." }); } catch { }
-            if (report == null) MessageBox.Show("無法啟動。請確認玩家包已完整解壓，並重新選擇控制台下載的玩家連線檔。", "VR Command 玩家", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            if (report == null) Console.Error.WriteLine("Unable to start. Check the extracted player package and the downloaded player connection file.");
             return 1;
         }
     }

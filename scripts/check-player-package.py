@@ -13,6 +13,7 @@ import shutil
 import socket
 import struct
 import subprocess
+import sys
 import time
 import uuid
 
@@ -177,6 +178,8 @@ def main():
     manifest = package.verify(folder)
     if manifest['launcherSourceSha256'] != package.digest(ROOT / 'tools/WindowsPlayerLauncher/PlayerLauncher.cs'):
         parser.error('Repackage the current launcher source before testing')
+    if args.check_openxr_unavailable:
+        require_silent_windows_launch(sys.executable)
     if args.check_openxr_unavailable or args.check_local_profiler or args.check_release_form:
         require_silent_windows_launch(folder / 'VrCommand.exe')
     directory = ROOT / 'artifacts/player-package-checks' / (datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
@@ -195,6 +198,13 @@ def main():
         findings.append(label); print('PASS:', label, flush=True)
 
     check('Actual launcher verifies the full extracted runtime', ['--verify'], success=True)
+    rejected = subprocess.run([str(folder / 'Launch-Player.exe'), '--launch', '--headless'], cwd=directory,
+                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
+    if rejected.returncode != 1 or b'Unable to start.' not in rejected.stderr:
+        raise AssertionError('Invalid headless launch must exit without a dialog and report the error')
+    findings.append('Invalid headless launch without a report exits with a terminal diagnostic')
+    print('PASS:', findings[-1], flush=True)
     base = {'role': 'Client', 'address': '127.0.0.1', 'port': 7777, 'joinTicket': 'fixture-not-a-ticket'}
     cases = [('server identity', dict(base, role='Server')), ('host identity', dict(base, role='Host')),
              ('management key', dict(base, gameServerKey='fixture-secret')), ('missing ticket', {k: v for k, v in base.items() if k != 'joinTicket'}),

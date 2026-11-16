@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-16 Windows 無人值守啟動
+
+- 外部玩家整合測試在啟動瀏覽器或玩家前，會核對這一輪實際使用的 `VrCommand.exe`。新解壓路徑的命令列與可攜包兩種測試入口都在防火牆查核後退出，兩場皆無啟動玩家程序。已核對的原路徑仍通過查核。管理 HTTPS、管理重啟及 OpenXR 測試也補上各自接收入站連線的程式查核。 [兩個入口的拒絕結果](../artifacts/windows-unattended-20261116-1730/browser-preflight.json) · [啟動前查核說明](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
+- Windows 玩家啟動器 1.17.1 在命令列參數有誤時直接退出並寫入終端機或指定報告。已用實際解壓的 0.50.12 玩家包通過 331 項檔案核對、45 項離線檢查，另通過 46 項連線狀態及 36 項連線檔檢查。新路徑的遊戲連線留待可安靜啟動時驗證。 [可攜玩家包](../artifacts/windows-unattended-20261116-1730/VRCommand-Player-0.50.12-launcher-1.17.1-win-x64.zip) · [離線驗證](../artifacts/windows-unattended-20261116-1730/launcher-offline.log)
+
 ## 2026-11-16 依全館報告補測 Windows 席位
 
 - `check-venue-udp-preflight.py --windows-retest-seat` 重新核對原始報告、網路清單及已保存的證據，依房席匯出一組待測端點。共用來源列出涵蓋的全部席位。Windows 監聽端和玩家端用相同的 `-EndpointFile` 帶入各自的位址和埠。已通過的來源會回報略過。 [雙端補測操作](EXTERNAL_CLIENTS.md#依全館報告補測-windows-席位)

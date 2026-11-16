@@ -204,9 +204,11 @@ def main():
     manifest = legacy.package.verify(folder)
     assert manifest['launcherSourceSha256'] == legacy.sha(ROOT / 'tools/WindowsControlLauncher/ControlLauncher.cs')
     require_silent_windows_launch(folder / 'Runtime/VrCommand.Api.exe')
+    require_silent_windows_launch(sys.executable)
     server_folder = args.server_package.resolve() if args.server_package else None
     if server_folder:
         load_module('package-windows-server').verify(server_folder)
+        require_silent_windows_launch(server_folder / 'Launch-Server.exe')
         require_silent_windows_launch(server_folder / 'Runtime/VrCommand.exe')
     name = 'run-' + uuid.uuid4().hex
     output = ROOT / 'artifacts/control-https-checks' / name
