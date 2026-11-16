@@ -2183,6 +2183,7 @@ function tab(name, worldTarget = null) {
   if (name !== 'operations') { operationsViewEpoch++; clearVenueMissionFile(); closeVenueDepartures(); }
   if (name !== 'missions') { placement.clearTrial(); clearMissionTemplate(); clearPropCopies(); propMove.reset(); }
   finishPropGesture();
+  $('world-return-venue-begin').hidden = !(name === 'world' && master() && worldTarget?.witness?.kind === 'blocked-begin');
   for (const candidate of ['operations', 'missions', 'replay', 'world']) { const active = candidate === name; $(candidate + '-view').hidden = !active; $('tab-' + candidate).classList.toggle('active', active); $('tab-' + candidate).setAttribute('aria-pressed', String(active)); }
   replay.active(name === 'replay'); world.active(name === 'world', worldTarget); readiness.active(name === 'operations'); connections.active(name === 'operations');
   roomReadiness.active(name === 'operations');
@@ -2198,6 +2199,11 @@ function tab(name, worldTarget = null) {
   venueLaunchReview.active(name === 'operations');
   operatorNetwork.active(name === 'operations');
 }
+$('world-return-venue-begin').addEventListener('click', () => {
+  if (!master() || $('world-view').hidden || $('world-return-venue-begin').hidden) return;
+  tab('operations');
+  $('venue-phase-title').focus();
+});
 function submit(id, action, execute = run) { $(id).addEventListener('submit', event => { event.preventDefault(); execute(action); }); }
 $('venue-departed-close').addEventListener('click', closeVenueDepartures);
 $('login-form').addEventListener('submit', login);

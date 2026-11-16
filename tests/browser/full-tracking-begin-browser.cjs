@@ -252,7 +252,15 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         && JSON.stringify(await getFences()) === JSON.stringify(readyFences),
         `${mode} opens the exact refused Preparing frame for the original room and makes no write`);
       await page.locator('#world-viewport').screenshot({ path: path.join(screenshots, `refused-begin-${mode.toLowerCase()}-frame.png`) });
-      await page.locator('#tab-operations').click();
+      const returnToOpening = page.getByRole('button', { name: '返回全館開場檢查', exact: true });
+      await returnToOpening.waitFor({ timeout: 5000 });
+      await page.locator('#world-view > .section-heading').screenshot({ path: path.join(screenshots, `refused-begin-${mode.toLowerCase()}-return.png`) });
+      await returnToOpening.click();
+      await page.locator('#venue-phase-title:focus').waitFor();
+      await publishUntil(sources, false, async () => await seatState(5, 2) === 'PoseUnavailable', true);
+      check(await option.isChecked() && await start.isDisabled() && await returnToOpening.isHidden()
+        && JSON.stringify(await getFences()) === JSON.stringify(readyFences),
+        `${mode} returns directly to the active opening policy and waits for a new ready snapshot`);
       if (mode === 'Linked') {
         await page.route(reviewRoute, async intercepted => {
           const response = await intercepted.fetch();
@@ -270,9 +278,12 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         await page.locator('#world-message').filter({ hasText: '回應快照的開場受阻或指令序號不同' }).waitFor();
         check(await page.locator('#world-player').isHidden() && JSON.stringify(await getFences()) === JSON.stringify(readyFences),
           'A changed pose at the same frame number cannot be shown as the original rejected seat');
+        await returnToOpening.click();
+        await page.locator('#venue-phase-title:focus').waitFor();
+        await page.locator('#tab-world').click();
+        check(await returnToOpening.isHidden(), 'Ordinary world navigation does not show the rejected-opening return action');
         await page.locator('#tab-operations').click();
       }
-      await page.locator('#refresh').click();
       await publishUntil(sources, false, () => start.isEnabled());
       const receiptPromise = page.waitForResponse(response => response.url().endsWith('/api/venue/phase') && response.request().method() === 'POST');
       const confirmation = page.waitForEvent('dialog').then(async dialog => { assert.match(dialog.message(), /25 席已連線且姿態有效/); await dialog.accept(); });
