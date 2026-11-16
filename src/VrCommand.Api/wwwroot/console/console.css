@@ -69,6 +69,11 @@
 #venue-missions-review table{min-width:520px}
 #venue-missions-review :is(td,th):is(:nth-child(2),:nth-child(3)){white-space:normal;overflow-wrap:anywhere}
 #venue-missions-review td:first-child{min-width:0}
+
+#venue-hardware-review-panel td:first-child{min-width:0}
+#venue-hardware-review-seat-table table{min-width:0}
+#venue-hardware-review-seat-table th,
+#venue-hardware-review-seat-table td{white-space:normal;padding-inline:8px}
 #venue-missions-review [data-changed=true] td:nth-child(3){color:var(--accent)}
 #venue-missions-maps-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:12px}
 #venue-missions-maps-grid article{min-width:0;padding:10px;border:1px solid var(--line);border-radius:5px;overflow-wrap:anywhere}
