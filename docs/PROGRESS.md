@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-17 在主控台查閱五房硬體模擬報告
+
+- 管理台 0.31.230 可由主控匯入五房核對工具的 JSON 摘要，檢視各房終止原因、模擬確認、取消及失敗數。含原設定的報告提供逐席結果。房間換場時更新場次比對，登出或離開工作區會清除摘要。檔案在瀏覽器內讀取。 [操作方式](HARDWARE.md#在主控台查看五房模擬摘要)
+- 既有合併、獨立和舊格式三份 ZIP 通過硬體模擬器 0.2.22 離線核對，原 ZIP 的 SHA-256 一致。合併場為 26 筆模擬確認、2 筆取消。獨立場為 27 筆模擬確認、2 筆取消，其中第 3 房因原入場綁定不符而未完成。報告逾時但無裝置掛接的情況使用修改副本經 CLI 核對。 [原案清單](../artifacts/venue-hardware-review-031230/original-zips.json) · [獨立場摘要](../artifacts/venue-hardware-review-031230/independent-review.json)
+- 132 項 Node 測試通過。最終原始碼獨立場、解壓包獨立場與解壓包合併場各通過 16 項 Chromium 專項。場次比對以隔離場次 ID 測試，保留原報告的結果欄位。管理服務透過本機 IPC 測試，TCP 監聽與 UDP 端點均為零，測試場次及程序已結束。 [原始碼](../artifacts/venue-hardware-review-031230/final-source/checks.json) · [獨立場](../artifacts/venue-hardware-review-031230/final-package-independent/checks.json) · [合併場](../artifacts/venue-hardware-review-031230/final-package-linked/checks.json)
+- 最終 Windows 管理包核對 589 個檔案，與既有 0.50.12 的 Windows 與 Quest 建置通過離線發行一致性檢查。GitHub Actions 對 `6bb8d11` 回報帳務或用量限制，工作未啟動。Quest USB 仍無 ADB 介面，廠商設備的指令送達、停止及頭盔跨機待驗。 [管理包](../artifacts/venue-hardware-review-031230/final/VRCommand-ControlServer-0.31.230.zip) · [發行核對](../artifacts/venue-hardware-review-031230/final/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43973721510)
+
 ## 2026-11-17 指定獨立房間的即時環境
 
 - 管理台 0.31.229 的全館環境可勾選執行中的獨立房間，一次調整天氣、日夜與閃電。管理服務重查所選房間及原環境版本。其餘房間可獨立變更。合併場維持五房共用一筆設定。 [操作方式](ENVIRONMENT.md#只調整指定獨立房間)
