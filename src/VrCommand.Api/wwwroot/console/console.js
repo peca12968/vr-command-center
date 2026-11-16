@@ -1733,6 +1733,8 @@ async function sendPending() {
     if (pending.kind === 'venue-phase') {
       const targets = pending.body.targets;
       if (response?.requestId !== pending.requestId || response.action !== pending.body.action || typeof response.duplicate !== 'boolean'
+          || ['requireFullTracking', 'requireFullParticipation'].some(policy =>
+            (response[policy] === undefined ? false : response[policy]) !== (pending.body[policy] ?? false))
           || !Array.isArray(response.sessions) || response.sessions.length !== targets.length
           || targets.some(target => !response.sessions.some(row => row?.sessionId === target.sessionId
             && Number.isSafeInteger(row.appliedAtSequence) && (pending.body.action === 'Begin'

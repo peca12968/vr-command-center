@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-17 全館開場回條核對原條件
+
+- 管理台 0.31.216 在確認全館命令時核對「五房各 5 席追蹤」及「五房各 5 席有效姿態」條件。舊版對缺少原條件的回條會清除待確認操作。新版保留原命令供重試，沿用同一請求識別、場次版本與條件。合併場與混合獨立場的瀏覽器專項共通過 108 項。全館控制回歸另在乾淨的管理實例通過 159 項，包含一般開場、環境及敵軍策略、結束與封存。全館控制的 ZIP 反例沿用 0.31.215 之後的 HEAD 格式，確認格式錯誤時不送出 GET。另通過 119 項 Node 與 7 項封裝檢查。 [舊版反例](../artifacts/desktop-guarded-openxr/20261117-004849-e3f11e14/browser.log) · [開場專項](../artifacts/desktop-guarded-openxr/20261117-005543-c9ed042b/checks.json) · [全館控制回歸](../artifacts/desktop-guarded-openxr/20261117-005428-2fae4329/checks.json) · [操作方式](PLAYER_READINESS.md#五房追蹤驗收開場)
+- 在已核對的 Windows 遊戲執行檔上，各用 24 個桌面合成姿態和 1 個 OpenXR Mock Runtime 席位，分別執行合併與獨立五房。兩輪都從瀏覽器重試同一開場命令，各保存一個原批次，並從已關閉的日誌核對共 543 格回放及 50 份伺服器戰績確認。兩個管理實例經 Windows 本機 IPC 執行，遊戲透過同機 UDP 連線。實體頭盔和跨機仍待驗收。 [兩輪回讀](../artifacts/venue-opening-policy-031216/native-readback.json) · [Windows 管理包](../artifacts/venue-opening-policy-031216/VRCommand-ControlServer-0.31.216.zip)
+
 ## 2026-11-17 Quest 部署等待 Android 確認啟動
 
 - 單席與批次部署先解析遊戲的啟動活動，正式連線檔核對通過後以 `am start -W` 啟動。舊版單席只接受指令退出碼，未送出活動也可能回報成功。新版會核對 Android 回傳的成功狀態及原活動名稱，拒絕缺少確認、逾時、互相衝突或沿用已啟動活動的結果。批次啟動失敗仍保存原成功席位及失敗步驟。 [部署操作](QUEST3.md#啟動前核對裝置檔案) · [舊版反例](../artifacts/quest-launch-confirmation-20261117/before.log)

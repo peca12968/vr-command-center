@@ -880,10 +880,17 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       && download.suggestedFilename() === `vr-command-venue-reports-v1-${closure.requestId}.zip`
       && reportZip.equals(Buffer.from(await response.arrayBuffer())), 'Browser downloads the exact original batch ZIP after room reuse');
     await fs.writeFile(path.join(screenshots, 'venue-reports.zip'), reportZip);
-    await page.route(reportsUrl, route => route.fulfill({ status: 200, contentType: 'application/zip-fake', body: 'fixture' }));
+    const reportMethods = [];
+    await page.route(reportsUrl, async route => {
+      reportMethods.push(route.request().method());
+      if (route.request().method() !== 'HEAD') return route.continue();
+      const original = await route.fetch();
+      await route.fulfill({ response: original, headers: { ...original.headers(), 'content-type': 'application/zip-fake' } });
+    });
     await reportButton.click();
-    await reportStatus.filter({ hasText: '報表格式不符' }).waitFor();
-    check(await reportButton.isEnabled(), 'An invalid ZIP media type reports an error and releases the download button');
+    await reportStatus.filter({ hasText: '無法核對戰績 ZIP 的原始內容' }).waitFor();
+    check(reportMethods.join() === 'HEAD' && await reportButton.isEnabled(),
+      'Invalid ZIP metadata prevents the GET and releases the download button');
     await page.unroute(reportsUrl);
     const archiveRoute = url => url.pathname === '/api/venue/closure' && url.searchParams.get('includeScores') === 'true';
     await page.route(archiveRoute, request => request.fulfill({ status: 503 }));

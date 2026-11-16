@@ -21,6 +21,54 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
   const tracking = id => page.locator(`[data-venue-tracking-begin="${id}"]`);
   const participation = id => page.locator(`[data-venue-participation-begin="${id}"]`);
   const canvas = page.locator('#world-canvas');
+  async function beginWithPolicy(mode, policy, prompt) {
+    const phaseUrl = '**/api/venue/phase';
+    const otherPolicy = policy === 'requireFullTracking' ? 'requireFullParticipation' : 'requireFullTracking';
+    const requests = [];
+    let receipt, retry;
+    const intercept = async route => {
+      const request = route.request();
+      if (request.method() !== 'POST') return route.continue();
+      requests.push({ body: request.postDataJSON(), requestId: request.headers()['idempotency-key'] });
+      const response = await route.fetch();
+      assert.equal(response.status(), 200);
+      const original = await response.json();
+      if (requests.length === 1) {
+        receipt = original;
+        const changed = { ...receipt };
+        delete changed[policy];
+        if (mode !== 'Linked') changed[otherPolicy] = true;
+        await route.fulfill({ response, json: changed });
+      } else {
+        retry = original;
+        await route.fulfill({ response });
+      }
+    };
+    await page.route(phaseUrl, intercept);
+    try {
+      const confirmation = page.waitForEvent('dialog').then(async dialog => {
+        assert.match(dialog.message(), prompt);
+        await dialog.accept();
+      });
+      await start.click();
+      await confirmation;
+      const notice = page.locator('#notice');
+      await notice.filter({ hasText: /結果未確認|全館管理命令已確認/ }).waitFor();
+      check(receipt?.[policy] === true && (await notice.innerText()).includes('結果未確認')
+        && await page.locator('#pending-command').isVisible() && await start.isDisabled(),
+      `${mode} keeps the original Begin pending when the receipt omits or substitutes ${policy}`);
+      await page.locator('#retry-command').click();
+      await notice.filter({ hasText: '全館管理命令已確認' }).waitFor();
+      const [{ body, requestId }] = requests;
+      check(requests.length === 2 && requestId && JSON.stringify(requests[0]) === JSON.stringify(requests[1])
+        && retry?.duplicate === true && retry[policy] === true && retry[otherPolicy] === undefined
+        && JSON.stringify(retry.sessions) === JSON.stringify(receipt.sessions) && await page.locator('#pending-command').isHidden(),
+      `${mode} retry confirms the original Begin policy and sequences with the same request and targets`);
+      return { receipt, retry, body, requestId };
+    } finally {
+      await page.unroute(phaseUrl, intercept);
+    }
+  }
   async function openTracking(row) {
     const expected = row.trackingBegin.frame.worldSequence;
     const request = page.waitForRequest(request => new URL(request.url()).pathname === `/api/sessions/${row.sessionId}/world/watch`);
@@ -285,15 +333,10 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         await page.locator('#tab-operations').click();
       }
       await publishUntil(sources, false, () => start.isEnabled());
-      const receiptPromise = page.waitForResponse(response => response.url().endsWith('/api/venue/phase') && response.request().method() === 'POST');
-      const confirmation = page.waitForEvent('dialog').then(async dialog => { assert.match(dialog.message(), /25 席已連線且姿態有效/); await dialog.accept(); });
-      await start.click(); await confirmation;
-      const response = await receiptPromise, receipt = await response.json(), body = response.request().postDataJSON();
-      const requestId = (await response.request().allHeaders())['idempotency-key'];
-      check(response.status() === 200 && body.requireFullParticipation === true && !body.requireFullTracking
+      const { receipt, retry, body, requestId } = await beginWithPolicy(mode, 'requireFullParticipation', /25 席已連線且姿態有效/);
+      check(receipt.duplicate === false && body.requireFullParticipation === true && !body.requireFullTracking
         && receipt.requireFullParticipation === true && receipt.sessions.length === sessions.length,
       `${mode} accepts the optional 25-seat policy with both simulated and tracked sources`);
-      const retry = await api('/venue/phase', 'POST', body, 'Master', 200, undefined, requestId);
       await api('/venue/phase', 'POST', { ...body, requireFullParticipation: false }, 'Master', 409, undefined, requestId);
       const proofs = new Map();
       for (const { sessionId, appliedAtSequence } of receipt.sessions) {
@@ -433,17 +476,10 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       check(lostPose.code === 'venue-begin-not-ready' && lostPose.roomIds.join() === '5',
         `${mode} rejects the whole Begin and reports only the room that lost a registered player's pose`);
       await publishUntil(sources, true, () => start.isEnabled());
-      const responsePromise = page.waitForResponse(response => response.url().endsWith('/api/venue/phase') && response.request().method() === 'POST');
-      const confirmation = page.waitForEvent('dialog').then(async dialog => { assert.match(dialog.message(), /25 席追蹤就緒/); await dialog.accept(); });
-      await start.click();
-      await confirmation;
-      const response = await responsePromise;
-      const body = response.request().postDataJSON(), requestId = (await response.request().allHeaders())['idempotency-key'];
-      const receipt = await response.json();
-      check(response.status() === 200 && body.requireFullTracking === true && receipt.requireFullTracking === true
+      const { receipt, retry, body, requestId } = await beginWithPolicy(mode, 'requireFullTracking', /25 席追蹤就緒/);
+      check(receipt.duplicate === false && body.requireFullTracking === true && receipt.requireFullTracking === true
         && receipt.sessions.length === sessions.length && (await api('/sessions')).every(session => session.state === 'Running'),
       `${mode} accepts one guarded Begin for the original sessions`);
-      const retry = await api('/venue/phase', 'POST', body, 'Master', 200, undefined, requestId);
       await api('/venue/phase', 'POST', { ...body, requireFullTracking: false }, 'Master', 409, undefined, requestId);
       await api('/venue/phase', 'POST', { ...body, action: 'End' }, 'Master', 400, undefined, randomUUID());
       check(retry.duplicate && retry.requireFullTracking && JSON.stringify(retry.sessions) === JSON.stringify(receipt.sessions),
