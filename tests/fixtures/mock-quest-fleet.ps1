@@ -43,6 +43,7 @@ if ($args[2] -cne 'shell') { exit 98 }
 switch -CaseSensitive ($args[3]) {
     'getprop' {
         if ($args[4] -ceq 'ro.serialno') {
+            if ($fault -ceq 'identity-timeout') { throw [TimeoutException]::new('ADB shell command timed out.') }
             if ($fault -ceq 'identity-missing') { exit 0 }
             if ($fault -ceq 'identity-invalid') { 'unknown'; exit 0 }
             if ($fault -ceq 'identity-duplicate') { 'HARDWARE-SERIAL-SHARED-CANARY'; exit 0 }
@@ -56,6 +57,7 @@ switch -CaseSensitive ($args[3]) {
             exit 0
         }
         if ($args[4] -cne 'ro.product.model') { exit 98 }
+        if ($fault -ceq 'model-timeout') { throw [TimeoutException]::new('ADB shell command timed out.') }
         if ($fault -ceq 'wrong-model') { 'Quest 2' } else { 'Quest 3' }
         exit 0
     }

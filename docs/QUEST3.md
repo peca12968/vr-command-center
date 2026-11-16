@@ -1,6 +1,8 @@
 # Quest 3 接入與工具鏈
 
-2026-11-16 Quest 開發 APK `0.50.11`／76 為 61,044,650 bytes，SHA-256 `06cec1ccf61c867038a05ff89acdd476ce24766dc146b3a325f6327455cf493c`。通過 ARM64、SDK 32／35、OpenXR 程式庫、APK v2 簽章及同版 Windows 來源核對。開啟遊戲內量測後，每條新連線可獨立採樣。 [APK](../artifacts/quest/VrCommand.apk) · [發行報告](../artifacts/venue-release-quest-reconnect-0511.json) · [前版原件](../artifacts/history/unity-0510-before-reconnect-fd0b4f27/quest/VrCommand.apk)
+2026-11-16 目前 Quest 開發 APK 為 `0.50.12`／77，61,046,094 bytes，SHA-256 `f2ff7f1ce8cd9a89864a8a6f245d168d64457869cb1e812d9582399eef098873`。發行報告記錄 ARM64、SDK 32／35 和 APK v2 簽章。 [APK](../artifacts/quest/VrCommand.apk) · [發行報告](../artifacts/vive-release-05012-fb9bcabe/venue-release.json)
+
+2026-11-16 Quest 開發 APK `0.50.11`／76 為 61,044,650 bytes，SHA-256 `06cec1ccf61c867038a05ff89acdd476ce24766dc146b3a325f6327455cf493c`。通過 ARM64、SDK 32／35、OpenXR 程式庫、APK v2 簽章及同版 Windows 來源核對。開啟遊戲內量測後，每條新連線可獨立採樣。 [發行報告](../artifacts/venue-release-quest-reconnect-0511.json) · [前版原件](../artifacts/history/unity-0510-before-reconnect-fd0b4f27/quest/VrCommand.apk)
 
 2026-11-16 Quest 開發 APK `0.50.9`／74 為 61,038,434 bytes，SHA-256 `53d965a70d8ffbdad95f01a955386909ec995a4156d762f9110294c66d905c8f`。通過 ARM64、SDK 32／35、OpenXR 程式庫、APK v2 簽章及同版 Windows 來源核對。新增首次啟動的 OpenXR 顯示與輸入檢查。 [APK 封存](../artifacts/history/unity-0509-before-quest-link-7650a819/quest/VrCommand.apk) · [發行報告](../artifacts/venue-release-quest-openxr-0509.json)
 
@@ -49,10 +51,12 @@ pwsh -NoProfile -NonInteractive -File .\scripts\check-quest-usb.ps1
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -SmokeTest -Serial '<ADB 序號>' `
-  -ReleaseReport .\artifacts\venue-release-quest-reconnect-0511.json
+  -ReleaseReport .\artifacts\vive-release-05012-fb9bcabe\venue-release.json
 ```
 
 工具核對指定 Quest 3，在目前 Android 使用者下安裝 APK，並讀回裝置上的 APK 雜湊。沒有既有玩家設定時，工具等待 Android 確認啟動，接著讀取該程序的 Unity 與 AndroidRuntime 日誌，並在三秒後重查原程序。成功輸出 JSON 的 `status` 為 `process-observed`。`unityLogLines` 是查到的 Unity 日誌列數，允許為零。預設遇到既有安裝會停止。
+
+部署工具對原生 ADB 指令設有期限。安裝最多 180 秒，檔案傳輸與 `am start` 各 30 秒，其他指令通常 10 秒。逾時時結束本次 ADB 用戶端並回報，已啟用的 ADB 服務繼續供其他操作使用。若安裝或檔案切換逾時，請先核對頭盔上的現行版本及設定再重試。批次預檢可在各席列出 `adb-timeout`，部署中的逾時會保留失敗步驟。
 
 如果 APK 安裝完成後遇到暫時的啟動或日誌錯誤，可在原命令加上 `-ResumeSmokeTest`。工具先核對已安裝 APK 的雜湊與原發行報告一致，並確認沒有玩家連線設定，才停止該遊戲程序並重新啟動。應用程式資料會保留。成功回條的 `installedThisRun` 在這次續測為 `false`，本輪完成首次安裝時為 `true`。 [Android 啟動指令](https://developer.android.com/tools/adb#am)
 
@@ -62,7 +66,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -SmokeTest -Serial '<ADB 序號
 
 Quest APK 0.50.9／74 起，首次啟動命令可加 `-RequireOpenXR`。腳本隨 Android Launcher Intent 傳入當次識別碼，從原程序的 Unity 日誌讀取相同識別碼的回報。同一次啟動必須載入 OpenXR，且顯示與輸入子系統都在執行，才會回傳 `status: "openxr-ready"`。舊日誌、其他程序的日誌，或互相衝突的回報都無法通過。 [Android Activity 啟動](https://developer.android.com/tools/adb#am) · [Unity XR 顯示子系統](https://docs.unity3d.com/6000.0/Documentation/ScriptReference/XR.XRDisplaySubsystem.html)
 
-檢查使用沒有玩家連線設定的 Quest。部署工具最多輪詢 20 秒，期間若遊戲退出或重啟會中止。已安裝相同版本可同時加 `-ResumeSmokeTest`，用新的識別碼重新檢查。頭手追蹤、入場、MR 對位及操作仍在單房實機驗收中確認。
+檢查使用沒有玩家連線設定的 Quest。取得遊戲 PID 後，部署工具用同一個 20 秒期限輪詢日誌並重查 PID。期間若遊戲退出、重啟或 ADB 逾時會中止。已安裝相同版本可同時加 `-ResumeSmokeTest`，用新的識別碼重新檢查。頭手追蹤、入場、MR 對位及操作仍在單房實機驗收中確認。
 
 ### 單房實機追蹤驗收
 
@@ -512,12 +516,12 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 
 #### 部署時核對每席 OpenXR
 
-單席及五房部署可加 `-RequireOpenXR`，並以 `-ReleaseReport` 指定同一 APK 的原發行報告。支援版號 0.50.9／74 起。下例使用目前的 0.50.11／76。
+單席及五房部署可加 `-RequireOpenXR`，並以 `-ReleaseReport` 指定同一 APK 的原發行報告。支援版號 0.50.9／74 起。下例使用目前的 0.50.12／77。
 
 ```powershell
 pwsh -NoProfile -NonInteractive -File .\scripts\deploy-quest.ps1 `
     -VenueBundle .\vr-venue-connections.zip -DeviceMap .\device-map.json `
-    -ReleaseReport .\artifacts\venue-release-quest-reconnect-0511.json `
+    -ReleaseReport .\artifacts\vive-release-05012-fb9bcabe\venue-release.json `
     -DeployMappedSeats -ManagementApi http://127.0.0.1:5081 -RequireOpenXR `
     > .\quest-deployment.json
 ```
@@ -732,11 +736,11 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connect
 
 ## 記錄 Quest 遊戲內連線量測
 
-使用 Quest 開發 APK 0.50.11／76，部署時加 `-RecordLinkMetrics`，並提供對應的 `-ReleaseReport`。以單席為例：
+功能支援 Quest 開發 APK 0.50.11／76 起，部署時加 `-RecordLinkMetrics`，並提供對應的 `-ReleaseReport`。以下使用 0.50.12／77 部署單席。
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\room-01-seat-01.json `
-  -Serial '<ADB 序號>' -ReleaseReport .\artifacts\venue-release-quest-reconnect-0511.json -RecordLinkMetrics
+  -Serial '<ADB 序號>' -ReleaseReport .\artifacts\vive-release-05012-fb9bcabe\venue-release.json -RecordLinkMetrics
 ```
 
 五房部署也可在原 `-VenueBundle`、`-DeviceMap`、`-DeployMappedSeats` 指令加上同一選項。每條新連線第一次進入執行中時開始採樣。若原程序重連，讓最後一條連線採樣 30 次結案，再由主控結束任務，保留原程序的 logcat。票券更新會保留已安裝的量測設定。 [收集日誌](#收集-quest-場館驗收日誌) · [併入場館驗收](EXTERNAL_CLIENTS.md#quest-遊戲內連線量測)

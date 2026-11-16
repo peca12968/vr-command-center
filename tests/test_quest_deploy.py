@@ -159,6 +159,7 @@ switch ($args[2]) {
     }
     'logcat' {
         if (($args[3..11] -join ' ') -cne '-d -t 1000 --pid=4242 -v brief -s Unity AndroidRuntime') { exit 98 }
+        if ($env:QUEST_TEST_FAIL -eq 'adb-log-timeout') { throw [TimeoutException]::new('ADB logcat timed out.') }
         if ($env:QUEST_TEST_FAIL -eq 'log-unavailable') { exit 1 }
         if ($env:QUEST_TEST_FAIL -eq 'process-restarted') { [IO.File]::WriteAllText((Join-Path $remote 'observed-process'), '4242') }
         if ($env:QUEST_TEST_FAIL -eq 'process-crashed') { 'E/AndroidRuntime( 4242): FATAL EXCEPTION: main' }
@@ -195,6 +196,85 @@ def make_ticket(room, seat, expiry, session=None, player=None, admission=None):
     return f'v2.{encode(payload)}.{encode(bytes(32))}'
 
 
+class QuestAdbProcessTests(unittest.TestCase):
+    def invoke(self, shell, script, **values):
+        if not shutil.which(shell):
+            self.skipTest('PowerShell is unavailable')
+        env = {**os.environ, 'VR_QUEST_PROCESS_HELPER': str(ROOT / 'scripts' / 'quest-adb-process.ps1'),
+               'VR_QUEST_PROCESS_PYTHON': sys.executable, **values}
+        return subprocess.run([shell, '-NoProfile', '-NonInteractive', '-Command',
+                               "$ErrorActionPreference = 'Stop'; . $env:VR_QUEST_PROCESS_HELPER; " + script],
+                              env=env, capture_output=True, encoding='utf-8', timeout=12)
+
+    def test_argument_boundaries_and_both_output_streams(self):
+        arguments = ['space and "quotes"', 'trailing' + chr(92), '', 'literal $() & ;']
+        script = """
+$program = 'import json, sys; sys.stderr.write("fixture stderr" * 20000); print(json.dumps(sys.argv[1:])); sys.exit(7)'
+$arguments = @('-c', $program) + @(ConvertFrom-Json -InputObject $env:VR_QUEST_PROCESS_ARGUMENTS)
+$result = Invoke-QuestAdbProcess $env:VR_QUEST_PROCESS_PYTHON $arguments 5000 'argument test'
+$result | ConvertTo-Json -Compress
+"""
+        shells = ['pwsh', 'powershell.exe'] if os.name == 'nt' else ['pwsh']
+        for shell in shells:
+            with self.subTest(shell=shell):
+                result = self.invoke(shell, script, VR_QUEST_PROCESS_ARGUMENTS=json.dumps(arguments))
+                if shell == 'powershell.exe' and 'FullyQualifiedErrorId : UnauthorizedAccess' in result.stderr:
+                    self.skipTest('Windows PowerShell script execution is unavailable under the current policy')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                child = json.loads(result.stdout)
+                self.assertEqual(child['ExitCode'], 7)
+                self.assertEqual(json.loads(child['Lines'][0]), arguments)
+                self.assertEqual(result.stderr, '')
+
+    def test_deadline_stops_only_the_started_client_and_discards_partial_output(self):
+        with tempfile.TemporaryDirectory(prefix='vr-quest-adb-timeout-') as temporary:
+            script = """
+$program = 'import os, pathlib, sys, time; pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); print("partial success", flush=True); time.sleep(30)'
+try {
+    Invoke-QuestAdbProcess $env:VR_QUEST_PROCESS_PYTHON @('-c', $program, $env:VR_QUEST_PROCESS_PID) 1500 'logcat'
+    throw 'The stalled process unexpectedly completed.'
+} catch [TimeoutException] {
+    $pidValue = [int](Get-Content -LiteralPath $env:VR_QUEST_PROCESS_PID)
+    $alive = $null -ne (Get-Process -Id $pidValue -ErrorAction SilentlyContinue)
+    [pscustomobject]@{ message = $_.Exception.Message; clientAlive = $alive } | ConvertTo-Json -Compress
+}
+"""
+            companion = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'],
+                                         creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            try:
+                result = self.invoke('pwsh', script, VR_QUEST_PROCESS_PID=str(Path(temporary) / 'client.pid'))
+                self.assertIsNone(companion.poll())
+            finally:
+                if companion.poll() is None:
+                    companion.terminate()
+                companion.wait(timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout), {
+                'message': 'ADB logcat timed out. Check the current device state before retrying.', 'clientAlive': False})
+            self.assertNotIn('partial success', result.stdout)
+
+    def test_deadline_includes_output_pipe_left_open_by_background_process(self):
+        with tempfile.TemporaryDirectory(prefix='vr-quest-adb-pipe-') as temporary:
+            script = """
+$program = 'import os, pathlib, subprocess, sys; child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(15)"], stdin=subprocess.DEVNULL, stdout=sys.stdout, stderr=sys.stderr, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)); pathlib.Path(sys.argv[1]).write_text(str(child.pid)); print("partial success")'
+try {
+    Invoke-QuestAdbProcess $env:VR_QUEST_PROCESS_PYTHON @('-c', $program, $env:VR_QUEST_PROCESS_PID) 1500 'devices'
+    throw 'The open pipe unexpectedly completed.'
+} catch [TimeoutException] {
+    $child = Get-Process -Id ([int](Get-Content -LiteralPath $env:VR_QUEST_PROCESS_PID)) -ErrorAction SilentlyContinue
+    [pscustomobject]@{ message = $_.Exception.Message; backgroundAlive = $null -ne $child } | ConvertTo-Json -Compress
+} finally {
+    if (Test-Path -LiteralPath $env:VR_QUEST_PROCESS_PID) {
+        Stop-Process -Id ([int](Get-Content -LiteralPath $env:VR_QUEST_PROCESS_PID)) -ErrorAction SilentlyContinue
+    }
+}
+"""
+            result = self.invoke('pwsh', script, VR_QUEST_PROCESS_PID=str(Path(temporary) / 'background.pid'))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout), {
+                'message': 'ADB devices timed out. Check the current device state before retrying.', 'backgroundAlive': True})
+
+
 class QuestDeployTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix='vr-quest-deploy-')
@@ -206,6 +286,7 @@ class QuestDeployTests(unittest.TestCase):
         self.scripts.mkdir()
         self.script = self.scripts / 'deploy-quest.ps1'
         shutil.copyfile(ROOT / 'scripts' / self.script.name, self.script)
+        shutil.copyfile(ROOT / 'scripts/quest-adb-process.ps1', self.scripts / 'quest-adb-process.ps1')
         self.adb = self.scripts / 'mock-adb.ps1'
         self.adb.write_text(ADB_FIXTURE, encoding='utf-8')
         self.commands = self.root / 'adb.log'
@@ -533,6 +614,7 @@ class QuestDeployTests(unittest.TestCase):
             ('fixture', 'existing-config', 'has no existing player configuration', True, False),
             ('fixture', 'missing-activity', 'Could not resolve a launcher activity', True, False),
             ('fixture', 'launch-timeout', 'did not confirm that the Quest launcher activity started', True, True),
+            ('fixture', 'adb-log-timeout', 'ADB logcat timed out', True, True),
             ('fixture', 'log-unavailable', 'Could not read the launched Quest process logs', True, True),
             ('fixture', 'process-restarted', 'process exited, restarted or reported a fatal error', True, True),
             ('fixture', 'process-crashed', 'process exited, restarted or reported a fatal error', True, True),
@@ -2138,13 +2220,15 @@ else:
         files, _ = self.bundle('Independent')
         path, _ = self.device_map()
         faults = {'fixture-03': 'missing', 'fixture-07': 'unauthorized', 'fixture-11': 'offline',
-                  'fixture-16': 'wrong-model', 'fixture-22': 'package-missing', 'fixture-25': 'version-mismatch'}
+                  'fixture-12': 'model-timeout', 'fixture-16': 'wrong-model', 'fixture-18': 'identity-timeout',
+                  'fixture-22': 'package-missing', 'fixture-25': 'version-mismatch'}
         result = self.run_fleet(files, path, '-DeployMappedSeats', '-ManagementApi', 'http://127.0.0.1:1', faults=faults)
         self.assertEqual(1, result.returncode, result.stderr)
         report = json.loads(result.stdout)
         self.assertEqual(('preflight', False), (report['phase'], report['complete']))
         self.assertEqual([(r, s) for r in range(1, 6) for s in range(1, 6)], [(row['roomId'], row['seat']) for row in report['devices']])
-        self.assertEqual({2:'missing', 6:'unauthorized', 10:'offline', 15:'wrong-model', 21:'package-unavailable', 24:'version-mismatch'},
+        self.assertEqual({2:'missing', 6:'unauthorized', 10:'offline', 11:'adb-timeout', 15:'wrong-model',
+                          17:'adb-timeout', 21:'package-unavailable', 24:'version-mismatch'},
                          {i:row['status'] for i,row in enumerate(report['devices']) if row['status'] != 'ready'})
         self.assertEqual(60, report['devices'][-1]['versionCode'])
         result = self.run_fleet(files, path, '-CheckOnly')
@@ -2716,6 +2800,7 @@ else:
         scripts.mkdir()
         script = scripts / 'deploy-quest.ps1'
         shutil.copyfile(ROOT / 'scripts' / script.name, script)
+        shutil.copyfile(ROOT / 'scripts/quest-adb-process.ps1', scripts / 'quest-adb-process.ps1')
         adb = scripts / 'mock-adb.ps1'
         adb.write_text(ADB_FIXTURE, encoding='utf-8')
         apk = self.root / 'artifacts/quest/VrCommand.apk'
@@ -2794,6 +2879,7 @@ else:
         scripts.mkdir()
         script = scripts / 'deploy-quest.ps1'
         shutil.copyfile(ROOT / 'scripts' / script.name, script)
+        shutil.copyfile(ROOT / 'scripts/quest-adb-process.ps1', scripts / 'quest-adb-process.ps1')
         adb = scripts / 'mock-adb.ps1'
         adb.write_text(ADB_FIXTURE, encoding='utf-8')
         apk = self.root / 'artifacts/quest/VrCommand.apk'

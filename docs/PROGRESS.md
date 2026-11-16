@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-16 Quest 無人值守部署期限
+
+- Quest 部署的原生 ADB 指令會在背景執行，安裝期限 180 秒，檔案傳輸及活動啟動 30 秒，其他查詢通常 10 秒。首次啟動的日誌與 PID 重查共用 20 秒觀測期限。ADB 用戶端逾時時停止自己的程序，保留其他程序及原服務。每席預檢記錄 `adb-timeout`，寫入中途失敗保留原部署步驟。 [部署說明](QUEST3.md#首次安裝與啟動檢查)
+- Windows PowerShell 7 完成 70 項部署回歸與 3 項 USB 狀態測試，沒有失敗。原生子程序測試涵蓋參數、結束碼、程序逾時及背景程序持有輸出管道，替身測試核對首次啟動逾時的停點與兩個受影響席位的唯讀報告。Windows PowerShell 5.1 的參數子測試因本機指令碼執行原則略過。 [部署測試](../artifacts/quest-adb-deadlines-20261116-140655/tests.log) · [USB 測試](../artifacts/quest-adb-deadlines-20261116-140655/usb-tests.log)
+- 以唯讀查核確認目前 `artifacts/desktop/VrCommand.exe` 及部署工具指定的 Unity `adb.exe` 通過防火牆啟動前查核。無人值守流程遇到未通過的執行檔會在終端機記錄原因並停止該次啟動。 [遊戲查核](../artifacts/quest-adb-deadlines-20261116-140655/windows-game-firewall.log) · [ADB 查核](../artifacts/quest-adb-deadlines-20261116-140655/windows-adb-firewall.log)
+- 被動 USB 檢查列出 5 個 Meta 裝置節點、1 個檔案傳輸介面、0 個 ADB 介面。Quest 0.50.12／77 的現有 APK 雜湊與發行報告相符。實機安裝及 OpenXR 操作待驗。 [USB 狀態](../artifacts/quest-adb-deadlines-20261116-140655/usb-status.json) · [原 APK 發行報告](../artifacts/vive-release-05012-fb9bcabe/venue-release.json)
+
 ## 2026-11-16 硬體模擬閘道拒絕重複回饋
 
 - 用原封裝 0.2.18 重現合併場第 3 房在確認原事件後，又收到其事件識別被移到較新序號的回覆。模擬設備實際收到第二批，原序號為 76，重複識別出現在序號 77。留存該輪反例及正常清理。 [舊版原反例](../artifacts/live-hardware-gateway/run-cf52c3c403994a17a4879c83812254b0/linked-continuity-duplicate-eventId.json)
