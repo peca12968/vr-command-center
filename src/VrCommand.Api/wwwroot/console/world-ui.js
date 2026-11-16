@@ -7,6 +7,7 @@ import { mountSavedClips } from './saved-clips-ui.js';
 import { mountWorldClipStatistics } from './world-clip-statistics.js';
 import { mountWorldShotTrace, isTraceableShot } from './world-shot-trace.js';
 import { missionTicksPerSecond, recordedClock } from './mission-clock.js';
+import { recordedPointInRoom } from './recorded-room.js';
 
 const $ = id => document.getElementById(id);
 const time = milliseconds => (milliseconds / 1000).toFixed(2) + ' 秒';
@@ -267,16 +268,10 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   function rowsInRoom(rows, roomId) {
     return Array.isArray(rows) && rows.every(row => row?.roomId === roomId);
   }
-  function pointInRoom(point, roomId, radius) {
-    // The recording uses the server's single-precision positions and room bounds.
-    const center = (roomId - 3) * 14, bound = Math.fround(radius);
-    return Number.isFinite(point?.x) && Number.isFinite(point?.z)
-      && Math.abs(Math.fround(Math.fround(point.x) - center)) <= bound && Math.abs(Math.fround(point.z)) <= bound;
-  }
   function matchesRoomRecording(recording, roomId) {
     const header = recording?.header;
     return recording?.observerRoomId === roomId && Array.isArray(header?.roomIds) && header.roomIds.includes(roomId)
-      && rowsInRoom(header.props, roomId) && header.props.every(prop => pointInRoom(prop.feet, roomId, 6));
+      && rowsInRoom(header.props, roomId) && header.props.every(prop => recordedPointInRoom(prop.feet, roomId, 6));
   }
   function matchesRoomFrame(value, roomId) {
     const packet = value?.packet, world = packet?.frame;
@@ -285,7 +280,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
       || !Array.isArray(packet.events) || !rowsInRoom(value.statistics, roomId)) return false;
     const players = new Set(value.statistics.map(row => row.playerId));
     return packet.events.every(event => typeof event?.playerId === 'string' && players.has(event.playerId)
-      && (event.hasRay === false || (event.hasRay === true && pointInRoom(event.origin, roomId, 6.01))));
+      && (event.hasRay === false || (event.hasRay === true && recordedPointInRoom(event.origin, roomId, 6.01))));
   }
   async function switchLiveRoom(roomId) {
     const recording = liveRooms.get(roomId), picker = $('world-recording');

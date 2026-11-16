@@ -74,3 +74,31 @@ test('rejects global event boundaries and invalid event rows in a room file', ()
     assert.throws(() => readPlayerReplay(file), /無法辨識回放檔/);
   }
 });
+
+test('rejects out-of-room prop positions and ray origins in a player room replay', () => {
+  for (const corrupt of [
+    file => { file.header.props[0].feet = { ...point, x: 14 }; },
+    file => { file.header.props[0].feet = { ...point, z: -6.001 }; },
+    file => { file.packets[1].events[0].origin = { ...point, x: -14 }; },
+    file => { file.packets[1].events[0].origin = { ...point, z: 6.011 }; }
+  ]) {
+    const file = replay(2, [3]); corrupt(file);
+    assert.throws(() => readPlayerReplay(file), /超出房間 3/);
+  }
+});
+
+test('keeps native room boundary rays and full replay compatibility', () => {
+  const room = replay(2, [5]);
+  room.roomId = 5;
+  room.header.props[0] = { ...room.header.props[0], roomId: 5, feet: { ...point, x: 34, z: -6 } };
+  for (const packet of room.packets) {
+    packet.frame.enemies[0].roomId = 5;
+    packet.frame.enemies[0].feet = { ...point, x: 28 };
+    packet.events[0].origin = { ...point, x: 34.009998, z: Math.fround(-6.01) };
+    packet.events[0].distance = 20;
+  }
+  assert.equal(readPlayerReplay(room), room);
+  const full = replay(1, [1, 2, 3, 4, 5]);
+  full.packets[0].events[0].origin = { ...point, x: 28 };
+  assert.equal(readPlayerReplay(full), full);
+});

@@ -1,3 +1,5 @@
+import { recordedPointInRoom } from './recorded-room.js';
+
 export const MAX_REPLAY_BYTES = 8 * 1024 * 1024;
 export const MAX_REPLAY_FRAMES = 300;
 const phase = ['Preparing', 'Running', 'Paused', 'Ended'];
@@ -10,8 +12,8 @@ const number = value => Number.isFinite(value) && Math.abs(value) <= 1e6;
 const point = value => value && [value.x, value.y, value.z].every(number);
 const rotation = value => point(value) && number(value.w);
 const bool = value => typeof value === 'boolean';
-function require(value) {
-  if (!value) throw new Error('無法辨識回放檔，請使用場館匯出的完整片段。');
+function require(value, message = '無法辨識回放檔，請使用場館匯出的完整片段。') {
+  if (!value) throw new Error(message);
 }
 
 export function readPlayerReplay(data) {
@@ -28,6 +30,8 @@ export function readPlayerReplay(data) {
     && header.props.every(prop => prop && header.roomIds.includes(prop.roomId) && point(prop.feet)
       && number(prop.yaw) && ['Sandbag', 'Barrel'].includes(prop.kind)));
   require(scoped ? header.roomIds.length === 1 && roomId === header.roomIds[0] : roomId === undefined);
+  if (scoped) require(header.props.every(prop => recordedPointInRoom(prop.feet, roomId, 6)),
+    `回放檔的場景物件超出房間 ${roomId}，請重新取得場館匯出的片段。`);
 
   let elapsed = 0, tick = 0;
   for (const [index, packet] of packets.entries()) {
@@ -58,6 +62,8 @@ export function readPlayerReplay(data) {
     }
     require(packet.events.every(event => event && typeof event === 'object' && (!scoped || !('sequence' in event)) && bool(event.hasRay) && (!event.hasRay
       || (point(event.origin) && point(event.direction) && number(event.distance) && event.distance >= 0))));
+    if (scoped) require(packet.events.every(event => !event.hasRay || recordedPointInRoom(event.origin, roomId, 6.01)),
+      `回放檔的射線起點超出房間 ${roomId}，請重新取得場館匯出的片段。`);
     elapsed = packet.elapsedMilliseconds;
     tick = frame.tick;
   }

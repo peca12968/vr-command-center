@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-17 玩家分房回放核對實際座標
+
+- 管理台 0.31.221 的網頁及離線播放器會核對分房片段中場景物件與射線起點的座標。這兩項使用本房觀戰原有的單精度邊界。用同一份片段修改座標後，舊版能開啟兩份錯房檔，新版在顯示前分別指出錯房的物件或射線。原全場格式及射線的原方向、距離保持相容。 [播放器操作](WORLD_RECORDING.md#讓玩家開啟回放) · [舊版單元反例](../artifacts/player-replay-room-031221/model-before.log) · [離線瀏覽器驗證](../artifacts/player-replay-room-031221/chromium-offline.json)
+- Windows 管理包解壓逐檔核對 571 項。121 項 Node 與 7 項套件回歸通過。從原 Windows 合併與獨立場的封存副本匯出十份分房及兩份完整格式片段，共 120 格。分房 ZIP 逐份比對內附播放器及 JSON，離線 Chromium 完成 18 個載入案例，對外請求為零。房控複驗原十房回放與 50 份戰績，原封存雜湊相同。Quest USB 偵錯介面仍為零。 [Windows 管理包](../artifacts/player-replay-room-031221/VRCommand-ControlServer-0.31.221.zip) · [匯出紀錄](../artifacts/player-replay-room-031221/exports.json) · [房控驗證](../artifacts/player-replay-room-031221/native-readback.json) · [USB 快照](../artifacts/player-replay-room-031221/usb-status.json)
+
 ## 2026-11-17 每次啟動原生遊戲前查核 Windows 防火牆
 
 - 桌面場館、入場、套件及瀏覽器操作等自動測試在各次原生遊戲啟動前重新查核 `VrCommand.exe` 的實際路徑及目前的網路設定檔。伺服器啟動器 1.27.2 在建立原生子程序前也會查核。Windows 現行設定拒絕新路徑的測試執行檔。Python 及 .NET Framework 啟動器皆回傳 2，子程序未執行。 [拒絕路徑驗證](../artifacts/windows-unattended-launch-20261117/live-firewall-rejection.json) · [無人值守操作](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
