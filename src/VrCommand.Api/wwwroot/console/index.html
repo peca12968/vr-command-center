@@ -238,6 +238,19 @@
               <button type="submit">建立準備場次</button>
             </fieldset>
           </form>
+          <details id="saved-venue-mission-plans" class="layout-report" hidden>
+            <summary>已保存的五房任務配置</summary>
+            <div class="form-row">
+              <label>配置名稱<input id="venue-plan-name" type="text" maxlength="80"></label>
+              <button id="save-venue-plan" type="button" class="secondary" disabled>保存目前五房配置</button>
+            </div>
+            <div class="form-row">
+              <label>已保存的配置<select id="saved-venue-plan"></select></label>
+              <button id="load-venue-plan" type="button" class="secondary" disabled>載入已保存配置</button>
+              <button id="refresh-venue-plans" type="button" class="quiet">更新清單</button>
+            </div>
+            <p id="venue-plan-status" class="hint" role="status"></p>
+          </details>
           <details id="launch-mission-file-panel" class="layout-report" hidden>
             <summary>五房任務配置檔</summary>
             <p class="hint">可在開場前保存五房的任務版本。載入時需使用含有這些版本的任務庫。</p>
@@ -580,7 +593,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.224 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.225 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

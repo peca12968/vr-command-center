@@ -18,6 +18,8 @@ internal static class MissionLibraryChecks
         var path = Path.Combine(directory, "mission-library"); var legacy = new MissionStore(path).Create(draft);
         var legacyPath = Path.Combine(path, legacy.Id.ToString("D") + ".json"); var originalFile = File.ReadAllBytes(legacyPath);
         var eventPath = Path.Combine(directory, "mission-library-sessions"); Guid oldSession; Guid newSession; Guid head; Guid revisionRequest = Guid.NewGuid();
+        var planRequest = Guid.NewGuid();
+        VenueMissionPlan savedPlan;
         using (var library = new SqliteMissionLibrary(path))
         using (var events = new SqliteSessionEventStore(eventPath))
         {
@@ -32,6 +34,23 @@ internal static class MissionLibraryChecks
             oldSession = manager.Create(SessionMode.Independent, [1], library.Get(legacy.Id), master).Id;
             var revised = draft with { Name = "夜間第二版", DurationSeconds = 900, Environment = new(ExperienceMode.VR, Weather.Storm, TimeOfDay.Night, true), Props = [new("barrel", new(3, 0, 4), 45)] };
             var second = library.Revise(legacy.Id, revised, master, revisionRequest);
+            var roomPlan = new VenueMissionPlanDraft("  五房測試  ", VenueMissionPlanMode.IndependentSet,
+                [legacy.Id, second.Id, legacy.Id, second.Id, legacy.Id]);
+            savedPlan = library.SaveVenuePlan(roomPlan, master, planRequest);
+            check(savedPlan.Plan.Name == "五房測試" && savedPlan.Plan.MissionIds.SequenceEqual(roomPlan.MissionIds),
+                "A named five-room plan retains the original version and position for every room");
+            Reject<AccessDeniedException>(() => library.VenuePlans(room), "Room credentials cannot list venue-wide plans");
+            Reject<AccessDeniedException>(() => library.SaveVenuePlan(roomPlan, server, Guid.NewGuid()), "Game servers cannot save venue-wide plans");
+            Reject<ArgumentException>(() => library.SaveVenuePlan(roomPlan with { Mode = VenueMissionPlanMode.Linked }, master, Guid.NewGuid()),
+                "A linked plan requires a single common saved version");
+            Reject<KeyNotFoundException>(() => library.SaveVenuePlan(roomPlan with { MissionIds = [legacy.Id, second.Id, legacy.Id, second.Id, Guid.NewGuid()] },
+                master, Guid.NewGuid()), "A plan referencing a missing mission is rejected as a whole");
+            Reject<InvalidOperationException>(() => library.SaveVenuePlan(roomPlan with { Name = "Different" }, master, planRequest),
+                "A saved plan request cannot be reused with a different name or assignment");
+            Reject<InvalidOperationException>(() => library.SaveVenuePlan(roomPlan, master with { Id = "other-master" }, planRequest),
+                "A saved plan retry preserves the original master identity");
+            check(Json(library.SaveVenuePlan(roomPlan, master, planRequest)) == Json(savedPlan) && library.VenuePlans(master).Length == 1,
+                "Retrying a named plan returns its original receipt without creating another plan");
             check(library.Version(second.Id) is { Number: 2 } info && info.SeriesId == legacy.Id && info.PreviousId == legacy.Id && info.Author == master,
                 "Revision records its series, immutable parent and authenticated author");
             check(Json(library.Get(legacy.Id)) == Json(legacy) && manager.Get(oldSession).Mission.Definition.Environment.Weather == Weather.Clear,
@@ -73,6 +92,8 @@ internal static class MissionLibraryChecks
             var manager = new SessionManager(events);
             check(library.History(legacy.Id).HeadId == head && library.Heads().Length == 2 && library.Version(head).Number == 7,
                 "Library restart restores revision heads and separate series");
+            check(Json(library.VenuePlans(master).Single()) == Json(savedPlan) && !savedPlan.Plan.MissionIds.Contains(head),
+                "Named venue plans keep exact historical version IDs through revisions and persistence restart");
             check(manager.Get(oldSession).Mission.Id == legacy.Id && manager.Get(newSession).Mission.Id == head,
                 "Event-store restart retains each session's embedded immutable mission");
         }

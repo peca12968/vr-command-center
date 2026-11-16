@@ -7,6 +7,9 @@ namespace VrCommand.Persistence;
 public record MissionRevision(Mission Mission, Guid SeriesId, int Number, Guid? PreviousId, OperatorIdentity Author);
 public record MissionVersionInfo(Guid Id, Guid SeriesId, int Number, Guid? PreviousId, DateTimeOffset CreatedAtUtc, string Name, OperatorIdentity Author);
 public record MissionHistory(Guid SeriesId, Guid HeadId, int HeadNumber, MissionVersionInfo[] Versions, int? NextBefore);
+public enum VenueMissionPlanMode { Linked = 1, IndependentSet = 2 }
+public record VenueMissionPlanDraft(string Name, VenueMissionPlanMode Mode, Guid[] MissionIds);
+public record VenueMissionPlan(Guid Id, DateTimeOffset CreatedAtUtc, VenueMissionPlanDraft Plan);
 
 public sealed class SqliteMissionLibrary : IDisposable
 {
@@ -33,6 +36,8 @@ public sealed class SqliteMissionLibrary : IDisposable
                   previous TEXT REFERENCES missions(id), created TEXT NOT NULL, name TEXT NOT NULL, body TEXT NOT NULL,
                   author TEXT NOT NULL, request TEXT UNIQUE, UNIQUE(series,revision));
                 CREATE TABLE IF NOT EXISTS library_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS venue_mission_plans (
+                  id TEXT PRIMARY KEY, created TEXT NOT NULL, body TEXT NOT NULL, author TEXT NOT NULL);
                 PRAGMA user_version=1;
                 """, transaction);
             schema.ExecuteNonQuery();
@@ -147,6 +152,63 @@ public sealed class SqliteMissionLibrary : IDisposable
             return new(series, headId, headNumber, result.ToArray(), more ? result[^1].Number : null);
         }
     }
+    public VenueMissionPlan[] VenuePlans(OperatorIdentity actor)
+    {
+        AccessPolicy.AuthorMission(actor);
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            using var command = Command("SELECT id,created,body FROM venue_mission_plans ORDER BY created DESC,id");
+            using var rows = command.ExecuteReader();
+            var plans = new List<VenueMissionPlan>();
+            while (rows.Read()) plans.Add(ReadVenuePlan(rows));
+            return plans.ToArray();
+        }
+    }
+
+    public VenueMissionPlan SaveVenuePlan(VenueMissionPlanDraft draft, OperatorIdentity actor, Guid id)
+    {
+        AccessPolicy.AuthorMission(actor);
+        var name = draft.Name?.Trim();
+        if (id == Guid.Empty || string.IsNullOrEmpty(name) || name.Length > 80 || name.Any(char.IsControl)
+            || !Enum.IsDefined(draft.Mode) || draft.MissionIds is not { Length: 5 })
+            throw new ArgumentException("Provide a name up to 80 characters and one saved mission version for each of five rooms.");
+        var missionIds = draft.MissionIds.ToArray();
+        if (missionIds.Contains(Guid.Empty))
+            throw new ArgumentException("Each room requires a saved mission version ID.");
+        if (draft.Mode == VenueMissionPlanMode.Linked && missionIds.Distinct().Count() != 1)
+            throw new ArgumentException("A linked plan must use one saved version for all five rooms.");
+        var plan = draft with { Name = name, MissionIds = missionIds };
+        var body = Write(plan);
+        var author = Write(actor);
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            using var transaction = db.BeginTransaction();
+            using (var existing = Command("SELECT id,created,body,author FROM venue_mission_plans WHERE id=$id",
+                       transaction, ("$id", id.ToString("D"))))
+            using (var row = existing.ExecuteReader())
+            {
+                if (row.Read())
+                {
+                    if (row.GetString(2) != body || row.GetString(3) != author)
+                        throw new InvalidOperationException("Venue plan request ID already identifies a different author or configuration.");
+                    return ReadVenuePlan(row);
+                }
+            }
+            foreach (var version in missionIds.Distinct()) Find(version, transaction);
+            var created = DateTimeOffset.UtcNow;
+            using var insert = Command("INSERT INTO venue_mission_plans(id,created,body,author) VALUES($id,$created,$body,$author)",
+                transaction, ("$id", id.ToString("D")), ("$created", created.ToString("O")), ("$body", body), ("$author", author));
+            insert.ExecuteNonQuery();
+            transaction.Commit();
+            return new(id, created, plan);
+        }
+    }
+
+    private static VenueMissionPlan ReadVenuePlan(SqliteDataReader row) => new(Guid.Parse(row.GetString(0)),
+        DateTimeOffset.Parse(row.GetString(1)), Read<VenueMissionPlanDraft>(row.GetString(2)));
+
     public Mission Create(MissionDraft draft, OperatorIdentity actor, Guid? requestId = null) => Save(null, draft, actor, requestId);
     public Mission Revise(Guid previousId, MissionDraft draft, OperatorIdentity actor, Guid requestId)
     {

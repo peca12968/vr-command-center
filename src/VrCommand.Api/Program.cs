@@ -190,6 +190,19 @@ if (controlHttps is not null)
 }
 app.MapGet("/api/missions", (SqliteMissionLibrary store, HttpContext context) => store.List(Actor(context)));
 app.MapGet("/api/mission-library", (SqliteMissionLibrary store, HttpContext context) => store.Heads(Actor(context)));
+app.MapGet("/api/venue/mission-plans", (SqliteMissionLibrary store, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    return store.VenuePlans(Actor(context));
+});
+app.MapPost("/api/venue/mission-plans", (VenueMissionPlanDraft draft, SqliteMissionLibrary store, HttpContext context) =>
+{
+    var actor = Actor(context);
+    AccessPolicy.AuthorMission(actor);
+    context.Response.Headers.CacheControl = "no-store";
+    var id = RequestId(context) ?? throw new ArgumentException("Idempotency-Key is required for saving a venue mission plan.");
+    return store.SaveVenuePlan(draft, actor, id);
+});
 app.MapGet("/api/missions/{id:guid}", (Guid id, SqliteMissionLibrary store, HttpContext context) => store.Get(id, Actor(context)));
 app.MapGet("/api/missions/{id:guid}/template", (Guid id, SqliteMissionLibrary store, HttpContext context) =>
 {
