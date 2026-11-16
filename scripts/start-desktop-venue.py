@@ -199,9 +199,11 @@ class Venue:
             'props': [{'assetId': 'barrel' if index % 2 else 'sandbag', 'position': {'x': (index - (room - 1) / 2) * 2, 'y': 0, 'z': 3}, 'yawDegrees': room * 15} for index in range(room)]}
         return self.request('/api/missions', definition, expected=201)
 
-    def create(self, mission, rooms, name, role='Master', players=None):
+    def create(self, mission, rooms, name, role='Master', players=None, *, origin='Simulation'):
+        if origin not in ('Simulation', 'GameServer'):
+            raise ValueError('Invalid desktop fixture telemetry origin')
         state = self.request('/api/sessions', {'missionId': mission['id'], 'mode': 'Linked' if len(rooms) == 5 else 'Independent', 'roomIds': rooms}, role=role, expected=201)
-        entry = {'name': name, 'id': state['id'], 'roomIds': rooms, 'mission': mission, 'players': [], 'endId': str(uuid.uuid4()), 'sealed': None, 'sourceAges': []}
+        entry = {'name': name, 'id': state['id'], 'roomIds': rooms, 'mission': mission, 'players': [], 'endId': str(uuid.uuid4()), 'sealed': None, 'sourceAges': [], 'origin': origin}
         self.rounds.append(entry)  # Track immediately so partial setup is always cleaned up.
         for room in rooms:
             player = players[room] if players else str(uuid.uuid4())
@@ -230,7 +232,8 @@ class Venue:
         self.ports.add(port); entry['port'] = port
         self.launch(name + '-server', {'role': 'Server', 'address': getattr(self.args, 'advertise_address', None) or '127.0.0.1',
             'listenAddress': getattr(self.args, 'listen_address', None) or '127.0.0.1', 'port': port, 'sessionId': entry['id'], 'managementApiUrl': self.base,
-            'gameServerKey': self.tokens['GameServer'], 'telemetryOrigin': 'Simulation', 'telemetryDirectory': str(self.runtime_directory / (name + '-telemetry'))})
+            'gameServerKey': self.tokens['GameServer'], 'telemetryOrigin': entry.get('origin', 'Simulation'),
+            'telemetryDirectory': str(self.runtime_directory / (name + '-telemetry'))})
 
     def ticket(self, entry, player):
         invitation = self.request(f'/api/sessions/{entry["id"]}/players/{player["id"]}/join-ticket', {}, admission=player['admissionId'], role='Room' + str(player['roomId']))
@@ -288,8 +291,9 @@ class Venue:
         world = self.wait(lambda: (world if (world := self.request(f'/api/sessions/{entry["id"]}/world', optional=True)) and world['complete'] else None), 30, entry['name'] + ' exact seals', required={'api', entry['name'] + '-server'})
         statistics = self.request(f'/api/sessions/{entry["id"]}/statistics'); final = self.frame(entry)
         if statistics['pendingTelemetry'] or final['packet']['frame']['phase'] != 'Ended': raise RuntimeError('Incomplete final telemetry')
-        if world['header']['origin'] != 'Simulation' or world['header']['roomIds'] != entry['roomIds']: raise RuntimeError('World source / room isolation failed')
-        if statistics['origin'] not in (None, 'Simulation'): raise RuntimeError('Mixed combat sources')
+        origin = entry.get('origin', 'Simulation')
+        if world['header']['origin'] != origin or world['header']['roomIds'] != entry['roomIds']: raise RuntimeError('World source / room isolation failed')
+        if statistics['origin'] not in (None, origin): raise RuntimeError('Mixed combat sources')
         if statistics['origin'] is None and any(p[field] for p in statistics['players'] for field in ['ammoUsed', 'shotsHit', 'kills', 'hitsReceived', 'damageTaken']):
             raise RuntimeError('Nonempty combat statistics must identify their source')
         if sorted(final['statistics'], key=lambda p: p['playerId']) != sorted(statistics['players'], key=lambda p: p['playerId']): raise RuntimeError('Replay / ledger statistics disagree')
@@ -342,9 +346,9 @@ class Venue:
             if (self.directory / 'dismiss-results.request').exists(): break
             time.sleep(.1)
 
-    def summary(self):
+    def summary(self, *, source='Actual Windows Unity UDP / NGO processes; Simulation source'):
         if self.request('/api/sessions'): raise RuntimeError('Venue still has active sessions')
-        self.save('summary.json', {'source': 'Actual Windows Unity UDP / NGO processes; Simulation source',
+        self.save('summary.json', {'source': source,
             'headsets': None if getattr(self.args, 'client_mode', 'local') == 'external' else 0,
             'completedAtUtc': datetime.now(timezone.utc).isoformat(), 'playerBuildReceipt': self.receipt, 'jobWorkersPerProcess': self.args.job_workers,
             'runtimeDirectory': str(self.runtime_directory), 'checks': self.evidence,

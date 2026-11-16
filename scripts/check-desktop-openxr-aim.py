@@ -27,7 +27,13 @@ def sha256(path):
 def verify(v, args):
     v.start()
     mission = v.mission(1)
-    entry = v.create(mission, [1], 'aim-loss', role='Room1')
+    origin = 'GameServer' if args.tracked_vr else 'Simulation'
+    entry = v.create(mission, [1], 'aim-loss', role='Room1', origin=origin)
+    other_rooms = []
+    if args.tracked_vr:
+        for room in range(2, 6):
+            other_rooms.append(v.create(v.mission(room), [room], f'simulation-room-{room}', role=f'Room{room}'))
+        v.clients(other_rooms)
     session = '/api/sessions/' + entry['id']
     peer = entry['players'][0]['id']
     tracked = str(uuid.uuid4())
@@ -35,7 +41,8 @@ def verify(v, args):
                                             'headset': 'ViveXr'}, role='Room1')
     entry['players'] = state['players']
     admissions = {(row['id'], row['admissionId'], row['roomId'], row['seat']) for row in entry['players']}
-    v.wait(lambda: v.request(session + '/world', optional=True), 30, 'native recording')
+    recording = v.wait(lambda: v.request(session + '/world', optional=True), 30, 'native recording')
+    assert recording['header']['origin'] == origin
 
     manifest = v.directory / 'fixture-runtime.json'
     v.save(manifest.name, {'file_format_version': '1.0.0', 'runtime': {'api_version': '1.0',
@@ -83,28 +90,87 @@ def verify(v, args):
 
     v.wait(lambda: ack(aim_ack, ['0 7']), 15, 'initial aim and both grips tracked')
     v.wait(lambda: ack(trigger_ack, ['0 0']), 10, 'initial trigger neutral')
+    peer_participates = not args.tracked_vr
+    peer_rig = 'Simulated' if peer_participates else 'None'
+
+    def original_readiness():
+        readiness = v.request(session + '/readiness')
+        if (readiness['origin'] != origin or readiness['sourceState'] != 'Fresh' or not readiness['worldSequence']
+                or {(row['playerId'], row['admissionId'], row['roomId'], row['seat']) for row in readiness['players']} != admissions):
+            return None
+        rows = {row['playerId']: row for row in readiness['players']}
+        if rows[peer]['canParticipate'] is not peer_participates or rows[peer]['rigKind'] != peer_rig:
+            return None
+        return readiness, rows[tracked]
+
+    def preparing():
+        result = original_readiness()
+        if result is None:
+            return None
+        readiness, tracked_row = result
+        if (readiness['observedSequence'] != readiness['sessionSequence'] or not tracked_row['canParticipate']
+                or tracked_row['rigKind'] != 'Tracked'):
+            return None
+        value = v.request(f'{session}/world/frames/{readiness["worldSequence"]}')
+        packet = value['packet']
+        if packet['frame']['phase'] != 'Preparing' or packet['frame']['tick'] != 0:
+            return None
+        assert packet['observedSequence'] == readiness['observedSequence']
+        return {'world': value, 'readiness': readiness}
+
+    v.save('preparing.json', v.wait(preparing, 16, 'original signed admissions and eligible Preparing rigs'))
+    independent_ticks = {}
+
+    def independent_checkpoint(name):
+        evidence = []
+        for other in other_rooms:
+            def advancing():
+                value = v.connected(other)
+                if value:
+                    packet = value['packet']
+                    frame = packet['frame']
+                    if (frame['phase'] == 'Running' and packet['suspended'] is False
+                            and packet['observedSequence'] >= other['beginSequence']
+                            and frame['tick'] > independent_ticks.get(other['id'], 0)):
+                        return packet
+                return None
+
+            packet = v.wait(advancing, 15, name + ' ' + other['name'])
+            independent_ticks[other['id']] = packet['frame']['tick']
+            evidence.append({'roomId': other['roomIds'][0], 'sessionId': other['id'],
+                             'streamId': other['streamId'], 'packet': packet})
+        if evidence:
+            v.save(name + '.json', evidence)
+            v.evidence.append(name)
+
+    for other in other_rooms:
+        world = v.request(f'/api/sessions/{other["id"]}/world')
+        assert world['header']['origin'] == 'Simulation' and world['header']['roomIds'] == other['roomIds']
+        other['streamId'] = world['header']['streamId']
+        other['beginSequence'] = v.command(other, 'Begin')['appliedAtSequence']
+    streams = {recording['header']['streamId']} | {other['streamId'] for other in other_rooms}
+    assert len(streams) == 1 + len(other_rooms)
     revision = v.command(entry, 'Begin')['appliedAtSequence']
     frames = {}
 
     def sample(name, available, minimum_tick, rounds=None, *, after_press=False):
         def checkpoint():
-            readiness = v.request(session + '/readiness')
-            rows = {row['playerId']: row for row in readiness['players']}
+            result = original_readiness()
+            if result is None:
+                return None
+            readiness, tracked_row = result
             observed = readiness['observedSequence']
             current = readiness['sessionSequence']
             # An accepted shot appends a combat record to the management sequence.
             same_round = revision <= observed <= current if after_press else observed == current == revision
-            if (readiness['sourceState'] != 'Fresh' or not same_round or not readiness['worldSequence']
-                    or {(row['playerId'], row['admissionId'], row['roomId'], row['seat']) for row in rows.values()} != admissions
-                    or not rows[peer]['canParticipate'] or rows[peer]['rigKind'] != 'Simulated'
-                    or rows[tracked]['canParticipate'] is not available
-                    or rows[tracked]['state'] != ('Participating' if available else 'PoseUnavailable')):
+            if (not same_round or tracked_row['canParticipate'] is not available
+                    or tracked_row['state'] != ('Participating' if available else 'PoseUnavailable')):
                 return None
             original_frame = v.request(f'{session}/world/frames/{readiness["worldSequence"]}')
             frame = original_frame['packet']['frame']
             players = {row['id']: row for row in frame['players']}
             if (original_frame['packet']['observedSequence'] != observed or frame['phase'] != 'Running'
-                    or frame['tick'] < minimum_tick or not players[peer]['connected']
+                    or frame['tick'] < minimum_tick or players[peer]['connected'] is not peer_participates
                     or players[tracked]['connected'] is not available):
                 return None
             player = players[tracked]
@@ -123,6 +189,7 @@ def verify(v, args):
         return value['packet']['frame']['tick'], player
 
     initial_tick, player = sample('running', True, 1)
+    independent_checkpoint('other-rooms-before-loss')
     magazine = player['magazine']
     loss.touch(exist_ok=False)
     v.wait(lambda: ack(aim_ack, ['0 7', '1 7']), 10, 'right aim untracked while both grips remain tracked')
@@ -131,6 +198,7 @@ def verify(v, args):
     trigger_witness = ['0 0', '1 1']
     v.wait(lambda: ack(trigger_ack, trigger_witness), 10, 'held trigger synced during aim loss')
     held_tick, _ = sample('held-during-loss', False, lost_tick + 15)
+    independent_checkpoint('other-rooms-during-loss')
     loss.unlink()
     v.wait(lambda: ack(aim_ack, ['0 7', '1 7', '0 7']), 10, 'aim tracking restores with both grips')
     recovered_tick, recovered = sample('held-after-recovery', True, held_tick + 15, magazine)
@@ -148,6 +216,7 @@ def verify(v, args):
                and 'VR_CLIENT_DISCONNECTED' not in client_log(identity) for identity in clients)
 
     sealed = v.seal(entry)
+    assert sealed['statistics']['origin'] == origin
     totals = {tracked: 1, peer: 0}
     assert {row['playerId']: row['ammoUsed'] for row in sealed['statistics']['players']} == totals
     for name, saved in frames.items():
@@ -170,9 +239,16 @@ def verify(v, args):
                                   and row['streamId'] == sealed['world']['header']['streamId'] for row in rows)
     assert {row['playerId']: int(row['ammoUsed']) for row in rows} == totals
     assert v.wait_for_player_results(entry)['allAcknowledged']
+    independent_checkpoint('other-rooms-after-tracked-end')
+    for other in other_rooms:
+        other_seal = v.seal(other)
+        assert other_seal['world']['header']['streamId'] == other['streamId']
+        assert all(row['ammoUsed'] == 0 for row in other_seal['statistics']['players'])
+        assert v.wait_for_player_results(other)['allAcknowledged']
     assert not v.request('/api/sessions')
-    v.evidence.extend(frames)
-    v.summary()
+    v.evidence.extend(('preparing', *frames))
+    sources = 'GameServer and Simulation telemetry' if other_rooms else 'Simulation telemetry'
+    v.summary(source=f'Actual Windows Unity UDP / NGO processes; {sources}; Unity Mock Runtime')
 
 
 def main():
@@ -181,11 +257,13 @@ def main():
     parser.add_argument('--mock-dll', type=Path, required=True)
     parser.add_argument('--pose-dll', type=Path, required=True)
     parser.add_argument('--runtime-root', type=Path, required=True)
+    parser.add_argument('--tracked-vr', action='store_true', help='Test the tracked-only GameServer room alongside four Simulation rooms')
     desktop.add_api_arguments(parser)
     args = parser.parse_args()
     args.duration = 300
     args.job_workers = 2
     args.check = True
+    args.visible_room = 0
     try:
         args.mock_dll = args.mock_dll.resolve(strict=True)
         args.pose_dll = args.pose_dll.resolve(strict=True)

@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 追蹤來源與四個桌面房同時驗證
+
+- Windows 0.50.12 以 `--tracked-vr` 讓第一房使用 `GameServer`，其餘四房使用 `Simulation`。第一房兩席均完成原簽名票券與 UDP 入場，只有 Unity Mock Runtime 席在準備及執行畫格上取得 `Tracked` 參戰姿態。右手指向失效後暫停該席，恢復沿用原連線並完成放開再扣的輸入驗證。 [重跑方式](WINDOWS_PLAYER_PACKAGE.md#本機追蹤整合驗證) · [五房報告](../artifacts/desktop-openxr-aim/20261116-123914-b7499bf7/summary.json)
+- 通過 11 個檢查點、800 格回放、五場戰鬥與世界雙封存、六筆原終場戰績確認。原封存逐格核對顯示，第一房追蹤失效到結束期間，另外四房各自維持有效姿態及前進 tick，原觀察區間為 7.556 至 8.356 秒。讀回將 Unity 與 API 的座標依原 binary32 表示正規化，同時確認原玩家日誌被驗收工具辨識為 `windows-openxr-mock-tracked`。C 槽原始資料與 F 槽快照 22 檔雜湊相符，活動場次與殘留程序均為零。 [原封存讀回](../artifacts/desktop-openxr-aim/20261116-123914-b7499bf7/closed-source-isolation.json)
+- 本輪使用管理包 0.31.184 的一般開場指令來驗證原生伺服器姿態政策。預設單房 `Simulation` 另重跑通過 8 個檢查點及 95 格回放。新版單場追蹤開場與實體頭盔須另依現場流程驗收。Quest USB 被動檢查仍只找到檔案傳輸介面。 [單場開場條件](PLAYER_READINESS.md#單場-vr-追蹤開場) · [預設模式回歸](../artifacts/desktop-openxr-aim/20261116-124109-2db24e8c/summary.json)
+
 ## 2026-11-16 以實際前進 tick 核對五房共同時段
 
 - 原 10 席回放顯示，管理序號更新前後會保存相同 tick 的畫格。驗收會照常逐格核對席位，只有下一個前進畫格在上一個前進畫格後 500 毫秒內才延長區間。測試涵蓋 500／501 毫秒、同 tick 失去席位、尾段無下一個前進畫格、暫停及原射擊配對。 [驗收方式](EXTERNAL_CLIENTS.md#核對-25-席同時連線的區間)

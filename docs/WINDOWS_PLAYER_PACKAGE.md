@@ -217,6 +217,8 @@ python scripts/check-desktop-openxr-aim.py `
     --pose-dll artifacts/openxr-mock-pose.dll --runtime-root '<新隔離執行目錄>'
 ```
 
+加上 `--tracked-vr` 可在第一房以 `GameServer` 追蹤來源驗證原票券入場。同房桌面玩家的 UDP 連線仍可建立，參戰快照只接受原 OpenXR 席的姿態。第二至第五房同時以 `Simulation` 運作，工具會在追蹤失效前、失效期間及第一房封存後，逐房核對原場次、原串流與持續前進的 tick。此測試使用一般開場指令及 Unity Mock Runtime。 [單場追蹤開場條件](PLAYER_READINESS.md#單場-vr-追蹤開場)
+
 加上 `--check-openxr-reconnect` 可用支援 Vive 右手 Menu 的測試 DLL 驗證同機重連。測試只關閉 OpenXR 席的 UDP 轉送，並在原玩家程序內重新讀取同一入場的新票券。 [重連驗證](QUEST_RECONNECT.md#windows-openxr-重連複驗)
 
 可再加上 `--hardware-simulator-package '<解壓目錄>/VRCommand-HardwareSimulator'`，用 .NET 10 執行硬體模擬包，為兩席分別綁定虛擬裝置。測試確認追蹤失效、恢復後扣住及放開時，兩個裝置都沒有收到回饋。重新扣下扳機後，TCP 模擬裝置只為射擊席確認一筆 `ShotFired` 後座力訊號，並與主控接受的原報告及封存射擊逐筆核對。驗證範圍是軟體路由與模擬確認，實際裝置輸出另行驗收。 [硬體模擬器](HARDWARE_SIMULATOR.md)
