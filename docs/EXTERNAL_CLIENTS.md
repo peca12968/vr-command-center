@@ -692,6 +692,14 @@ Quest 批次已設定 `questLinkCriteria` 時，`issues[].questLinkMetrics` 會�
 
 在 `--inspect-venue-stages` 的收件報告中，`issues[].concurrentRoster` 會列出共同時段不足的門檻、原錄製可確認的最長共同毫秒數，以及各場次房間組合各自的最長連續時段。若時段達標但沒有一段包含所有席位的封存射擊，`missingFireSeats` 會列出在射擊席位最多的合格時段內仍待補的房號與席號。席數相同時採較長的時段。請依這些資料安排重測，再重跑正式驗收。
 
+每個 `groups` 項目附上 `longestWindow` 的實際 UTC 起訖及 `continuousWindows` 區間數。獨立模式可在這裡看出各房有自己的有效區間，但時間沒有交集。`interruptions` 列出暫停、場次暫緩、畫格間隔超標或 tick 未前進的原畫格。`affectedSeats` 附上原房號、席位與畫格狀態。每類只記錄畫格數與第一、最後一格的原世界序號和 UTC。`disconnected` 取自原世界畫格的 `connected: false`，要區分追蹤失效與網路中斷時請比對玩家及伺服器的原日誌。
+
+只收到一批時，在該批 `venue.json` 設定原 `minimumConcurrentMilliseconds` 及每場的 `worldJournal`，可直接檢查同樣的時段資料。未達門檻時輸出 `concurrentRoster`，退出碼為 1。
+
+```powershell
+python scripts/verify-field-results.py --venue-manifest .\venue.json --inspect-concurrent-roster
+```
+
 ##### 六批使用各自的 Windows 啟動回條
 
 在 `stages.json` 加入 `"requireVerifiedVenueStart": true`，並在六份批次清單各自引用原 `verifiedVenueStart`。驗收會逐批核對原預檢、就緒及結束報告，並拒絕重複使用同一個啟動批次 ID。缺少回條時，錯誤會指出總清單中的項次。摘要會顯示各批已核對的回條及原啟動 ID。 [保存及引用回條](#核對-windows-五房啟動回條)

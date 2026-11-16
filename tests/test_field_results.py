@@ -2332,6 +2332,20 @@ class FieldResultsTests(unittest.TestCase):
             path.write_text(json.dumps(manifest), encoding='utf-8')
             with self.assertRaisesRegex(field.EvidenceError, 'continuous concurrent roster'):
                 field.verify_venue(path)
+            with self.assertRaises(field.ConcurrentRosterIncomplete) as rejected:
+                field.verify_venue_batch(path, inspect_roster_minimum=1000)
+            overlap = rejected.exception.overlap
+            self.assertEqual(0, overlap['longestMilliseconds'])
+            self.assertEqual([[1], [2], [3], [4], [5]], [row['roomIds'] for row in overlap['groups']])
+            first, fifth = overlap['groups'][0], overlap['groups'][4]
+            self.assertEqual(7700, fifth['longestMilliseconds'])
+            self.assertLess(first['longestWindow']['throughUtc'], fifth['longestWindow']['fromUtc'])
+            self.assertTrue(all(row['continuousWindows'] == 1 and row['interruptions'] == []
+                                and row['affectedSeats'] == [] for row in overlap['groups']))
+            result = subprocess.run([sys.executable, str(SCRIPT), '--venue-manifest', str(path),
+                                     '--inspect-concurrent-roster'], capture_output=True)
+            self.assertEqual(1, result.returncode)
+            self.assertEqual({'version': 1, 'consistent': False, 'concurrentRoster': overlap}, json.loads(result.stdout))
 
     def test_venue_concurrent_roster_does_not_bridge_interruptions(self):
         def interrupt(packet):
@@ -2365,6 +2379,22 @@ class FieldResultsTests(unittest.TestCase):
                     else:
                         with self.assertRaisesRegex(field.EvidenceError, 'continuous concurrent roster'):
                             field.verify_venue(path)
+                        with self.assertRaises(field.ConcurrentRosterIncomplete) as rejected:
+                            field.verify_venue_batch(path, inspect_roster_minimum=6000)
+                        group, = rejected.exception.overlap['groups']
+                        reason = {'stalled-tick': 'tick-not-advancing', 'missing-player': 'roster-mismatch',
+                                  'wrong-room': 'roster-mismatch', 'gap': 'frame-gap'}.get(cause, cause)
+                        self.assertEqual(2, group['continuousWindows'])
+                        issue, = group['interruptions']
+                        self.assertEqual((reason, 1, 40), (issue['reason'], issue['frameCount'], issue['first']['worldSequence']))
+                        self.assertEqual(issue['first'], issue['last'])
+                        if cause in ('missing-player', 'wrong-room'):
+                            row, = group['affectedSeats']
+                            self.assertEqual((5, 5, 'disconnected' if cause == 'missing-player' else 'wrong-room'),
+                                             (row['roomId'], row['seat'], row['reason']))
+                            self.assertEqual(issue['first'], row['first'])
+                        else:
+                            self.assertEqual([], group['affectedSeats'])
 
     def test_venue_concurrent_roster_requires_original_journals_and_bounded_integer(self):
         with tempfile.TemporaryDirectory() as directory:

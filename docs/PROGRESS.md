@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 五房共同時段定位與 10 席回歸
+
+- 五房封存及六批收件檢查可在共同時段不足時輸出各場最長區間的 UTC 起訖、暫停、暫緩、畫格間隔、tick 及受影響席位。資訊來自原封存回放，每類附畫格數及第一、最後世界序號，原驗收門檻照常判定。單批可用 `--inspect-concurrent-roster`。 [收件操作](EXTERNAL_CLIENTS.md#一次查看六批待補件)
+- Windows 0.50.12 和管理包 0.31.184 用已通過防火牆查核的執行檔，在單機各跑 10 席合併及五房獨立。18 項檢查、1,779 格回放、20 筆原戰績確認、六份 CSV 與六場雙封存通過。C 槽原始資料和 F 槽快照 84 檔雜湊相符，活動場次與殘留程序均為零。另用 20 秒門檻驗證拒絕報告，合併最長 10.255 秒、獨立共同最長 7.700 秒；第一房有 25 格暫停。原 OpenXR 模擬追蹤中斷的封存也正確定位第一房第二席的 9 格 `connected: false`。 [10 席實跑](../artifacts/desktop-exercise/20261116-121144-6e95438c/exercise-result.json) · [原生回放讀回](../artifacts/venue-overlap-diagnostics-de8fb70a/native-05012-readback.json)
+- 0.50.7 的原封存六批重新驗收，仍核對 80 筆玩家確認。另按 9 秒重新檢查，同一批原檔的六組區間均不足，收件報告逐批列出房間時段。單批重新檢查也確認 10 席獨立場原共同區間為 8.250 秒。實體頭盔及跨機容量仍待場測。 [六批通過](../artifacts/venue-overlap-diagnostics-de8fb70a/accepted.json) · [六批不足](../artifacts/venue-overlap-diagnostics-de8fb70a/short.json) · [單批不足](../artifacts/venue-overlap-diagnostics-de8fb70a/one-short.json)
+
 ## 2026-11-16 Windows OpenXR 右手指向中斷回歸
 
 - Windows 0.50.12 用 Unity Mock Runtime 和已通過防火牆查核的原生執行檔入場。右手指向失去追蹤時保留座標，雙手握持維持追蹤。原房間只有 OpenXR 席進入 `PoseUnavailable`，桌面席持續參與。恢復後維持原票券與連線。扳機一路扣住及放開時彈藥數未變，再扣一次才接受一筆事件。 [OpenXR 測試方式](WINDOWS_PLAYER_PACKAGE.md#本機追蹤整合驗證) · [實際追蹤旗標紀錄](../artifacts/desktop-openxr-aim/20261116-120607-abf02220/aim-loss-ack.txt)

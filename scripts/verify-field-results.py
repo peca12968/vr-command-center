@@ -663,7 +663,58 @@ def verify_combat_journal(path, session_id, stream_id, origin, final_sequence, a
     return {'sha256': digest.hexdigest(), 'events': final_sequence, 'players': len(projected)}
 
 
-def roster_periods(players, minimum_ms, applied_end, *, require_tracked=False, sealed_fires=None, require_living=False):
+class VenueRosterInterruptions:
+    """Bounded observations from the original world frames and admitted seats."""
+
+    def __init__(self, players):
+        self.seats = {pid: (row['roomId'], row['seat'] + 1) for pid, row in players.items()}
+        self.group_reasons = {}
+        self.seat_reasons = {}
+
+    @staticmethod
+    def record(target, key, packet):
+        point = (integer(packet['sequence'], 1), integer(packet['elapsedMilliseconds']))
+        evidence = target.setdefault(key, {'frameCount': 0, 'first': point})
+        evidence['frameCount'] += 1
+        evidence['last'] = point
+
+    def group(self, reason, packet):
+        self.record(self.group_reasons, reason, packet)
+
+    def roster(self, packet, rows, require_tracked):
+        self.group('roster-mismatch', packet)
+        bodies = {row['id']: row for row in rows}
+        for pid, (room, seat) in self.seats.items():
+            row = bodies.get(pid)
+            if row is None:
+                reason = 'missing-player'
+            elif row['roomId'] != room:
+                reason = 'wrong-room'
+            elif row['connected'] is not True:
+                reason = 'disconnected'
+            elif require_tracked and row['rig']['kind'] != 'Tracked':
+                reason = 'not-tracked'
+            else:
+                continue
+            self.record(self.seat_reasons, (room, seat, reason), packet)
+
+    def summary(self, capture):
+        def point(value):
+            sequence, elapsed = value
+            return {'worldSequence': sequence,
+                    'capturedAtUtc': (capture + timedelta(milliseconds=elapsed)).isoformat()}
+
+        def item(reason, evidence):
+            return {'reason': reason, 'frameCount': evidence['frameCount'],
+                    'first': point(evidence['first']), 'last': point(evidence['last'])}
+
+        return {'interruptions': [item(reason, evidence) for reason, evidence in sorted(self.group_reasons.items())],
+                'affectedSeats': [{'roomId': room, 'seat': seat, **item(reason, evidence)}
+                                  for (room, seat, reason), evidence in sorted(self.seat_reasons.items())]}
+
+
+def roster_periods(players, minimum_ms, applied_end, *, require_tracked=False, sealed_fires=None, require_living=False,
+                   interruptions=None):
     expected = {pid: player['roomId'] for pid, player in players.items()}
     periods, fires, pending_fires = [], [], []
     start = previous = previous_tick = None
@@ -690,6 +741,11 @@ def roster_periods(players, minimum_ms, applied_end, *, require_tracked=False, s
         matched = match_fires(packet) if sealed_fires is not None else ()
         frame = packet['frame']
         if frame['phase'] != 'Running' or packet['suspended'] is not False or packet['observedSequence'] >= applied_end:
+            if interruptions is not None and packet['observedSequence'] < applied_end:
+                if frame['phase'] == 'Paused':
+                    interruptions.group('paused', packet)
+                elif frame['phase'] == 'Running':
+                    interruptions.group('suspended', packet)
             previous = None
             previous_tick = None
             pending_fires.clear()
@@ -702,6 +758,11 @@ def roster_periods(players, minimum_ms, applied_end, *, require_tracked=False, s
                                                  and row['rig']['kind'] in ('Tracked', 'Simulated')))}
         tick = integer(frame['tick'])
         if len(rows) != len(expected) or connected != expected or not tick:
+            if interruptions is not None:
+                if len(rows) != len(expected) or connected != expected:
+                    interruptions.roster(packet, rows, require_tracked)
+                if not tick:
+                    interruptions.group('tick-not-started', packet)
             previous = None
             previous_tick = None
             pending_fires.clear()
@@ -713,10 +774,17 @@ def roster_periods(players, minimum_ms, applied_end, *, require_tracked=False, s
             if previous is not None and elapsed - previous <= MAX_CONCURRENT_FRAME_GAP_MS:
                 pending_fires.extend(pid for pid, event_tick in matched if event_tick == tick)
             else:
+                if previous is not None and interruptions is not None:
+                    interruptions.group('frame-gap', packet)
                 previous = None
                 pending_fires.clear()
             return
         if previous is None or elapsed - previous > MAX_CONCURRENT_FRAME_GAP_MS or tick <= previous_tick:
+            if previous is not None and interruptions is not None:
+                if elapsed - previous > MAX_CONCURRENT_FRAME_GAP_MS:
+                    interruptions.group('frame-gap', packet)
+                if tick <= previous_tick:
+                    interruptions.group('tick-not-advancing', packet)
             start = elapsed
         else:
             fires.extend((previous, elapsed, pid) for pid in pending_fires)
@@ -746,15 +814,19 @@ class VenueRosterOverlap:
         self.groups = []
         self.seats = {}
 
-    def add(self, capture_started_at, periods, fires, players=None):
+    def add(self, capture_started_at, periods, fires, players=None, interruptions=None):
         require(capture_started_at is not None, 'Concurrent roster verification requires an original UTC capture clock')
         capture = datetime.fromisoformat(capture_started_at).astimezone(timezone.utc)
         self.fires.extend((capture + timedelta(milliseconds=before), capture + timedelta(milliseconds=after), pid)
                           for before, after, pid in fires)
         right = [(capture + timedelta(milliseconds=start), capture + timedelta(milliseconds=end)) for start, end in periods]
         if self.inspect:
+            longest = max(right, key=lambda period: period[1] - period[0], default=None)
+            window = None if longest is None else {'fromUtc': longest[0].isoformat(), 'throughUtc': longest[1].isoformat()}
             self.groups.append({'roomIds': sorted({player['roomId'] for player in players.values()}),
-                                'longestMilliseconds': max((end - start for start, end in periods), default=0)})
+                                'longestMilliseconds': max((end - start for start, end in periods), default=0),
+                                'longestWindow': window, 'continuousWindows': len(right),
+                                **(interruptions.summary(capture) if interruptions is not None else {})})
             self.seats.update({pid: (player['roomId'], player['seat'] + 1) for pid, player in players.items()})
         if self.intervals is None:
             self.intervals = right
@@ -930,8 +1002,10 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
                     'Quest readiness frame is later than the guarded Begin frame')
             readiness_frames.setdefault(seat['worldSequence'], []).append(seat)
     if concurrency is not None:
+        interruptions = VenueRosterInterruptions(players) if concurrency.inspect else None
         observe_roster, periods, fires = roster_periods(players, concurrency.sample_minimum_ms, applied_end,
-                                                       require_tracked=concurrency.require_tracked, sealed_fires=sealed_fires)
+                                                       require_tracked=concurrency.require_tracked, sealed_fires=sealed_fires,
+                                                       interruptions=interruptions)
     if reconnect_window is not None:
         observe_reconnect, finish_reconnect = reconnect_window.watch(players, applied_end, world['acceptedSequence'],
             tracked_only=quest_mr)
@@ -1044,7 +1118,7 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
                 'World journal lacks an active accepted pose for an original seat')
     if concurrency is not None:
         require(not sealed_fires, 'Original sealed combat fire is missing from the world journal')
-        concurrency.add(journal['captureStartedAtUtc'], periods, fires, players)
+        concurrency.add(journal['captureStartedAtUtc'], periods, fires, players, interruptions)
     if reconnect_window is not None:
         capture = journal['captureStartedAtUtc']
         require(capture is not None, 'Reconnect window requires an original UTC capture clock')
@@ -3108,7 +3182,7 @@ def venue_final_room_counts(manifest):
 
 
 def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_logs=False, inspect_udp=False,
-                       inspect_missing=False,
+                       inspect_missing=False, inspect_roster=False,
                        staged_roster=None, staged_link_criteria=None, expected_stage=None, inspect_roster_minimum=None,
                        staged=False, staged_quest_link_criteria=None, staged_require_server_release=False,
                        staged_release_sha256=None):
@@ -3219,13 +3293,14 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
         require_tracked = require_tracked or staged_roster['requireTrackedRoster']
         require_fire = require_fire or staged_roster['requireConcurrentFire']
     require(not require_tracked or minimum is not None, 'requireTrackedRoster requires minimumConcurrentMilliseconds')
+    require(not inspect_roster or minimum is not None, 'Concurrent roster inspection requires minimumConcurrentMilliseconds')
     require(not require_fire or (minimum is not None and combat_journals),
             'requireConcurrentFire requires minimumConcurrentMilliseconds and the original combat journals for the full batch')
     concurrency = None
     if minimum is not None:
         require(journals, 'Concurrent roster verification requires the original world journals for the full batch')
         concurrency = VenueRosterOverlap(minimum, require_tracked=require_tracked, require_fire=require_fire,
-                                         inspect=inspect_roster_minimum is not None)
+                                         inspect=inspect_roster or inspect_roster_minimum is not None)
     require_distinct_remote_roster = manifest.get('requireDistinctRemoteRoster', False)
     require(type(require_distinct_remote_roster) is bool, 'requireDistinctRemoteRoster must be a boolean')
     require(not require_distinct_remote_roster or (topology == 'direct-lan' and concurrency is not None),
@@ -3988,8 +4063,10 @@ def main():
     venue = parser.add_mutually_exclusive_group()
     venue.add_argument('--venue-manifest', type=Path, help='Check one five-room End batch from a private manifest')
     venue.add_argument('--venue-stages', type=Path, help='Verify the six original five-room batches for staged 5, 10 and 25 player runs')
-    parser.add_argument('--inspect-venue-stages', action='store_true', help='List issues across all six original venue batches')
-    parser.add_argument('--inspect-windows-inbox', action='store_true', help='List missing seats, conflicts and verified Windows measurements in a venue inbox')
+    inspection = parser.add_mutually_exclusive_group()
+    inspection.add_argument('--inspect-venue-stages', action='store_true', help='List issues across all six original venue batches')
+    inspection.add_argument('--inspect-windows-inbox', action='store_true', help='List missing seats, conflicts and verified Windows measurements in a venue inbox')
+    inspection.add_argument('--inspect-concurrent-roster', action='store_true', help='Show the recorded interruptions when one five-room batch is too short')
     parser.add_argument('--topology', choices=('same-host', 'direct-lan'))
     parser.add_argument('--server-ip', action='append', help='Repeat for each assigned server IPv4')
     parser.add_argument('--world-journal', type=Path, help='Original closed .worldlog for a single session')
@@ -4033,6 +4110,8 @@ def main():
         parser.error('--inspect-windows-inbox requires --venue-manifest.')
     if args.inspect_venue_stages and not args.venue_stages:
         parser.error('--inspect-venue-stages requires --venue-stages.')
+    if args.inspect_concurrent_roster and not args.venue_manifest:
+        parser.error('--inspect-concurrent-roster requires --venue-manifest.')
     if args.udp_preflight and args.udp_source_preflight:
         parser.error('Use either --udp-preflight or --udp-source-preflight.')
     try:
@@ -4041,7 +4120,7 @@ def main():
         elif args.venue_stages:
             report = verify_venue_stages(args.venue_stages, inspect=args.inspect_venue_stages)
         elif args.venue_manifest:
-            report = verify_venue(args.venue_manifest)
+            report, _ = verify_venue_batch(args.venue_manifest, inspect_roster=args.inspect_concurrent_roster)
         else:
             windows = args.player or []
             quest = args.quest_player or []
@@ -4092,6 +4171,9 @@ def main():
                             quest_readiness_reports=[read_quest_json(path) for path in args.quest_readiness_report or ()],
                             tracked_vr_start=evidence.get('tracked-vr-start.json'), roster_departures=evidence.get('roster-departures.json'),
                             require_quest_link_metrics=args.require_quest_link_metrics, quest_link_criteria=quest_link_criteria)
+    except ConcurrentRosterIncomplete as error:
+        print(json.dumps({'version': 1, 'consistent': False, 'concurrentRoster': error.overlap}, indent=2))
+        parser.exit(1, f'Field evidence rejected. {error}.\n')
     except EvidenceError as error:
         parser.exit(1, f'Field evidence rejected. {error}.\n')
     except (OSError, UnicodeError, ArithmeticError, AttributeError, KeyError, TypeError, ValueError, RecursionError,

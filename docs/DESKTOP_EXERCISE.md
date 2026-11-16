@@ -6,6 +6,8 @@
 
 管理程式及 Windows 遊戲啟動前各自核對實際執行檔的防火牆設定。使用 UDP 轉送時，也會在建立測試場次前查核 `python.exe`。測試使用新資料目錄、原套件執行環境及 `127.0.0.1`。`api-runtime.json` 保存管理執行檔路徑、組件 SHA-256、版本、程序識別和繫結位址。 [無人值守測試](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
 
+以 `--players-per-room 2 --mode both` 在同機排演 10 席。兩種模式各有 10 個獨立的玩家程序，逐次核對原房間、席位、輸入及終場確認。按實際場館驗收時，用各房的完整日誌和封存檔核對共同在線區間。 [分階段驗收](EXTERNAL_CLIENTS.md#分階段驗收-5-人與-10-人)
+
 ```powershell
 python scripts/check-desktop-exercise.py --api-exe <管理包-Runtime-VrCommand.Api.exe> `
   --runtime-root <本機測試目錄> --mode both --players-per-room 5 --seconds 40 `
