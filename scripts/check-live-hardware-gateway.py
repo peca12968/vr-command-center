@@ -856,7 +856,7 @@ def run(args, api_command, api_cwd):
                     request(venue_path+'/combat-stream', {'streamId':stream_id,'origin':'Simulation'}, 'GameServer')
                     started = request(venue_path+'/commands', {'commandId':str(uuid.uuid4()),'action':'Begin'})
                     venue_streams[owner] = (stream_id, started['appliedAtSequence'], 0)
-                status_directory = runtime/f'{label}-status'
+                status_directory = out/f'{label}-status'
                 status_directory.mkdir()
 
                 def venue_status(directory=status_directory):
@@ -1505,12 +1505,16 @@ def run(args, api_command, api_cwd):
                                                 for new,old in zip(rows,original_status,strict=True)) else None
                 snapshot_path = status_directory/'room-01.status.json'
                 if os.name == 'nt':
-                    reader = start(['powershell.exe','-NoProfile','-NonInteractive','-Command',
-                        "$file=[IO.FileStream]::new($env:VR_TEST_STATUS_PATH,[IO.FileMode]::Open,[IO.FileAccess]::Read,"
-                        "([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)); try { "
-                        "[Console]::WriteLine('open'); $null=[Console]::ReadLine(); "
-                        "$text=[IO.StreamReader]::new($file); [Console]::WriteLine($text.ReadToEnd()) } finally { $file.Dispose() }"],
-                        {**env,'VR_TEST_STATUS_PATH':str(snapshot_path)})
+                    def open_windows_status(*, share_delete):
+                        share = '[IO.FileShare]::ReadWrite' + (' -bor [IO.FileShare]::Delete' if share_delete else '')
+                        return start(['powershell.exe','-NoProfile','-NonInteractive','-Command',
+                            "$file=[IO.FileStream]::new($env:VR_TEST_STATUS_PATH,[IO.FileMode]::Open,[IO.FileAccess]::Read,"
+                            f"({share})); try {{ "
+                            "[Console]::WriteLine('open'); $null=[Console]::ReadLine(); "
+                            "$text=[IO.StreamReader]::new($file); [Console]::WriteLine($text.ReadToEnd()) } finally { $file.Dispose() }"],
+                            {**env,'VR_TEST_STATUS_PATH':str(snapshot_path)})
+
+                    reader = open_windows_status(share_delete=True)
                     assert reader.stdout.readline().strip()=='open'
                     held_status = venue_status()[0]['status']
                     fresh = wait(lambda:rows if (rows:=refreshed()) and rows[0]['status']['sequence']>held_status['sequence'] else None,
@@ -1538,14 +1542,69 @@ def run(args, api_command, api_cwd):
                     check([row['state'] for row in rejected]==['invalid','mismatch','invalid','invalid','waiting']
                           and all(row['status'] is None for row in rejected), 'Invalid, future-dated and wrong-session files expose no old ACK counters')
 
-                    stop_venue_room.touch()
                     first_room = gateways[1]
+                    final_ack_count = 6
+                    if os.name=='nt':
+                        reader = open_windows_status(share_delete=False)
+                        assert reader.stdout.readline().strip()=='open'
+                        held = json.loads(snapshot_path.read_bytes())
+                        try:
+                            published = publish_venue_batch(1,1)[0]['report']['reportId']
+
+                            def feedback_or_exit():
+                                if not venue_peers[1].lines.empty():
+                                    return {'frame':venue_peers[1].read('feedback')}
+                                code = first_room.poll()
+                                return {'exitCode':code} if code is not None else None
+
+                            observed = wait(feedback_or_exit,'mock feedback while a reader prevents room status replacement')
+                            save('linked-locked-status-feedback.json',{'statusPath':str(snapshot_path),'held':held,
+                                 'originalReportId':published,'observed':observed})
+                            assert 'frame' in observed, 'The status reader stopped the feedback gateway'
+                            signal, = observed['frame']['signals']
+                            assert observed['frame']['connectionId']==venue_connections[1] and signal['signal']['reportId']==published
+                            venue_peers[1].reply('ack')
+                            final_ack_count += 1
+                            # A status reader keeps the last complete heartbeat while the mock receives its batch.
+                            assert json.loads(snapshot_path.read_bytes())==held
+                            check(True,'A reader blocking replacement leaves the mock connection and its feedback active')
+                        finally:
+                            taken, _ = reader.communicate(input='close\n',timeout=5)
+                            assert reader.returncode==0 and json.loads(taken)==held
+
+                        wait(lambda:venue_ack_count(status_directory,1)==final_ack_count,'confirmed feedback after releasing the reader')
+                        reader = open_windows_status(share_delete=False)
+                        assert reader.stdout.readline().strip()=='open'
+                        held = json.loads(snapshot_path.read_bytes())
+                        try:
+                            stop_venue_room.touch()
+
+                            def durable_room_result():
+                                try:
+                                    return json.loads(venue_reports[1].read_bytes())
+                                except (FileNotFoundError, PermissionError, json.JSONDecodeError):
+                                    return None
+
+                            result = wait(durable_room_result,'original room report while terminal status replacement is locked')
+                            time.sleep(.10)
+                            assert result['termination']=='operator-stop' and first_room.poll() is None
+                        finally:
+                            taken, _ = reader.communicate(input='close\n',timeout=5)
+                            assert reader.returncode==0 and json.loads(taken)==held
+                    else:
+                        stop_venue_room.touch()
                     stdout, _ = first_room.communicate(timeout=8)
                     assert first_room.returncode==0 and not any(secret in stdout for secret in private)
                     stopped_room = venue_status()[0]
                     check(stopped_room['state']=='stopped' and stopped_room['status']['termination']=='operator-stop'
-                          and stopped_room['status']['progress']['acknowledged']==6 and venue_reports[1].is_file(),
+                          and stopped_room['status']['progress']['acknowledged']==final_ack_count and venue_reports[1].is_file(),
                           'Graceful room stop publishes the terminal heartbeat after the original report')
+                    if os.name=='nt':
+                        final_signal, = result['attempts'][-1]['deliveries']
+                        assert result['acknowledged']==final_ack_count and final_signal['signal']['reportId']==published
+                        assert stopped_room['status']['runId']==held['runId'] and stopped_room['status']['sequence']>held['sequence']
+                        save('linked-locked-status-stop.json',{'statusPath':str(snapshot_path),'held':held,
+                             'terminal':stopped_room,'reportAckCount':result['acknowledged'],'originalReportId':published})
 
                     crash_report = out/'linked-venue-crash-report.json'
                     crashed = invoke(1, 'Room1', crash_report, **room1_options)

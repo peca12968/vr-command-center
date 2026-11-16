@@ -3,9 +3,9 @@ import argparse,hashlib,json,shutil,uuid,zipfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 FILES=['VrCommand.HardwareSimulator.dll','VrCommand.HardwareSimulator.deps.json','VrCommand.HardwareSimulator.runtimeconfig.json','VrCommand.Core.dll','VrCommand.Simulation.dll']
-VERSION='0.2.20'
+VERSION='0.2.21'
 MOCK_FIREWALL_FILES=('windows_firewall.py','check-windows-firewall-notifications.ps1')
-LIVE_VERSIONS={*(f'0.2.{minor}' for minor in range(15)), '0.2.19', VERSION}
+LIVE_VERSIONS={*(f'0.2.{minor}' for minor in range(15)), '0.2.19', '0.2.20', VERSION}
 README=f'''VR Command 硬體回饋模擬器 {VERSION}
 
 需要 .NET 10 runtime，本機使用10.0.14驗證。這不是Unity玩家程式或廠商SDK。
@@ -74,7 +74,7 @@ def verify(folder):
     if manifest.get('schemaVersion')!=1 or not valid_version:raise ValueError('Unsupported simulator package')
     expected=set(FILES)|{'example.json','README.txt'}
     if mode=='OfflineAndLiveSimulation':expected.add('mock-device.py')
-    if version==VERSION:expected.update(MOCK_FIREWALL_FILES)
+    if version in {'0.2.20', VERSION}:expected.update(MOCK_FIREWALL_FILES)
     if set(manifest['files'])!=expected:raise ValueError('Unexpected simulator package payload')
     actual={p.relative_to(folder).as_posix() for p in folder.rglob('*') if p.is_file()}
     if actual!=set(manifest['files'])|{'hardware-package.json'}:raise ValueError('Missing or additional package file')

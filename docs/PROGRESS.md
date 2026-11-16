@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-17 Windows 模擬閘道狀態檔競用
+
+- 0.2.21 讓 Windows 活動中的狀態檔短暫被鎖時，保留上一份完整狀態並於下一次更新補寫。停止時先保存房間報告，再限時等待終止狀態可寫入。受控測試持有不允許替換的讀取控制代碼時，0.2.20 提前退出。0.2.21 在同一連線確認第七筆模擬回饋，解鎖後更新同一執行識別碼的終止狀態。 [舊版反例](../artifacts/hardware-status-sharing-0221/baseline-locked-status.json) · [狀態讀取驗證](../artifacts/hardware-status-sharing-0221/read-probe.jsonl) · [終止狀態](../artifacts/hardware-status-sharing-0221/extracted-f/run-22bd494f11a84cb789997fae8fe1975a/linked-locked-status-stop.json)
+- 房間狀態檔在 F 槽的編譯版與解壓版各完成 98 項即時排演，程序均已清理。38 項離線檢查通過，解壓版範例報告位元組相同，發行包執行後仍可核對 10 個檔案。廠商協議與實體設備待驗。 [編譯版](../artifacts/hardware-status-sharing-0221/compiled-f/run-00e5cc66a6d04673873d43f8456914db/checks.json) · [解壓版](../artifacts/hardware-status-sharing-0221/extracted-f/run-22bd494f11a84cb789997fae8fe1975a/checks.json) · [套件](../artifacts/hardware-packages/hardware-simulator-0.2.21-net10.zip)
+
 ## 2026-11-17 模擬閘道的戰鬥串流序號與發行包
 
 - 0.2.20 在轉送前拒絕同一頁的重複序號，以及同一戰鬥串流跨批次的倒退。舊版讓合併場第五房的重複序號抵達本機模擬設備。新版的合併及獨立排演都只保留原一筆確認，受影響房間以 `management-invalid-response` 結束。原待確認批次、正常序號間隔及其他房間的模擬確認均有回歸。 [舊版反例](../artifacts/hardware-stream-order-0220/before/run-7c8e1854990a4954aebde164ec82d7ac/linked-stream-order.json) · [合併回讀](../artifacts/hardware-stream-order-0220/extracted-release-live/linked-stream-order.json) · [獨立回讀](../artifacts/hardware-stream-order-0220/extracted-release-live/independent-stream-order.json)
