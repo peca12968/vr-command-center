@@ -13,11 +13,20 @@ static PFN_xrSetInputDeviceStateBoolEXT mockSetButton;
 static PFN_xrSetInputDeviceStateFloatEXT mockSetTriggerValue;
 static PFN_xrCreateReferenceSpace mockCreateReferenceSpace;
 static PFN_xrCreateActionSpace mockCreateActionSpace;
+static PFN_xrSuggestInteractionProfileBindings mockSuggestBindings;
 static PFN_xrLocateSpace mockLocateSpace;
 static PFN_xrLocateViews mockLocateViews;
 static XrSpace headSpace;
-static XrSpace actionSpaces[64];
+static struct { XrSpace space; XrAction action; XrPath hand; } actionSpaces[64];
 static unsigned actionSpaceCount;
+enum { RIGHT_AIM = 1, RIGHT_GRIP = 2, LEFT_GRIP = 4, AIM_WITNESS = 7 };
+static struct { XrAction action; unsigned joints; } poseActions[64];
+static unsigned poseActionCount;
+static XrPath leftHand;
+static wchar_t aimLossFile[32768], aimLossAckFile[32768];
+static SRWLOCK aimWitnessLock = SRWLOCK_INIT;
+static unsigned aimWitness;
+static char aimMode, lastAimMode, lastAimWitness;
 static wchar_t trackingLossFile[32768];
 static wchar_t triggerCommandFile[32768];
 static wchar_t triggerAckFile[32768];
@@ -144,9 +153,76 @@ static XrResult XRAPI_CALL createReferenceSpace(XrSession session, const XrRefer
 static XrResult XRAPI_CALL createActionSpace(XrSession session, const XrActionSpaceCreateInfo *info, XrSpace *space)
 {
     XrResult result = mockCreateActionSpace(session, info, space);
-    if (XR_SUCCEEDED(result) && actionSpaceCount < sizeof(actionSpaces) / sizeof(actionSpaces[0]))
-        actionSpaces[actionSpaceCount++] = *space;
+    if (XR_SUCCEEDED(result) && actionSpaceCount < ARRAYSIZE(actionSpaces)) {
+        actionSpaces[actionSpaceCount].space = *space;
+        actionSpaces[actionSpaceCount].action = info->action;
+        actionSpaces[actionSpaceCount++].hand = info->subactionPath;
+    }
     return result;
+}
+
+static XrResult XRAPI_CALL suggestBindings(XrInstance instance, const XrInteractionProfileSuggestedBinding *info)
+{
+    XrResult result = mockSuggestBindings(instance, info);
+    if (XR_FAILED(result))
+        return result;
+    PFN_xrStringToPath toPath = (PFN_xrStringToPath)functionFor(instance, "xrStringToPath");
+    XrPath aim, grip, left;
+    if (!toPath || XR_FAILED(toPath(instance, "/user/hand/right", &rightHand)) ||
+        XR_FAILED(toPath(instance, "/user/hand/left", &leftHand)) ||
+        XR_FAILED(toPath(instance, "/user/hand/right/input/aim/pose", &aim)) ||
+        XR_FAILED(toPath(instance, "/user/hand/right/input/grip/pose", &grip)) ||
+        XR_FAILED(toPath(instance, "/user/hand/left/input/grip/pose", &left)))
+        return XR_ERROR_RUNTIME_FAILURE;
+    for (uint32_t binding = 0; binding < info->countSuggestedBindings; binding++) {
+        const XrActionSuggestedBinding *entry = &info->suggestedBindings[binding];
+        unsigned joint = entry->binding == aim ? RIGHT_AIM : entry->binding == grip ? RIGHT_GRIP : entry->binding == left ? LEFT_GRIP : 0;
+        if (!joint)
+            continue;
+        unsigned index = 0;
+        while (index < poseActionCount && poseActions[index].action != entry->action)
+            index++;
+        if (index == ARRAYSIZE(poseActions))
+            return XR_ERROR_LIMIT_REACHED;
+        if (index == poseActionCount) {
+            poseActions[index].action = entry->action;
+            poseActionCount++;
+        }
+        poseActions[index].joints |= joint;
+    }
+    return result;
+}
+
+static void applyAimLoss(unsigned index, XrSpaceLocation *location)
+{
+    unsigned joint = 0;
+    for (unsigned action = 0; action < poseActionCount; action++) {
+        if (poseActions[action].action == actionSpaces[index].action) {
+            joint = poseActions[action].joints;
+            break;
+        }
+    }
+    XrPath hand = actionSpaces[index].hand;
+    if (hand == rightHand) joint &= RIGHT_AIM | RIGHT_GRIP;
+    if (hand == leftHand) joint &= LEFT_GRIP;
+    const XrSpaceLocationFlags tracked = XR_SPACE_LOCATION_POSITION_TRACKED_BIT | XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
+    const XrSpaceLocationFlags valid = XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+    if ((joint != RIGHT_AIM && joint != RIGHT_GRIP && joint != LEFT_GRIP) ||
+        (location->locationFlags & (tracked | valid)) != (tracked | valid))
+        return;
+
+    AcquireSRWLockExclusive(&aimWitnessLock);
+    char mode = GetFileAttributesW(aimLossFile) == INVALID_FILE_ATTRIBUTES ? '0' : '1';
+    if (mode != aimMode) {
+        aimMode = mode;
+        aimWitness = 0;
+    }
+    if (mode == '1' && joint == RIGHT_AIM)
+        location->locationFlags &= ~tracked;
+    aimWitness |= joint;
+    if (aimWitness == AIM_WITNESS)
+        acknowledge(aimLossAckFile, mode, '7', &lastAimMode, &lastAimWitness);
+    ReleaseSRWLockExclusive(&aimWitnessLock);
 }
 
 static XrResult XRAPI_CALL locateSpace(XrSpace space, XrSpace base, XrTime time, XrSpaceLocation *location)
@@ -159,7 +235,7 @@ static XrResult XRAPI_CALL locateSpace(XrSpace space, XrSpace base, XrTime time,
         location->pose.position.y = 1.65f;
     }
     for (unsigned index = 0; index < actionSpaceCount; index++) {
-        if (space == actionSpaces[index]) {
+        if (space == actionSpaces[index].space) {
             location->pose.position.y = 1.25f;
             location->pose.position.z = -0.4f;
             if (handsUntracked()) {
@@ -168,6 +244,8 @@ static XrResult XRAPI_CALL locateSpace(XrSpace space, XrSpace base, XrTime time,
             } else {
                 location->pose.position.x += recoveredOffset();
             }
+            if (aimLossFile[0])
+                applyAimLoss(index, location);
             break;
         }
     }
@@ -223,6 +301,9 @@ static XrResult XRAPI_CALL getProc(XrInstance instance, const char *name, PFN_xr
     } else if (strcmp(name, "xrCreateActionSpace") == 0) {
         mockCreateActionSpace = (PFN_xrCreateActionSpace)*function;
         *function = (PFN_xrVoidFunction)createActionSpace;
+    } else if (aimLossFile[0] && strcmp(name, "xrSuggestInteractionProfileBindings") == 0) {
+        mockSuggestBindings = (PFN_xrSuggestInteractionProfileBindings)*function;
+        *function = (PFN_xrVoidFunction)suggestBindings;
     } else if (strcmp(name, "xrLocateSpace") == 0) {
         mockLocateSpace = (PFN_xrLocateSpace)*function;
         *function = (PFN_xrVoidFunction)locateSpace;
@@ -242,6 +323,12 @@ __declspec(dllexport) XrResult XRAPI_CALL xrNegotiateLoaderRuntimeInterface(
         return XR_ERROR_RUNTIME_UNAVAILABLE;
     length = GetEnvironmentVariableW(L"VR_COMMAND_OPENXR_TRACKING_LOSS_FILE", trackingLossFile, ARRAYSIZE(trackingLossFile));
     if (length >= ARRAYSIZE(trackingLossFile))
+        return XR_ERROR_RUNTIME_UNAVAILABLE;
+    length = GetEnvironmentVariableW(L"VR_COMMAND_OPENXR_AIM_LOSS_FILE", aimLossFile, ARRAYSIZE(aimLossFile));
+    if (length >= ARRAYSIZE(aimLossFile) || (aimLossFile[0] && trackingLossFile[0]))
+        return XR_ERROR_RUNTIME_UNAVAILABLE;
+    length = GetEnvironmentVariableW(L"VR_COMMAND_OPENXR_AIM_LOSS_ACK", aimLossAckFile, ARRAYSIZE(aimLossAckFile));
+    if (length >= ARRAYSIZE(aimLossAckFile) || (aimLossFile[0] && !aimLossAckFile[0]))
         return XR_ERROR_RUNTIME_UNAVAILABLE;
     length = GetEnvironmentVariableW(L"VR_COMMAND_OPENXR_TRIGGER_COMMAND", triggerCommandFile, ARRAYSIZE(triggerCommandFile));
     if (length >= ARRAYSIZE(triggerCommandFile))

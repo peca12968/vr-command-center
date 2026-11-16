@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 Windows OpenXR 右手指向中斷回歸
+
+- Windows 0.50.12 用 Unity Mock Runtime 和已通過防火牆查核的原生執行檔入場。右手指向失去追蹤時保留座標，雙手握持維持追蹤。原房間只有 OpenXR 席進入 `PoseUnavailable`，桌面席持續參與。恢復後維持原票券與連線。扳機一路扣住及放開時彈藥數未變，再扣一次才接受一筆事件。 [OpenXR 測試方式](WINDOWS_PLAYER_PACKAGE.md#本機追蹤整合驗證) · [實際追蹤旗標紀錄](../artifacts/desktop-openxr-aim/20261116-120607-abf02220/aim-loss-ack.txt)
+- 最終原生執行通過七個檢查點及 96 格回放，回讀取得原射擊事件及全場 CSV 的 1／0 發。兩個玩家確認終場戰績，活動場次與殘留程序為零。C 槽原始資料與 F 槽快照共 14 檔雜湊相符。Windows 玩家及伺服器 ZIP 的 324 項共用執行檔案逐項比對至實測目錄和兩份清單。另實測新解壓路徑會在啟動前擋下。實體 VIVE、Quest 及跨電腦場測仍待。 [原生報告](../artifacts/desktop-openxr-aim/20261116-120607-abf02220/summary.json) · [原射擊事件](../artifacts/desktop-openxr-aim/20261116-120607-abf02220/accepted-shot.json) · [CSV](../artifacts/desktop-openxr-aim/20261116-120607-abf02220/report.csv) · [兩套 ZIP 核對](../artifacts/openxr-mock/aim-loss-v1/release-payload-match-with-archives.json)
+- 首輪伺服器已接受一發，測試讀回因把管理版本鎖在 Begin 而逾時。修正後通過 95 格並讀回觀測序號 5、管理序號 6。後續 CSV 首輪依錯誤大小寫篩選列，修正為 API 實際輸出的 `Player` 後再跑完整流程。 [首輪封存事件](../artifacts/desktop-openxr-aim/20261116-120056-88aeec73/closed-shot-readback.json) · [版本讀回](../artifacts/desktop-openxr-aim/20261116-120347-1a36ac32/new-press.json)
+
 ## 2026-11-16 無人值守的管理 API 與 Unity 測試
 
 - 修正 Unity 冒煙、入場及管理 API 測試啟動前的查核。預設 `dotnet.exe` 在本機私人網路缺少涵蓋的防火牆規則，五個入口實測均在啟動前以代碼 1 結束。三個新解壓的 0.50.12 遊戲路徑也由防火牆查核擋下。管理包 HTTPS 和重啟驗證同樣先查核包內實際的 API 執行檔。 [操作說明](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)

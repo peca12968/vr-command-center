@@ -197,7 +197,7 @@ Windows 建置啟用 Touch 與 Unity 的 HTC Vive Controller 兩個 OpenXR 互�
 ```powershell
 cl /nologo /std:c11 /O2 /LD /W4 /WX /wd4191 /I"C:\XR\include\openxr" `
     /Fo"artifacts\openxr-mock-pose.obj" tests\fixtures\openxr-mock-pose.c `
-    /link /OUT:artifacts\openxr-mock-pose.dll
+    /link /OUT:artifacts\openxr-mock-pose.dll /IMPLIB:artifacts\openxr-mock-pose.lib
 python scripts/check-server-package.py '<解壓遊戲伺服器包>' `
     --control-package '<解壓管理包>' --player-package '<解壓玩家包>' `
     --runtime-root '<新隔離執行目錄>' --openxr-mock-only `
@@ -205,6 +205,17 @@ python scripts/check-server-package.py '<解壓遊戲伺服器包>' `
 ```
 
 可加上 `--observe-closure-ui`，用專案的 Playwright Chromium 驗證房卡顯示與清除待確認席位，核對兩席彈藥數，並由實際控制台結束和核對封存。
+
+`check-desktop-openxr-aim.py` 用同一個測試 DLL 專門切換右手指向追蹤。DLL 依 OpenXR 動作綁定辨識右手指向和雙手握持空間，保留有效座標，記錄右手指向失效及兩側握持仍有追蹤。測試核對同一入場暫停與恢復、扳機維持扣住時的彈藥不變，以及放開後新扣發的單筆事件、原玩家戰績與 CSV。 [Khronos 動作綁定](https://registry.khronos.org/OpenXR/specs/1.1/man/html/xrSuggestInteractionProfileBindings.html)
+
+這個入口用 `127.0.0.1` 並先檢查遊戲與管理 API 的執行檔路徑。圖形玩家由原生遊戲執行檔直接啟動，使用與正式 OpenXR 啟動器相同的 Direct3D 11 參數。驗證涵蓋模擬控制器和原生遊戲程式。
+
+```powershell
+python scripts/check-desktop-openxr-aim.py `
+    --api-exe '<已通過查核的管理包>/Runtime/VrCommand.Api.exe' `
+    --mock-dll '<Unity OpenXR 套件>/Runtime/MockRuntime/windows/x64/mock_runtime.dll' `
+    --pose-dll artifacts/openxr-mock-pose.dll --runtime-root '<新隔離執行目錄>'
+```
 
 加上 `--check-openxr-reconnect` 可用支援 Vive 右手 Menu 的測試 DLL 驗證同機重連。測試只關閉 OpenXR 席的 UDP 轉送，並在原玩家程序內重新讀取同一入場的新票券。 [重連驗證](QUEST_RECONNECT.md#windows-openxr-重連複驗)
 

@@ -106,7 +106,7 @@ def player_result_phase(text):
 
 class Venue:
     def __init__(self, args, *, artifact_family='desktop-venue'):
-        if artifact_family not in ('desktop-venue', 'desktop-demo', 'desktop-capacity', 'desktop-active', 'desktop-debrief', 'desktop-end-race', 'desktop-clock', 'desktop-clock-faults', 'desktop-long', 'desktop-seal-faults', 'desktop-briefing', 'desktop-readiness', 'desktop-first-person', 'desktop-navigation', 'desktop-ai-targeting', 'desktop-crouch', 'desktop-exercise', 'desktop-walkway', 'desktop-journal-recovery'):
+        if artifact_family not in ('desktop-venue', 'desktop-demo', 'desktop-capacity', 'desktop-active', 'desktop-debrief', 'desktop-end-race', 'desktop-clock', 'desktop-clock-faults', 'desktop-long', 'desktop-seal-faults', 'desktop-briefing', 'desktop-readiness', 'desktop-first-person', 'desktop-navigation', 'desktop-ai-targeting', 'desktop-crouch', 'desktop-exercise', 'desktop-walkway', 'desktop-journal-recovery', 'desktop-openxr-aim'):
             raise ValueError('Unknown native fixture artifact family')
         self.args = args
         self.artifact_family = artifact_family
@@ -176,11 +176,12 @@ class Venue:
         self.save('api-runtime.json', {'program': command[0], 'assembly': str(assembly), 'assemblySha256': assembly_sha256,
                                       'version': version, 'processId': self.processes['api'].pid, 'bind': self.base})
 
-    def launch(self, name, config, visible=False, *, extra_args=()):
+    def launch(self, name, config, visible=False, *, extra_args=(), environment=None):
         self.save(name + '.json', config)
         flags = ['-screen-fullscreen', '0', '-screen-width', '1100', '-screen-height', '760'] if visible else ['-batchmode', '-nographics']
         self.processes[name] = subprocess.Popen([str(self.args.player_exe.resolve()), *flags, '-job-worker-count', str(self.args.job_workers), '-logFile', str(self.directory / (name + '.log')),
-            '--vr-config', str(self.directory / (name + '.json')), *extra_args], cwd=self.args.player_exe.resolve().parent, creationflags=subprocess.CREATE_NO_WINDOW)
+            '--vr-config', str(self.directory / (name + '.json')), *extra_args], cwd=self.args.player_exe.resolve().parent,
+            env=environment, creationflags=subprocess.CREATE_NO_WINDOW)
 
     def stop(self, name):
         process = self.processes[name]
