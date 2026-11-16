@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-17 管理台 0.31.222 的 Windows ZIP 為 53,408,665 位元組，SHA-256 `ccd33799d18b0cb1dc838c6765c5231dc7d365b38cfa36aa76d7b7695af46fd7`。解壓逐檔核對 574 筆。玩家回放頁與離線播放器可按戰鬥事件跳到原保存格。 [管理包](../artifacts/player-replay-events-031222/final/VRCommand-ControlServer-0.31.222.zip) · [回放操作](WORLD_RECORDING.md#讓玩家開啟回放)
+
 2026-11-17 管理台 0.31.217 的 Windows ZIP 為 53,397,290 位元組，SHA-256 `781688732e7e68bb9125fb46614962a5aad58f15a4e9b77255d611a94abcb3f2`。解壓後逐檔核對 568 筆。房控從戰績開啟個人回放時沿用原房間的伺服器範圍。 [管理包](../artifacts/room-personal-replay-031217/VRCommand-ControlServer-0.31.217.zip) · [回放操作](REPORTS.md#從戰績開啟個人回放)
 
 2026-11-17 管理台 0.31.216 的 Windows ZIP 為 53,396,986 位元組，SHA-256 `974a9c1670292808348e2a61724e817d582eef24a764660ae2a38e3b53010f5c`。解壓後逐檔核對 568 筆。管理台會核對五房開場回條是否保留原開場條件。 [管理包](../artifacts/venue-opening-policy-031216/VRCommand-ControlServer-0.31.216.zip) · [開場操作](PLAYER_READINESS.md#五房追蹤驗收開場)

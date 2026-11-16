@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-17 玩家回放按戰鬥事件跳轉
+
+- 管理台 0.31.222 的網頁與單檔播放器可篩選七種戰鬥事件，按上一個或下一個事件畫格停在原錄製。畫面顯示同格筆數，跳轉保留視角、速度與循環設定。分房與全場依原匯出的檔案範圍。 [回放操作](WORLD_RECORDING.md#讓玩家開啟回放) · [離線播放器](../artifacts/player-replay-events-031222/final/VRCommand-Player-Replay-0.31.222.html)
+- 解壓版網頁與離線播放器均用 Chromium 讀取十份分房及兩份全場原匯出，各核對另一段封存中的十個受傷畫格。原日誌共 273 格，樣本讀取第 166 至 264 格。驗證篩選無結果、首尾、播放中跳轉及手機排版，未送出 API 或外部請求。122 項 Node 測試通過。 [封存來源](../artifacts/player-replay-events-031222/archive-window.json) · [瀏覽器複驗](../artifacts/player-replay-events-031222/final/chromium-events.json) · [Node 測試](../artifacts/player-replay-events-031222/node-tests.log)
+- Windows 管理 ZIP 解壓逐檔核對 574 項，與原 0.50.12 Windows 玩家、伺服器和 Quest APK 通過發行核對。完整連線瀏覽器測試未在無人值守模式啟動。本機 Quest USB 仍只有檔案傳輸介面，頭盔及跨機待驗。 [管理包](../artifacts/player-replay-events-031222/final/VRCommand-ControlServer-0.31.222.zip) · [共同發行](../artifacts/player-replay-events-031222/final/venue-release.json) · [USB 快照](../artifacts/player-replay-events-031222/usb-status.json)
+- GitHub Actions 對 `c889197` 回報帳務或用量限制，工作未啟動。 [GitHub Actions 工作](https://github.com/peca12968/vr-command-center/actions/runs/43956244952/job/133611439154)
+
 ## 2026-11-17 Quest 發行核對加入 AndroidManifest
 
 - 場館發行工具直接核對已簽章 APK 裡的 AndroidManifest。確認同一啟動篩選器宣告 Android 與 Meta VR、Quest 3 裝置、頭部追蹤、MR 透視及 Internet 權限。用真正 AAPT2 與 APK v2 簽章建立六個測試包，舊版均接受，新版拒絕五個缺少宣告的版本。十項發行回歸通過。 [操作方式](EXTERNAL_CLIENTS.md#發送前離線核對交付套件) · [簽章測試](../artifacts/quest-apk-manifest-20261117/signed-fixtures-final-results.json) · [單元測試](../artifacts/quest-apk-manifest-20261117/release-tests-final.log)
