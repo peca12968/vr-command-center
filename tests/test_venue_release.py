@@ -54,6 +54,13 @@ class VenueReleaseTests(unittest.TestCase):
         self.assertEqual(identity, {key: self.source[key] for key in release.IDENTITY})
         self.assertEqual(summary['pairedGameFiles'], 4)
         self.assertEqual(summary['consoleVersion'], '0.31.83')
+        server_manifest = self.server / 'server-package.json'
+        server_bytes = server_manifest.read_bytes()
+        self.assertEqual(summary['serverManifestSha256'], hashlib.sha256(server_bytes).hexdigest())
+        server_manifest.write_bytes(server_bytes + b'\n')
+        _, server_repacked = release.verify_windows(self.control, self.server, self.player)
+        self.assertEqual(server_repacked['playerManifestSha256'], summary['playerManifestSha256'])
+        self.assertNotEqual(server_repacked['serverManifestSha256'], summary['serverManifestSha256'])
         manifest = self.player / 'player-package.json'
         original = manifest.read_bytes()
         self.assertEqual(summary['playerManifestSha256'], hashlib.sha256(original).hexdigest())
@@ -90,6 +97,18 @@ class VenueReleaseTests(unittest.TestCase):
 
         with patch.object(release.player_package, 'verify', side_effect=replace_after_verifying):
             with self.assertRaisesRegex(ValueError, 'manifest changed during verification'):
+                release.verify_windows(self.control, self.server, self.player)
+
+    def test_server_manifest_replacement_during_verification_is_rejected(self):
+        verify = release.server_package.verify
+
+        def replace_after_verifying(folder, *, manifest_bytes):
+            checked = verify(folder, manifest_bytes=manifest_bytes)
+            (folder / 'server-package.json').write_bytes(manifest_bytes + b'\n')
+            return checked
+
+        with patch.object(release.server_package, 'verify', side_effect=replace_after_verifying):
+            with self.assertRaisesRegex(ValueError, 'server manifest changed during verification'):
                 release.verify_windows(self.control, self.server, self.player)
 
     def test_quest_uses_original_receipt_bytes_and_build_identity(self):

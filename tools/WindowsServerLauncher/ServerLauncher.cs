@@ -32,7 +32,26 @@ internal static class ServerLauncher
     internal static string Full(string path) { return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar); }
     internal static bool Inside(string path, string parent) { return String.Equals(Full(path), Full(parent), StringComparison.OrdinalIgnoreCase) || Full(path).StartsWith(Full(parent) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase); }
     internal static void Plain(string path) { for (var p = Path.GetFullPath(path); !String.IsNullOrEmpty(p); p = Path.GetDirectoryName(p)) if (File.Exists(p) || Directory.Exists(p)) Need((File.GetAttributes(p) & FileAttributes.ReparsePoint) == 0, "請使用實際路徑，不要使用連結。"); }
-    internal static Dictionary<string, object> Read(string path, int max) { Plain(path); Need(new FileInfo(path).Length <= max, "設定檔過大。"); var value = Map(Json.DeserializeObject(File.ReadAllText(path, Encoding.UTF8))); Need(value != null, "設定格式錯誤。"); return value; }
+    internal static Dictionary<string, object> Read(string path, int max, string expectedHash = null)
+    {
+        Plain(path);
+        using (var file = File.OpenRead(path))
+        {
+            Need(file.Length <= max, "設定檔過大。");
+            if (expectedHash != null)
+            {
+                using (var sha = SHA256.Create())
+                    Need(Hex(sha.ComputeHash(file)) == expectedHash, "本機伺服器包清單與場館發行報告不符。");
+                file.Position = 0;
+            }
+            using (var reader = new StreamReader(file, Encoding.UTF8))
+            {
+                var value = Map(Json.DeserializeObject(reader.ReadToEnd()));
+                Need(value != null, "設定格式錯誤。");
+                return value;
+            }
+        }
+    }
     internal static string Hash(string path) { using (var s = SHA256.Create()) using (var f = File.OpenRead(path)) return Hex(s.ComputeHash(f)); }
     internal static string Hex(byte[] data) { return BitConverter.ToString(data).Replace("-", "").ToLowerInvariant(); }
     internal static void Save(string path, object value)
@@ -46,9 +65,26 @@ internal static class ServerLauncher
         Need(!String.IsNullOrEmpty(path), "需要新的結果路徑。"); Plain(path);
         Need(!File.Exists(path) && !Directory.Exists(path) && Directory.Exists(Path.GetDirectoryName(Full(path))) && !Inside(path, Root) && (work == null || !Inside(path, work)), "結果路徑已存在或與程式／資料重疊。");
     }
-    internal static void Verify()
+    static string ReadReleaseHash(Dictionary<string, string> options)
     {
-        var manifest = Read(Path.Combine(Root, "server-package.json"), 4 * 1024 * 1024); object rows;
+        string path;
+        if (!options.TryGetValue("--release-report", out path)) return null;
+        Need(!Inside(path, Root), "場館發行報告必須在程式包之外。");
+        var release = Read(path, 8192);
+        Need(Yes(release, "verified") && Text(release, "scope") == "offline-package-consistency", "請使用已核對的場館發行報告。");
+        var hash = Text(Child(release, "windows"), "serverManifestSha256");
+        Need(hash != null && System.Text.RegularExpressions.Regex.IsMatch(hash, @"\A[a-f0-9]{64}\z"), "發行報告缺少有效的 Windows 伺服器套件清單雜湊。");
+        return hash;
+    }
+    static Dictionary<string, object> WithReleaseHash(Dictionary<string, object> report, string hash)
+    {
+        if (hash != null) report.Add("serverManifestSha256", hash);
+        return report;
+    }
+    internal static void Verify(string releaseHash = null)
+    {
+        var pathToManifest = Path.Combine(Root, "server-package.json");
+        var manifest = Read(pathToManifest, 4 * 1024 * 1024, releaseHash); object rows;
         Need(Num(manifest, "schemaVersion") == 1 && Text(manifest, "target") == "win-x64" && manifest.TryGetValue("files", out rows) && rows is object[], "伺服器包版本不正確。");
         rows = manifest["files"]; var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in (object[])rows)
@@ -62,6 +98,7 @@ internal static class ServerLauncher
         var actual = new HashSet<string>(StringComparer.OrdinalIgnoreCase); var folders = new Stack<string>(); folders.Push(Root);
         while (folders.Count > 0) { var folder = folders.Pop(); Plain(folder); foreach (var file in Directory.GetFiles(folder)) { Plain(file); Need(actual.Add(file.Substring(Root.Length + 1).Replace('\\', '/')), "伺服器包路徑重複。"); } foreach (var child in Directory.GetDirectories(folder)) { Plain(child); folders.Push(child); } }
         var expected = new HashSet<string>(seen, StringComparer.OrdinalIgnoreCase); expected.Add("server-package.json"); Need(actual.SetEquals(expected), "程式包有額外檔案；私人設定與結果須放在包外。");
+        Need(releaseHash == null || Hash(pathToManifest) == releaseHash, "核對期間伺服器包清單已變更。");
     }
     static void RequireTrackedVrBuild()
     {
@@ -720,10 +757,13 @@ internal static class ServerLauncher
         internal Catalog Catalog;
         internal string Topology;
         internal List<VenueServer> Servers;
+        internal string ReleaseHash;
         internal object Public()
         {
-            return new { schemaVersion = 1, status = "venue-checked", complete = true, topology = Topology, instanceId = Catalog.InstanceId,
-                servers = Servers.ConvertAll(server =>
+            return WithReleaseHash(new Dictionary<string, object>
+            {
+                { "schemaVersion", 1 }, { "status", "venue-checked" }, { "complete", true }, { "topology", Topology },
+                { "instanceId", Catalog.InstanceId }, { "servers", Servers.ConvertAll(server =>
                 {
                     var choice = server.Choice;
                     var row = new Dictionary<string, object> { { "roomIds", choice.Rooms }, { "sessionId", choice.Id },
@@ -735,7 +775,8 @@ internal static class ServerLauncher
                         row.Add("registeredSeats", choice.RegisteredSeats);
                     }
                     return row;
-                }) };
+                }) }
+            }, ReleaseHash);
         }
         internal bool Same(VenuePlan other)
         {
@@ -752,7 +793,7 @@ internal static class ServerLauncher
         string diagnostics; var peerDiagnostics = options.TryGetValue("--peer-diagnostics", out diagnostics);
         Need(!peerDiagnostics || diagnostics == "on", "來源診斷只接受 on。");
         var trackedVr = TrackedVrOption(options);
-        Need(options.Count == 5 + (peerDiagnostics ? 1 : 0) + (trackedVr ? 1 : 0) && options.ContainsKey("--work")
+        Need(options.Count == 5 + (peerDiagnostics ? 1 : 0) + (trackedVr ? 1 : 0) + (options.ContainsKey("--release-report") ? 1 : 0) && options.ContainsKey("--work")
             && options.ContainsKey("--seconds") && options.ContainsKey("--ready-report"), "需要venue-run/work/seconds/ready-report/report五個參數。");
         int seconds; Need(Int32.TryParse(options["--seconds"], out seconds) && seconds >= 60 && seconds <= 86400, "執行期限須為60至86400秒。");
         var planPath = Full(options["--venue-run"]); var work = Full(options["--work"]);
@@ -768,7 +809,7 @@ internal static class ServerLauncher
         Output(report, work); Output(ready, work);
         Need(!String.Equals(Full(report), Full(ready), StringComparison.OrdinalIgnoreCase), "結果路徑不能重複。");
         outputValid = true;
-        return ExecuteVenue(LoadVenuePlan(plan, instancePath), work, seconds, ready, report, peerDiagnostics, () => false, trackedVr);
+        return ExecuteVenue(LoadVenuePlan(plan, instancePath, ReadReleaseHash(options)), work, seconds, ready, report, peerDiagnostics, () => false, trackedVr);
     }
 
     static string VenueInstancePath(Dictionary<string, object> plan)
@@ -778,23 +819,23 @@ internal static class ServerLauncher
         return Full(instancePath);
     }
 
-    static VenuePlan ReadVenuePlan(string path, Action<string> checkInstance = null)
+    static VenuePlan ReadVenuePlan(string path, Action<string> checkInstance = null, Func<string> readReleaseHash = null)
     {
         Need(!String.IsNullOrWhiteSpace(path) && Path.IsPathRooted(path), "需要場館計畫的完整路徑。");
         path = Full(path);
         Need(!Inside(path, Root), "場館計畫必須在程式包之外。");
         var plan = Read(path, 8192); var instance = VenueInstancePath(plan);
         if (checkInstance != null) checkInstance(Path.GetDirectoryName(instance));
-        return LoadVenuePlan(plan, instance);
+        return LoadVenuePlan(plan, instance, readReleaseHash == null ? null : readReleaseHash());
     }
 
-    static VenuePlan LoadVenuePlan(Dictionary<string, object> plan, string instancePath)
+    static VenuePlan LoadVenuePlan(Dictionary<string, object> plan, string instancePath, string releaseHash = null)
     {
         var version = Num(plan, "version"); var topology = Text(plan, "topology"); object raw;
         Need(version >= 1 && version <= 4 && plan.Count == 6 && (topology == "Linked" || topology == "Independent")
             && plan.TryGetValue("servers", out raw) && raw is object[]
             && ((object[])raw).Length == (topology == "Linked" ? 1 : 5), "請提供完整的獨立或合併場館設定。");
-        Verify();
+        Verify(releaseHash);
         var guarded = version >= 2;
         if (guarded)
         {
@@ -829,7 +870,7 @@ internal static class ServerLauncher
         foreach (var server in servers)
             try { server.Config.CheckPort(); }
             catch (SocketException) { throw new InvalidDataException("無法使用房間 " + String.Join("、", server.Choice.Rooms) + " 的 UDP 埠 " + server.Config.Port + "。"); }
-        return new VenuePlan { Version = version, Catalog = catalog, Topology = topology, Servers = servers };
+        return new VenuePlan { Version = version, Catalog = catalog, Topology = topology, Servers = servers, ReleaseHash = releaseHash };
     }
 
     static void CheckVenueRevision(Choice current, long sequence, string missionId, int[] rooms)
@@ -988,8 +1029,11 @@ internal static class ServerLauncher
                         endpointPublication = "confirmed";
                         RequireVenueUdp(servers);
                         Need(!cancel(), "已中止啟動；此輪未完成。");
-                        Save(ready, new { schemaVersion = 1, status = "venue-ready", topology = plan.Topology, instanceId = plan.Catalog.InstanceId,
-                            servers = servers.ConvertAll(server => new { roomIds = server.Choice.Rooms, ready = server.Run.Ready() }) });
+                        Save(ready, WithReleaseHash(new Dictionary<string, object>
+                        {
+                            { "schemaVersion", 1 }, { "status", "venue-ready" }, { "topology", plan.Topology }, { "instanceId", plan.Catalog.InstanceId },
+                            { "servers", servers.ConvertAll(server => new { roomIds = server.Choice.Rooms, ready = server.Run.Ready() }) }
+                        }, plan.ReleaseHash));
                         published = true;
                     }
                     catch (Exception error) { publicationError = Safe(error); }
@@ -1004,12 +1048,16 @@ internal static class ServerLauncher
             }
         }
         var complete = published && !cancel() && servers.TrueForAll(server => server.Error == null && server.Run.Complete && server.Run.Cleanup);
-        Save(report, new { schemaVersion = 1, status = complete ? "venue-sealed-stopped" : "venue-incomplete",
-            complete = complete, topology = plan.Topology, instanceId = plan.Catalog.InstanceId, readyPublished = published,
-            venueLaunchId = launchId, sourceAttachment = sourceAttachment, sourceAttachmentError = sourceAttachmentError, sourceAttachmentRetried = sourceAttachmentRetried,
-            endpointPublication = endpointPublication, publicationError = publicationError, endpointPublicationRetried = endpointPublicationRetried,
-            servers = servers.ConvertAll(server => new { roomIds = server.Choice.Rooms,
-                result = server.Run.Report(server.Run.Complete && server.Run.Cleanup ? "sealed-stopped" : "incomplete", server.Error) }) });
+        Save(report, WithReleaseHash(new Dictionary<string, object>
+        {
+            { "schemaVersion", 1 }, { "status", complete ? "venue-sealed-stopped" : "venue-incomplete" }, { "complete", complete },
+            { "topology", plan.Topology }, { "instanceId", plan.Catalog.InstanceId }, { "readyPublished", published },
+            { "venueLaunchId", launchId }, { "sourceAttachment", sourceAttachment }, { "sourceAttachmentError", sourceAttachmentError },
+            { "sourceAttachmentRetried", sourceAttachmentRetried }, { "endpointPublication", endpointPublication },
+            { "publicationError", publicationError }, { "endpointPublicationRetried", endpointPublicationRetried },
+            { "servers", servers.ConvertAll(server => new { roomIds = server.Choice.Rooms,
+                result = server.Run.Report(server.Run.Complete && server.Run.Cleanup ? "sealed-stopped" : "incomplete", server.Error) }) }
+        }, plan.ReleaseHash));
         return complete ? 0 : 1;
     }
 
@@ -1326,12 +1374,20 @@ internal static class ServerLauncher
         {
             var options = new Dictionary<string, string>(); for (var i = 0; i < args.Length; i += 2) { Need(i + 1 < args.Length && !options.ContainsKey(args[i]), "參數格式錯誤。"); options.Add(args[i], args[i + 1]); }
             Need(options.ContainsKey("--report"), "需要結果路徑。"); report = options["--report"]; Output(report, options.ContainsKey("--catalog") ? Path.GetDirectoryName(Full(options["--catalog"])) : options.ContainsKey("--work") ? options["--work"] : null); outputValid = true;
-            if (options.Count == 2 && options.ContainsKey("--verify")) { Need(options["--verify"] == "package", "驗證參數錯誤。"); Verify(); Save(report, new { schemaVersion = 1, complete = true, status = "verified" }); return 0; }
+            var previewOptions = 2 + (options.ContainsKey("--release-report") ? 1 : 0);
+            if (options.Count == previewOptions && options.ContainsKey("--verify"))
+            {
+                Need(options["--verify"] == "package", "驗證參數錯誤。");
+                var releaseHash = ReadReleaseHash(options);
+                Verify(releaseHash);
+                Save(report, WithReleaseHash(new Dictionary<string, object> { { "schemaVersion", 1 }, { "complete", true }, { "status", "verified" } }, releaseHash));
+                return 0;
+            }
             if (options.Count == 2 && options.ContainsKey("--catalog")) { Verify(); Save(report, Catalog.Load(options["--catalog"]).Public()); return 0; }
-            if (options.Count == 2 && options.ContainsKey("--venue-check"))
+            if (options.Count == previewOptions && options.ContainsKey("--venue-check"))
             {
                 outputValid = false;
-                var preview = ReadVenuePlan(options["--venue-check"], instance => { Output(report, instance); outputValid = true; });
+                var preview = ReadVenuePlan(options["--venue-check"], instance => { Output(report, instance); outputValid = true; }, () => ReadReleaseHash(options));
                 Save(report, preview.Public()); return 0;
             }
             if (options.ContainsKey("--venue-run")) return RunVenue(options, ref outputValid);

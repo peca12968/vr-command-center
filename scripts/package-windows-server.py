@@ -6,7 +6,7 @@ ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('server_player_package',ROOT/'scripts/package-windows-player.py');player=importlib.util.module_from_spec(spec);spec.loader.exec_module(player)
 digest=player.digest;plain=player.plain
 TOP='VRCommand-GameServer'
-README='''VR Command Windows 遊戲伺服器啟動器 1.24／Windows 遊戲程式
+README='''VR Command Windows 遊戲伺服器啟動器 1.25／Windows 遊戲程式
 
 完整解壓後開啟 Launch-Server.exe。先啟動配套的管理服務，在網頁控制台建立 Preparing VR 或 MR 場次。
 按「選擇檔案」選control-instance.json，或在路徑欄直接貼上完整檔案路徑，按 Enter 或「載入／更新」。只使用既有GameServer角色金鑰。
@@ -52,6 +52,7 @@ CLI：Launch-Server.exe --run 私人JSON --work 全新資料夾 --seconds 3600 -
 唯讀列出待開場次：Launch-Server.exe --catalog control-instance.json完整路徑 --report 新結果檔；報告不含金鑰，輸出須在程式包與實例外。
 seconds為60..86400，期限結束仍未完成封存與36秒保留則失敗；結果與就緒檔必須在程式包與work外且不能重複。
 離線核對：Launch-Server.exe --verify package --report 新結果檔。
+離線核對、五房計畫預覽及五房批次啟動可加入 --release-report 原場館發行報告.json。工具逐檔核對本機伺服器包，再比對原發行報告；報告及結果檔放在程式包外。
 
 本機記錄：%LOCALAPPDATA%/VrCommand/GameServers（含私人金鑰）與GameServerReports。
 Windows x64與.NET Framework4.8；操作人員不需Python、Unity Editor或.NET SDK。
@@ -62,8 +63,10 @@ server-package.json是SHA256完整性清單，不是數位簽章。Runtime/build
 Notices保留玩家包相同的素材／Transport授權。Microsoft Job文件：https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects
 '''
 
-def verify(folder):
-    folder=plain(folder);manifest=json.loads((folder/'server-package.json').read_text(encoding='utf-8'))
+def verify(folder, *, manifest_bytes=None):
+    folder=plain(folder)
+    if manifest_bytes is None: manifest_bytes=plain(folder/'server-package.json').read_bytes()
+    manifest=json.loads(manifest_bytes.decode('utf-8'))
     if manifest.get('schemaVersion')!=1 or manifest.get('target')!='win-x64':raise ValueError('Unsupported server package')
     seen=set()
     for row in manifest['files']:
@@ -91,7 +94,7 @@ def main():
     with (stage/'compile.log').open('xb') as log:subprocess.run([str(compiler),'/nologo','/warnaserror','/codepage:65001','/target:winexe','/platform:x64','/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Web.Extensions.dll','/out:'+str(folder/'Launch-Server.exe'),str(frozen)],stdout=log,stderr=subprocess.STDOUT,check=True)
     if digest(source)!=source_hash:raise ValueError('Launcher source changed during compilation')
     (folder/'README.txt').write_text(README,encoding='utf-8')
-    manifest={'schemaVersion':1,'target':'win-x64','launcherVersion':'1.24.0','createdAtUtc':datetime.now(timezone.utc).isoformat(),'build':receipt,'launcherSourceSha256':source_hash,'scope':'Standalone server launcher; no keys, tickets or databases; manifest is not a signature.',
+    manifest={'schemaVersion':1,'target':'win-x64','launcherVersion':'1.25.0','createdAtUtc':datetime.now(timezone.utc).isoformat(),'build':receipt,'launcherSourceSha256':source_hash,'scope':'Standalone server launcher; no keys, tickets or databases; manifest is not a signature.',
         'files':[{'path':p.relative_to(folder).as_posix(),'bytes':p.stat().st_size,'sha256':digest(p)} for p in sorted(folder.rglob('*')) if p.is_file()]}
     (folder/'server-package.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8');verify(folder)
     output=plain(args.output);output.parent.mkdir(parents=True,exist_ok=True)

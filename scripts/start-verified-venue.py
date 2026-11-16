@@ -86,6 +86,14 @@ def launch(args):
     with tempfile.TemporaryDirectory(prefix='vr-verified-venue-') as directory:
         snapshot = Path(directory) / 'venue-plan.json'
         snapshot.write_bytes(raw_plan)
+        release_args = []
+        if args.release_report is not None:
+            with args.release_report.open('rb') as stream:
+                release_raw = stream.read(8193)
+            field.require(0 < len(release_raw) <= 8192, 'The release report is empty or too large')
+            release_snapshot = Path(directory) / 'venue-release.json'
+            release_snapshot.write_bytes(release_raw)
+            release_args = ['--release-report', str(release_snapshot)]
         with args.network_plan.open('rb') as stream:
             network_raw = stream.read(field.MAX_QUEST_PLAN_BYTES + 1)
         field.require(len(network_raw) <= field.MAX_QUEST_PLAN_BYTES, 'The network plan is too large')
@@ -123,18 +131,21 @@ def launch(args):
         original_preview = field.read_udp_launcher_document(preview, preview=True)
         field.require(original_preview[0] == binding['previewSha256'], 'The original Windows launcher preview changed')
         own_launcher_processes()
-        if any('registeredSeats' in row for row in original_preview[2].values()):
+        release_hash = None
+        if release_args or any('registeredSeats' in row for row in original_preview[2].values()):
             fresh_path = Path(directory) / 'current-preview.json'
-            current = subprocess.run([str(launcher), '--venue-check', str(snapshot), '--report', str(fresh_path)], timeout=45)
-            field.require(current.returncode == 0, 'Windows launcher no longer accepts the original session revisions')
+            current = subprocess.run([str(launcher), '--venue-check', str(snapshot), '--report', str(fresh_path), *release_args], timeout=45)
+            field.require(current.returncode == 0, 'Windows launcher could not verify the original session revisions or server release')
             fresh = field.read_udp_launcher_document(fresh_path, preview=True)
             field.require(fresh == original_preview, 'Current Windows launcher preview differs from the original sessions, seats or bindings')
+            if release_args:
+                release_hash = field.read_quest_document(fresh_path)[0]['serverManifestSha256']
         print(json.dumps({'status': 'udp-preflight-verified', 'mode': checked['mode'],
                           'verifiedSources': checked['verifiedSources'], 'launchPlanSha256': binding['planSha256'],
                           'networkPlanSha256': checked['networkPlanSha256'],
                           **({'requireDistinctRemoteRoster': True} if distinct else {})}), flush=True)
         command = [str(launcher), '--venue-run', str(snapshot), '--work', str(args.work.resolve()),
-                   '--seconds', str(args.seconds), '--ready-report', str(ready_path), '--report', str(result_path)]
+                   '--seconds', str(args.seconds), '--ready-report', str(ready_path), '--report', str(result_path), *release_args]
         if args.peer_diagnostics:
             command.extend(('--peer-diagnostics', 'on'))
         if args.tracked_vr:
@@ -148,17 +159,20 @@ def launch(args):
                 process.wait()
                 return 130
         if code == 0 and receipt_path is not None:
-            write_start_receipt(receipt_path, ready_path, result_path, readiness, original, checked)
+            write_start_receipt(receipt_path, ready_path, result_path, readiness, original, checked, release_hash)
         return code
 
 
-def write_start_receipt(path, ready_path, result_path, readiness, original, checked):
+def write_start_receipt(path, ready_path, result_path, readiness, original, checked, release_hash=None):
     ready, ready_raw = field.read_quest_document(ready_path)
     with result_path.open('rb') as stream:
         result_raw = field.limited_read(stream)
     terminal = field.read_json(result_raw.decode('utf-8-sig'))
     field.require(terminal['status'] == 'venue-sealed-stopped' and terminal['complete'] is terminal['readyPublished'] is True,
                   'The original Windows venue launch did not seal and stop')
+    if release_hash is not None:
+        field.require(ready.get('serverManifestSha256') == terminal.get('serverManifestSha256') == release_hash,
+                      'The Windows launch reports do not share the verified server release')
     receipt = {'version': 1, 'scope': 'verified-windows-venue-start', 'mode': checked['mode'],
                'checkedAtUtc': checked['checkedAtUtc'], 'readinessSha256': hashlib.sha256(original).hexdigest(),
                'terminalSha256': hashlib.sha256(result_raw).hexdigest(),
@@ -178,6 +192,7 @@ def main():
     parser.add_argument('--verify-only', action='store_true', help='Recheck archived UDP evidence without contacting management or starting Windows')
     parser.add_argument('--retry-output', type=Path, help='With --verify-only, save an incomplete report for check-venue-udp-preflight.py --retry-report')
     parser.add_argument('--launcher', type=Path)
+    parser.add_argument('--release-report', type=Path, help='Original release report supplied to both the fresh preview and Windows launch')
     parser.add_argument('--launch-plan', type=Path, required=True)
     parser.add_argument('--network-plan', type=Path, required=True)
     parser.add_argument('--readiness', type=Path, required=True)
@@ -193,7 +208,7 @@ def main():
     args = parser.parse_args()
     launch_options = ('launcher', 'work', 'seconds', 'ready_report', 'report')
     if args.verify_only:
-        if any(getattr(args, name) is not None for name in launch_options) or args.start_receipt or args.peer_diagnostics:
+        if any(getattr(args, name) is not None for name in launch_options) or args.start_receipt or args.peer_diagnostics or args.release_report:
             parser.error('--verify-only does not accept Windows launch or output options')
     else:
         if args.retry_output is not None:

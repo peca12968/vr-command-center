@@ -1,5 +1,16 @@
 # Windows 遊戲伺服器包
 
+## 依場館發行報告核對伺服器包
+
+啟動器 1.25 可在離線核對、五房預覽或五房批次啟動時加上 `--release-report`。使用由主控提供且含 `windows.serverManifestSha256` 的原發行報告，報告及輸出放在程式包之外。工具比對清單原始位元組的 SHA-256，逐檔核對遊戲伺服器包。發行不符時在查詢管理服務與建立遊戲程序前退出。
+
+```powershell
+& .\Launch-Server.exe --verify package --release-report C:\Delivery\venue-release.json --report C:\Delivery\server-verified.json
+& .\Launch-Server.exe --venue-check C:\Delivery\venue-plan.json --release-report C:\Delivery\venue-release.json --report C:\Delivery\venue-preview.json
+```
+
+在 `--venue-run` 加入相同參數，即可於啟動時重新核對。完成核對的報告、五房預覽、就緒與收尾檔均可查到 `serverManifestSha256`。使用 `start-verified-venue.py` 時，將同一份 `--release-report` 帶入。工具會以相同報告重做預覽與啟動。 [產生原發行報告](EXTERNAL_CLIENTS.md#發送前離線核對交付套件)
+
 2026-11-16 `VRCommand-GameServer-0.50.11-1.24-win-x64.zip` 為 84,985,912 bytes，SHA-256 `3b6f84c96b05daba8b2f72202b7db13bcb0b3217feba4459adf1b5a395f00bbe`。解壓核對 331 筆清單，已和 Quest 0.50.11 核對來源及網路識別。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.11-1.24-win-x64.zip) · [發行報告](../artifacts/venue-release-quest-reconnect-0511.json)
 
 2026-11-16 `VRCommand-GameServer-0.50.10-1.24-win-x64.zip` 為 84,984,809 bytes，SHA-256 `02c29654473635860b2698b674008d58b5f19418b5a33024b1322e59dfe5c089`。解壓核對 331 筆清單，已和 Quest 0.50.10 核對來源及網路識別。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.10-1.24-win-x64.zip) · [發行報告](../artifacts/venue-release-quest-link-0510.json)

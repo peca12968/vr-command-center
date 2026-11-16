@@ -30,6 +30,8 @@ if ($LASTEXITCODE -eq 0) {
 
 成功的 `venue-release.json` 可供 Quest 部署工具逐席核對裝置上已安裝的 APK。重新產生的報告也含 `windows.playerManifestSha256`，可供 Windows 玩家啟動器 1.6 在每台電腦核對主控交付的原套件。主控將同一份報告交給各 Windows 席位，玩家連線檔仍按席位個別交付。 [Quest 部署](QUEST3.md#核對頭盔內已安裝的發行-apk) · [Windows 核對](WINDOWS_PLAYER_PACKAGE.md#依場館發行報告核對玩家包)
 
+供遊戲伺服器的發行報告含 `windows.serverManifestSha256`。五房預覽與啟動可讀取同一份報告，逐檔核對解壓後的遊戲伺服器包。只有玩家套件摘要的舊報告，可用同版交付物重新產生。 [伺服器核對](WINDOWS_SERVER_PACKAGE.md#依場館發行報告核對伺服器包)
+
 ## 分開啟動程式
 
 Windows 遊戲伺服器包可獨立啟動既有 Preparing VR 場次。CLI 已通過同機五房獨立與 Linked，WinForms 已驗證載入場次、啟動和封存後停止。 [Windows 遊戲伺服器包](WINDOWS_SERVER_PACKAGE.md)

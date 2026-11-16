@@ -54,7 +54,10 @@ def require_matching_identity(expected, actual, message):
 
 def verify_windows(control, server, player):
     control_manifest = control_package.verify(control)
-    server_manifest = server_package.verify(server)
+    server_manifest_path = player_package.plain(server / 'server-package.json')
+    server_manifest_bytes = server_manifest_path.read_bytes()
+    server_manifest_hash = hashlib.sha256(server_manifest_bytes).hexdigest()
+    server_manifest = server_package.verify(server, manifest_bytes=server_manifest_bytes)
     manifest_path = player_package.plain(player / 'player-package.json')
     manifest_bytes = manifest_path.read_bytes()
     player_manifest = player_package.verify(player, manifest_bytes=manifest_bytes)
@@ -93,10 +96,11 @@ def verify_windows(control, server, player):
             == {row['path'] for row in player_manifest['files']} | {'player-package.json'},
             'Windows player package contains unlisted files')
     require(digest(manifest_path) == player_manifest_hash, 'Windows player manifest changed during verification')
+    require(digest(server_manifest_path) == server_manifest_hash, 'Windows server manifest changed during verification')
     return game, {'apiVersion': control_manifest['apiVersion'], 'consoleVersion': console, 'buildCommit': published['baseCommit'],
                   'controlFiles': len(control_manifest['files']), 'pairedGameFiles': len(runtime),
                   'serverFiles': len(server_manifest['files']), 'playerFiles': len(player_manifest['files']),
-                  'playerManifestSha256': player_manifest_hash}
+                  'playerManifestSha256': player_manifest_hash, 'serverManifestSha256': server_manifest_hash}
 
 
 def quest_metadata(badging, signing):

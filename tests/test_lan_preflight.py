@@ -50,6 +50,28 @@ class NetworkPlanPreparationTests(unittest.TestCase):
         path.write_text(json.dumps(value), encoding='utf-8')
         return path
 
+    def test_verified_start_receipt_keeps_both_original_server_release_witnesses(self):
+        spec = importlib.util.spec_from_file_location('start_verified_venue', ROOT / 'scripts/start-verified-venue.py')
+        start = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(start)
+        expected = 'a' * 64
+        source = {'topology': 'Linked', 'instanceId': 'fixture-instance', 'serverManifestSha256': expected}
+        ready = self.store('ready.json', dict(source, status='venue-ready'))
+        terminal = self.store('terminal.json', dict(source, status='venue-sealed-stopped', complete=True, readyPublished=True))
+        readiness = self.store('readiness.json', {'complete': True})
+        checked = {'mode': 'Linked', 'checkedAtUtc': '2026-11-16T00:00:00+00:00'}
+        accepted = readiness.with_name('accepted.json')
+        start.write_start_receipt(accepted, ready, terminal, readiness, readiness.read_bytes(), checked, expected)
+        receipt = json.loads(accepted.read_bytes())
+        self.assertEqual(hashlib.sha256(ready.read_bytes()).hexdigest(), receipt['readySha256'])
+        self.assertEqual(hashlib.sha256(terminal.read_bytes()).hexdigest(), receipt['terminalSha256'])
+        terminal = self.store('other-terminal.json', dict(source, serverManifestSha256='b' * 64,
+                              status='venue-sealed-stopped', complete=True, readyPublished=True))
+        rejected = readiness.with_name('rejected.json')
+        with self.assertRaisesRegex(start.field.EvidenceError, 'do not share the verified server release'):
+            start.write_start_receipt(rejected, ready, terminal, readiness, readiness.read_bytes(), checked, expected)
+        self.assertFalse(rejected.exists())
+
     def test_prepare_both_topologies_and_a_quest_subset_consumed_by_the_original_probe(self):
         spec = importlib.util.spec_from_file_location('quest_venue_probe', ROOT / 'scripts/probe-quest-venue.py')
         probe = importlib.util.module_from_spec(spec)
