@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-17 從五房配置檔套用單房任務版本
+
+- 管理台 0.31.223 的五房獨立準備可以從配置檔預覽套用選定房間。若原準備使用共用任務，會切換到逐房指定，並將原共用版本保留給另外四房。編輯草稿保留，目標房重新檢查場地。 [操作方式](MISSION_VERSIONS.md#在開場前保存五房任務配置) · [手機操作畫面](../artifacts/venue-mission-one-room-031223/package-browser/apply-room-mobile.png)
+- 原始碼與解壓套件各通過 12 項 Chromium／實際管理 API 專項。核對逐房切換、VR 與 MR 混合、歷史版本和場地失敗。套用及下載配置沒有建立場次，明確確認後才一次建立五場，逐房讀回原版本，測試場次全部結束。兩輪 API 都使用 Windows 本機 IPC，TCP 監聽及 UDP 端點為零。首輪測試把唯讀場地檢查 POST 算成寫入而失敗，後續按實際端點複驗。 [解壓套件驗證](../artifacts/venue-mission-one-room-031223/package-browser/checks.json) · [程序紀錄](../artifacts/venue-mission-one-room-031223/package-browser/runtime.json)
+- 122 項 Node 測試通過，套件解壓逐檔核對 574 項，搭配原 0.50.12 Windows 伺服器、玩家與 Quest APK 完成發行核對。實體頭盔、跨機與廠商硬體待驗。 [Windows 管理包](../artifacts/venue-mission-one-room-031223/VRCommand-ControlServer-0.31.223.zip) · [發行報告](../artifacts/venue-mission-one-room-031223/venue-release.json) · [USB 快照](../artifacts/venue-mission-one-room-031223/usb-status.json)
+- GitHub Actions 對 `672df11` 回報帳務或用量限制，工作未啟動。 [GitHub Actions 工作](https://github.com/peca12968/vr-command-center/actions/runs/43957910567/job/133617250917)
+
 ## 2026-11-17 玩家回放按戰鬥事件跳轉
 
 - 管理台 0.31.222 的網頁與單檔播放器可篩選七種戰鬥事件，按上一個或下一個事件畫格停在原錄製。畫面顯示同格筆數，跳轉保留視角、速度與循環設定。分房與全場依原匯出的檔案範圍。 [回放操作](WORLD_RECORDING.md#讓玩家開啟回放) · [離線播放器](../artifacts/player-replay-events-031222/final/VRCommand-Player-Replay-0.31.222.html)
