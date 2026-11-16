@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 一次登記五房玩家名冊
+
+- 管理台 0.31.227 主控可在準備階段逐席填寫名稱與頭盔，一次登記最多 25 人。批次核對各席的原場次與空席，任一衝突會阻止整批寫入。結果未確認時可沿用各席的原請求重試。 [操作方式](PLAYER_READINESS.md#批次加入場館名冊)
+- 原始碼獨立場 13 項、解壓包獨立場 13 項及合併場 12 項 Chromium 驗證通過。各自登記完整 25 席，核對原名冊、入場識別與既有簽票驗證。另實測房間換場、最後一房搶先登記、錯誤回條後重試及房控／遊戲伺服器拒絕。程序使用本機 IPC。首輪獨立測試未通過衝突訊息斷言，合併測試在登入尚未穩定時停止；已保存首輪結果。正式版顯示衝突房席，測試等候可用狀態。 [獨立場](../artifacts/venue-batch-roster-031227/final-package-independent/checks.json) · [合併場](../artifacts/venue-batch-roster-031227/final-package-linked/checks.json) · [IPC 程序紀錄](../artifacts/venue-batch-roster-031227/final-package-linked/runtime.json)
+- 1146 項 .NET 與 124 項 Node 通過。首輪 .NET 測試誤把留存離場戰績算成差異，複驗按原玩家識別核對歷史及現行名冊。解壓管理包核對 577 個檔案，與原 0.50.12 Windows／Quest 通過發行核對。GitHub Actions 對 `ba05832` 回報帳務或用量限制，工作未啟動。Quest 仍無 ADB 介面，實機、跨機及廠商設備待驗。 [管理包](../artifacts/venue-batch-roster-031227/final/VRCommand-ControlServer-0.31.227.zip) · [發行報告](../artifacts/venue-batch-roster-031227/final/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43967282009/job/133649925643)
+
 ## 2026-11-17 玩家回放跟隨鏡頭
 
 - 管理台 0.31.226 的網頁和單檔播放器可按房選擇匿名玩家，依保存的姿態跟隨。換房、換檔或平移會結束跟隨。角色暫未出現時保留鏡頭位置，等同一角色再出現。 [操作方式](WORLD_RECORDING.md#讓玩家開啟回放) · [離線播放器](../artifacts/player-replay-follow-031226/VRCommand-Player-Replay-0.31.226.html)
