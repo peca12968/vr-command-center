@@ -444,7 +444,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.z
 
 #### 用裝置清單部署 25 席
 
-先在各台 Quest 3 安裝同一版場館 APK 並授權 USB 偵錯。開發 APK `0.50.2` 的版本代碼為 `67`。建立 25 席清單後，依實體標籤把每個 `REPLACE-*` 換成對應的 ADB 裝置序號。每組房號與席位須對應一個唯一序號，清單只保存在操作電腦。腳本透過 `adb devices` 及 Android 套件管理器讀取授權狀態與已啟用的應用程式版本。 [Android ADB 文件](https://developer.android.com/tools/adb) · [套件管理器版本輸出](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/pm/PackageManagerShellCommand.java#1130)
+先在各台 Quest 3 安裝同一版場館 APK 並授權 USB 偵錯。開發 APK `0.50.2` 的版本代碼為 `67`。建立 25 席清單後，依實體標籤把每個 `REPLACE-*` 換成對應的 ADB 裝置序號。每組房號與席位須對應一個唯一序號，清單只保存在操作電腦。腳本透過 `adb devices -l` 讀取授權狀態及 ADB 連線識別，再用 Android 套件管理器查詢已啟用的應用程式版本。 [ADB 命令參考](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/docs/user/adb.1.md) · [套件管理器版本輸出](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/pm/PackageManagerShellCommand.java#1130)
 
 ```powershell
 $seats = foreach ($room in 1..5) {
@@ -472,6 +472,8 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.z
 ```
 
 正式部署在各席開始寫入前會再讀一次裝置序號。若和預檢結果不同，該席會標記為 `device-identity-changed`。若讀取失敗則標記為 `device-identity-unavailable`。兩種情況都會在該席寫入前停止。這些檢查適用於完整與部分裝置清單，現場仍須依實體標籤核對房號及席位。
+
+同一輪預檢與部署中的檔案驗證、寫入、停啟遊戲及 OpenXR 檢查，會固定使用該席從 `adb devices -l` 取得的連線識別。缺少有效識別或多個裝置共用識別時，預檢分別回報 `transport-unavailable` 或 `transport-ambiguous`。若原連線在寫入途中中斷，該步驟會失敗，暫存檔可能留在原頭盔。下一輪重試會為原裝置重新取得連線識別。ADB 服務的重啟須先讓本輪部署結束，再開始重試。 [ADB 依連線識別選取裝置](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/docs/user/adb.1.md)
 
 正式部署使用管理包 0.31.104 或更新版。每席寫入前，服務會重新核對整份原部署 ZIP 的 25 個入場、端點及各來源最近五秒內的有效遊戲畫格。VR、MR 及混合部署都適用，部分清單仍使用同一份五房 ZIP 驗證。任一來源失效時，目前席位回報 `venue-check-failed`，後續席位標記為 `not-attempted`。已送出啟動的席位保留原結果。純預檢仍可用來核對檔案、端點與名冊。
 

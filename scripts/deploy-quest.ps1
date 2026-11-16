@@ -52,7 +52,7 @@ function Invoke-QuestAdb([string[]]$ArgumentList, [int]$MaximumMilliseconds = 0)
         & $AdbPath @ArgumentList
         return
     }
-    $command = if ($ArgumentList[0] -eq '-s') { $ArgumentList[2] } else { $ArgumentList[0] }
+    $command = if ($ArgumentList[0] -in '-s','-t') { $ArgumentList[2] } else { $ArgumentList[0] }
     $operation = if ($command -eq 'shell' -and $ArgumentList[3] -eq 'am' -and $ArgumentList[4] -eq 'start') { 'activity launch' }
         elseif ($command -in 'install', 'devices', 'push', 'pull', 'logcat') { $command }
         else { 'shell command' }
@@ -892,15 +892,29 @@ function Confirm-TrackedSeats($Venue, [object[]]$Map, [switch]$IncludeAllHeadset
     return $report
 }
 
-function Get-QuestDeviceInventory {
-    $lines = @(Invoke-QuestAdb @('devices'))
+function Get-QuestDeviceInventory([switch]$WithTransport) {
+    $arguments = if ($WithTransport) { @('devices', '-l') } else { @('devices') }
+    $lines = @(Invoke-QuestAdb $arguments)
     if ($LASTEXITCODE -ne 0) { throw 'Could not list authorized Android devices.' }
-    $inventory = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
+    $inventory = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::Ordinal)
+    $seenTransports = [Collections.Generic.HashSet[long]]::new()
+    $duplicateTransports = [Collections.Generic.HashSet[long]]::new()
     foreach ($line in $lines) {
-        if ($line -cnotmatch '\A(\S+)\t(\S+)\s*\z') { continue }
+        if ($line -ceq 'List of devices attached' -or $line -cnotmatch '\A(\S+)[ \t]+(\S+)(?:[ \t]+(.*))?\z') { continue }
         $key = $Matches[1]; $status = $Matches[2]
+        $transportId = 0L
+        if ($WithTransport) {
+            $fields = @($Matches[3] -csplit '[ \t]+' | Where-Object { $_ -clike 'transport_id:*' })
+            if ($fields.Count -eq 1 -and $fields[0] -cmatch '\Atransport_id:([1-9][0-9]{0,18})\z' -and
+                [long]::TryParse($Matches[1], [ref]$transportId)) {
+                if (-not $seenTransports.Add($transportId)) { [void]$duplicateTransports.Add($transportId) }
+            } elseif ($status -ceq 'device') { $status = 'transport-unavailable' }
+        }
         if ($inventory.ContainsKey($key)) { $status = 'ambiguous' }
-        $inventory[$key] = $status
+        $inventory[$key] = @{ Status = $status; TransportId = $transportId }
+    }
+    foreach ($device in $inventory.Values) {
+        if ($device.Status -ceq 'device' -and $duplicateTransports.Contains($device.TransportId)) { $device.Status = 'transport-ambiguous' }
     }
     return ,$inventory
 }
@@ -923,13 +937,13 @@ function Read-QuestRelease([string]$Path) {
     return @{ versionCode = $quest.versionCode; sha256 = $quest.sha256; reportSha256 = Get-QuestSha256 $original.Bytes }
 }
 
-function Get-QuestApkStatus([string]$TargetSerial, [string]$ExpectedHash) {
-    $paths = @(Invoke-QuestAdb @('-s', $TargetSerial, 'shell', 'pm', 'path', '--user', 'current', 'com.vrcommand.quest') 2>$null)
+function Get-QuestApkStatus([string[]]$Target, [string]$ExpectedHash) {
+    $paths = @(Invoke-QuestAdb ($Target + @('shell', 'pm', 'path', '--user', 'current', 'com.vrcommand.quest')) 2>$null)
     # A release is one standalone APK. Never pass an unexpected path to the remote shell.
     if ($LASTEXITCODE -ne 0 -or $paths.Count -ne 1 -or $paths[0] -cnotmatch '\Apackage:((?:/[A-Za-z0-9._=+~-]+)+/base\.apk)\z') {
         return 'apk-unverified'
     }
-    $hash = Read-QuestFileHash $TargetSerial $Matches[1]
+    $hash = Read-QuestFileHash $Target $Matches[1]
     if (-not $hash) { return 'apk-unverified' }
     if ($hash -cne $ExpectedHash) { return 'apk-hash-mismatch' }
     return 'ready'
@@ -961,15 +975,19 @@ function New-VerifiedQuestApk([string]$Path, [string]$ExpectedHash) {
 
 function Get-MappedQuestStatus($Row, $Inventory, [int]$VersionCode, [string]$ExpectedHash) {
     $result = [ordered]@{ roomId = $Row.roomId; seat = $Row.seat; status = 'ready' }
-    $status = $Inventory[$Row.serial]
+    $connected = $Inventory[$Row.serial]
+    $status = $connected.Status
     if ($status -cne 'device') {
-        $result.status = if (-not $status) { 'missing' } elseif ($status -cin @('unauthorized','offline','ambiguous')) { $status } else { 'unavailable' }
+        $result.status = if (-not $status) { 'missing' }
+            elseif ($status -cin @('unauthorized','offline','ambiguous','transport-unavailable','transport-ambiguous')) { $status }
+            else { 'unavailable' }
         return $result
     }
-    $model = Invoke-QuestAdb @('-s', $Row.serial, 'shell', 'getprop', 'ro.product.model') 2>$null
+    $target = @('-t', [string]$connected.TransportId)
+    $model = Invoke-QuestAdb ($target + @('shell', 'getprop', 'ro.product.model')) 2>$null
     if ($LASTEXITCODE -ne 0) { $result.status = 'model-unavailable'; return $result }
     if (([string]$model).Trim() -cne 'Quest 3') { $result.status = 'wrong-model'; return $result }
-    $packages = @(Invoke-QuestAdb @('-s', $Row.serial, 'shell', 'pm', 'list', 'packages', '-e', '--show-versioncode', '--user', 'current', 'com.vrcommand.quest') 2>$null)
+    $packages = @(Invoke-QuestAdb ($target + @('shell', 'pm', 'list', 'packages', '-e', '--show-versioncode', '--user', 'current', 'com.vrcommand.quest')) 2>$null)
     if ($LASTEXITCODE -ne 0) { $result.status = 'package-query-failed'; return $result }
     $rows = @($packages | Where-Object { $_ -cmatch '\Apackage:com\.vrcommand\.quest versionCode:[0-9]+\s*\z' })
     $code = 0L
@@ -979,14 +997,14 @@ function Get-MappedQuestStatus($Row, $Inventory, [int]$VersionCode, [string]$Exp
     $result.versionCode = $code
     if ($code -ne $VersionCode) { $result.status = 'version-mismatch'; return $result }
     if ($ExpectedHash) {
-        $result.status = Get-QuestApkStatus $Row.serial $ExpectedHash
+        $result.status = Get-QuestApkStatus $target $ExpectedHash
         if ($result.status -ceq 'ready') { $result.apkVerified = $true }
     }
     return $result
 }
 
-function Read-QuestDeviceSerial([string]$TargetSerial) {
-    $lines = @(Invoke-QuestAdb @('-s', $TargetSerial, 'shell', 'getprop', 'ro.serialno') 2>$null)
+function Read-QuestDeviceSerial([string[]]$Target) {
+    $lines = @(Invoke-QuestAdb ($Target + @('shell', 'getprop', 'ro.serialno')) 2>$null)
     if ($LASTEXITCODE -ne 0 -or $lines.Count -ne 1 -or $lines[0] -cnotmatch '\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\z' -or
         $lines[0] -match '\A(?:unknown|0+)\z') { return $null }
     return [string]$lines[0]
@@ -1211,7 +1229,7 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
     Confirm-QuestAdbStartup 'Android platform-tools are not installed.'
     $originalMap = $Map
     if ($Retry) { $Map = @($Map | Select-Object -Skip $Retry.Completed.Count) }
-    $inventory = Get-QuestDeviceInventory
+    $inventory = Get-QuestDeviceInventory -WithTransport
     $devices = @($Map | ForEach-Object {
         $preflightSeat = $_
         try { Get-MappedQuestStatus $preflightSeat $inventory $VersionCode $ExpectedHash }
@@ -1221,7 +1239,8 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
     $firstSeatBySerial = [Collections.Generic.Dictionary[string,int]]::new([StringComparer]::OrdinalIgnoreCase)
     for ($index = 0; $index -lt $Map.Count; $index++) {
         if ($devices[$index].status -cne 'ready') { continue }
-        try { $reportedSerial = Read-QuestDeviceSerial $Map[$index].serial }
+        $target = @('-t', [string]$inventory[$Map[$index].serial].TransportId)
+        try { $reportedSerial = Read-QuestDeviceSerial $target }
         catch [TimeoutException] { $devices[$index].status = 'adb-timeout'; continue }
         if (-not $reportedSerial) { $devices[$index].status = 'device-identity-unavailable'; continue }
         if ($Retry -and (Get-QuestDeploymentFingerprint $Retry.Proof.salt $reportedSerial.ToUpperInvariant()) -cne
@@ -1283,13 +1302,14 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
     foreach ($device in $devices) { $device.status = 'not-attempted'; $device.Remove('apkVerified') }
     for ($index = 0; $index -lt $Map.Count; $index++) {
         $row = $Map[$index]; $device = $devices[$index]
+        $target = @('-t', [string]$inventory[$row.serial].TransportId)
         $connection = $Venue.Connections["$($row.roomId)/$($row.seat)"]
-        try { $reportedSerial = Read-QuestDeviceSerial $row.serial }
+        try { $reportedSerial = Read-QuestDeviceSerial $target }
         catch [TimeoutException] { $device.status = 'adb-timeout'; return $report }
         if (-not $reportedSerial) { $device.status = 'device-identity-unavailable'; return $report }
         if ($reportedSerial -cne $reportedSerials[$index]) { $device.status = 'device-identity-changed'; return $report }
         if ($ExpectedHash) {
-            try { $apkStatus = Get-QuestApkStatus $row.serial $ExpectedHash }
+            try { $apkStatus = Get-QuestApkStatus $target $ExpectedHash }
             catch [TimeoutException] { $device.status = 'adb-timeout'; return $report }
             if ($apkStatus -cne 'ready') { $device.status = $apkStatus; return $report }
             $device.apkVerified = $true
@@ -1308,7 +1328,7 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
         }
         $deployment = @{}
         try {
-            Set-QuestConnection $row.serial $connection.Ticket.Config $connection.Ticket $connection.Alignment `
+            Set-QuestConnection $target $connection.Ticket.Config $connection.Ticket $connection.Alignment `
                 -RequestMixedReality:($null -ne $connection.Alignment) -Deployment $deployment -LiveVenue $Venue
             $device.filesVerified = $true
             $device.status = 'launch-requested'
@@ -1345,43 +1365,43 @@ function Enter-QuestDeployment {
     return $lock
 }
 
-function Read-QuestFileHash([string]$TargetSerial, [string]$Path) {
-    $lines = @(Invoke-QuestAdb @('-s', $TargetSerial, 'shell', 'sha256sum', $Path) 2>$null)
+function Read-QuestFileHash([string[]]$Target, [string]$Path) {
+    $lines = @(Invoke-QuestAdb ($Target + @('shell', 'sha256sum', $Path)) 2>$null)
     if ($LASTEXITCODE -eq 0 -and $lines.Count -eq 1 -and $lines[0] -cmatch '\A([0-9a-f]{64})[ \t]+(.+)\z' -and $Matches[2] -ceq $Path) {
         return $Matches[1]
     }
 }
 
-function Confirm-QuestFileHash([string]$TargetSerial, [string]$Path, [string]$ExpectedHash, [string]$Description) {
-    if ((Read-QuestFileHash $TargetSerial $Path) -cne $ExpectedHash) {
+function Confirm-QuestFileHash([string[]]$Target, [string]$Path, [string]$ExpectedHash, [string]$Description) {
+    if ((Read-QuestFileHash $Target $Path) -cne $ExpectedHash) {
         throw [IO.InvalidDataException]::new("$Description could not be verified on the selected Quest.")
     }
 }
 
-function Publish-QuestFile([string]$TargetSerial, [string]$Local, [string]$Staging, [string]$Destination, [string]$Description,
+function Publish-QuestFile([string[]]$Target, [string]$Local, [string]$Staging, [string]$Destination, [string]$Description,
     [string]$ExpectedHash, [string]$ContentHash, [scriptblock]$BeforeActivation, [hashtable]$ConnectionDeployment) {
     $stagedHash = if ($ContentHash) { $ContentHash } else { (Get-FileHash -LiteralPath $Local -Algorithm SHA256).Hash.ToLowerInvariant() }
     try {
-        Invoke-QuestAdb @('-s', $TargetSerial, 'push', $Local, $Staging) | Out-Null
+        Invoke-QuestAdb ($Target + @('push', $Local, $Staging)) | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "$Description could not be copied." }
-        if (-not $ExpectedHash) { Confirm-QuestFileHash $TargetSerial $Staging $stagedHash $Description }
+        if (-not $ExpectedHash) { Confirm-QuestFileHash $Target $Staging $stagedHash $Description }
         if ($BeforeActivation) { & $BeforeActivation }
         if ($ExpectedHash) {
             $command = 'current=$(sha256sum ''{0}'') && staged=$(sha256sum ''{1}'') && [ "${{current%% *}}" = ''{2}'' ] && [ "${{staged%% *}}" = ''{3}'' ] && mv -f ''{1}'' ''{0}''' `
                 -f $Destination, $Staging, $ExpectedHash, $stagedHash
-            Invoke-QuestAdb @('-s', $TargetSerial, 'shell', $command) *> $null
+            Invoke-QuestAdb ($Target + @('shell', $command)) *> $null
             if ($LASTEXITCODE -ne 0) { throw 'Could not confirm ticket replacement. Check the selected device and read its current configuration before retrying.' }
         } else {
             if ($null -ne $ConnectionDeployment) { $ConnectionDeployment.Step = 'activate-connection' }
-            Invoke-QuestAdb @('-s', $TargetSerial, 'shell', 'mv', $Staging, $Destination) | Out-Null
+            Invoke-QuestAdb ($Target + @('shell', 'mv', $Staging, $Destination)) | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "$Description could not be activated." }
             if ($null -ne $ConnectionDeployment) { $ConnectionDeployment.Step = 'verify-active-connection' }
-            Confirm-QuestFileHash $TargetSerial $Destination $stagedHash $Description
+            Confirm-QuestFileHash $Target $Destination $stagedHash $Description
         }
     } catch {
         $publishError = $_
         try {
-            Invoke-QuestAdb @('-s', $TargetSerial, 'shell', 'rm', '-f', $Staging) *> $null
+            Invoke-QuestAdb ($Target + @('shell', 'rm', '-f', $Staging)) *> $null
             if ($LASTEXITCODE -ne 0) { throw 'ADB cleanup failed.' }
         } catch {
             Write-Warning 'Could not remove the temporary deployment file from the selected device.'
@@ -1441,9 +1461,9 @@ function Update-QuestPlayerTicket($ConnectionFile, $Ticket, $Target) {
             $current.joinTicket = $Fresh.joinTicket
             [IO.File]::WriteAllText($local, ($current | ConvertTo-Json -Depth 4 -Compress))
             $staging = "$remote/vr-connection-$([Guid]::NewGuid().ToString('N')).tmp"
-            Publish-QuestFile $Serial $local $staging $destination 'Player ticket file' $expectedHash -BeforeActivation {
+            Publish-QuestFile @('-s', $Serial) $local $staging $destination 'Player ticket file' $expectedHash -BeforeActivation {
                 if ($liveSeat) { Confirm-QuestPlayerReadback $liveSeat }
-                if ($alignmentPath) { Confirm-QuestFileHash $Serial $alignmentPath $Ticket.AlignmentHash 'Original locked MR alignment' }
+                if ($alignmentPath) { Confirm-QuestFileHash @('-s', $Serial) $alignmentPath $Ticket.AlignmentHash 'Original locked MR alignment' }
             }
         }
     } finally { Remove-Item -LiteralPath $local }
@@ -1453,16 +1473,16 @@ function Update-QuestPlayerTicket($ConnectionFile, $Ticket, $Target) {
     $report | ConvertTo-Json -Compress
 }
 
-function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment, [switch]$UsePassthrough, [switch]$RequestMixedReality,
+function Set-QuestConnection([string[]]$Target, $Config, $Ticket, $Alignment, [switch]$UsePassthrough, [switch]$RequestMixedReality,
     [hashtable]$Deployment = @{}, $LiveVenue, $LiveSeat) {
     if ($RequireOpenXR) {
         $Deployment.Step = 'resolve-launcher'
-        $activity = Get-QuestLauncherActivity $TargetSerial
+        $activity = Get-QuestLauncherActivity $Target
         $nonce = [Guid]::NewGuid().ToString('N')
     }
     $Deployment.Step = 'prepare-device'
     $remoteDirectory = '/sdcard/Android/data/com.vrcommand.quest/files'
-    Invoke-QuestAdb @('-s', $TargetSerial, 'shell', 'mkdir', '-p', $remoteDirectory) | Out-Null
+    Invoke-QuestAdb ($Target + @('shell', 'mkdir', '-p', $remoteDirectory)) | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'App data directory could not be prepared.' }
     $deploymentId = [Guid]::NewGuid().ToString('N')
     if ($Alignment) {
@@ -1471,7 +1491,7 @@ function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment
         $stagedAlignment = [IO.Path]::GetTempFileName()
         try {
             [IO.File]::WriteAllBytes($stagedAlignment, $Alignment.Bytes)
-            Publish-QuestFile $TargetSerial $stagedAlignment "$remoteDirectory/vr-room-alignment-$deploymentId.tmp" `
+            Publish-QuestFile $Target $stagedAlignment "$remoteDirectory/vr-room-alignment-$deploymentId.tmp" `
                 "$remoteDirectory/vr-room-alignment-$alignmentHash.json" 'Room alignment file' -ContentHash $alignmentHash
         } finally { Remove-Item -LiteralPath $stagedAlignment }
         if (-not $Ticket.AlignmentHash) { $Config | Add-Member -NotePropertyName 'roomAlignmentSha256' -NotePropertyValue $alignmentHash }
@@ -1487,7 +1507,7 @@ function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment
         $Deployment.Step = 'stage-connection'
         [IO.File]::WriteAllText($stagedConfig, ($Config | ConvertTo-Json -Depth 4 -Compress))
         # The active config is the commit point. Its referenced alignment is already verified by hash.
-        Publish-QuestFile $TargetSerial $stagedConfig "$remoteDirectory/vr-connection-$deploymentId.tmp" `
+        Publish-QuestFile $Target $stagedConfig "$remoteDirectory/vr-connection-$deploymentId.tmp" `
             "$remoteDirectory/vr-connection.json" 'Player connection file' -ConnectionDeployment $Deployment -BeforeActivation {
                 if ($LiveVenue) {
                     $Deployment.Step = 'verify-live-venue-before-stop'
@@ -1501,7 +1521,7 @@ function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment
                 $Deployment.Step = 'check-expiry-before-stop'
                 if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired before activation. Download a fresh connection file.' }
                 $Deployment.Step = 'stop-game'
-                Invoke-QuestAdb @('-s', $TargetSerial, 'shell', 'am', 'force-stop', 'com.vrcommand.quest') | Out-Null
+                Invoke-QuestAdb ($Target + @('shell', 'am', 'force-stop', 'com.vrcommand.quest')) | Out-Null
                 if ($LASTEXITCODE -ne 0) { throw 'Quest app could not be stopped before activating configuration.' }
             }
         $Deployment.Step = 'clean-local-connection'
@@ -1510,12 +1530,12 @@ function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment
     if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired before launch. Download a fresh connection file.' }
     $Deployment.Step = 'launch-game'
     if ($RequireOpenXR) {
-        Start-QuestCheckedActivity $TargetSerial $activity $nonce
+        Start-QuestCheckedActivity $Target $activity $nonce
         $Deployment.Step = 'observe-openxr'
-        $observation = Read-QuestLaunchedProcess $TargetSerial $nonce
+        $observation = Read-QuestLaunchedProcess $Target $nonce
         $Deployment.OpenXR = [ordered]@{ processId = $observation.processId; nonce = $nonce }
     } else {
-        Invoke-QuestAdb @('-s', $TargetSerial, 'shell', 'monkey', '-p', 'com.vrcommand.quest', '-c', 'android.intent.category.LAUNCHER', '1') | Out-Null
+        Invoke-QuestAdb ($Target + @('shell', 'monkey', '-p', 'com.vrcommand.quest', '-c', 'android.intent.category.LAUNCHER', '1')) | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'Quest app launch failed.' }
     }
 }
@@ -1524,7 +1544,7 @@ function Invoke-QuestFirstLaunch([string]$Apk, $Release) {
     if ($Serial -cnotmatch '\A[A-Za-z0-9\[][A-Za-z0-9._:%\[\]-]{0,127}\z') { throw 'Use an explicit ADB serial for the Quest 3.' }
     Confirm-QuestAdbStartup 'Provide the installed ADB executable.'
     $inventory = Get-QuestDeviceInventory
-    $deviceState = $inventory[$Serial]
+    $deviceState = $inventory[$Serial].Status
     if ($deviceState -cne 'device') {
         if ($deviceState -cnotin @('unauthorized','offline','ambiguous')) { $deviceState = 'missing or unavailable' }
         throw "Quest 3 ADB state: $deviceState. On Windows, use scripts/check-quest-usb.ps1 to distinguish USB enumeration from ADB authorization."
@@ -1546,15 +1566,15 @@ function Invoke-QuestFirstLaunch([string]$Apk, $Release) {
             if ($LASTEXITCODE -ne 0 -or $install -cnotcontains 'Success') { throw 'Quest APK installation did not return Success.' }
         } finally { Remove-Item -LiteralPath $stagedApk -ErrorAction SilentlyContinue }
     }
-    if ((Get-QuestApkStatus $Serial $Release.sha256) -cne 'ready') { throw 'Installed Quest APK could not be verified against the release report.' }
+    if ((Get-QuestApkStatus @('-s', $Serial) $Release.sha256) -cne 'ready') { throw 'Installed Quest APK could not be verified against the release report.' }
 
     $config = '/sdcard/Android/data/com.vrcommand.quest/files/vr-connection.json'
     Invoke-QuestAdb @('-s', $Serial, 'shell', 'test', '!', '-e', $config) | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not confirm the Quest has no existing player configuration. App launch was skipped.' }
-    $activity = Get-QuestLauncherActivity $Serial
+    $activity = Get-QuestLauncherActivity @('-s', $Serial)
     $nonce = if ($RequireOpenXR) { [Guid]::NewGuid().ToString('N') }
-    Start-QuestCheckedActivity $Serial $activity $nonce -Restart:$ResumeSmokeTest
-    $observation = Read-QuestLaunchedProcess $Serial $nonce
+    Start-QuestCheckedActivity @('-s', $Serial) $activity $nonce -Restart:$ResumeSmokeTest
+    $observation = Read-QuestLaunchedProcess @('-s', $Serial) $nonce
     $report = [ordered]@{
         phase = 'quest-first-launch'; status = 'process-observed'; model = 'Quest 3'; versionCode = $Release.versionCode
         apkVerified = $true; apkSha256 = $Release.sha256; venueReleaseReportSha256 = $Release.reportSha256
@@ -1569,20 +1589,20 @@ function Invoke-QuestFirstLaunch([string]$Apk, $Release) {
     return $report
 }
 
-function Get-QuestLauncherActivity([string]$TargetSerial) {
-    $resolved = @(Invoke-QuestAdb @('-s', $TargetSerial, 'shell', 'pm', 'resolve-activity', '--brief', '--user', 'current',
-        '-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.LAUNCHER', '-p', 'com.vrcommand.quest') 2>$null)
+function Get-QuestLauncherActivity([string[]]$Target) {
+    $resolved = @(Invoke-QuestAdb ($Target + @('shell', 'pm', 'resolve-activity', '--brief', '--user', 'current',
+        '-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.LAUNCHER', '-p', 'com.vrcommand.quest')) 2>$null)
     $activities = @($resolved -cmatch '\Acom\.vrcommand\.quest/[A-Za-z0-9._]+\z')
     if ($LASTEXITCODE -ne 0 -or $activities.Count -ne 1) { throw 'Could not resolve a launcher activity for the installed Quest app.' }
     return $activities[0]
 }
 
-function Start-QuestCheckedActivity([string]$TargetSerial, [string]$Activity, [string]$Nonce, [switch]$Restart) {
+function Start-QuestCheckedActivity([string[]]$Target, [string]$Activity, [string]$Nonce, [switch]$Restart) {
     $launchOptions = @('-W')
     if ($Restart) { $launchOptions += '-S' }
     $extras = @()
     if ($Nonce) { $extras = @('--es', 'com.vrcommand.quest.OPENXR_PROBE', $Nonce) }
-    $launchArguments = @('-s', $TargetSerial, 'shell', 'am', 'start') + $launchOptions + @('--user', 'current',
+    $launchArguments = $Target + @('shell', 'am', 'start') + $launchOptions + @('--user', 'current',
         '-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.LAUNCHER', '-n', $Activity) + $extras
     $startup = @(Invoke-QuestAdb $launchArguments 2>$null)
     if ($LASTEXITCODE -ne 0 -or $startup -cnotcontains 'Status: ok' -or
@@ -1591,8 +1611,8 @@ function Start-QuestCheckedActivity([string]$TargetSerial, [string]$Activity, [s
     }
 }
 
-function Read-QuestLaunchedProcess([string]$TargetSerial, [string]$Nonce) {
-    $pidCommand = @('-s', $TargetSerial, 'shell', 'pidof', 'com.vrcommand.quest')
+function Read-QuestLaunchedProcess([string[]]$Target, [string]$Nonce) {
+    $pidCommand = $Target + @('shell', 'pidof', 'com.vrcommand.quest')
     $appPid = Invoke-QuestAdb $pidCommand 2>$null
     if ($LASTEXITCODE -ne 0 -or [string]$appPid -cnotmatch '\A[1-9][0-9]{0,9}\z' -or [long]$appPid -gt [int]::MaxValue) {
         throw [InvalidOperationException]::new('Quest game process was not present after launch.')
@@ -1602,8 +1622,8 @@ function Read-QuestLaunchedProcess([string]$TargetSerial, [string]$Nonce) {
     do {
         $remaining = [int](20000 - $clock.ElapsedMilliseconds)
         if ($remaining -le 0) { throw [InvalidOperationException]::new('No OpenXR evidence was observed for the current Quest launch.') }
-        $logs = @(Invoke-QuestAdb @('-s', $TargetSerial, 'logcat', '-d', '-t', '1000', "--pid=$appPid", '-v', 'brief',
-            '-s', 'Unity', 'AndroidRuntime') -MaximumMilliseconds $remaining 2>$null)
+        $logs = @(Invoke-QuestAdb ($Target + @('logcat', '-d', '-t', '1000', "--pid=$appPid", '-v', 'brief',
+            '-s', 'Unity', 'AndroidRuntime')) -MaximumMilliseconds $remaining 2>$null)
         if ($LASTEXITCODE -ne 0) { throw [InvalidOperationException]::new('Could not read the launched Quest process logs.') }
         $remaining = [int](20000 - $clock.ElapsedMilliseconds)
         if ($remaining -le 0) { throw [InvalidOperationException]::new('Could not confirm the original Quest process before the observation deadline.') }
@@ -1854,11 +1874,11 @@ try {
     if ($RequireOpenXR) { Invoke-QuestAdb @('-s', $Serial, 'install', '-r', $apk) *> $null }
     else { Invoke-QuestAdb @('-s', $Serial, 'install', '-r', $apk) }
     if ($LASTEXITCODE -ne 0) { throw 'APK installation failed.' }
-    if ($release -and (Get-QuestApkStatus $Serial $release.sha256) -cne 'ready') {
+    if ($release -and (Get-QuestApkStatus @('-s', $Serial) $release.sha256) -cne 'ready') {
         throw 'Installed Quest APK could not be verified against the release report.'
     }
     if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') { Confirm-VenueReadback $venue -RequireLiveSource }
-    Set-QuestConnection $Serial $config $ticket $alignment -UsePassthrough:$Passthrough -RequestMixedReality:$isMixedReality `
+    Set-QuestConnection @('-s', $Serial) $config $ticket $alignment -UsePassthrough:$Passthrough -RequestMixedReality:$isMixedReality `
         -LiveVenue $(if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') { $venue }) -LiveSeat $liveSeat -Deployment $deployment
 } finally {
     $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose()

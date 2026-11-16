@@ -2347,6 +2347,24 @@ else:
     def test_mapped_deployment_stops_before_writing_to_changed_device(self):
         self.assert_mapped_deployment_stops('identity-changed', 'device-identity-changed', None)
 
+    def test_mapped_deployment_does_not_retarget_after_transport_disconnect(self):
+        self.assert_mapped_deployment_stops('disconnect-after-staging', 'deployment-failed', 'stop-game', partial=True)
+
+    def test_mapped_quest_requires_an_unambiguous_transport(self):
+        files, _ = self.bundle('Independent')
+        path, _ = self.device_map()
+        faults = {'fixture-03': 'transport-duplicate', 'fixture-08': 'transport-missing'}
+        result = self.run_fleet(files, path, '-CheckOnly', faults=faults)
+        self.assertEqual(1, result.returncode, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertFalse(report['complete'])
+        self.assertEqual({0: 'transport-ambiguous', 2: 'transport-ambiguous', 7: 'transport-unavailable'},
+                         {i: row['status'] for i, row in enumerate(report['devices']) if row['status'] != 'ready'})
+        commands = (self.root / 'transport.log').read_text(encoding='utf-8').splitlines()
+        self.assertEqual('devices -l', commands[0])
+        self.assertTrue(all(line.startswith('-t ') for line in commands[1:]))
+        self.assertFalse(any(line.startswith(('-t 101 ', '-t 103 ', '-t 108 ')) for line in commands[1:]))
+
     def test_mapped_deployment_requires_a_current_source_receipt_before_each_seat(self):
         for reason in ('source-stale', 'missing-receipt'):
             with self.subTest(reason=reason):
@@ -2620,10 +2638,11 @@ else:
                 log = self.root/'adb.log'
                 first_report = self.root/'first.json'
 
-                def invoke(*extra, faults=None):
+                def invoke(*extra, faults=None, transport_base=100):
                     return subprocess.run([*command, *extra], capture_output=True, encoding='utf-8', timeout=20,
                         env={**os.environ, **release_env, 'VR_QUEST_FLEET_FIXTURE': str(self.root),
-                             'VR_COMMAND_MASTER_KEY': 'PRIVATE_MASTER_CANARY', 'VR_QUEST_FLEET_FAULTS': json.dumps(faults or {})})
+                             'VR_COMMAND_MASTER_KEY': 'PRIVATE_MASTER_CANARY', 'VR_QUEST_FLEET_FAULTS': json.dumps(faults or {}),
+                             'VR_QUEST_FLEET_TRANSPORT_BASE': str(transport_base)})
 
                 first = invoke(faults={'fixture-02': 'config-active-changed'})
                 self.assertEqual(1, first.returncode, first.stderr)
@@ -2676,8 +2695,14 @@ else:
                 report.write_text(retry_again.stdout, encoding='utf-8')
                 log.unlink()
 
-                resumed = invoke('-RetryIncomplete', str(report))
+                transport_log = self.root / 'transport.log'
+                transport_log.unlink()
+                resumed = invoke('-RetryIncomplete', str(report), transport_base=200)
                 self.assertEqual(0, resumed.returncode, resumed.stderr)
+                transport_commands = transport_log.read_text(encoding='utf-8').splitlines()
+                self.assertEqual('devices -l', transport_commands[0])
+                self.assertTrue(all(line.startswith('-t 203 ') for line in transport_commands[1:]))
+                self.assertTrue(any(line.startswith('-t 203 shell monkey ') for line in transport_commands))
                 final = json.loads(resumed.stdout)
                 self.assertEqual((True, 3, 22), (final['complete'], final['mappedSeats'], final['unmappedSeats']))
                 self.assertEqual(hashlib.sha256(report.read_bytes()).hexdigest(), final['previousDeploymentSha256'])
@@ -2815,13 +2840,18 @@ else:
                 thread.join(timeout=5)
         self.assertEqual(1, result.returncode, result.stderr)
         report = json.loads(result.stdout)
+        if fault == 'disconnect-after-staging':
+            self.assertFalse((fleet / 'replacement-device.log').exists(), 'No commands may be sent to a replacement ADB transport')
+            transport_commands = (fleet / 'transport.log').read_text(encoding='utf-8').splitlines()
+            self.assertIn('-t 104 shell am force-stop com.vrcommand.quest', transport_commands)
+            self.assertFalse(any(line.startswith('-t 104 shell monkey ') for line in transport_commands))
         self.assertEqual(('deployment', False, True), (report['phase'], report['complete'], report['managementVerified']))
         self.assertEqual(['launch-requested'] * 3 + [expected_status] + ['not-attempted'] * (count - 4),
                          [row['status'] for row in report['devices']])
         self.assertEqual([True] * 3 + [None] * (count - 3), [row.get('filesVerified') for row in report['devices']])
         self.assertEqual([None] * 3 + [failed_step] + [None] * (count - 4), [row.get('failedStep') for row in report['devices']])
         expected_write_checks = 6 if fault in ('identity-changed', 'apk-changed') else 7
-        if fault in ('force-stop', 'config-move', 'config-active-changed', 'launch', 'source-stale-after-staging'):
+        if fault in ('force-stop', 'config-move', 'config-active-changed', 'launch', 'source-stale-after-staging', 'disconnect-after-staging'):
             expected_write_checks += 1
         self.assertEqual(['/api/mr-deployment/venue-check', f'/api/sessions/{session}/connection-endpoint']
                          + ['/api/mr-deployment/venue-check'] * expected_write_checks, calls)
@@ -2833,7 +2863,7 @@ else:
             self.assertEqual(fault == 'config-active-changed', active.endswith(b'\n'))
         else:
             self.assertEqual(b'previous connection', active)
-        self.assertFalse(list(before.glob('*.tmp')))
+        self.assertEqual(1 if fault == 'disconnect-after-staging' else 0, len(list(before.glob('*.tmp'))))
         self.assertEqual(['fixture-01','fixture-02','fixture-03','fixture-04'], sorted(folder.name for folder in fleet.glob('fixture-*')))
         for seat in range(1, 4):
             actual = json.loads((fleet / f'fixture-{seat:02}' / 'vr-connection.json').read_bytes())

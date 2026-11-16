@@ -1,16 +1,36 @@
 $root = $env:VR_QUEST_FLEET_FIXTURE
 if (-not $root -or -not (Test-Path -LiteralPath $root -PathType Container)) { exit 97 }
 $faults = if ($env:VR_QUEST_FLEET_FAULTS) { ConvertFrom-Json -InputObject $env:VR_QUEST_FLEET_FAULTS -AsHashtable } else { @{} }
+$transportBase = if ($env:VR_QUEST_FLEET_TRANSPORT_BASE) { [int]$env:VR_QUEST_FLEET_TRANSPORT_BASE } else { 100 }
+[IO.File]::AppendAllText((Join-Path $root 'transport.log'), (($args -join ' ') + "`n"))
+if ($args[0] -ceq '-t') {
+    $transport = 0
+    if (-not [int]::TryParse($args[1], [ref]$transport) -or $transport -le $transportBase -or $transport -gt $transportBase + 25) { exit 99 }
+    $args[0] = '-s'
+    $args[1] = 'fixture-{0:00}' -f ($transport - $transportBase)
+    if ([IO.File]::Exists((Join-Path $root "disconnected-$($args[1])"))) { exit 1 }
+}
+if ($args[0] -ceq '-s' -and [IO.File]::Exists((Join-Path $root "disconnected-$($args[1])"))) {
+    [IO.File]::AppendAllText((Join-Path $root 'replacement-device.log'), (($args[2..($args.Count - 1)] -join ' ') + "`n"))
+    if (($args[2..4] -join ' ') -cne 'shell am force-stop') { exit 1 }
+    exit 0
+}
+[bool]$longInventory = $args[0] -ceq 'devices' -and $args[1] -ceq '-l'
+if ($longInventory) { $args = @('devices') }
 [IO.File]::AppendAllText((Join-Path $root 'adb.log'), (($args -join ' ') + "`n"))
 if ($args[0] -ceq 'devices') {
     'List of devices attached'
-    "unmapped-device`tdevice"
+    if ($longInventory) { 'unmapped-device   device transport_id:1' } else { "unmapped-device`tdevice" }
     foreach ($index in 1..25) {
         $serial = 'fixture-{0:00}' -f $index
         $state = $faults[$serial]
         if ($state -ceq 'missing') { continue }
         if ($state -cnotin @('offline','unauthorized')) { $state = 'device' }
-        "$serial`t$state"
+        if ($longInventory) {
+            $id = if ($faults[$serial] -ceq 'transport-duplicate') { $transportBase + 1 } else { $transportBase + $index }
+            $suffix = if ($faults[$serial] -ceq 'transport-missing') { '' } else { " transport_id:$id" }
+            "$serial   $state$suffix"
+        } else { "$serial`t$state" }
     }
     exit 0
 }
@@ -112,6 +132,9 @@ switch -CaseSensitive ($args[3]) {
                 if ([DateTimeOffset]::UtcNow -ge $deadline) { exit 96 }
                 Start-Sleep -Milliseconds 50
             }
+        }
+        if ($fault -ceq 'disconnect-after-staging' -and $path -cmatch '/vr-connection-[0-9a-f]+\.tmp$') {
+            [IO.File]::WriteAllText((Join-Path $root "disconnected-$serial"), 'The original transport went away')
         }
         "$hash  $($args[4])"
         exit 0

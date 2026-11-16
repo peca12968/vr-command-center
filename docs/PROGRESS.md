@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-16 Quest 五房部署沿用同一條 ADB 連線
+
+- 五房的完整與部分裝置清單以 `adb devices -l` 確認每席的連線識別，再用該識別核對頭盔身分、APK、檔案、遊戲啟動與 OpenXR。預檢會拒絕缺少連線識別或識別重複的項目。 [部署方式](QUEST3.md#用裝置清單部署-25-席)
+- 模擬第 4 席在暫存檔驗證後斷線，替代裝置接手同一 ADB 名稱。舊腳本將指令送至替代裝置。新版在原連線的停止步驟失敗，保留已完成的三席與原正式檔，替代裝置未收到指令。原頭盔的暫存檔保留。另驗證補部署會依原裝置身分使用重新連線的新識別。 [舊版反例](../artifacts/quest-transport-pin-20261116-1518/before.log) · [新版回歸](../artifacts/quest-transport-pin-20261116-1518/focused-final.log)
+- 部署套件執行 74 項測試並通過，Windows PowerShell 5.1 的單一子案例因本機腳本政策略過。3 項 USB 診斷測試也通過。合併與獨立 MR 排演各完成 25 席模擬部署，每席在原 ADB 連線核對 APK 和校正檔，並各發出一次停止及啟動指令。第一次五房排演的核對程式按反向輸入列比對已排序的部署回條，改依房席排序後重跑兩種模式皆通過。 [部署套件](../artifacts/quest-transport-pin-20261116-1518/deploy-suite.log) · [USB 測試](../artifacts/quest-transport-pin-20261116-1518/usb-tests.log) · [五房排演](../artifacts/quest-transport-pin-20261116-1518/full-fleet.json)
+- 管理包 0.31.211 與 Windows 玩家、伺服器及 Quest APK 0.50.12 通過既有發行檔一致性核對。Windows 的被動 USB 快照有 1 個檔案傳輸介面、0 個 ADB 介面。本輪遊戲部署以模擬 ADB 驗證，實體頭盔與跨機仍待。 [發行核對](../artifacts/quest-transport-pin-20261116-1518/venue-release.json) · [USB 快照](../artifacts/quest-transport-pin-20261116-1518/usb-status.json)
+
 ## 2026-11-16 核對回放搜尋命中的原事件
 
 - 控制台 0.31.211 在點選搜尋結果或跳轉前後事件時，會比對保存畫格的時間與篩選後的原事件識別。對照管理包 0.31.210 會接受以另一個射擊事件 ID 替換的畫格。新版在畫格、時間、玩家、種類和筆數都相同時仍會拒絕替換，關閉測試攔截後仍能開啟原射擊。 [對照測試](../artifacts/desktop-guarded-openxr/20261116-150213-e8e75b19/browser.log) · [新版瀏覽器紀錄](../artifacts/desktop-guarded-openxr/20261116-150754-b4b8c24b/browser.log)
