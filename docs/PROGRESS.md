@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 六批完整發行驗收
+
+- `prepare-venue-stages.py --require-complete-venue-release` 會在總清單固定原發行 JSON 的 SHA-256，要求六批的伺服器終止報告、Windows 玩家報告及 Quest 部署證據均核對同一份原檔。收件報告逐批列出缺少完整摘要的房間組合和房席，比對失敗時保留原證據檔名。舊總清單可沿用原設定。 [六批完整核對](EXTERNAL_CLIENTS.md#六批核對伺服器和每席的完整發行證據)
+- 用 Windows 1.17、伺服器 1.26、Quest 0.50.11／76 及管理包 0.31.206 的原發行報告，排演 5、10、25 人的獨立與合併共六批。模擬證據核對 18 場伺服器、50 席 Windows 與 30 席 Quest。移除三批各自的伺服器、Windows 或 Quest 摘要後，收件檢查逐批指出待補位置。舊 0.50.7 六批的 80 份戰績確認用原清單重驗，摘要逐位元組相符；同批套用完整發行條件時，逐批列出缺少完整摘要。 [驗證摘要](../artifacts/venue-complete-release-f7bc804d/validation.json) · [模擬缺件報告](../artifacts/venue-complete-release-f7bc804d/simulated-missing-release-intake.json) · [舊封存缺件報告](../artifacts/venue-complete-release-f7bc804d/archived-0507-intake.json)
+- 本機 137 項封存、9 項發行及 10 項伺服器套件測試通過。功能提交 `eb4b31d` 已推送，GitHub Actions 未執行測試步驟。Quest USB 仍未提供 ADB 偵錯介面。實體頭盔、跨機 25 人及廠商硬體待驗。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43789666555/job/133044977490)
+
 ## 2026-11-16 Windows 玩家戰績與全館發行報告
 
 - Windows 玩家啟動器 1.17 的套件核對、啟動與退出報告加入 `venueReleaseReportSha256`。驗收 ZIP 內的退出報告保留啟動時所讀取的原發行檔摘要。全館驗收會用同一份原檔核對 Windows、Quest 與伺服器。Windows 收件指出摘要不符的 ZIP 並列出完成核對的席數。舊收件繼續核對原套件清單、日誌及戰績。 [玩家包操作](WINDOWS_PLAYER_PACKAGE.md#依場館發行報告核對玩家包) · [全館驗收](EXTERNAL_CLIENTS.md#核對全館共用的發行報告)
