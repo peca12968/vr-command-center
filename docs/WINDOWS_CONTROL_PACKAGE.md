@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-16 管理台 0.31.210 的 Windows ZIP 為 53,388,035 bytes，SHA-256 `83bf8afb67f7a4aa7a30f21e1709340735eaa8cb0f31a695ac420a405ee437df`。解壓核對 568 檔。從戰績開啟個人回放時，會核對封存尾端的玩家與戰績。 [管理包](../artifacts/windows-control-player-replay-score-031210.zip) · [操作說明](REPORTS.md#從戰績開啟個人回放)
+
 2026-11-16 管理台 0.31.209 的 Windows ZIP 為 53,387,386 bytes，SHA-256 `6088b5027020f0807dcb9183f22fe50e81d01cc1e64441c3a1a8281371d027eb`。解壓核對 568 檔。主控從受阻快照可直接返回全館開場檢查，依目前席位狀態繼續操作。 [管理包](../artifacts/windows-control-return-opening-031209.zip) · [操作說明](PLAYER_READINESS.md#五房追蹤驗收開場)
 
 2026-11-16 `VRCommand-ControlServer-0.31.205.zip` 為 53,377,195 bytes，SHA-256 `380804a5ececfe59e80f8fb901b097deb832875b0a1213ed4d08db6433ee76b2`。解壓核對 568 筆清單。主控可從全館結束批次查看離場玩家的封存戰績，並開啟原房間的個人回放。 [管理包](../artifacts/VRCommand-ControlServer-0.31.205.zip) · [收尾操作](SESSION_CLOSURE.md)

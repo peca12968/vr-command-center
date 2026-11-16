@@ -276,9 +276,12 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await rejectReplayStatistics(openReview, linked.id, subject, player => { player.playerId = randomUUID(); },
       'A different archived player at the exact final frame prevents opening the personal replay');
     await page.locator('#tab-operations').click();
-    const scopedSearch = page.waitForResponse(response => new URL(response.url()).pathname === `/api/sessions/${linked.id}/world/event-frames`);
-    await openReview.click();
-    const searchQuery = new URL((await scopedSearch).url()).searchParams;
+    await review.selectOption(subject);
+    const [scopedSearch] = await Promise.all([
+      page.waitForResponse(response => new URL(response.url()).pathname === `/api/sessions/${linked.id}/world/event-frames`),
+      openReview.click()
+    ]);
+    const searchQuery = new URL(scopedSearch.url()).searchParams;
     check(searchQuery.get('roomId') === '2' && searchQuery.get('playerId') === subject
       && await page.locator('#world-room').inputValue() === '2' && await page.locator('#world-review-player-scope').isVisible(),
       'The linked personal review opens the exact sealed source and starts its first search in the selected room');

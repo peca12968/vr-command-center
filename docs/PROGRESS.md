@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 個人回放核對封存戰績
+
+- 控制台 0.31.210 在開啟個人回放前，逐欄核對尾端畫格中唯一原玩家的姓名、房間、耗彈、命中、擊殺、中彈、損耗、命中率和血量。一般任務統計、全館席位和離場玩家入口均核對。對照包 0.31.209 會開啟房號遭替換的回放。新版在畫格與封存序號一致時，仍拒絕替換玩家識別、房號與耗彈的測試回應。 [對照反例](../artifacts/desktop-guarded-openxr/20261116-145436-76183666/browser.log) · [拒絕畫面](../artifacts/desktop-guarded-openxr/20261116-145810-9c8e0b24/venue-departed-replay-score-refused.png)
+- 解壓新管理包通過 158 項瀏覽器檢查與 26 項 Node 測試。原個人回放仍能在合併與獨立場找到離場玩家的原射擊。第一輪新包已正確拒絕替換的玩家，但測試返回場次頁後漏選玩家而逾時。補選後以同一包重跑通過。另從前一輪 Windows 原生兩種模式的原始紀錄逐欄核對 50 份戰績。 [新包首輪](../artifacts/desktop-guarded-openxr/20261116-145644-4095e659/browser.log) · [最終瀏覽器](../artifacts/desktop-guarded-openxr/20261116-145810-9c8e0b24/checks.json) · [原生戰績核對](../artifacts/console-replay-score-20261116-145435/native-replay-scores.json)
+- 原始碼 `ed2a324` 的管理包核對 568 檔，搭配 Windows 0.50.12 玩家及伺服器和 Quest 0.50.12／77 通過離線發行核對。瀏覽器場景使用測試快照，實體頭盔與跨機待驗。 [Windows 管理包](../artifacts/windows-control-player-replay-score-031210.zip) · [發行核對](../artifacts/console-replay-score-20261116-145435/venue-release.json)
+
 ## 2026-11-16 從封存重驗五房的拒絕開場畫格
 
 - 原生五房測試加入兩種拒絕回條的原始畫格讀回。全追蹤政策須對上 24 席合成姿態與五個房間，有效姿態政策只拒絕當時失效的第 5 房第 5 席。讀回比對各房原場次、串流、管理序號、時間、名冊與姿態，並將核對完成的畫格寫入 `rejectedOpenings`。 [重跑方式](PLAYER_READINESS.md#五房各-5-席有效姿態開場)
