@@ -113,7 +113,7 @@ runtime只收VrCommand.exe／UnityPlayer／CrashHandler／WinPix及D3D12、MonoB
 
 ### Windows OpenXR 啟動
 
-Windows 版原始碼已加入 VIVE Focus 3 控制器設定，可供 VIVE XR Elite、Focus 3 與 Focus Vision 的 Windows 串流模式使用。新設定使用 `XR_HTC_vive_focus3_controller_interaction` 或支援該設定的 OpenXR 1.1 執行環境。右扳機、A、B 分別接到既有射擊、換彈和重連輸入。左 X、Y 和握把分別接到簡報翻頁、關閉與字型授權資訊。左手使用握持姿態，右手使用指向姿態。已核對 SDK 編譯與按鍵路徑，待重新建置 Windows 玩家包後用實機驗證。 [HTC 控制器說明](https://developer.vive.com/resources/openxr/unity/tutorials/basic-input-for-openxr/) · [Khronos Focus 3 設定](https://registry.khronos.org/OpenXR/specs/1.1-khr/html/xrspec.html#_htc_vive_focus_3_controller_profile)
+Windows 版原始碼已加入 VIVE Focus 3 控制器設定，可供 VIVE XR Elite、Focus 3 與 Focus Vision 的 Windows 串流模式使用。新設定使用 `XR_HTC_vive_focus3_controller_interaction` 或支援該設定的 OpenXR 1.1 執行環境。右扳機、A、B 分別接到既有射擊、換彈和重連輸入。左 X、Y 和握把分別接到簡報翻頁、關閉與字型授權資訊。左手使用握持姿態，右手使用指向姿態。已在 Unity Editor 用模擬 XR 裝置描述核對左右手姿態、按鍵與追蹤中斷，待重新建置 Windows 玩家包後用實機驗證。 [驗證紀錄](../artifacts/vive-unity-input-9cb0a383/verification.json) · [HTC 控制器說明](https://developer.vive.com/resources/openxr/unity/tutorials/basic-input-for-openxr/) · [Khronos Focus 3 設定](https://registry.khronos.org/OpenXR/specs/1.1-khr/html/xrspec.html#_htc_vive_focus_3_controller_profile)
 
 在頭盔到場前，可開啟解壓後的啟動器 1.16，按「檢查 OpenXR」或 Alt+X。視窗會顯示本機檔案的檢查結果。可在載入連線檔前檢查，調整頭盔軟體後再按一次即可更新結果。
 

@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-16 VIVE 控制器在 Unity Editor 驗證
+
+- 以 Unity 6000.3.27f1 執行獨立測試專案，從專案原始碼編譯並執行 `ViveFocus3ControllerTests.cs` 的六個案例。核對六個遊戲按鍵路徑及六個姿態對應，並以兩份模擬 XR 裝置描述觸發 Unity 動態建立手把配置。兩手的握持與指向姿態、按鍵值和右手追蹤中斷均可獨立讀取。 [驗證及雜湊](../artifacts/vive-unity-input-9cb0a383/verification.json) · [Editor 程序紀錄](../artifacts/vive-unity-input-9cb0a383/unity-repository-tests.log)
+- 獨立專案從本機快取載入相依組件，啟動時停用 Unity 套件管理器。首兩次隔離測試缺少相依組件，補入後通過。首輪動態測試保留了 Unity 重建前的控制器物件，依同一裝置 ID 重新取得有效物件後通過，回歸測試亦重現這個路徑。本輪只執行 VIVE 控制器案例，完整 EditMode、Windows 玩家包重建和實體頭盔待驗。 [首次動態測試](../artifacts/vive-unity-input-9cb0a383/unity-dynamic.log) · [動態測試重跑](../artifacts/vive-unity-input-9cb0a383/unity-dynamic-live-devices.log)
+
 ## 2026-11-16 VIVE XR Elite 與 Focus 3 Windows 控制器接入
 
 - Windows OpenXR 新增 `htc/vive_focus3_controller`。HTC 將這組設定用於 Focus 3、XR Elite 和 Focus Vision 的 Windows 串流模式。專案將六個動作接到原追蹤與遊戲輸入，並依執行環境是否支援該設定決定是否註冊。準備工程時於 Windows 啟用，Android 繼續採用 Quest 設定。 [操作說明](WINDOWS_PLAYER_PACKAGE.md#windows-openxr-啟動)
