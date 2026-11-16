@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 Quest 五房開場的追蹤中斷與封存順序
+
+- 五房全追蹤開場遇到單一已登記席位中斷時，管理服務仍拒絕整批開場，現在會回報實際受影響的房間。舊管理包在合併場針對同一個中斷案例回報五房。封存若同時核對 Quest 追蹤回條與原受理開始的見證，取樣畫格必須等於或早於伺服器當時使用的畫格。獨立與合併的反例均能各自驗證回條和見證，但新版會拒絕把順序相反的兩者組成開場證據。 [操作與錯誤回覆](PLAYER_READINESS.md#五房追蹤驗收開場) · [封存核對](EXTERNAL_CLIENTS.md#核對-quest-開場追蹤回條)
+- 新管理包解壓後，以實際 API、WebSocket 與合成 GameServer 姿態排演兩種拓撲，各含先啟動 12 席及補部署 13 席。第 3 房第 3 席失去追蹤時，整批回傳 409 和房號 `[3]`，準備狀態與管理序號均保持。追蹤恢復後以同一請求識別成功開始，再重送取得原回條。5 個獨立場次與 1 個合併場次都取得原準備見證、首個執行畫格及雙封存，最後活動場次為零。Quest USB 仍只有檔案傳輸介面。 [獨立場](../artifacts/quest-guarded-opening-api-independent-423a64fd.json) · [合併場](../artifacts/quest-guarded-opening-api-linked-88a0e639.json)
+- 1115 項核心、825 項 HTTP、94 項 Chromium 專項與 133 項封存檢查通過。管理包 API 0.31.0／控制台 0.31.205 含 568 個清單項目，ZIP 為 53,377,214 位元組，SHA-256 `c52afb9f710725d113cb06c1f3d8fc272579a17ebeb014e56caaf2c0c7939d69`。使用解壓包內的 DLL 執行上述背景測試。功能提交 `5f7ac42` 已推送，GitHub Actions 因帳務或支出上限未啟動，步驟數為零。 [Windows 管理包](../artifacts/windows-control-quest-guarded-opening-5f7ac42.zip) · [Chromium 結果](../artifacts/console-quest-guarded-opening-20261116/checks.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43780425738/job/133016124313)
+
 ## 2026-11-16 Windows 觀戰取樣與 SSD 快測
 
 - Windows 快測與桌面場館以同一條 SSE 串流的錄影起始 UTC 和收到畫格的經過毫秒數，計算該畫格的來源年齡。保留原 1.5 秒門檻。F 槽對照場的 141 筆樣本中，舊查詢與 SSE 的畫格序號全部相同，兩種測法相差最多 0.523 毫秒。該輪記錄世界寫入佇列滿載、玩家入場被拒及最後畫格停在第 82 格。原始 journal 的 82 格均已回覆，整場未封存。 [取樣對照](../artifacts/unity-player-smoke/20261116-080748-f40cb112/sse-pairing-observation.ndjson) · [閉檔分析](../artifacts/unity-player-smoke/20261116-080748-f40cb112/world-journal-analysis.json)
