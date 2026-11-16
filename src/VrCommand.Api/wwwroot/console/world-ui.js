@@ -43,7 +43,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   let clipStart = null, clipEnd = null, clipPosition = null, clipPlayback = '';
   let clipLoopTimer = null;
   let eventContextRequest = null;
-  let returnLiveSource = null, liveRetryTimer;
+  let returnLiveSource = null, liveRetryTimer, liveBoundary;
   let observerRoom = null;
   let liveRooms = new Map(), roomSwitch;
   let venueReview = null, venueAnchor = null;
@@ -82,6 +82,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   function reset() {
     frameNumber.value = '';
     observerRoom = null;
+    liveBoundary = null;
     beginReview = null;
     reviewPlayer = returnLiveSource = null; clearClip(); bindVenueReview(null);
     stop(); stopList(); info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = ''; cameras.reset(); cameraForm.reset(); reviewControls();
@@ -346,6 +347,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   function resetRecording() {
     frameNumber.value = '';
     observerRoom = null;
+    liveBoundary = null;
     beginReview = null;
     reviewPlayer = returnLiveSource = null; clearClip(); bindVenueReview(null);
     stop(); cameras.bind(null); cameraForm.reset(); info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = '';
@@ -651,10 +653,9 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     return replayAt(0, sequence);
   }
   function openLive() {
-    const sameLiveRoom = observerRoom !== null && mode === 'live' && frame;
-    const sourceKey = returnLiveSource ?? (sameLiveRoom ? geometry : null);
-    const target = sourceKey ? { mode: 'live', sessionId: $('world-recording').value, sourceKey,
-      initialFrame: sameLiveRoom ? frame.packet.sequence : 0 } : null;
+    const sessionId = $('world-recording').value;
+    const sourceKey = returnLiveSource ?? (info?.header.sessionId === sessionId ? geometry : null);
+    const target = sourceKey ? { mode: 'live', sessionId, sourceKey } : null;
     returnLiveSource = null;
     bindVenueReview(null);
     return connect('live', 0, null, null, target);
@@ -1106,8 +1107,9 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     let hasHeader = false, streamGeometry = '', reachedSavedEnd = false, lastSequence = sequence === null ? null : sequence - 1;
     let recentJump = Boolean(target?.sourceKey || returnLiveSource || (clip && sequence < frame?.packet.sequence));
     let playerFrame = null, playerComplete = false, witnessFrame = null;
-    const initialLiveSequence = target?.initialFrame ?? 0;
-    let lastLiveSequence = liveRetry ? frame?.packet.sequence ?? initialLiveSequence : initialLiveSequence;
+    const initialLiveSequence = Math.max(target?.initialFrame ?? 0,
+      liveBoundary?.sourceKey === expectedGeometry ? liveBoundary.sequence : 0);
+    let lastLiveSequence = expectedGeometry && geometry === expectedGeometry ? frame?.packet.sequence ?? 0 : 0;
     let announcedLiveSequence = 0, announcedLiveComplete = false;
     let idleTimer, idleExpired = false, transportFailure = false;
     function watchLive() {
@@ -1188,6 +1190,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
                 if (!hasHeader || !Number.isSafeInteger(current) || current < 1 || current < Math.max(lastLiveSequence, initialLiveSequence))
                   throw new Error('即時觀戰的快照序號不符。');
                 if (current === lastLiveSequence) {
+                  liveBoundary = { sourceKey: streamGeometry, sequence: current };
                   if (!received) { received = performance.now(); status(); }
                   continue;
                 }
@@ -1213,7 +1216,11 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
                 if (witnessFrame || !matchesWitness(data.packet, target, info.header))
                   throw new Error(`回應快照的${witnessLabel}或指令序號不同。`);
                 witnessFrame = data;
-              } else { show(data, recentJump); recentJump = false; }
+              } else {
+                show(data, recentJump);
+                if (nextMode === 'live') liveBoundary = { sourceKey: streamGeometry, sequence: lastLiveSequence };
+                recentJump = false;
+              }
             }
             else if (type === 'complete' && playerReview) {
               if (!playerFrame || playerComplete || !matchesTarget(data, target)) throw new Error('回應的世界封存範圍不同。');
@@ -1264,7 +1271,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
         if (playerReview || witness) resetRecording();
         if (clip) clipPlayback = '';
         connected = connecting = false; status();
-        const original = hasHeader || initialLiveSequence ? geometry : liveRetry ? expectedGeometry : null;
+        const original = hasHeader ? geometry : expectedGeometry;
         if (nextMode === 'live' && (idleExpired || transportFailure) && retryLive(id, key, original, request, liveRetry)) return;
         message('觀戰已中斷：' + (idleExpired ? '等待即時資料逾時' : error.message) + '；可重新連接。', true);
       }

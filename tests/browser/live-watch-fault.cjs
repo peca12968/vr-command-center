@@ -76,21 +76,42 @@ async function waitForLiveFrame(page, sequence) {
 
 async function checkLiveMetadata({ page, base, live, api, canvas, check }) {
   const sessionId = live.header.sessionId;
-  const metadata = await api(`/sessions/${sessionId}/world`);
-  const frame = await api(`/sessions/${sessionId}/world/frames/${metadata.acceptedSequence}`);
   const watch = url => url.origin === base && url.pathname === `/api/sessions/${sessionId}/world/watch`
     && url.searchParams.get('mode') === 'live';
+  const camera = await canvas.getAttribute('data-camera');
+  let retained;
+  const foreignHeader = async route => {
+    retained = await canvas.getAttribute('data-sequence');
+    const metadata = await api(`/sessions/${sessionId}/world`);
+    const header = { ...metadata.header, streamId: '00000000-0000-4000-8000-000000000002' };
+    await route.fulfill({ status: 200, contentType: 'text/event-stream',
+      body: `event: header\ndata: ${JSON.stringify({ ...metadata, header })}\n\n` });
+  };
+  await page.route(watch, foreignHeader, { times: 1 });
+  try {
+    await page.locator('#world-live').click();
+    await page.locator('#world-message').filter({ hasText: '回應的錄製來源不同' }).waitFor({ timeout: 8000 });
+    check(await canvas.getAttribute('data-sequence') === retained && await canvas.getAttribute('data-camera') === camera,
+      'A manual full-view reconnect rejects a foreign header and keeps the last accepted frame');
+  } finally { await page.unroute(watch, foreignHeader); }
+
   const records = [
-    [{ ...metadata, header: { ...metadata.header, streamId: '00000000-0000-4000-8000-000000000002' }, complete: true },
+    [metadata => ({ ...metadata, header: { ...metadata.header, streamId: '00000000-0000-4000-8000-000000000002' }, complete: true }),
       '回應的錄製來源不同', 'A foreign status after an initial live header cannot mark the original recording sealed'],
-    [{ ...metadata, acceptedSequence: metadata.acceptedSequence - 1, complete: true },
+    [metadata => ({ ...metadata, acceptedSequence: metadata.acceptedSequence - 1, complete: true }),
       '即時觀戰的狀態序號不符', 'A regressive status cannot replace the last accepted live frame'],
   ];
-  const camera = await canvas.getAttribute('data-camera');
+  let verifiedSequence;
   for (const [substitute, error, description] of records) {
-    const body = [['header', metadata], ['frame', frame], ['status', substitute]]
-      .map(([kind, payload]) => `event: ${kind}\ndata: ${JSON.stringify(payload)}\n\n`).join('');
-    const reply = route => route.fulfill({ status: 200, contentType: 'text/event-stream', body });
+    const reply = async route => {
+      // The selected live feed may advance until the reconnect request stops it.
+      const metadata = await api(`/sessions/${sessionId}/world`);
+      verifiedSequence = metadata.acceptedSequence;
+      const frame = await api(`/sessions/${sessionId}/world/frames/${verifiedSequence}`);
+      const body = [['header', metadata], ['frame', frame], ['status', substitute(metadata)]]
+        .map(([kind, payload]) => `event: ${kind}\ndata: ${JSON.stringify(payload)}\n\n`).join('');
+      await route.fulfill({ status: 200, contentType: 'text/event-stream', body });
+    };
     await page.route(watch, reply, { times: 1 });
     try {
       await page.locator('#world-live').click();
@@ -98,12 +119,12 @@ async function checkLiveMetadata({ page, base, live, api, canvas, check }) {
         || document.querySelector('#world-freshness').textContent === '場次已封存', error, { polling: 100 });
       check((await page.locator('#world-message').innerText()).includes(error)
         && (await page.locator('#world-freshness').innerText()).includes('過期')
-        && Number(await canvas.getAttribute('data-sequence')) === frame.packet.sequence
+        && Number(await canvas.getAttribute('data-sequence')) === verifiedSequence
         && await canvas.getAttribute('data-camera') === camera, description);
     } finally { await page.unroute(watch, reply); }
   }
   await page.locator('#world-live').click();
-  await waitForLiveFrame(page, frame.packet.sequence);
+  await waitForLiveFrame(page, verifiedSequence);
 }
 
 async function checkLiveWatch({ page, base, live, api, canvas, screenshots, check, extended }) {
