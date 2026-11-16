@@ -105,6 +105,8 @@ Windows 三包整合驗證可使用 `--prepare-independent-set --check-venue-beg
 
 自動化客戶端可在新版的 `POST /api/venue/phase` 加入 `requireFullParticipation: true`。以回條的同名欄位確認政策已套用。成功時原 `Begin` 事件的 `venue.participationFrame` 保存來源、世界格和擷取偏移。重試須使用同一請求識別與相同政策。
 
+Windows 同機可執行 `scripts/check-desktop-venue-openxr.py`，沿用 [單場原生回歸](#windows-原生回歸) 的管理包、資料目錄及兩個 DLL 參數，再選 `--mode Linked` 或 `--mode Independent`。每次開啟 24 個桌面玩家端和房間 5 第 5 席的原生 OpenXR Mock Runtime。工具先核對全追蹤開場會拒絕含合成姿態的房間，再讓該 OpenXR 席失去姿態，確認有效姿態政策只標記第 5 房、整批保持準備中。恢復後以相同的場館請求識別開始，並從原日誌核對開場畫格與各席終場回條。
+
 ### 執行中五房追蹤總覽
 
 主控專用的「執行中五房追蹤」在控制台 0.31.106 顯示共同取樣時間、各房已確認追蹤的席數及原畫格號。合成、待確認、淘汰及未編列的席位分開列出，準備、暫停及空房也有各自狀態。總數顯示有確認資料的房間數。

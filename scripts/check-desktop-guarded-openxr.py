@@ -30,8 +30,8 @@ field = load('verify-field-results')
 
 
 class GuardedVenue(desktop.Venue):
-    def __init__(self, args):
-        super().__init__(args, artifact_family='desktop-guarded-openxr')
+    def __init__(self, args, *, artifact_family='desktop-guarded-openxr'):
+        super().__init__(args, artifact_family=artifact_family)
         self.endpoint = self.runtime_directory.with_suffix('.sock')
         self.relay = None
 
@@ -132,7 +132,23 @@ class RoomConsole:
             raise RuntimeError('Console and its browser exceeded their shutdown limit')
 
 
-def verify(venue, args, console=None):
+def launch_openxr(venue, entry, player, name):
+    args = venue.args
+    manifest = venue.directory / 'fixture-runtime.json'
+    venue.save(manifest.name, {'file_format_version': '1.0.0', 'runtime':
+        {'api_version': '1.0', 'name': 'VR Command guarded start test', 'library_path': str(args.pose_dll)}})
+    loss = venue.directory / 'aim-loss.request'
+    ack = venue.directory / 'aim-loss-ack.txt'
+    environment = {key: value for key, value in os.environ.items()
+                   if key.upper() != 'XR_RUNTIME_JSON' and not key.upper().startswith('VR_COMMAND_OPENXR_')}
+    environment.update(XR_RUNTIME_JSON=str(manifest), VR_COMMAND_OPENXR_MOCK_DLL=str(args.mock_dll),
+                       VR_COMMAND_OPENXR_AIM_LOSS_FILE=str(loss), VR_COMMAND_OPENXR_AIM_LOSS_ACK=str(ack))
+    venue.launch(name, venue.client_config(entry, venue.ticket(entry, player)), visible=True,
+                 extra_args=('-force-d3d11', '--vr-openxr'), environment=environment)
+    return loss, ack
+
+
+def verify(venue, console=None):
     venue.start()
     mission = venue.mission(1, name='第一房 VR 追蹤開場（Mock Runtime）', briefing='Windows 原生 OpenXR 測試場次')
     entry = venue.create(mission, [1], 'guarded-openxr', role='Room1', origin='GameServer', headset='ViveXr')
@@ -144,18 +160,8 @@ def verify(venue, args, console=None):
     venue.request(session + '/connection-endpoint', {'version': 1, 'streamId': stream, 'address': '127.0.0.1', 'port': entry['port']},
                   role='GameServer', method='PUT')
 
-    manifest = venue.directory / 'fixture-runtime.json'
-    venue.save(manifest.name, {'file_format_version': '1.0.0', 'runtime':
-        {'api_version': '1.0', 'name': 'VR Command guarded start test', 'library_path': str(args.pose_dll)}})
-    loss = venue.directory / 'aim-loss.request'
-    ack = venue.directory / 'aim-loss-ack.txt'
-    environment = {key: value for key, value in os.environ.items()
-                   if key.upper() != 'XR_RUNTIME_JSON' and not key.upper().startswith('VR_COMMAND_OPENXR_')}
-    environment.update(XR_RUNTIME_JSON=str(manifest), VR_COMMAND_OPENXR_MOCK_DLL=str(args.mock_dll),
-                       VR_COMMAND_OPENXR_AIM_LOSS_FILE=str(loss), VR_COMMAND_OPENXR_AIM_LOSS_ACK=str(ack))
     name = entry['name'] + '-player'
-    venue.launch(name, venue.client_config(entry, venue.ticket(entry, player)), visible=True,
-                 extra_args=('-force-d3d11', '--vr-openxr'), environment=environment)
+    loss, ack = launch_openxr(venue, entry, player, name)
     log = venue.directory / (name + '.log')
 
     def log_text():
@@ -281,29 +287,37 @@ def verify_closed(venue, sealed, records, evidence):
     venue.save('closed-readback.json', {'world': world_report, 'combat': combat_report})
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+def add_native_arguments(parser):
     parser.add_argument('--player-exe', type=Path, default=desktop.ROOT / 'artifacts/desktop/VrCommand.exe')
     parser.add_argument('--control-package', type=Path, required=True)
     parser.add_argument('--mock-dll', type=Path, required=True)
     parser.add_argument('--pose-dll', type=Path, required=True)
     parser.add_argument('--runtime-root', type=Path, required=True)
+
+
+def verify_native_inputs(args):
+    if os.name != 'nt':
+        raise ValueError('Requires the Windows Unity player and Windows IPC')
+    package = args.control_package.resolve(strict=True)
+    manifest = load('package-control-server').verify(package)
+    args.console_version = manifest['consoleVersion']
+    if tuple(map(int, args.console_version.split('.'))) < (0, 31, 201):
+        raise ValueError('Use a management package with the exported original guarded VR Begin frame')
+    args.api_exe = package / 'Runtime/VrCommand.Api.exe'
+    args.mock_dll = args.mock_dll.resolve(strict=True)
+    args.pose_dll = args.pose_dll.resolve(strict=True)
+    desktop.verify_player(args)
+    require_silent_windows_launch(sys.executable)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_native_arguments(parser)
     parser.add_argument('--room-console', action='store_true', help='Exercise the shipped room console in headless Chromium')
     args = parser.parse_args()
     args.duration, args.job_workers, args.check = 300, 2, False
     try:
-        if os.name != 'nt':
-            raise ValueError('Requires the Windows Unity player and Windows IPC')
-        package = args.control_package.resolve(strict=True)
-        manifest = load('package-control-server').verify(package)
-        args.console_version = manifest['consoleVersion']
-        if tuple(map(int, args.console_version.split('.'))) < (0, 31, 201):
-            raise ValueError('Use a management package with the exported original guarded VR Begin frame')
-        args.api_exe = package / 'Runtime/VrCommand.Api.exe'
-        args.mock_dll = args.mock_dll.resolve(strict=True)
-        args.pose_dll = args.pose_dll.resolve(strict=True)
-        desktop.verify_player(args)
-        require_silent_windows_launch(sys.executable)
+        verify_native_inputs(args)
         if args.room_console:
             args.node = shutil.which('node')
             if not args.node:
@@ -313,7 +327,7 @@ def main():
     venue = GuardedVenue(args)
     console = RoomConsole(venue) if args.room_console else None
     try:
-        sealed, records, evidence = verify(venue, args, console)
+        sealed, records, evidence = verify(venue, console)
     finally:
         try:
             if console is not None:

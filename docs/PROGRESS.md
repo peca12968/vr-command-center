@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 五房 25 席有效姿態的開場驗證
+
+- Windows 0.50.12 與管理包 0.31.206 完成合併和獨立兩種同機排演。每輪有 24 個桌面玩家端及第 5 房第 5 席的 Unity OpenXR Mock Runtime。全追蹤政策拒絕含合成姿態的五房。該席失去右手指向時，有效姿態政策只回報第 5 房，所有場次保持原準備序號。同一場館開場請求在追蹤恢復後成功，原樣重送只取得重複回條。 [合併拒絕](../artifacts/desktop-venue-openxr/20261116-132044-e28095d4/rejected-start.json) · [獨立拒絕](../artifacts/desktop-venue-openxr/20261116-132059-649a50db/rejected-start.json) · [重跑方式](PLAYER_READINESS.md#五房各-5-席有效姿態開場)
+- 從六份已關閉的世界日誌核對準備時的失效與恢復、實際採用的開場畫格及執行中的原席位。合併 84 格、五房獨立共 417 格。50 份原玩家終場戰績逐席與管理統計相符，25＋25 筆 UDP 入場及伺服器確認對應原連線。兩輪共 36 個原資料檔在 C／F 槽雜湊相符，活動場次與殘留程序均為零。單房原管理台流程另重跑 10 項成功。 [合併讀回](../artifacts/desktop-venue-openxr/20261116-132044-e28095d4/closed-readback.json) · [獨立讀回](../artifacts/desktop-venue-openxr/20261116-132059-649a50db/closed-readback.json) · [單房回歸](../artifacts/desktop-guarded-openxr/20261116-132114-467ea780/stage.json)
+- 保留兩次早期測試失敗。首輪完成開場及封存，讀回缺少明確啟用的 UDP 同儕日誌。另一輪補核對 End 時，發現其後會再記錄一筆戰鬥封存，調整為分別驗證 End 事件與封存序號。Quest 3 被動檢查仍只有檔案傳輸介面，實機及跨機 25 人待驗。 [同儕日誌首輪](../artifacts/desktop-venue-openxr/20261116-131707-2d1c22b8/cleanup.json) · [End 原回條](../artifacts/desktop-venue-openxr/20261116-131942-36883b19/ended.json)
+
 ## 2026-11-16 在原管理台驗證 VR 追蹤開場與回放
 
 - 管理包 0.31.206 搭配 Windows 0.50.12 與 Unity Mock Runtime，以無介面 Chromium 登入第一房房控。畫面從 1／1 席更新到 0／1 席，點開場回傳 HTTP 409 並顯示追蹤未就緒，管理序號保持 3。追蹤恢復後再次點擊，在序號 4 開場。重送該次瀏覽器的原命令取得重複回條，並確認原生遊戲第 74 格已進入執行中。 [拒絕畫面](../artifacts/desktop-guarded-openxr/20261116-131052-d7631a0c/console-tracking-lost.png) · [接受回條](../artifacts/desktop-guarded-openxr/20261116-131052-d7631a0c/accepted-begin.json)
