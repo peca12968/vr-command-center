@@ -7,6 +7,8 @@ import sys
 import time
 import uuid
 
+from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
+
 
 def send(sock, value):
     body = json.dumps(value, separators=(',', ':')).encode()
@@ -93,6 +95,10 @@ def main():
     args = parser.parse_args()
     if args.port != 0 and not 1024 <= args.port <= 65535:
         parser.error('Use 0 or a port in 1024–65535')
+    try:
+        require_silent_windows_launch(sys.executable)
+    except WindowsFirewallLaunchError as error:
+        parser.exit(2, f'{error}\n')
     with socket.socket() as listener:
         listener.bind(('127.0.0.1', args.port))
         listener.listen()
