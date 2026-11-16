@@ -4,6 +4,8 @@
 
 - 單席正式日誌與五房總報告都在暫存檔關閉後一次發布。舊版建立正式日誌時測得檔案大小為零。新版直接發布已核對的日誌，同名正式檔若在擷取期間出現，會保留原檔與本輪暫存。16 項單席及報告擷取專項通過。 [操作方式](QUEST3.md#收集-quest-場館驗收日誌) · [舊版反例](../artifacts/quest-capture-publish-20261117/before.log) · [擷取回歸](../artifacts/quest-capture-publish-20261117/capture-final.log)
 - 實際 Windows SDK ADB 用戶端連上同機模擬裝置，合併及獨立各擷取 25 席，在 F 槽逐份核對原位元組與 SHA-256。另一次三席排演刻意產生同名檔案，該席保留兩份檔案並在完整總報告中列為未完成，另外兩席通過。Windows 此時仍只偵測到 Quest 3 的檔案傳輸介面。 [ADB 回讀](../artifacts/quest-capture-publish-20261117/native-adb-readback.json) · [USB 快照](../artifacts/quest-capture-publish-20261117/usb-status.json)
+- 原封存驗收工具重新開啟三份總報告與 52 份已完成日誌，逐席核對位元組、摘要與最終斷線。完整封存回歸 144 項通過，另一次專項驗證包含新增的總報告測試。部署回歸 84 項中 83 項通過，1 項略過。 [封存重讀](../artifacts/quest-capture-publish-20261117/field-readback.json) · [封存回歸](../artifacts/quest-capture-publish-20261117/field-full.log) · [部署回歸](../artifacts/quest-capture-publish-20261117/quest-full.log)
+- GitHub Actions 對 `4c8cbd7` 回報帳務或用量限制，工作未啟動。 [GitHub Actions 工作](https://github.com/peca12968/vr-command-center/actions/runs/43945402915/job/133573600602)
 
 ## 2026-11-17 玩家分房回放核對實際座標
 
