@@ -4,6 +4,7 @@
 
 - 管理台 0.31.221 的網頁及離線播放器會核對分房片段中場景物件與射線起點的座標。這兩項使用本房觀戰原有的單精度邊界。用同一份片段修改座標後，舊版能開啟兩份錯房檔，新版在顯示前分別指出錯房的物件或射線。原全場格式及射線的原方向、距離保持相容。 [播放器操作](WORLD_RECORDING.md#讓玩家開啟回放) · [舊版單元反例](../artifacts/player-replay-room-031221/model-before.log) · [離線瀏覽器驗證](../artifacts/player-replay-room-031221/chromium-offline.json)
 - Windows 管理包解壓逐檔核對 571 項。121 項 Node 與 7 項套件回歸通過。從原 Windows 合併與獨立場的封存副本匯出十份分房及兩份完整格式片段，共 120 格。分房 ZIP 逐份比對內附播放器及 JSON，離線 Chromium 完成 18 個載入案例，對外請求為零。房控複驗原十房回放與 50 份戰績，原封存雜湊相同。Quest USB 偵錯介面仍為零。 [Windows 管理包](../artifacts/player-replay-room-031221/VRCommand-ControlServer-0.31.221.zip) · [匯出紀錄](../artifacts/player-replay-room-031221/exports.json) · [房控驗證](../artifacts/player-replay-room-031221/native-readback.json) · [USB 快照](../artifacts/player-replay-room-031221/usb-status.json)
+- GitHub Actions 對 `40be9f6` 回報帳務或用量限制，工作未啟動。 [GitHub Actions 工作](https://github.com/peca12968/vr-command-center/actions/runs/43943745978/job/133567769309)
 
 ## 2026-11-17 每次啟動原生遊戲前查核 Windows 防火牆
 
