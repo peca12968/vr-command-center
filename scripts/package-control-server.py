@@ -127,7 +127,12 @@ def main():
     api,receipt=publication(args.publication);stage=plain(args.stage_root)/('control-server-'+uuid.uuid4().hex);stage.mkdir(parents=True,exist_ok=False);folder=stage/TOP;folder.mkdir();shutil.copytree(api,folder/'Runtime')
     license_folder=folder/'Notices';license_folder.mkdir();notice_sources=notices(args.publication,license_folder)
     source=ROOT/'tools/WindowsControlLauncher/ControlLauncher.cs';compiler=Path(os.environ.get('WINDIR','C:/Windows'))/'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
-    with (stage/'compile.log').open('xb') as log:subprocess.run([str(compiler),'/nologo','/warnaserror','/codepage:65001','/target:winexe','/platform:x64','/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Web.Extensions.dll','/out:'+str(folder/'Start-Control.exe'),str(source)],stdout=log,stderr=subprocess.STDOUT,check=True)
+    with (stage/'compile.log').open('xb') as log:
+        subprocess.run([str(compiler),'/nologo','/warnaserror','/codepage:65001','/target:winexe','/platform:x64',
+                        '/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Web.Extensions.dll',
+                        '/resource:'+str(ROOT/'scripts/check-windows-firewall-notifications.ps1')+',FirewallPreflight.ps1',
+                        '/out:'+str(folder/'Start-Control.exe'),str(source),str(ROOT/'tools/WindowsFirewallPreflight.cs')],
+                       stdout=log,stderr=subprocess.STDOUT,check=True)
     (folder/'README.txt').write_text(README,encoding='utf-8');(folder/'publish-receipt.json').write_text(json.dumps(receipt,indent=2)+'\n',encoding='utf-8')
     manifest={'schemaVersion':1,'target':'win-x64','apiVersion':'0.31.0','consoleVersion':receipt['consoleVersion'],'createdAtUtc':datetime.now(timezone.utc).isoformat(),'launcherSourceSha256':digest(source),'runtimeFrameworks':receipt['runtimeFrameworks'],
         'scope':'Portable management API / private instance launcher; no Unity server, keys, tickets or databases. SHA manifest is not a signature.',

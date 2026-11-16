@@ -417,7 +417,9 @@ internal static class PlayerLauncher
         if (openXR) args += " -force-d3d11 --vr-openxr";
         if (log != null) args += " -logFile " + Quote(log);
         if (linkMetrics != null) args += " --vr-link-metrics " + Quote(linkMetrics);
-        var child = Process.Start(new ProcessStartInfo(Path.Combine(Root, "VrCommand.exe"), args)
+        var image = Path.Combine(Root, "VrCommand.exe");
+        WindowsFirewallPreflight.Require(image);
+        var child = Process.Start(new ProcessStartInfo(image, args)
         { UseShellExecute = false, WorkingDirectory = Root, CreateNoWindow = headless });
         Require(child != null, "無法啟動玩家程式。");
         try { ProcessReport(reportPath, "started", release, child); return child; }
@@ -514,13 +516,14 @@ internal static class PlayerLauncher
             Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new PlayerForm(config, log, report)); return 0;
         }
-        catch
+        catch (Exception error)
         {
             // Serializer / IO exception text can contain input. Do not echo secrets or file contents.
+            var firewall = error as WindowsFirewallPreflight;
             if (report != null && !File.Exists(report) && !report.StartsWith(Root, StringComparison.OrdinalIgnoreCase) && !SamePath(report, config)
                 && !SamePath(report, log) && !SamePath(report, linkMetrics) && !SamePath(report, releasePath) && !SamePath(report, evidenceZip))
-                try { Report(report, new { status = "rejected", reason = "Package, connection file or launch options are invalid." }); } catch { }
-            if (report == null) Console.Error.WriteLine("Unable to start. Check the extracted player package and the downloaded player connection file.");
+                try { Report(report, new { status = "rejected", reason = firewall == null ? "Package, connection file or launch options are invalid." : firewall.Message }); } catch { }
+            if (report == null) Console.Error.WriteLine(firewall == null ? "Unable to start. Check the extracted player package and the downloaded player connection file." : firewall.Message);
             return 1;
         }
     }
@@ -800,6 +803,10 @@ internal static class PlayerLauncher
                     releasePath.Enabled = false; chooseRelease.Enabled = false; loadRelease.Enabled = false;
                     status.Text = monitor.Message;
                     RenderTicket();
+                }
+                catch (WindowsFirewallPreflight error)
+                {
+                    status.Text = error.Message; UpdatePlay();
                 }
                 catch
                 {

@@ -159,8 +159,10 @@ def package(player, output, compiler):
         subprocess.run([str(compiler), '/nologo', '/target:winexe', '/platform:x64', '/optimize+', '/warnaserror+',
                         '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/reference:System.Web.Extensions.dll',
                         '/reference:System.IO.Compression.dll',
-                        '/out:' + str(folder / 'Launch-Player.exe'), str(source)], check=True)
-        manifest = {'version': 1, 'platform': 'Windows-x64', 'launcherVersion': '1.17.1', 'createdAtUtc': datetime.now(timezone.utc).isoformat(),
+                        '/resource:' + str(ROOT / 'scripts/check-windows-firewall-notifications.ps1') + ',FirewallPreflight.ps1',
+                        '/out:' + str(folder / 'Launch-Player.exe'), str(source),
+                        str(ROOT / 'tools/WindowsFirewallPreflight.cs')], check=True)
+        manifest = {'version': 1, 'platform': 'Windows-x64', 'launcherVersion': '1.17.2', 'createdAtUtc': datetime.now(timezone.utc).isoformat(),
                     'build': receipt, 'launcherSourceSha256': digest(source), 'scope': 'Offline portable PC player; no tickets; not a signature or network/device verification',
                     'files': [{'path': file.relative_to(folder).as_posix(), 'bytes': file.stat().st_size, 'sha256': digest(file)}
                               for file in sorted(folder.rglob('*')) if file.is_file()]}

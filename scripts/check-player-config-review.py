@@ -11,6 +11,7 @@ def main():
     directory = ROOT / 'artifacts/player-review-checks' / ('run-' + uuid.uuid4().hex)
     directory.mkdir(parents=True, exist_ok=False)
     sources = [ROOT / 'tools/WindowsPlayerLauncher' / n for n in ['PlayerLauncher.cs', 'ConfigReviewChecks.cs']]
+    sources.append(ROOT / 'tools/WindowsFirewallPreflight.cs')
     exe = directory / 'checks.exe'
     done = subprocess.run([str(compiler), '/nologo', '/target:exe', '/platform:x64', '/warnaserror+', '/main:PlayerReviewChecks',
         '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/reference:System.Web.Extensions.dll', '/reference:System.IO.Compression.dll',

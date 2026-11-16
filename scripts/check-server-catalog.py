@@ -102,7 +102,7 @@ def main():
         delayed_instance=delayed/'control-instance.json'
         shutil.copyfile(data/'operator-keys.json',delayed/'operator-keys.json')
         compiler=Path(os.environ['WINDIR'])/'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
-        with (proof/'compile.log').open('xb') as log:subprocess.run([str(compiler),'/nologo','/warnaserror','/codepage:65001','/target:exe','/platform:x64','/main:ServerCatalogProof','/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Web.Extensions.dll','/out:'+str(proof/'CatalogProof.exe'),str(proof/'ServerLauncher.cs'),str(proof/'CatalogProof.cs')],stdout=log,stderr=subprocess.STDOUT,check=True)
+        with (proof/'compile.log').open('xb') as log:subprocess.run([str(compiler),'/nologo','/warnaserror','/codepage:65001','/target:exe','/platform:x64','/main:ServerCatalogProof','/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Web.Extensions.dll','/out:'+str(proof/'CatalogProof.exe'),str(proof/'ServerLauncher.cs'),str(proof/'CatalogProof.cs'),str(ROOT/'tools/WindowsFirewallPreflight.cs')],stdout=log,stderr=subprocess.STDOUT,check=True)
         with held_catalog(port, delayed) as relay_port:
             delayed_instance.write_text(json.dumps(dict(read(data/'control-instance.json'),port=relay_port)),encoding='utf-8')
             descriptor.write_text(json.dumps({'instance':str(data/'control-instance.json'),'masterKey':keys['Master'],

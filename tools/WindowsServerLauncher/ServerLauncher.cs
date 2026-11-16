@@ -563,6 +563,8 @@ internal static class ServerLauncher
             {
                 Verify();
                 if (trackedVr) RequireTrackedVrBuild();
+                WindowsFirewallPreflight.Require(typeof(ServerLauncher).Assembly.Location);
+                WindowsFirewallPreflight.Require(Path.Combine(Root, "Runtime", "VrCommand.exe"));
             }
             Config.Identity(); var state = Config.Request("/api/sessions/" + Config.Session);
             var experience = Text(Child(state, "environment"), "mode");
@@ -954,6 +956,7 @@ internal static class ServerLauncher
             servers.Add(new VenueServer { Choice = choice, Config = config });
         }
         servers.Sort((a, b) => a.Choice.Rooms[0].CompareTo(b.Choice.Rooms[0]));
+        WindowsFirewallPreflight.Require(typeof(ServerLauncher).Assembly.Location);
         foreach (var server in servers)
             try { server.Config.CheckPort(); }
             catch (SocketException) { throw new InvalidDataException("無法使用房間 " + String.Join("、", server.Choice.Rooms) + " 的 UDP 埠 " + server.Config.Port + "。"); }
@@ -981,6 +984,8 @@ internal static class ServerLauncher
     {
         Need(!cancel(), "已中止啟動；此輪未完成。");
         if (trackedVr) RequireTrackedVrBuild();
+        WindowsFirewallPreflight.Require(typeof(ServerLauncher).Assembly.Location);
+        WindowsFirewallPreflight.Require(Path.Combine(Root, "Runtime", "VrCommand.exe"));
         if (deadlines != null) deadlines.RequirePending(DateTimeOffset.UtcNow);
         var servers = plan.Servers;
         var launchId = plan.Version >= 4 ? Guid.NewGuid().ToString("D") : null;

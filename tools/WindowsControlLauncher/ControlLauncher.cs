@@ -146,10 +146,12 @@ internal static class ControlLauncher
         internal void Start(string root)
         {
             Verify(); var instance = Instance(root); keys = Keys(root); nonce = Token();
+            var image = Path.Combine(Root, "Runtime", "VrCommand.Api.exe");
+            WindowsFirewallPreflight.Require(image);
             var lockPath = Path.Combine(root, ".control-server.lock"); Plain(lockPath); lease = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             var https = HttpsSettings.Load(root, instance);
             Uri = "http://" + Text(instance, "bindAddress") + ":" + Number(instance, "port");
-            var info = new ProcessStartInfo(Path.Combine(Root, "Runtime", "VrCommand.Api.exe"), "--urls " + Uri) { WorkingDirectory = Full(root), UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
+            var info = new ProcessStartInfo(image, "--urls " + Uri) { WorkingDirectory = Full(root), UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
             var remove = new List<string>(); foreach (string name in info.EnvironmentVariables.Keys) if (name.StartsWith("OperatorKeys__", StringComparison.OrdinalIgnoreCase) || String.Equals(name, "OperatorKeyFile", StringComparison.OrdinalIgnoreCase) || String.Equals(name, "PlayerTicketSigningKey", StringComparison.OrdinalIgnoreCase) || String.Equals(name, "ControlPipeToken", StringComparison.OrdinalIgnoreCase) || name.StartsWith(HttpsSettings.Prefix, StringComparison.OrdinalIgnoreCase) || String.Equals(name, HttpsSettings.PasswordVariable, StringComparison.OrdinalIgnoreCase)) remove.Add(name);
             foreach (var name in remove) info.EnvironmentVariables.Remove(name);
             info.EnvironmentVariables["OperatorKeyFile"] = Path.Combine(Full(root), "operator-keys.json"); info.EnvironmentVariables["DataDirectory"] = Path.Combine(Full(root), "missions"); info.EnvironmentVariables["SessionDataDirectory"] = Path.Combine(Full(root), "sessions");
@@ -226,7 +228,7 @@ internal static class ControlLauncher
         catch (Exception error)
         {
             if (service != null) { try { service.Stop(); } catch { } }
-            if (report != null && !File.Exists(report)) { try { SaveNew(report, new { status = "rejected", complete = false, errorType = error.GetType().Name, childPid = service == null ? 0 : service.ChildId, childExited = service == null || !service.Running }); } catch { } }
+            if (report != null && !File.Exists(report)) { try { SaveNew(report, new { status = "rejected", complete = false, errorType = error.GetType().Name, childPid = service == null ? 0 : service.ChildId, childExited = service == null || !service.Running, firewall = error is WindowsFirewallPreflight ? error.Message : null }); } catch { } }
             return 1;
         }
         finally { if (service != null) service.Dispose(); }
@@ -252,7 +254,7 @@ internal static class ControlLauncher
             var credentials = new FlowLayoutPanel { Width = 620, Height = 44 }; role.Items.AddRange(Roles); role.SelectedIndex = 0; credentials.Controls.Add(role); credentials.Controls.Add(copy); credentials.Controls.Add(open); panel.Controls.Add(credentials); panel.Controls.Add(status);
             create.Click += (s, e) => Try(() => { var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrCommand", "ControlServers", DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")); Verify(); Initialize(path, bind.Text, (int)port.Value); LoadInstance(path); });
             select.Click += (s, e) => { using (var dialog = new OpenFileDialog { Title = "選取資料實例的control-instance.json", Filter = "VR Command資料實例|control-instance.json", FileName = "control-instance.json", CheckFileExists = true, Multiselect = false, AutoUpgradeEnabled = true, InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) }) if (dialog.ShowDialog(this) == DialogResult.OK) Try(() => LoadInstance(Path.GetDirectoryName(dialog.FileName))); };
-            start.Click += (s, e) => { var selectedRoot = folder.Text; busy = true; UpdateButtons(); status.Text = "正在啟動並核對管理服務…"; ThreadPool.QueueUserWorkItem(x => { try { var next = new Service(); service = next; next.Start(selectedRoot); BeginInvoke((Action)(() => { busy = false; status.Text = "服務已就緒：" + next.Uri + (next.HttpsBinding == null ? "" : "\r\n房控HTTPS監聽：" + next.HttpsBinding); UpdateButtons(); })); } catch { if (service != null) { try { service.Dispose(); service = null; } catch { } } BeginInvoke((Action)(() => { busy = false; status.Text = service == null ? "啟動失敗，請確認資料、地址、埠號與HTTPS設定。" : "啟動未完成，服務停止尚未確認。請保留此視窗。"; UpdateButtons(); })); } }); };
+            start.Click += (s, e) => { var selectedRoot = folder.Text; busy = true; UpdateButtons(); status.Text = "正在啟動並核對管理服務…"; ThreadPool.QueueUserWorkItem(x => { try { var next = new Service(); service = next; next.Start(selectedRoot); BeginInvoke((Action)(() => { busy = false; status.Text = "服務已就緒：" + next.Uri + (next.HttpsBinding == null ? "" : "\r\n房控HTTPS監聽：" + next.HttpsBinding); UpdateButtons(); })); } catch (Exception error) { if (service != null) { try { service.Dispose(); service = null; } catch { } } BeginInvoke((Action)(() => { busy = false; status.Text = error is WindowsFirewallPreflight ? error.Message : service == null ? "啟動失敗，請確認資料、地址、埠號與HTTPS設定。" : "啟動未完成，服務停止尚未確認。請保留此視窗。"; UpdateButtons(); })); } }); };
             stop.Click += (s, e) => Stop(false); open.Click += (s, e) => Try(() => Process.Start(new ProcessStartInfo(service.Uri + "/console/") { UseShellExecute = true })); copy.Click += (s, e) => Try(() => { Clipboard.SetText(ControlLauncher.Text(Keys(folder.Text), role.Text)); status.Text = "已複製所選角色的登入金鑰。"; });
             bind.SelectedIndexChanged += (s, e) => UpdateButtons(); port.ValueChanged += (s, e) => UpdateButtons();
             var monitor = new System.Windows.Forms.Timer { Interval = 1000 }; monitor.Tick += (s, e) => { if (!busy && service != null && !service.Running) { status.Text = "管理服務已中斷；確認停止後可重開原資料實例。"; UpdateButtons(); } }; monitor.Start();

@@ -11,8 +11,10 @@ New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
 if (-not (Test-Path -LiteralPath $EditorPath)) { throw "Unity Editor not found at $EditorPath" }
 $packageManager = Join-Path (Split-Path -Parent $EditorPath) 'Data/Resources/PackageManager/Server/UnityPackageManager.exe'
 if (-not (Test-Path -LiteralPath $packageManager)) { throw 'Unity installation is not complete: the Package Manager component is missing. Wait for the active installer to finish.' }
-& (Join-Path $PSScriptRoot 'check-windows-firewall-notifications.ps1') -Executable $EditorPath
-if ($LASTEXITCODE -ne 0) { throw 'Unity Editor startup skipped after the Windows Firewall check.' }
+foreach ($program in @($EditorPath, $packageManager)) {
+    & (Join-Path $PSScriptRoot 'check-windows-firewall-notifications.ps1') -Executable $program
+    if ($LASTEXITCODE -ne 0) { throw "Unity startup skipped after the Windows Firewall check for $program." }
+}
 $method = switch ($Target) {
     'Prepare' { 'Prepare' }
     'Desktop' { 'BuildDesktop' }

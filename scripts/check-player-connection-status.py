@@ -22,6 +22,7 @@ def main():
     if os.name != 'nt' or not args.compiler.is_file(): parser.error('Requires Windows and the installed .NET Framework compiler')
     directory = ROOT / 'artifacts/launcher-status-checks' / (datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8]); directory.mkdir(parents=True, exist_ok=False)
     sources = [ROOT / 'tools/WindowsPlayerLauncher' / name for name in ['PlayerLauncher.cs', 'ConnectionStatusChecks.cs']]
+    sources.append(ROOT / 'tools/WindowsFirewallPreflight.cs')
     executable = directory / 'checks.exe'
     result = subprocess.run([str(args.compiler), '/nologo', '/target:exe', '/platform:x64', '/optimize+', '/warnaserror+', '/main:LauncherStateChecks',
         '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/reference:System.Web.Extensions.dll',
