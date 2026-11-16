@@ -100,9 +100,8 @@ export function mountMrVenueBundle(state, api, download, ticketDestination) {
       if (!applies()) return;
       const bundle = await api('/mr-deployment/venue-bundle', 'POST', { topology: current.topology,
         rooms: current.entries.map(({ roomId, sessionId, players }, index) => ({ roomId, sessionId, players, alignmentFile: alignments[index] })) },
-      undefined, undefined, 'blob');
+      undefined, undefined, 'venue-ticket-archive');
       if (!applies()) return;
-      if (bundle.type !== 'application/zip') throw new Error('Expected a venue ZIP download.');
       const latest = plan(await api('/sessions'));
       if (!applies()) return;
       if (!latest?.ready || latest.target !== current.target || latest.roster !== current.roster) {
@@ -125,7 +124,7 @@ export function mountMrVenueBundle(state, api, download, ticketDestination) {
       download('quest-mr-venue.zip', bundle);
       status.textContent = '已下載五房部署包。票券有效五分鐘，請依房間與席位個別交付。';
     } catch (error) {
-      if (applies()) status.textContent = Object.hasOwn(guidance, error.code) && Number.isInteger(error.roomId)
+      if (applies()) status.textContent = error.code === 'venue-archive-unverified' ? error.message : Object.hasOwn(guidance, error.code) && Number.isInteger(error.roomId)
         ? `房間 ${error.roomId} · ${guidance[error.code]}` : '未能下載部署包，請確認場次與連線後再試。';
     } finally {
       if (generation === request) { pending = false; update(); }

@@ -159,6 +159,41 @@ with zipfile.ZipFile(sys.argv[1]) as outer:
       check(plan.ready && conflict.roomId === 5 && conflict.code === 'vr-venue-source-changed',
         topology + ' venue uses published sources and refuses a stale source before issuing a ZIP');
       if (topology === 'Linked') assert.match(await page.locator('#vr-venue-rooms').textContent(), /僅本機/);
+      if (topology === 'Independent') {
+        const archiveRoute = '**/api' + bundle;
+        for (const fault of ['bytes', 'request']) {
+          const received = Promise.withResolvers();
+          const substitute = async route => {
+            try {
+              const original = await route.fetch(), headers = original.headers(), body = Buffer.from(await original.body());
+              assert.equal(original.status(), 200);
+              if (fault === 'bytes') body[0] ^= 1;
+              else headers['x-vrcommand-archive-request'] = randomUUID();
+              await route.fulfill({ response: original, headers, body });
+              received.resolve(null);
+            } catch (error) { received.resolve(error); }
+          };
+          const downloads = [];
+          const record = file => downloads.push(file);
+          await page.route(archiveRoute, substitute, { times: 1 });
+          page.on('download', record);
+          try {
+            await issue.click();
+            await status.filter({ hasText: /無法核對五房連線檔|已下載五房/ }).waitFor();
+            const error = await received.promise;
+            if (error) throw error;
+            check((await status.textContent()).includes('無法核對五房連線檔') && downloads.length === 0,
+              fault === 'bytes' ? 'Modified ZIP bytes are rejected even when the response is labelled as a ZIP'
+                : 'A genuine ZIP with the wrong issuance request ID is rejected');
+          } finally {
+            await page.unroute(archiveRoute, substitute);
+            page.off('download', record);
+            for (const file of downloads) await file.delete();
+          }
+          await load.click();
+          await status.filter({ hasText: '已讀取 25 席' }).waitFor();
+        }
+      }
       const downloaded = page.waitForEvent('download');
       await issue.click();
       const proof = await inspect(await downloaded, plan);

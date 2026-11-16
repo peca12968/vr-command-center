@@ -151,9 +151,8 @@ export function mountVrVenueTickets(state, api, download, ticketSourceLive) {
         }
       }
       const route = mixed ? '/mixed-deployment/venue' : '/vr-deployment/venue';
-      const zip = await api(route + '-bundle', 'POST', body, undefined, undefined, 'blob');
+      const zip = await api(route + '-bundle', 'POST', body, undefined, undefined, 'venue-ticket-archive');
       if (!request.current()) return;
-      if (zip.type !== 'application/zip') throw new Error('Invalid venue archive');
       const current = await api(route);
       if (!request.current()) return;
       if (!current?.ready || current.topology !== topology || !Array.isArray(current.rooms) || roomScope(current.rooms) !== roomScope(confirmedRooms)) {
@@ -164,7 +163,7 @@ export function mountVrVenueTickets(state, api, download, ticketSourceLive) {
       status.textContent = '已下載五房連線檔。票券有效五分鐘，請依房間與席位個別交付。';
     } catch (error) {
       if (request.current()) {
-        const reason = Object.hasOwn(guidance, error.code) && Number.isInteger(error.roomId)
+        const reason = error.code === 'venue-archive-unverified' ? error.message : Object.hasOwn(guidance, error.code) && Number.isInteger(error.roomId)
           ? `房間 ${error.roomId} · ${guidance[error.code]}。請重新讀取五房名冊。` : '無法下載五房連線檔，請重新讀取後重試。';
         clear(reason); update();
       }

@@ -136,14 +136,38 @@ function canIssueTicket(session, room) {
 }
 function time(value) { return new Date(value).toLocaleTimeString('zh-TW', { hour12: false }); }
 
+async function readVenueTicketArchive(response, request, signal) {
+  const limit = 256 * 1024;
+  try {
+    const digest = /^sha-256=:([A-Za-z0-9+/]{43}=):$/.exec(response.headers.get('Repr-Digest') ?? '')?.[1];
+    if (!digest || response.headers.get('X-VrCommand-Archive-Request') !== request
+      || response.headers.get('Content-Type')?.split(';', 1)[0].trim() !== 'application/zip'
+      || Number(response.headers.get('Content-Length')) > limit) throw new Error();
+    const file = await response.blob();
+    if (file.size < 1 || file.size > limit) throw new Error();
+    // Fetch verifies the bytes locally, including on HTTP management pages.
+    const local = URL.createObjectURL(file);
+    try {
+      const verified = await fetch(local, { integrity: 'sha256-' + digest, signal });
+      if (!verified.ok) throw new Error();
+      await verified.arrayBuffer();
+    } finally { URL.revokeObjectURL(local); }
+    return file;
+  } catch {
+    throw Object.assign(new Error('無法核對五房連線檔的原始內容，請重新配票。'), { code: 'venue-archive-unverified' });
+  }
+}
+
 async function api(path, method = 'GET', body, requestId, admissionId, responseType = 'json') {
   const controller = new AbortController(), epoch = state.epoch;
   const timeout = setTimeout(() => controller.abort(), 8000);
   try {
     const binary = body instanceof Blob;
-    const response = await fetch('/api' + path, { method, headers: { Authorization: 'Bearer ' + state.key, 'Content-Type': binary ? 'application/octet-stream' : 'application/json', ...(requestId ? { 'Idempotency-Key': requestId } : {}), ...(admissionId ? { 'If-Match-Admission': admissionId } : {}) }, body: binary || body === undefined ? body : JSON.stringify(body), signal: controller.signal, cache: 'no-store' });
+    const archiveRequest = responseType === 'venue-ticket-archive' ? uuid() : null;
+    const response = await fetch('/api' + path, { method, headers: { Authorization: 'Bearer ' + state.key, 'Content-Type': binary ? 'application/octet-stream' : 'application/json', ...(requestId ? { 'Idempotency-Key': requestId } : {}), ...(admissionId ? { 'If-Match-Admission': admissionId } : {}), ...(archiveRequest ? { 'X-VrCommand-Archive-Request': archiveRequest } : {}) }, body: binary || body === undefined ? body : JSON.stringify(body), signal: controller.signal, cache: 'no-store' });
     if (epoch !== state.epoch) throw new Error('登入狀態已變更，已忽略舊回應。');
-    const content = responseType === 'blob' && response.ok ? await response.blob() : await response.text();
+    const content = archiveRequest && response.ok ? await readVenueTicketArchive(response, archiveRequest, controller.signal)
+      : responseType === 'blob' && response.ok ? await response.blob() : await response.text();
     if (epoch !== state.epoch) throw new Error('登入狀態已變更，已忽略舊回應。');
     if (!response.ok) {
       let message = '操作未完成，請重新整理後確認。', layout, code, maxCount, roomIds, roomId, workstationIssues, blockedRooms, reviews;
@@ -186,7 +210,7 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
       const error = new Error(message); error.status = response.status; error.layout = layout; error.code = code; error.roomId = roomId;
       error.workstationIssues = workstationIssues; error.beginReviews = reviews; throw error;
     }
-    if (responseType === 'blob') return content;
+    if (responseType === 'blob' || archiveRequest) return content;
     return content ? JSON.parse(content) : null;
   } finally { clearTimeout(timeout); }
 }

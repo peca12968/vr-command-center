@@ -63,7 +63,7 @@ app.Use(async (context, next) =>
     context.Response.Headers["Referrer-Policy"] = "no-referrer";
     if (context.Request.Path.StartsWithSegments("/console"))
     {
-        context.Response.Headers.ContentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
+        context.Response.Headers.ContentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' blob:; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
         context.Response.Headers.CacheControl = "no-store";
     }
     await next(context);
@@ -361,7 +361,7 @@ app.MapMethods("/api/venue/closure/{id:guid}/reports.zip", [HttpMethods.Get, Htt
 {
     context.Response.Headers.CacheControl = "no-store";
     var report = manager.FinalVenueReports(id, Actor(context));
-    return ReportArchive(context, FinalReportCsv.EncodeVenueBundle(report, includeScores == true), $"vr-command-venue-reports-v1-{report.RequestId:D}.zip");
+    return ArchiveWithDigest(context, FinalReportCsv.EncodeVenueBundle(report, includeScores == true), $"vr-command-venue-reports-v1-{report.RequestId:D}.zip");
 });
 app.MapGet("/api/venue/closure/{id:guid}/scores.csv", (Guid id, SessionManager manager, HttpContext context) =>
 {
@@ -460,12 +460,20 @@ app.MapMethods("/api/sessions/{id:guid}/reports.zip", [HttpMethods.Get, HttpMeth
     if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Only the master may export the linked report bundle.");
     var report = manager.FinalReport(id, actor);
     if (report.Mode != SessionMode.Linked) throw new ArgumentException("The report bundle requires a linked session.");
-    return ReportArchive(context, FinalReportCsv.EncodeBundle(report), $"vr-command-reports-v1-{report.SessionId:D}.zip");
+    return ArchiveWithDigest(context, FinalReportCsv.EncodeBundle(report), $"vr-command-reports-v1-{report.SessionId:D}.zip");
 });
-static IResult ReportArchive(HttpContext context, byte[] archive, string filename)
+static IResult ArchiveWithDigest(HttpContext context, byte[] archive, string filename)
 {
     context.Response.Headers["Repr-Digest"] = $"sha-256=:{Convert.ToBase64String(SHA256.HashData(archive))}:";
     return Results.File(archive, "application/zip", filename);
+}
+static IResult VenueTicketArchive(HttpContext context, byte[] archive, string filename)
+{
+    const string requestHeader = "X-VrCommand-Archive-Request";
+    var values = context.Request.Headers[requestHeader];
+    if (values.Count == 1 && Guid.TryParseExact(values[0], "D", out var id) && id != Guid.Empty)
+        context.Response.Headers[requestHeader] = id.ToString("D");
+    return ArchiveWithDigest(context, archive, filename);
 }
 static IResult ExportReport(Guid id, int? roomId, SessionManager manager, HttpContext context)
 {
@@ -583,7 +591,7 @@ app.MapPost("/api/mr-deployment/venue-bundle", async (WorldRecordings worlds, Ht
     var actor = Actor(context);
     if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue exports require the master operator.");
     var request = await MrVenueBundle.Read(context.Request, context.RequestAborted);
-    return Results.File(MrVenueBundle.Create(request, worlds, actor, ticketSigner), "application/zip", "quest-mr-venue.zip");
+    return VenueTicketArchive(context, MrVenueBundle.Create(request, worlds, actor, ticketSigner), "quest-mr-venue.zip");
 });
 app.MapGet("/api/vr-deployment/venue", (WorldRecordings worlds, HttpContext context) =>
 {
@@ -596,7 +604,7 @@ app.MapPost("/api/vr-deployment/venue-bundle", async (WorldRecordings worlds, Ht
     var actor = Actor(context);
     if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue exports require the master operator.");
     var request = await VrVenueTickets.ReadRequest(context.Request, context.RequestAborted);
-    return Results.File(VrVenueTickets.Create(request, worlds, actor, ticketSigner), "application/zip", "vr-venue-connections.zip");
+    return VenueTicketArchive(context, VrVenueTickets.Create(request, worlds, actor, ticketSigner), "vr-venue-connections.zip");
 });
 app.MapPost("/api/vr-deployment/venue-check", async (WorldRecordings worlds, HttpContext context) =>
 {
@@ -617,7 +625,7 @@ app.MapPost("/api/mixed-deployment/venue-bundle", async (WorldRecordings worlds,
     var actor = Actor(context);
     if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue exports require the master operator.");
     var request = await MixedVenueDeployment.ReadBundle(context.Request, context.RequestAborted);
-    return Results.File(MixedVenueDeployment.Create(request, worlds, actor, ticketSigner), "application/zip", "vr-mr-venue-deployment.zip");
+    return VenueTicketArchive(context, MixedVenueDeployment.Create(request, worlds, actor, ticketSigner), "vr-mr-venue-deployment.zip");
 });
 app.MapPost("/api/mixed-deployment/venue-check", async (WorldRecordings worlds, HttpContext context) =>
 {

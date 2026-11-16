@@ -40,7 +40,8 @@ module.exports = async ({ context, api, tokens, base, root, directory, screensho
     const origin = 'GameServer';
     await api(roomPath(session.id) + '/combat-stream', 'POST', { streamId, origin }, 'GameServer');
     const started = Date.now();
-    const header = { sessionId: session.id, streamId, roomIds: session.roomIds, origin, calibration: 'quest-room-mr-v1',
+    const header = { sessionId: session.id, streamId, roomIds: session.roomIds, origin,
+      calibration: session.environment.mode === 'MR' ? 'quest-room-mr-v1' : 'uncalibrated-vr',
       captureStartedAtUtc: new Date(started).toISOString().replace('Z', '0000+00:00') };
     const send = (...messages) => execute('python', [path.join(root, 'scripts/world_test_socket.py')], {
       input: JSON.stringify({ port: Number(new URL(base).port), route: '/api' + roomPath(session.id) + '/world/publish',
@@ -222,8 +223,35 @@ module.exports = async ({ context, api, tokens, base, root, directory, screensho
         await writeFile(path.join(screenshots, 'mr-venue-late-ticket.json'), JSON.stringify(result, null, 2));
         check(result.signedResponses === 1 && result.downloads === 0 && result.message.includes('未下載'),
           'A signed 25-seat MR ZIP cannot download after one original room admission changes during delivery');
+
+        await end(room.sessionId);
+        const vrMission = await api('/missions', 'POST', { ...mission.definition, name: 'Mixed venue VR room',
+          environment: { ...mission.definition.environment, mode: 'VR' } }, 'Master', 201);
+        const vr = await api('/sessions', 'POST', { missionId: vrMission.id, mode: 'Independent', roomIds: [5] }, 'Master', 201);
+        active.add(vr.id);
+        for (const number of roomIds) await add(vr.id, 5, number);
+        await publish(vr, 17804);
+        await login('Master');
+        await page.locator('#vr-venue-read').click();
+        await page.locator('#vr-venue-status').filter({ hasText: 'VR／MR 混合獨立場 · 已讀取 25 席' }).waitFor();
+        for (let roomId = 1; roomId < 5; roomId++)
+          await page.locator(`#mixed-venue-alignment-${roomId}`).setInputFiles({
+            name: `original-${roomId}.json`, mimeType: 'application/json', buffer: files[roomId - 1] });
+        const mixedArchive = page.waitForEvent('download');
+        const mixedResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/mixed-deployment/venue-bundle');
+        await page.locator('#vr-venue-issue').click();
+        const mixed = await mixedArchive, response = await mixedResponse;
+        assert.equal(response.status(), 200);
+        const saved = await readFile(await mixed.path());
+        assert.equal(response.headers()['repr-digest'], `sha-256=:${createHash('sha256').update(saved).digest('base64')}:`);
+        const requestId = response.request().headers()['x-vrcommand-archive-request'];
+        check(!!requestId && requestId === response.headers()['x-vrcommand-archive-request']
+          && mixed.suggestedFilename() === 'vr-mr-venue-deployment.zip',
+        'A mixed VR and MR venue downloads the exact archive for its own issuance request');
+        await mixed.delete();
+        await end(vr.id);
       }
-      for (const session of sessions) await end(session.id);
+      for (const session of sessions) if (active.has(session.id)) await end(session.id);
       const ended = await post(request, 409);
       assert.equal(ended.code, 'venue-session-changed');
     }

@@ -110,6 +110,8 @@ API 使用 `POST /api/sessions/{id}/rooms/{roomId}/players/{playerId}/vr-connect
 
 `vr-venue-connections.zip` 內含 `venue.json`、五個原格式的分房 ZIP 及共 25 份四欄玩家連線檔。分房 ZIP 依房號命名，每個 JSON 依房號與席位命名。票券自簽發起有效五分鐘，請將對應的 JSON 個別交給玩家，整份 ZIP 由主控私下保管。Windows 玩家啟動器可再次核對檔內標示的房間與席位。 [玩家端核對](PLAYER_CONFIG_REVIEW.md#連線檔席位與效期)
 
+管理包 0.31.220 的 VR、MR 與混合五房配票，會先核對此輪的請求編號及 ZIP 原始位元組的 SHA-256，再重新確認原場次、端點與名冊。若回應無法核對，控制台會停在下載前並提示重新配票。核對使用瀏覽器內的檔案內容，無須把已收到的票券傳回管理服務。
+
 ### 依電腦分發 Windows VR 連線檔
 
 主控可用 PowerShell 7 及原始 `vr-venue-connections.zip` 或 `vr-mr-venue-deployment.zip` 匯出指定 Windows 席位。先準備一份版本 1 的對照表，房號與席位均為 1 到 5。`station` 是電腦標籤，開頭須為英文字母或數字，全長至多 32 字元，可用英文字母、數字與連字號。每台電腦與每個席位只填一次。
