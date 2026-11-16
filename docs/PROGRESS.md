@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-16 Quest 部署與重試核對整份發行報告
+
+- `deploy-quest.ps1` 會以 `venueReleaseReportSha256` 記錄選用的原發行檔。重試若換用內容或換行不同的檔案，會在呼叫 ADB 前拒絕。合併追蹤檢查會比對各筆已有的發行摘要，封存和六批收件則比對原發行檔並列出完成核對的席數。舊部署回條及其累計重試沿用原 APK 證據。 [Quest 部署](QUEST3.md#核對頭盔內已安裝的發行-apk) · [封存核對](EXTERNAL_CLIENTS.md#核對封存席位的-quest-發行-apk)
+- 使用原 0.50.11／76 APK 和 Windows 1.26 的同一份發行報告，先完成單席離線及兩種模式各 25 席模擬預檢。再以模擬 ADB 與本機管理服務完成獨立和合併各 25 席的部署、APK 與設定檔核對及 OpenXR 回條，各有 50 次即時來源核對，分別用時 85.66 與 88.19 秒。兩份部署報告的摘要均與 Windows 1.26 既有離線核對原檔一致。 [預檢](../artifacts/quest-release-report-check-a16b6a43/validation.json) · [兩種模式部署排演](../artifacts/quest-release-deployment-fixture-5e945802/validation.json)
+- 本機 67 項部署與 136 項封存測試通過。舊 0.50.7 六批的 80 份戰績確認摘要逐位元組一致。功能提交 `62400dd` 已推送，GitHub Actions 未執行測試步驟。Quest USB 仍未提供 ADB 偵錯介面，實體頭盔及跨機容量待驗。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43787712054/job/133038971134)
+
 ## 2026-11-16 五房開場與封存核對同一份發行報告
 
 - Windows 啟動器 1.26 在離線核對、五房預覽、就緒及收尾報告記錄整份場館發行報告的 SHA-256。開場腳本會拒絕遺漏或換用發行報告，即使伺服器套件摘要相同。封存驗收及六批收件檢查亦比對報告原檔，並以 `venue-release-report-mismatch` 指出不符的證據。 [Windows 啟動方式](WINDOWS_SERVER_PACKAGE.md#依場館發行報告核對伺服器包) · [封存操作](EXTERNAL_CLIENTS.md#核對五房伺服器發行版本)
