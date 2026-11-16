@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 核對 Quest APK 原生程式庫的載入方式
+
+- 場館發行工具讀取已簽署 APK 的 `extractNativeLibs` 設定。直接載入時逐庫核對未壓縮格式及 ZIP 資料起點的 4 KiB 對齊。現行 Quest 0.50.12／77 APK 使用安裝時解出原生程式庫，七個 ARM64 程式庫及原 SHA-256 通過。管理包 0.31.230 與原 Windows 玩家、伺服器也通過共同發行核對。 [操作方式](EXTERNAL_CLIENTS.md#發送前離線核對交付套件) · [發行報告](../artifacts/quest-native-layout-20261117/venue-release.json)
+- 四份測試 APK 的 v2 簽章均有效。舊工具接受四份，新工具接受壓縮後解出的版本與直接載入且已對齊的版本，拒絕直接載入卻壓縮或未對齊的兩份。首次簽章工具自動對齊未對齊測試檔，複驗在簽章時明確保留原偏移。獨立及合併各一席 VR、一席 MR 的 `CheckOnly` 皆讀取原 APK 及新發行報告成功。套件測試共 37 項，36 項通過，1 項跳過。 [簽署測試](../artifacts/quest-native-layout-20261117/signed-layout.json) · [離線部署檢查](../artifacts/quest-native-layout-20261117/deployment-check-only.json)
+- Quest USB 仍無 ADB 介面，實機安裝與跨機驗收待完成。GitHub Actions 對 `b7334f5` 回報帳務或用量限制，工作未啟動。 [USB 狀態](../artifacts/quest-native-layout-20261117/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43976662001)
+
 ## 2026-11-17 核對指定房間的環境執行畫格
 
 - 戰後驗收工具可在獨立場的 `SetEnvironment` 參照中指定 `roomIds`。原環境批次須完整對應所列房間及其原場次，每房都要有對應管理序號的有效執行畫格。全館與合併場可沿用原驗收設定。 [操作方式](EXTERNAL_CLIENTS.md#核對指定獨立房間的環境批次)
