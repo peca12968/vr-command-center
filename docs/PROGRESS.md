@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-16 Quest UDP 預檢沿用當次 ADB 連線
+
+- 單席及五房 UDP 預檢從授權清單選定連線識別。傳入私有金鑰、執行診斷及清理均使用該條連線。對照版在金鑰傳入後轉向接手同一序號的替代連線，仍會接受其診斷回報。新版會將該席判為失敗。也核對了診斷已回報完成、但原連線在清理前中斷的情況。 [預檢方式](QUEST3.md#開場前從頭盔執行-udp-預檢) · [舊版反例](../artifacts/quest-udp-transport-20261116-1545/before.log)
+- 使用本機 Android SDK 的 ADB 用戶端、隔離的模擬 Android 服務與實際 Windows 迴環 UDP 監聽。合併場第一次有一席在傳入金鑰後中斷、另一席通過。補測只核對失敗席位的新連線，已通過席位沿用原雙端報告，舊檔逐位元相同。首輪測試服務未支援 ADB shell v2，補齊測試服務的輸入及退出回覆後通過。 [合併場補測](../artifacts/quest-udp-transport-20261116-1545/native-udp-transport.json)
+- 獨立五房以相同測試服務執行 25 席各一筆 UDP 交換，五個迴環埠都完成。75 次金鑰傳輸、探測及清理指令均使用對應席位的原 ADB 連線。再從 50 份原雙端檔案逐席核對來源、埠、交換摘要和雜湊。 [25 席回讀](../artifacts/quest-udp-transport-20261116-1545/independent-25-readback.json)
+- 11 項 Quest UDP、17 項 LAN、12 項單席擷取及 2 項五房擷取回歸通過。Java 測試組因本機防火牆查核未通過而略過。Windows 的被動 USB 快照仍有 1 個檔案傳輸介面、0 個 ADB 介面。實體頭盔和跨機待驗。 [Quest UDP 測試](../artifacts/quest-udp-transport-20261116-1545/udp-tests.log) · [LAN 測試](../artifacts/quest-udp-transport-20261116-1545/lan-tests.log) · [USB 快照](../artifacts/quest-udp-transport-20261116-1545/usb-status.json)
+
 ## 2026-11-16 Quest 日誌擷取固定在原 ADB 連線
 
 - 單席與五房擷取先讀一次授權裝置及連線識別。接著用同一條連線讀取遊戲 PID、原 logcat 與結束時的 PID。缺少唯一連線識別的席位會回報失敗。原部署入場、OpenXR 及裝置身分核對依原選項執行。 [擷取方式](QUEST3.md#收集-quest-場館驗收日誌)

@@ -19,6 +19,7 @@ from unittest.mock import Mock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'scripts'))
 SHELL = shutil.which(os.environ.get('VR_COMMAND_POWERSHELL', 'powershell.exe' if os.name == 'nt' else 'pwsh'))
 LOOPBACK = '127.0.0.1'
 PLAN_SCRIPT = ROOT / 'scripts/prepare-venue-network-plan.py'

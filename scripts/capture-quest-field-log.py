@@ -3,7 +3,6 @@
 import argparse
 import asyncio
 import base64
-from collections import Counter
 import hashlib
 import importlib.util
 import json
@@ -16,6 +15,7 @@ import sys
 import time
 import uuid
 
+from quest_adb import AdbTransportError, read_adb_transports, select_adb_transport
 
 spec = importlib.util.spec_from_file_location('field_results', Path(__file__).with_name('verify-field-results.py'))
 field = importlib.util.module_from_spec(spec)
@@ -39,43 +39,6 @@ def read_connection(path):
     expected = {key: field.identity(str(uuid.UUID(bytes_le=payload[offset:offset + 16])))
                 for key, offset in (('sessionId', 1), ('playerId', 17), ('admissionId', 33))}
     return port, dict(expected, roomId=payload[49])
-
-
-def read_adb_transports(adb, timeout):
-    field.require(timeout > 0, 'Capture timed out before reading ADB transports')
-    try:
-        result = subprocess.run([*adb, 'devices', '-l'], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                stderr=subprocess.DEVNULL, timeout=min(5, timeout),
-                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-    except subprocess.TimeoutExpired:
-        raise field.EvidenceError('Quest ADB transport inventory timed out') from None
-    field.require(result.returncode == 0 and len(result.stdout) <= 65536, 'Could not read Quest ADB transports')
-    rows = result.stdout.decode('utf-8').splitlines()
-    field.require(rows and rows[0] == 'List of devices attached', 'Invalid Quest ADB transport inventory')
-    aliases, ids = Counter(), Counter()
-    candidates = {}
-    for line in rows[1:]:
-        if not line.strip():
-            continue
-        row = re.fullmatch(r'(\(no serial number\)|\S+)[ \t]+(\S+)(?:[ \t]+(.*))?', line)
-        field.require(row is not None, 'Invalid Quest ADB transport inventory row')
-        serial, state, metadata = row.groups()
-        aliases[serial] += 1
-        transport_fields = [token for token in (metadata or '').split() if token.startswith('transport_id:')]
-        valid_ids = [int(token.removeprefix('transport_id:')) for token in transport_fields
-                     if re.fullmatch(r'transport_id:[1-9][0-9]{0,18}', token)]
-        ids.update(valid_ids)
-        if (state == 'device' and len(transport_fields) == len(valid_ids) == 1
-                and valid_ids[0] <= 2**63 - 1):
-            candidates[serial] = valid_ids[0]
-    return {serial: str(transport) for serial, transport in candidates.items()
-            if aliases[serial] == 1 and ids[transport] == 1}
-
-
-def select_adb_transport(adb, transports, serial):
-    transport = transports.get(serial)
-    field.require(transport is not None, 'Expected one authorized Quest ADB transport for this seat')
-    return [*adb, '-t', transport]
 
 
 def quest_pid(adb, timeout):
@@ -353,7 +316,7 @@ async def capture_venue(adb, plan, directory, seconds):
                                    on_final=close_readiness)
         except (field.EvidenceError, OSError, UnicodeError, ValueError, TimeoutError, RecursionError) as error:
             close_readiness()
-            reason = str(error) if isinstance(error, field.EvidenceError) else 'Check ADB and the capture directory'
+            reason = str(error) if isinstance(error, (field.EvidenceError, AdbTransportError)) else 'Check ADB and the capture directory'
             print(json.dumps({'stage': 'capture-failed', **seat, 'reason': reason}), file=sys.stderr, flush=True)
             partial = log.with_name(log.name + '.partial')
             return {**source, 'complete': False, 'reason': reason, **({'partial': partial.name} if partial.is_file() else {})}
@@ -429,7 +392,7 @@ def main():
             remaining = deadline - time.monotonic()
             field.require(remaining > 0, 'Capture timed out before checking the Quest process')
             report = asyncio.run(capture(target, port, admission, args.output, remaining))
-    except field.EvidenceError as error:
+    except (field.EvidenceError, AdbTransportError) as error:
         parser.exit(1, f'Quest capture incomplete. {error}.\n')
     except (OSError, UnicodeError, ValueError, KeyError, TypeError, TimeoutError, RecursionError, KeyboardInterrupt):
         parser.exit(1, 'Quest capture incomplete. Check ADB and use a new output path.\n')

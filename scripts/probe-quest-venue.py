@@ -80,11 +80,6 @@ def launcher_proof(plan_path, preview_path, directory):
             'launcherPreview': summary}, preview
 
 
-def device_ready(adb, serial):
-    result = subprocess.run([str(adb), '-s', serial, 'get-state'], capture_output=True, timeout=8, creationflags=CREATE_NO_WINDOW)
-    return result.returncode == 0 and result.stdout.strip() == b'device'
-
-
 def wait_for_listener(process, path, expected):
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
@@ -127,7 +122,7 @@ def probe_seat(shell, adb, directory, group, device, count, timeout_ms):
     stage = 'device'
     result = {'roomId': room, 'seat': seat, 'complete': False}
     try:
-        require(device_ready(adb, device['serial']), 'ADB device is not ready.')
+        target = quest_udp.probe_target(adb, device['serial'])
         stage = 'key'
         with tempfile.TemporaryDirectory(prefix='quest-venue-udp-') as work:
             key = Path(work) / 'probe.key'
@@ -145,7 +140,7 @@ def probe_seat(shell, adb, directory, group, device, count, timeout_ms):
                                                                'peerAddress': peer, 'port': port})
                     stage = 'probe'
                     report = quest_udp.run_probe(argparse.Namespace(adb=adb, serial=device['serial'], key_file=key,
-                        local_address=peer, peer_address=address, port=port, count=count, timeout_ms=timeout_ms))
+                        local_address=peer, peer_address=address, port=port, count=count, timeout_ms=timeout_ms), target=target)
                     with probe_path.open('x', encoding='utf-8', newline='\n') as destination:
                         json.dump(report, destination, separators=(',', ':'))
                         destination.write('\n')

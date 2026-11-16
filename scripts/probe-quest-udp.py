@@ -9,6 +9,7 @@ import re
 import subprocess
 import uuid
 
+from quest_adb import AdbTransportError, read_adb_transports, select_adb_transport
 
 PACKAGE = 'com.vrcommand.udpprobe'
 PREFIX = 'INSTRUMENTATION_RESULT: probeReport='
@@ -84,8 +85,14 @@ def android_report(output, args):
     return report
 
 
-def run_probe(args):
-    adb = [str(args.adb.resolve(strict=True)), '-s', args.serial]
+def probe_target(adb, serial):
+    command = [str(adb.resolve(strict=True))]
+    return select_adb_transport(command, read_adb_transports(command, 5), serial)
+
+
+def run_probe(args, *, target=None):
+    key = read_key(args.key_file)
+    adb = probe_target(args.adb, args.serial) if target is None else target
     key_name = 'udp-' + uuid.uuid4().hex + '.key'
     private_key = 'files/' + key_name
 
@@ -96,7 +103,6 @@ def run_probe(args):
             raise ValueError('ADB could not run the Quest probe. Check the selected device and installed probe APK.')
         return result.stdout
 
-    key = read_key(args.key_file)
     try:
         invoke(['shell', '-T', f"run-as {PACKAGE} sh -c 'umask 077; mkdir -p files && set -C && cat > {private_key}'"], data=key)
         settings = {'keyName': key_name, 'localAddress': args.local_address, 'peerAddress': args.peer_address,
@@ -135,7 +141,7 @@ def main():
         with args.report.open('x', encoding='utf-8', newline='\n') as destination:
             json.dump(report, destination, separators=(',', ':'))
             destination.write('\n')
-    except WindowsFirewallLaunchError as error:
+    except (AdbTransportError, WindowsFirewallLaunchError) as error:
         parser.exit(1, f'{error}\n')
     except (OSError, ValueError, subprocess.SubprocessError, KeyboardInterrupt):
         parser.exit(1, 'Quest UDP probe could not save a valid report. Check the device, APK, probe key and output path.\n')

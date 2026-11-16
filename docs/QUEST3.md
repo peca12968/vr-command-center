@@ -117,7 +117,7 @@ python .\scripts\probe-quest-udp.py --adb $adb --serial $serial --key-file $key 
   --report .\quest-probe-room-01.json
 ```
 
-每次用新報告檔，樣本數須與監聽端一致。同一頭盔一次執行一組。工具從 ADB 標準輸入將金鑰暫存於診斷套件的私有目錄，讀取後即清除。完成報告含實際來源和交換摘要，請與原監聽報告一併保存在私人位置。逾時樣本以空值保存，整次未完成會以退出碼 1 結束。兩端退出後用原綁定位址與埠開場，再保留遊戲原始 logcat 與封存。 [逐來源驗收](EXTERNAL_CLIENTS.md#核對每個玩家來源的-udp-預檢)
+每次用新報告檔，樣本數須與監聽端一致。同一頭盔一次執行一組。工具用 `adb devices -l` 確認唯一授權連線，固定在該連線傳入診斷套件的私有暫存金鑰、執行探測與清理。原連線消失時，本次探測失敗。若中斷時金鑰已傳入但尚未讀取，暫存檔可能留在原頭盔，下一次探測會使用新金鑰。完成報告含實際來源和交換摘要，請與原監聽報告一併保存在私人位置。逾時樣本以空值保存，整次未完成會以退出碼 1 結束。兩端退出後用原綁定位址與埠開場，再保留遊戲原始 logcat 與封存。 [ADB 連線選擇](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/docs/user/adb.1.md) · [逐來源驗收](EXTERNAL_CLIENTS.md#核對每個玩家來源的-udp-預檢)
 
 建置可使用 `scripts/build-quest-udp-probe.py --sdk <SDK> --jdk <JDK> --keystore <診斷用開發金鑰庫> --output <新APK>`。需要 Android 35 平台、Build Tools 36.0.0 及 JDK 17。診斷金鑰庫使用別名 `androiddebugkey` 和標準開發密碼 `android`，獨立保存以供同一診斷套件更新。APK 的最低 Android API 為 32，目標 API 為 35。 [APK 簽章工具](https://developer.android.com/tools/apksigner)
 
@@ -148,7 +148,7 @@ python .\scripts\probe-quest-venue.py --adb $adb --device-map .\device-map.json 
   --network-plan .\quest-network.json --output-directory .\quest-udp-batch --count 5
 ```
 
-工具依房號和席位順序啟動各次 Windows 監聽，配對該台 Quest 的回覆，等原監聽程序結束再接續。每次用新的輸出資料夾，內有各席原始報告和 `preflight-report.json`。某席失敗仍會繼續，摘要列出階段並以非零結束。每組端點的已安排席位全部通過時，該組才有 `udpSourcePreflights` 清單。批次在 20 分鐘後停止安排新探測，避免用盡封存核對的 30 分鐘啟動前有效窗。
+工具依房號和席位順序選定當次 ADB 連線、啟動 Windows 監聽、配對該台 Quest 的回覆，等原監聽程序結束再接續。每次用新的輸出資料夾，內有各席原始報告和 `preflight-report.json`。某席 ADB 連線中斷時仍會繼續其他席位。頭盔重連後可用原報告補測未通過席位。摘要列出失敗階段並以非零結束。每組端點的已安排席位全部通過時，該組才有 `udpSourcePreflights` 清單。批次在 20 分鐘後停止安排新探測，避免用盡封存核對的 30 分鐘啟動前有效窗。
 
 全部探測完成後，按原網路清單啟動遊戲伺服器。封存驗收清單可用 `udpPreflightBatch` 引用一份報告，或用 `udpPreflightBatches` 引用多份。混合 Windows 與 Quest 時，可在開場前用場館工具核對各席位的雙端報告，也可在封存驗收清單逐場補上 Windows 來源的 `udpSourcePreflights`。 [場館 UDP 核對](EXTERNAL_CLIENTS.md#開場前核對五房-udp-報告) · [封存核對](EXTERNAL_CLIENTS.md#核對每個玩家來源的-udp-預檢)
 

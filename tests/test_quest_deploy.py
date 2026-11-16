@@ -23,6 +23,7 @@ import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'scripts'))
 CAPTURE_FIXTURE = ROOT / 'tests/fixtures/run-quest-capture.py'
 ADB_FIXTURE = r"""
 $remote = Join-Path $env:QUEST_TEST_ROOT 'remote'

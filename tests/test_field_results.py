@@ -21,6 +21,7 @@ from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/verify-field-results.py'
+sys.path.insert(0, str(SCRIPT.parent))
 spec = importlib.util.spec_from_file_location('field_results', SCRIPT)
 field = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(field)

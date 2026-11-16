@@ -194,12 +194,12 @@ class QuestUdpProtocolTests(unittest.TestCase):
         self.assertEqual('Linked', mode)
         self.assertEqual([{'roomIds': rooms, 'address': SERVER, 'port': port, 'devices': devices}], groups)
 
-        def java_probe(args):
+        def java_probe(args, *, target):
             command = [*self.java, str(args.key_file), args.local_address, args.peer_address, str(args.port),
                        str(args.count), str(args.timeout_ms)]
             return json.loads(subprocess.run(command, capture_output=True, check=True, timeout=8).stdout)
 
-        with patch.object(quest_venue, 'device_ready', return_value=True), patch.object(
+        with patch.object(quest_venue.quest_udp, 'probe_target', return_value=['adb', '-t', '41']), patch.object(
                 quest_venue.quest_udp, 'run_probe', side_effect=java_probe) as probes, redirect_stderr(io.StringIO()):
             report = quest_venue.probe_venue(shell, self.work / 'adb-fixture.exe', mode, groups, output, 2, 900, launcher=launcher)
         self.assertTrue(report['complete'])
@@ -232,7 +232,7 @@ class QuestUdpProtocolTests(unittest.TestCase):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as game:
             game.bind((SERVER, port))
             busy_output = self.work / 'busy'
-            with patch.object(quest_venue, 'device_ready', return_value=True), patch.object(
+            with patch.object(quest_venue.quest_udp, 'probe_target', return_value=['adb', '-t', '41']), patch.object(
                     quest_venue.quest_udp, 'run_probe') as probes, redirect_stderr(io.StringIO()):
                 busy = quest_venue.probe_venue(shell, self.work / 'adb-fixture.exe', mode, groups, busy_output, 2, 900)
             self.assertFalse(busy['complete'])
@@ -252,7 +252,7 @@ class QuestUdpProtocolTests(unittest.TestCase):
         groups = [{'roomIds': [1, 2, 3, 4, 5], 'address': SERVER, 'port': port, 'devices': devices}]
         launch, preview = write_guarded_launch(self.work, 'Linked', groups, 'retry')
 
-        def java_probe(args):
+        def java_probe(args, *, target):
             command = [*self.java, str(args.key_file), args.local_address, args.peer_address, str(args.port),
                        str(args.count), str(args.timeout_ms)]
             return json.loads(subprocess.run(command, capture_output=True, check=True, timeout=8).stdout)
@@ -260,7 +260,12 @@ class QuestUdpProtocolTests(unittest.TestCase):
         def run(name, retry_report=None, offline=None):
             output = self.work / name
             launcher, _ = quest_venue.launcher_proof(launch, preview, output)
-            with patch.object(quest_venue, 'device_ready', side_effect=lambda _, serial: serial != offline), patch.object(
+            def target_device(_, serial):
+                if serial == offline:
+                    raise ValueError('Unavailable fixture seat')
+                return ['adb', '-t', serial.rsplit('-', 1)[-1]]
+
+            with patch.object(quest_venue.quest_udp, 'probe_target', side_effect=target_device), patch.object(
                     quest_venue.quest_udp, 'run_probe', side_effect=java_probe) as probes, redirect_stderr(io.StringIO()):
                 report = quest_venue.probe_venue(shell, self.work / 'adb-fixture.exe', 'Linked', groups, output, 2, 900, retry_report, launcher=launcher)
             return report, [call.args[0].serial for call in probes.call_args_list]
@@ -462,7 +467,7 @@ class QuestUdpVenuePlanTests(unittest.TestCase):
             {'roomId': room, 'seat': 1, 'serial': f'fixture-{room}', 'address': f'127.0.0.{room + 1}'}
             for room in (1, 2)]}]
 
-        def local_probe(args):
+        def local_probe(args, *, target):
             command = [*shell, '-Mode', 'Probe', '-KeyFile', str(args.key_file), '-LocalAddress', args.local_address,
                        '-PeerAddress', args.peer_address, '-Port', str(args.port), '-Count', str(args.count),
                        '-TimeoutMs', str(args.timeout_ms)]
@@ -472,7 +477,7 @@ class QuestUdpVenuePlanTests(unittest.TestCase):
 
         original = self.root / 'original-exchanges'
         retry = self.root / 'retry-exchanges'
-        with patch.object(quest_venue, 'device_ready', return_value=True), patch.object(
+        with patch.object(quest_venue.quest_udp, 'probe_target', return_value=['adb', '-t', '41']), patch.object(
                 quest_venue.quest_udp, 'run_probe', side_effect=local_probe) as probes, redirect_stderr(io.StringIO()):
             first = quest_venue.probe_venue(shell, Path('adb'), 'Linked', groups, original, 2, 900)
             self.assertTrue(first['complete'])
@@ -521,16 +526,47 @@ class QuestUdpAdbTests(unittest.TestCase):
     def output(self):
         return (quest_udp.PREFIX + json.dumps(self.report) + '\r\nINSTRUMENTATION_CODE: -1\r\n').encode()
 
+    def inventory(self):
+        return self.result(b'List of devices attached\r\nprobe-device device transport_id:41\r\n')
+
+    def test_rebound_serial_cannot_continue_or_clean_up_an_original_probe(self):
+        phases = []
+        rebound = False
+
+        def adb_call(command, **kwargs):
+            nonlocal rebound
+            if command[1:] == ['devices', '-l']:
+                return self.inventory()
+            target = command[1:3]
+            phase = 'transfer' if kwargs['input'] is not None else 'instrument' if 'instrument' in command else 'cleanup'
+            phases.append((phase, target))
+            if phase == 'transfer':
+                self.assertEqual(self.key, kwargs['input'])
+                rebound = True
+                return self.result()
+            self.assertTrue(rebound)
+            # The same serial is now routed to a replacement, which would report success.
+            if target == ['-s', 'probe-device']:
+                return self.result(self.output() if phase == 'instrument' else b'')
+            return subprocess.CompletedProcess(command, 1, b'', b'no device with transport id 41')
+
+        with patch.object(quest_udp.subprocess, 'run', side_effect=adb_call):
+            with self.assertRaisesRegex(ValueError, 'ADB could not run the Quest probe'):
+                quest_udp.run_probe(self.args)
+        self.assertEqual([(phase, ['-t', '41']) for phase in ('transfer', 'instrument', 'cleanup')], phases)
+
     def test_adb_key_is_sent_only_on_private_stdin_and_cleaned(self):
-        with patch.object(quest_udp.subprocess, 'run', side_effect=[self.result(), self.result(self.output()), self.result()]) as calls:
+        with patch.object(quest_udp.subprocess, 'run',
+                          side_effect=[self.inventory(), self.result(), self.result(self.output()), self.result()]) as calls:
             self.assertEqual(self.report, quest_udp.run_probe(self.args))
-        transfer, probe, cleanup = calls.call_args_list
+        inventory, transfer, probe, cleanup = calls.call_args_list
+        self.assertEqual(['devices', '-l'], inventory.args[0][1:])
         self.assertEqual(self.key, transfer.kwargs['input'])
         self.assertIsNone(probe.kwargs['input'])
         self.assertIsNone(cleanup.kwargs['input'])
         self.assertNotIn(self.key.decode(), repr([call.args for call in calls.call_args_list]))
         for call in (transfer, probe, cleanup):
-            self.assertEqual(['-s', 'probe-device'], call.args[0][1:3])
+            self.assertEqual(['-t', '41'], call.args[0][1:3])
         key_path = cleanup.args[0][-1]
         self.assertRegex(key_path, r'\Afiles/udp-[0-9a-f]{32}\.key\Z')
         self.assertIn(key_path, transfer.args[0][-1])
@@ -538,11 +574,21 @@ class QuestUdpAdbTests(unittest.TestCase):
 
     def test_bad_report_is_rejected_and_private_file_is_cleaned(self):
         self.report['peerAddress'] = '127.0.0.3'
-        with patch.object(quest_udp.subprocess, 'run', side_effect=[self.result(), self.result(self.output()), self.result()]) as calls:
+        with patch.object(quest_udp.subprocess, 'run',
+                          side_effect=[self.inventory(), self.result(), self.result(self.output()), self.result()]) as calls:
             with self.assertRaisesRegex(ValueError, 'requested probe'):
                 quest_udp.run_probe(self.args)
-        self.assertEqual(3, calls.call_count)
+        self.assertEqual(4, calls.call_count)
         self.assertIn('rm', calls.call_args.args[0])
         self.report['peerAddress'] = SERVER
         self.report.update(matched=0, complete=False, exchangeSha256=None, samples=[{'sample': 1, 'roundTripMs': None}])
         self.assertFalse(quest_udp.android_report(self.output(), self.args)['complete'])
+
+    def test_disconnect_after_android_completion_prevents_publishing_success(self):
+        rejected = subprocess.CompletedProcess([], 1, b'', b'no device with transport id 41')
+        with patch.object(quest_udp.subprocess, 'run', side_effect=[
+            self.inventory(), self.result(), self.result(self.output()), rejected
+        ]) as calls, self.assertRaisesRegex(ValueError, 'ADB could not run the Quest probe'):
+            quest_udp.run_probe(self.args)
+        self.assertEqual(['-t', '41', 'shell', 'run-as', quest_udp.PACKAGE, 'rm', '-f'],
+                         calls.call_args.args[0][1:-1])
