@@ -1198,6 +1198,30 @@ class FieldResultsTests(unittest.TestCase):
             verified = subprocess.run(command, capture_output=True, check=True)
             self.assertEqual(80, json.loads(verified.stdout)['serverAcknowledgements'])
 
+            batch = root / names[0]
+            release = batch.parent / json.loads(batch.read_bytes())['venueReleaseReport']
+            release_hash = hashlib.sha256(release.read_bytes()).hexdigest()
+            with zipfile.ZipFile(original) as archive:
+                log = archive.read('player.log')
+                launch = json.loads(archive.read('launch-report.json'))
+
+            def write_stamped(stamp):
+                with zipfile.ZipFile(original, 'w') as archive:
+                    archive.writestr('player.log', log)
+                    archive.writestr('launch-report.json', json.dumps(dict(launch, venueReleaseReportSha256=stamp)))
+
+            write_stamped(release_hash)
+            stage = field.verify_venue_stages(path)['stages'][0]
+            self.assertEqual({'venueReleaseReportSha256': release_hash, 'releaseReportSeatsVerified': 1}, stage['windowsRelease'])
+            write_stamped('f' * 64)
+            [problem] = field.verify_venue_stages(path, inspect=True)['issues']
+            self.assertEqual([1], problem['entries'])
+            inbox = problem['windowsInbox']
+            self.assertEqual([{'roomId': 5, 'seat': 1}], inbox['missingSeats'])
+            [rejected] = inbox['issues']
+            self.assertEqual({'kind': 'windowsPlayerReport', 'name': original.name, 'status': 'venue-release-report-mismatch'},
+                             rejected['evidenceMismatch'])
+
     def test_staged_inspection_lists_failed_and_missing_windows_measurements(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -3812,6 +3836,21 @@ class FieldResultsTests(unittest.TestCase):
                 path.write_text(json.dumps(self.pack_venue(root, manifest)), encoding='utf-8')
                 self.assertEqual(field.verify_venue(path), split)
 
+                release_hash = hashlib.sha256(release.read_bytes()).hexdigest()
+                for row in manifest['sessions']:
+                    for player in row['players']:
+                        if 'launcherReport' in player:
+                            launch_path = root / player['launcherReport']
+                            launch = json.loads(launch_path.read_bytes())
+                            launch_path.write_text(json.dumps(dict(launch, venueReleaseReportSha256=release_hash)), encoding='utf-8')
+                deployment_path = root / manifest['questDeployments']['reports'][0]
+                deployment = json.loads(deployment_path.read_bytes())
+                deployment_path.write_text(json.dumps(dict(deployment, venueReleaseReportSha256=release_hash)), encoding='utf-8')
+                mixed = field.verify_venue(path)['venueRelease']
+                self.assertEqual(release_hash, mixed['windows']['venueReleaseReportSha256'])
+                self.assertEqual(release_hash, mixed['quest']['venueReleaseReportSha256'])
+                self.assertEqual((15, 10), (mixed['windows']['releaseReportSeatsVerified'], mixed['quest']['releaseReportSeatsVerified']))
+
     def test_shared_venue_release_rejects_swapped_or_incomplete_proofs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -3832,11 +3871,18 @@ class FieldResultsTests(unittest.TestCase):
             path.write_text(json.dumps(manifest), encoding='utf-8')
             launch_path = root / manifest['sessions'][0]['players'][0]['launcherReport']
             launch = json.loads(launch_path.read_bytes())
+            release_path = root / manifest['venueReleaseReport']
+            original_release = release_path.read_bytes()
+            launch['venueReleaseReportSha256'] = hashlib.sha256(original_release).hexdigest()
+            launch_path.write_text(json.dumps(launch), encoding='utf-8')
+            release_path.write_bytes(original_release + b'\n')
+            with self.assertRaisesRegex(field.EvidenceError, 'Windows player launch used different original venue release report bytes'):
+                field.verify_venue(path)
+            release_path.write_bytes(original_release)
             launch['playerManifestSha256'] = '11' * 32
             launch_path.write_text(json.dumps(launch), encoding='utf-8')
             with self.assertRaisesRegex(field.EvidenceError, 'original venue release manifest'):
                 field.verify_venue(path)
-            release_path = root / manifest['venueReleaseReport']
             release = json.loads(release_path.read_bytes())
             release['quest']['sha256'] = '35' * 32
             release_path.write_text(json.dumps(release), encoding='utf-8')

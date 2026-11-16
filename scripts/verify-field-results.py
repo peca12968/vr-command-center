@@ -1639,12 +1639,21 @@ def read_windows_evidence(log, launcher, bundle):
     return raw_log, content(launcher) if launcher is not None else None, None
 
 
-def verify_windows_release(log_hash, launch, windows_hash, *, has_link_metrics=False):
+def verify_windows_release(log_hash, launch, windows_hash, release_hash, evidence, *, has_link_metrics=False):
     require(launch.get('status') == 'exited' and integer(launch.get('exitCode'), 0, 0) == 0
             and integer(launch.get('processId'), 1, 2**31 - 1) and launch.get('playerManifestSha256') == windows_hash,
             'Windows launcher did not exit with the original venue release manifest')
     require(launch.get('playerLogSha256') == log_hash if 'playerLogSha256' in launch else has_link_metrics,
             'Windows release evidence does not match the original player log bytes')
+    if 'venueReleaseReportSha256' not in launch:
+        return False
+    digest = launch['venueReleaseReportSha256']
+    require(type(digest) is str and re.fullmatch(r'[0-9a-f]{64}', digest),
+            'Invalid original Windows player venue release report digest')
+    if digest != release_hash:
+        raise VenueReleaseEvidenceError('Windows player launch used different original venue release report bytes',
+                                        'windowsPlayerReport', evidence, 'venue-release-report-mismatch')
+    return True
 
 
 def read_windows_seat_map(path):
@@ -1687,7 +1696,7 @@ def read_windows_station_addresses(path, seat_map):
 
 def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, seat_map, evidence_path, link_criteria,
                   station_addresses=None, planned_seat_addresses=None, verify_history=False, strict_startup_port=False,
-                  reconnect_sources=None):
+                  reconnect_sources=None, release_hash=None):
     require(directory.is_dir(), 'Windows evidence inbox must be a directory')
     require(type(windows_hash) is str and re.fullmatch(r'[0-9a-f]{64}', windows_hash),
             'Windows evidence inbox requires the original Windows release report')
@@ -1734,6 +1743,7 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
         require(seat_map.keys() <= roster_seats.keys(), 'Windows seat map names a seat outside the original batch roster')
     selected = {owner: seat for seat, owner in roster_seats.items() if seat_map is None or seat in seat_map}
     received, logs, issues, connections, measured, histories = {}, {}, [], set(), {}, {}
+    release_bound = set()
     for file in files:
         try:
             path = evidence_path(str(file))
@@ -1749,7 +1759,8 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
             log_hash, launch = hashlib.sha256(raw_log).hexdigest(), read_json(raw_launch)
             require(raw_metrics is not None or 'linkMetrics' not in launch, 'Player ZIP lacks its recorded Windows link report')
             metrics = verify_windows_link(log_hash, connection, launch, raw_metrics, link_criteria) if raw_metrics is not None else None
-            verify_windows_release(log_hash, launch, windows_hash, has_link_metrics=raw_metrics is not None)
+            bound = verify_windows_release(log_hash, launch, windows_hash, release_hash, file,
+                                           has_link_metrics=raw_metrics is not None)
             require(connection in acknowledgements, 'Player ZIP lacks an original server acknowledgement')
             verify_player_terminal_result(result, owners[player_id], ledger[player_id], boundary)
             require(seat not in received and (session_id, connection) not in connections, 'Player ZIP repeats a seat or acknowledged connection')
@@ -1765,6 +1776,9 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
                     startup = next(line for line in log.splitlines() if line.startswith('VR_NETWORK_STARTED '))
                     require(client_startup_on_port(startup, port), 'Expected one original Windows client startup')
                 verify_reconnect_chain(history, peers, acknowledgements, approved, released, address, planned)
+        except VenueReleaseEvidenceError as error:
+            issues.append({'file': file.name, 'reason': str(error), 'evidenceMismatch': error.evidence})
+            continue
         except EvidenceError as error:
             issues.append({'file': file.name, 'reason': str(error)})
             continue
@@ -1773,6 +1787,8 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
             issues.append({'file': file.name, 'reason': 'Player ZIP cannot be read as original Windows evidence'})
             continue
         received[seat] = file.name
+        if bound:
+            release_bound.add(seat)
         if metrics is not None:
             measured[seat] = metrics
         connections.add((session_id, connection))
@@ -1814,9 +1830,12 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
         missing_metrics = [seat_row(seat) for seat in sorted(set(selected.values()) - measured.keys())]
         measured_rows = [dict(seat_row(seat), file=received[seat], **measured[seat]) for seat in sorted(measured)]
         link_report['windowsLinkMetrics'] = link_intake_summary(measured_rows, missing_metrics, link_criteria)
+    bound_count = len(release_bound & received.keys())
     return groups, {'complete': not missing and not issues, 'expectedWindowsSeats': len(selected),
                     'receivedWindowsSeats': len(received), 'missingSeats': [seat_row(seat) for seat in missing],
                     'receivedSeats': [dict(seat_row(seat), file=received[seat]) for seat in sorted(received)], 'issues': issues,
+                    **({'windowsRelease': {'venueReleaseReportSha256': release_hash, 'releaseReportSeatsVerified': bound_count}}
+                       if bound_count else {}),
                     **link_report, **reconnect_report}
 
 
@@ -3381,7 +3400,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
         windows_by_session, inbox = windows_inbox(directory, inputs, expected, players_per_room, windows_hash,
                                                  seat_map, evidence_path, link_criteria, station_addresses=station_addresses,
                                                  planned_seat_addresses=planned_seat_addresses, verify_history=verify_reconnect_history,
-                                                 strict_startup_port=require_distinct_remote_roster, reconnect_sources=reconnect_sources)
+                                                 strict_startup_port=require_distinct_remote_roster, reconnect_sources=reconnect_sources,
+                                                 release_hash=release_hash)
         if station_addresses is not None:
             station_summary['windowsStationAddresses'] = {'sha256': address_hash, 'expectedSeats': len(station_addresses),
                                                           'verifiedSeats': inbox['receivedWindowsSeats']}
@@ -3522,7 +3542,9 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
                 if raw_metrics is not None:
                     link_rows.append({**seat, **verify_windows_link(log_hash, connection, launch, raw_metrics, link_criteria)})
                 if release is not None:
-                    verify_windows_release(log_hash, launch, windows_hash, has_link_metrics=raw_metrics is not None)
+                    if verify_windows_release(log_hash, launch, windows_hash, release_hash, bundle or launch_path,
+                                              has_link_metrics=raw_metrics is not None):
+                        seat = {**seat, 'releaseReportVerified': True}
                     release_seats.append(seat)
                 yield address, log
         preflight_paths = preflight_pair(entry['udpPreflight']) if preflights else None
@@ -3652,6 +3674,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
         reconnect_summary.update(reconnect_source_summary(reconnect_summary['reconnectHistory']['reconnectedSeats']))
         require(reconnect_summary['reconnectSourcePlan']['verifiedSeats'] == len(reconnect_sources),
                 'A planned reconnect source seat has no verified connection history')
+    windows_bound = sum(row.get('releaseReportVerified', False) for session in summaries
+                        for row in session.get('windowsReleaseSeats', ()))
     report = {'version': 1, 'consistent': True, 'declaredTopology': topology, 'mode': mode, 'players': len(player_ids),
             **({'expectedPlayersPerRoom': players_per_room} if 'expectedPlayersPerRoom' in manifest else {}),
             **({'expectedFinalPlayersByRoom': final_counts, 'departedScoresVerified': len(departed_admissions)} if final_counts is not None else {}),
@@ -3676,7 +3700,9 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
             **({'questReadiness': readiness_summary} if readiness_summary is not None else {}),
             **({'venueRelease': {'reportSha256': release_hash,
                 **({'server': server_release} if server_release is not None else {}),
-                **({'windows': {'playerManifestSha256': windows_hash, 'seatsVerified': windows_players}} if windows_players else {}),
+                **({'windows': {'playerManifestSha256': windows_hash, 'seatsVerified': windows_players,
+                                **({'venueReleaseReportSha256': release_hash, 'releaseReportSeatsVerified': windows_bound}
+                                   if windows_bound else {})}} if windows_players else {}),
                 **({'quest': deployment_summary} if deployment_summary is not None else {})}} if release is not None else {}),
             **({'windowsLinkMetricsVerified': windows_link_reports} if windows_link_reports else {}),
             **({'windowsLinkCriteria': {**link_criteria, 'seatsVerified': windows_link_reports}} if link_criteria is not None else {}),
@@ -3710,9 +3736,10 @@ def staged_batch_report(report, batch):
             'highestP95RoundTripMs': {key: slowest[key] for key in ('roomId', 'seat', 'p95RoundTripMs')},
         }
     server_release = report.get('venueRelease', {}).get('server')
-    quest_deployment = report.get('questDeployment', {})
-    quest_release = {key: quest_deployment[key] for key in ('venueReleaseReportSha256', 'releaseReportSeatsVerified')
-                     if key in quest_deployment}
+    releases = {'windowsRelease': report.get('venueRelease', {}).get('windows', {}),
+                'questRelease': report.get('questDeployment', {})}
+    seat_proofs = {name: {key: proof[key] for key in ('venueReleaseReportSha256', 'releaseReportSeatsVerified')}
+                   for name, proof in releases.items() if 'venueReleaseReportSha256' in proof}
     return {'mode': report['mode'], 'players': report['players'], 'closureRequestId': batch['closureRequestId'],
             'manifestSha256': batch['manifestSha256'],
             'startedAtUtc': batch['started'].astimezone(timezone.utc).isoformat(),
@@ -3720,7 +3747,7 @@ def staged_batch_report(report, batch):
             'serverAcknowledgements': report['serverAcknowledgements'],
             'worldJournalsVerified': report['worldJournalsVerified'], 'concurrentRoster': report['concurrentRoster'],
             **({'serverRelease': server_release} if server_release is not None else {}),
-            **({'questRelease': quest_release} if quest_release else {}),
+            **seat_proofs,
             **{key: report[key] for key in ('combatJournalsVerified', 'distinctRemoteRoster', 'windowsLinkCriteria', 'questLinkCriteria',
                                            'questLinkMetricsVerified',
                                            'windowsStationAddresses', 'venueNetworkPlan', 'reconnectSourcePlan',

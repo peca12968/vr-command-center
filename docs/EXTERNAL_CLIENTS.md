@@ -915,6 +915,8 @@ Quest 0.50.11 起，原程序重連後會在新連線第一次進入執行中時
 
 同一個 `verify-field-results.py --venue-manifest` 指令會核對所有席位。Windows 核對退出報告的清單雜湊、原日誌及伺服器確認的最終戰績。Quest 核對共用報告的 APK 雜湊、原部署、入場及戰績。缺少任何席位的原證據、換用其他席位的報告或使用不同發行包時，整批拒絕。成功摘要的 `venueRelease` 列出發行報告雜湊及各平台核對席位數。僅核對 Quest 時仍可沿用原有的 `questDeployments.releaseReport` 格式。實體設備與主機身分依現場驗收。
 
+Windows 玩家啟動器 1.17 的原退出報告含 `venueReleaseReportSha256`。收件和正式封存會與頂層 `venueReleaseReport` 原檔比對。Windows 玩家、Quest 部署及伺服器可用同一份原檔提出證據。收件不符時，`windowsInbox.issues` 列出有問題的 ZIP 檔名和 `venue-release-report-mismatch`。六批摘要的 `windowsRelease.releaseReportSeatsVerified` 顯示核對了整份報告的 Windows 席數。較早的玩家報告仍依原套件清單、日誌及戰績核對。
+
 ### 核對五房伺服器發行版本
 
 同時提供 `venueReleaseReport` 和含 `serverManifestSha256` 的五房終止報告時，驗收會比對兩份檔案的伺服器清單摘要。成功時 `venueRelease.server` 會列出摘要及核對到的原場次數。若一併提交 `verifiedVenueStart`，也會比對啟動回條引用的原就緒檔與 UDP 報告引用的原預覽。任一檔案的摘要不同，驗收會失敗。

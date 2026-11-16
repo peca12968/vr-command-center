@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-16 啟動器 1.17／Windows 遊戲 0.50.11 的 ZIP 為 84,952,986 位元組，SHA-256 `dd985b0aed61f4cbe5e00b548c08bff4dc653df35997dacc3805beefc740d171`。解壓核對 331 筆清單。程序報告與驗收 ZIP 記錄原場館發行檔的摘要。 [玩家包](../artifacts/windows-player-release-report-1170-05011.zip) · [共同發行報告](../artifacts/venue-release-windows-player-report-1170-05011.json)
+
 2026-11-16 `VRCommand-Player-0.50.11-1.16-win-x64.zip` 為 84,952,780 bytes，SHA-256 `06f7964eb7e887fc9345df1d47eb0d45933202d6a8e35045cf8d2f9c33bf28bd`。解壓核對 331 筆清單，已和 Quest 0.50.11 核對來源及網路識別。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.11-1.16-win-x64.zip) · [發行報告](../artifacts/venue-release-quest-reconnect-0511.json)
 
 2026-11-16 `VRCommand-Player-0.50.10-1.16-win-x64.zip` 為 84,951,683 bytes，SHA-256 `61fe844eb722a460c2541a079657a1479b78019a0acbffd732da3058dad66915`。解壓核對 331 筆清單，已和 Quest 0.50.10 核對來源及網路識別。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.10-1.16-win-x64.zip) · [發行報告](../artifacts/venue-release-quest-link-0510.json)
@@ -154,7 +156,7 @@ Windows 建置啟用 Touch 與 Unity 的 HTC Vive Controller 兩個 OpenXR 互�
 
 在啟動器 1.9 開啟玩家視窗並載入自己的連線檔。按「選擇發行報告」，或貼上主控提供的原 `venue-release.json` 完整路徑，再按 Enter 核對。清單相符後，選桌面或 Windows OpenXR，再按「開始遊戲」。啟動時會重新檢查報告及套件，修改路徑或檔案後須重新核對。場館若未提供發行報告，可留空沿用一般啟動流程。
 
-遊戲關閉後，在啟動器按「開啟本次紀錄資料夾」，把同一資料夾的 `player.log` 和 `launch-report.json` 交給控制人員。每次發行核對啟動都會建立自己的資料夾。退出報告包含原套件清單和玩家日誌的雜湊、程序識別及退出碼。 [全館封存操作](EXTERNAL_CLIENTS.md#核對全館共用的發行報告)
+遊戲關閉後，在啟動器按「開啟本次紀錄資料夾」，把同一資料夾的 `player.log` 和 `launch-report.json` 交給控制人員。每次發行核對啟動都會建立自己的資料夾。退出報告包含原套件清單和玩家日誌的雜湊、程序識別及退出碼。啟動器 1.17 另保存 `venueReleaseReportSha256`，對應啟動時讀入的整份原發行 JSON。請用同一份原檔驗收。 [全館封存操作](EXTERNAL_CLIENTS.md#核對全館共用的發行報告)
 
 啟動器 1.10 在原日誌包含最終戰績與結束斷線、玩家程序以退出碼 0 結束後，會在本次紀錄資料夾建立 `player-evidence.zip`。它包含原 `player.log` 與 `launch-report.json`，原檔繼續保留在同一資料夾。交回 ZIP 即可供主控驗收。命令列可搭配 `--launch --wait --release-report --log --report` 加上 `--evidence-zip <包外新檔案.zip>`。 [主控驗收](EXTERNAL_CLIENTS.md#收集-windows-玩家驗收-zip)
 
@@ -176,7 +178,7 @@ Windows 建置啟用 Touch 與 Unity 的 HTC Vive Controller 兩個 OpenXR 互�
 
 啟動器先以發行報告比對原清單的 SHA-256，再按該清單逐檔核對本機玩家包。清單屬於不同發行批次、檔案被更換或資料夾內有清單外檔案時，會以退出碼 1 停在啟動前。連線檔、發行報告及本次程序報告均放在解壓目錄外。成功時，程序報告保留核對過的 `playerManifestSha256`，可搭配原入場日誌留存。選用此模式須使用含 Windows 清單雜湊的新報告。雜湊依賴主控交付的原報告，發行者身分與實體頭盔由現場核對。 [產生場館發行報告](EXTERNAL_CLIENTS.md#發送前離線核對交付套件)
 
-啟動器 1.7 搭配 `--wait`、`--log`、`--report` 時，退出報告也會保存原玩家日誌的 SHA-256。若日誌缺失、為空、無法讀取或超過 16 MiB，欄位為空值。封存驗收可直接配對原日誌及退出報告。 [全館封存操作](EXTERNAL_CLIENTS.md#核對全館共用的發行報告)
+啟動器 1.7 搭配 `--wait`、`--log`、`--report` 時，退出報告也會保存原玩家日誌的 SHA-256。若日誌缺失、為空、無法讀取或超過 16 MiB，欄位為空值。啟動器 1.17 的 `--verify`、啟動與退出報告都會記錄整份原發行 JSON 的摘要，驗收 ZIP 內含相同的原退出報告。 [全館封存操作](EXTERNAL_CLIENTS.md#核對全館共用的發行報告)
 
 #### 本機追蹤整合驗證
 

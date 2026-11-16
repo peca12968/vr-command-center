@@ -117,6 +117,7 @@ def check_openxr_unavailable(folder, directory, base, release=None, manifest_has
             or connection['state'] != 'OpenXRUnavailable' or connection['exited'] is not True
             or connection['processId'] != launch['processId']
             or launch.get('playerManifestSha256') != manifest_hash
+            or launch.get('venueReleaseReportSha256') != (package.digest(release) if release is not None else None)
             or (manifest_hash is not None and launch.get('playerLogSha256') != package.digest(log))
             or [line for line in messages if line.startswith('VR_OPENXR_STARTUP ')]
             != ['VR_OPENXR_STARTUP status=requested', 'VR_OPENXR_STARTUP status=unavailable']
@@ -187,8 +188,9 @@ def main():
                                 cwd=directory, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW)
         value = json.loads(report.read_text(encoding='utf-8'))
         expected = 'verified' if success else 'rejected'
+        release_hash = package.digest(Path(options[options.index('--release-report') + 1])) if manifest_hash is not None else None
         if (result.returncode != (0 if success else 1) or value.get('status') != expected or 'processId' in value
-                or value.get('playerManifestSha256') != manifest_hash):
+                or value.get('playerManifestSha256') != manifest_hash or value.get('venueReleaseReportSha256') != release_hash):
             raise AssertionError('Actual launcher result differed: ' + label)
         findings.append(label); print('PASS:', label, flush=True)
 
@@ -234,6 +236,10 @@ def main():
         release.write_text(json.dumps(release_shape), encoding='utf-8-sig')
     original_release = release.read_bytes()
     check('Matches the original release and verifies every local package file', ['--verify', '--release-report', str(release)],
+          success=True, manifest_hash=manifest_hash)
+    same_manifest = directory / 'same-package-different-release-bytes.json'
+    same_manifest.write_bytes(original_release + b'\n')
+    check('Records distinct release report bytes for the same player package', ['--verify', '--release-report', str(same_manifest)],
           success=True, manifest_hash=manifest_hash)
     other_release = args.other_release_report.resolve(strict=True) if args.other_release_report else directory / 'different-release.json'
     if not args.other_release_report:

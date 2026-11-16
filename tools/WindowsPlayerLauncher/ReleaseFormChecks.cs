@@ -158,8 +158,9 @@ public sealed class ReleaseFormChecks : MarshalByRefObject
                 var value = Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(report));
                 Check((string)value["status"] == "exited" && (int)value["processId"] == pid && (int)value["exitCode"] == 2,
                     "Terminal report belongs to the actual original OpenXR process");
-                Check((string)value["playerManifestSha256"] == reportHash && (string)value["playerLogSha256"] == Hash(log),
-                    "Terminal report binds the original package and log bytes");
+                Check((string)value["playerManifestSha256"] == reportHash && (string)value["playerLogSha256"] == Hash(log)
+                    && (string)value["venueReleaseReportSha256"] == releaseHash,
+                    "Terminal report binds the original package, release report and log bytes");
                 var messages = File.ReadAllText(log);
                 Check(messages.Contains("VR_OPENXR_STARTUP status=") && !messages.Contains("VR_CLIENT_CONNECTED"),
                     "Actual child fails OpenXR setup before admission");
