@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 從個人回放返回原批次戰績
+
+- 管理台 0.31.241 從分房、全館席位或離場明細開啟個人回放後，可按「返回原批次戰績」。會重讀同一批次、核對原場次與雙封存，再開啟原明細並恢復未確認篩選。玩家仍在清單時，焦點回到該列。 [操作方式](SESSION_CLOSURE.md#從全館收尾查看席位)
+- 正式解壓包以本機 IPC 及 Chromium 通過 15 項。五房獨立與合併各驗留場及離場，交叉核對中彈畫格、原明細、焦點與新批次出現後的回到原批次。切換到其他錄製會清除返回入口，替換為其他批次的回應會拒絕重開明細。測試無管理寫入，清理後活動場次、API 的 TCP 監聽及 UDP 端點皆為零。Node 133 項通過。直接讀工作樹的初驗因缺少封裝時才產出的離線播放器檔而未完成，解壓包測試已涵蓋該檔。 [正式包驗證](../artifacts/closure-replay-return-031241/package-batch-check/checks.json) · [本機 IPC](../artifacts/closure-replay-return-031241/package-batch-check/runtime.json)
+- 管理包核對 589 檔，與既有 Windows／Quest 0.50.12 通過離線發行核對。Quest 3 仍未出現 ADB 偵錯介面，實機與跨機待驗。GitHub Actions 對 `5372422` 回報帳務或支出上限，工作未啟動。 [Windows 管理包](../artifacts/closure-replay-return-031241/final/VRCommand-ControlServer-0.31.241.zip) · [發行核對](../artifacts/closure-replay-return-031241/final/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44003983384)
+
 ## 2026-11-17 從全館戰績直接回看最近中彈
 
 - 管理台 0.31.240 在全館席位與離場戰績列提供「跳到最近中彈」。主控會進入原場次、原房間與該玩家的錄製，先核對原封存尾端及戰績，再搜尋保存的最近中彈畫格。沒有中彈的玩家仍能使用個人回放。 [操作方式](REPORTS.md#從戰績開啟個人回放)
