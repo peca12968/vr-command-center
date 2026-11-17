@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-18 配票前原地升級 Quest APK
+
+- `9fd28b9` 在 `-PrepareQuestApks` 新增 `-UpgradeFromReleaseReport`。兩版發行報告須對應同一簽章憑證，目標版號須較新，頭盔舊 APK 須符合原版號與 SHA-256。預檢區分首次安裝、可升級與已符合新版。逐席更新前核對原裝置與應用程式是否仍在執行，更新後讀回 APK 並再次核對裝置。 [配票前升級操作](QUEST3.md#配票前升級已安裝的-quest-apk)
+- 用 SDK 工具重新驗證原 0.50.10／75 與 0.50.12／77 APK 的簽章、內容與發行報告。模擬 ADB 五房 25 席先預檢出 19 席已就緒、5 席可升級、1 席待首次安裝。第 3 房升級時注入失敗，重跑略過先前已升級的兩台模擬裝置，最後 25 席 APK 均核對通過。模擬裝置原有設定與兩份原 APK 保持逐位元一致。 [簽章核對](../artifacts/quest-apk-upgrade-20261117/signed-apks.json) · [25 席排演](../artifacts/quest-apk-upgrade-20261117/checks.json) · [中斷與重跑](../artifacts/quest-apk-upgrade-20261117/resumed.json)
+- Windows 部署回歸共 97 項，65 項通過，32 項依防火牆查核或本機執行原則等既有條件略過。簽章發行報告回歸另有 12 項通過。 [部署測試](../artifacts/quest-apk-upgrade-20261117/deployment-regression.log)
+- Windows 目前只列舉 Quest 檔案傳輸介面，ADB 啟動前查核依防火牆通知設定略過原生啟動。頭盔實際升級與資料保留仍待驗收。GitHub Actions 因帳務或支出上限未開始執行。 [USB 查核](../artifacts/quest-apk-upgrade-20261117/usb-status.json) · [防火牆查核](../artifacts/quest-apk-upgrade-20261117/adb-firewall.log) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44128849330)
+
 ## 2026-11-17 F 槽排演狀態檔重試及原事件核對
 
 - F 槽 exFAT 的檔案替換測試在讀取競爭下觀察到 Windows 錯誤 1175，兩檔名保留。`a7a1ed2` 只將此替換錯誤納入既有限時重試。兩版各另跑 768 次產品狀態寫入，大量並行讀取下皆完成且都沒再遇到致命寫入例外。首輪漏終止報告的原紀錄未保留原生錯誤碼，其成因仍待確認。 [檔案系統測試](../artifacts/hardware-status-exfat-0224/filesystem-probe.json) · [新版產品寫入檢查](../artifacts/hardware-status-exfat-0224/heartbeat-new.json) · [Microsoft ReplaceFileW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew)
