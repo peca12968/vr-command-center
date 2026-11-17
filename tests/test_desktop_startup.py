@@ -38,6 +38,41 @@ class StartupWitnessTests(unittest.TestCase):
 
 
 class NativeLaunchTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Control GUI validation uses Windows')
+    def test_control_gui_exits_before_opening_port_when_python_preflight_refuses(self):
+        spec = importlib.util.spec_from_file_location('control_gui', ROOT / 'scripts/check-control-gui.py')
+        gui = importlib.util.module_from_spec(spec); spec.loader.exec_module(gui)
+        refusal = windows_firewall.WindowsFirewallLaunchError('Python firewall preflight refused.')
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(sys, 'argv', ['check-control-gui.py', directory, '--runtime-root', directory]), \
+                patch.object(gui.checks.package, 'verify'), \
+                patch.object(windows_firewall, 'require_silent_windows_launch', side_effect=refusal) as guard, \
+                patch.object(gui.socket, 'socket') as socket, patch.object(gui.subprocess, 'Popen') as launch, \
+                patch('sys.stderr'):
+            with self.assertRaises(SystemExit) as exit_status:
+                gui.main()
+
+        self.assertEqual(exit_status.exception.code, 2)
+        guard.assert_called_once_with(sys.executable)
+        socket.assert_not_called()
+        launch.assert_not_called()
+
+    def test_https_native_checks_the_game_again_before_contacting_management(self):
+        spec = importlib.util.spec_from_file_location('control_https', ROOT / 'scripts/check-control-https.py')
+        https = importlib.util.module_from_spec(spec); spec.loader.exec_module(https)
+        refusal = windows_firewall.WindowsFirewallLaunchError('Game firewall policy changed.')
+        request = Mock()
+        folder = ROOT / 'server-package-fixture'
+        with patch.object(windows_firewall, 'require_silent_windows_launch', side_effect=refusal) as guard, \
+                patch.object(https.socket, 'socket') as socket, patch.object(https.subprocess, 'Popen') as launch:
+            with self.assertRaisesRegex(windows_firewall.WindowsFirewallLaunchError, 'Game firewall policy changed'):
+                https.verify_native(folder, None, None, {}, None, request, None, None, None)
+
+        guard.assert_called_once_with(folder / 'Runtime/VrCommand.exe')
+        request.assert_not_called()
+        socket.assert_not_called()
+        launch.assert_not_called()
+
     @unittest.skipUnless(os.name == 'nt', 'Windows Firewall preflight uses PowerShell and Windows executable paths')
     def test_firewall_preflight_cannot_be_overridden_by_inherited_manual_mode(self):
         checker = ROOT / 'scripts/check-windows-firewall-notifications.ps1'

@@ -1,17 +1,23 @@
 """Prepare an owned instance, then observe actual GUI select / start / stop / close actions. Never sends UI input."""
-import argparse,importlib.util,json,os,secrets,socket,subprocess,time,urllib.request,uuid
+import argparse,importlib.util,json,os,secrets,socket,subprocess,sys,time,urllib.request,uuid
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 def module(name,file):
     spec=importlib.util.spec_from_file_location(name,ROOT/'scripts'/file);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);return m
 checks=module('control_gui_checks','check-control-package.py');venue=module('control_gui_venue','start-desktop-venue.py')
 def main():
-    from windows_firewall import require_silent_windows_launch
+    from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch, start_checked_windows_process
 
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('package',type=Path);p.add_argument('--runtime-root',type=Path,required=True);args=p.parse_args()
     if os.name!='nt':p.error('Windows GUI evidence only')
     folder=args.package.resolve();checks.package.verify(folder);exe=folder/'Start-Control.exe'
-    require_silent_windows_launch(folder / 'Runtime/VrCommand.Api.exe')
+    api_exe = folder / 'Runtime/VrCommand.Api.exe'
+    try:
+        require_silent_windows_launch(sys.executable)
+        require_silent_windows_launch(api_exe)
+        require_silent_windows_launch(exe)
+    except WindowsFirewallLaunchError as error:
+        p.exit(2, f'{error}\n')
     out=ROOT/'artifacts/control-gui'/('run-'+uuid.uuid4().hex);out.mkdir(parents=True,exist_ok=False);runtime=args.runtime_root.resolve()/out.name;runtime.mkdir(parents=True,exist_ok=False);data=runtime/'instance'
     def save(name,value):(out/name).write_text(json.dumps(value,indent=2)+'\n',encoding='utf-8')
     def stage(value,**extra):save('stage.json',{'stage':value,**extra});print(json.dumps({'stage':value,'directory':str(out),**extra}),flush=True)
@@ -20,7 +26,8 @@ def main():
     subprocess.run([str(exe),'--init',str(data),'--port',str(port),'--report',str(out/'init.json')],check=True,timeout=30)
     ready=out/'warm-ready.json';final=out/'warm-final.json';stop=out/'warm-stop.request';warm=None;gui=None;witness=None;errors=[];observed=None;stopped=False
     try:
-        warm=subprocess.Popen([str(exe),'--run',str(data),'--seconds','30','--ready-report',str(ready),'--stop-file',str(stop),'--report',str(final)])
+        require_silent_windows_launch(api_exe)
+        warm=start_checked_windows_process([exe,'--run',str(data),'--seconds','30','--ready-report',str(ready),'--stop-file',str(stop),'--report',str(final)])
         deadline=time.monotonic()+35
         while not ready.exists():
             if warm.poll() is not None or time.monotonic()>deadline:raise RuntimeError('Warm instance did not become ready')
@@ -29,7 +36,8 @@ def main():
         if warm.returncode!=0 or not checks.read(final)['graceful']:raise RuntimeError('Warm instance did not close normally')
         original={name:checks.sha(data/name) for name in ['control-instance.json','operator-keys.json','player-ticket-signing.key']}
         keys=checks.read(data/'operator-keys.json')['OperatorKeys'];uri=f'http://127.0.0.1:{port}'
-        gui=subprocess.Popen([str(exe)],cwd=out,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);stage('select-existing-instance',guiPid=gui.pid,instance=str(data))
+        require_silent_windows_launch(api_exe)
+        gui=start_checked_windows_process([exe],cwd=out,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);stage('select-existing-instance',guiPid=gui.pid,instance=str(data))
         powershell=Path(os.environ.get('WINDIR','C:/Windows'))/'System32/WindowsPowerShell/v1.0/powershell.exe'
         def children():
             # Own child process metadata only; no UI Automation, command lines,

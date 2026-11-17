@@ -28,7 +28,11 @@ def free_port(address):
 
 
 def verify_native(server_folder, runtime, output, keys, tls, request, mission, management_uri, check, game_pin=None, debrief_receipts=False):
-    from windows_firewall import start_checked_windows_process
+    from windows_firewall import require_silent_windows_launch, start_checked_windows_process
+
+    game = server_folder / 'Runtime/VrCommand.exe'
+    require_silent_windows_launch(game)
+    require_silent_windows_launch(sys.executable)
 
     state = request(tls, '/api/sessions', keys['Master'], status=201,
                     body={'missionId': mission['id'], 'mode': 'Independent', 'roomIds': [1]})
@@ -43,7 +47,7 @@ def verify_native(server_folder, runtime, output, keys, tls, request, mission, m
     config = runtime / 'server-config.json'
     game_settings = {'role': 'Server', 'managementApiUrl': management_uri, 'gameServerKey': keys['GameServer'],
                      'sessionId': state['id'], 'address': '127.0.0.1', 'listenAddress': '127.0.0.1', 'port': udp_port}
-    launcher = str(server_folder / 'Launch-Server.exe')
+    launcher = server_folder / 'Launch-Server.exe'
     if game_pin:
         for label, invalid in [('missing-game-pin', game_settings), ('wrong-game-pin', dict(game_settings, managementCertificateSha256='0' * 64)),
                                ('invalid-game-pin', dict(game_settings, managementCertificateSha256='A' * 64))]:
@@ -51,8 +55,11 @@ def verify_native(server_folder, runtime, output, keys, tls, request, mission, m
             unused_ready = output / (label + '-ready.json')
             unused_work = runtime / (label + '-work')
             config.write_text(json.dumps(invalid), encoding='utf-8')
-            failure = subprocess.run([launcher, '--run', str(config), '--work', str(unused_work), '--seconds', '60',
-                                      '--ready-report', str(unused_ready), '--report', str(rejected)], cwd=runtime, timeout=25)
+            require_silent_windows_launch(game)
+            require_silent_windows_launch(launcher)
+            failure = subprocess.run([str(launcher), '--run', str(config), '--work', str(unused_work), '--seconds', '60',
+                                      '--ready-report', str(unused_ready), '--report', str(rejected)],
+                                     cwd=runtime, timeout=25, env={**os.environ, 'VR_COMMAND_UNATTENDED': '1'})
             report = read(rejected)
             check(failure.returncode == 1 and not unused_ready.exists() and not unused_work.exists()
                   and report['status'] == ('incomplete' if label == 'wrong-game-pin' else 'rejected')
@@ -61,9 +68,10 @@ def verify_native(server_folder, runtime, output, keys, tls, request, mission, m
     config.write_text(json.dumps(game_settings), encoding='utf-8')
     ready, final = output / 'server-ready.json', output / 'server-final.json'
     work = runtime / 'server-work'
-    runner = subprocess.Popen([launcher, '--run', str(config), '--work', str(work),
-                               '--seconds', '120', '--ready-report', str(ready), '--report', str(final), '--peer-diagnostics', 'on'],
-                              cwd=runtime)
+    require_silent_windows_launch(game)
+    runner = start_checked_windows_process([launcher, '--run', str(config), '--work', str(work), '--seconds', '120',
+                                            '--ready-report', str(ready), '--report', str(final), '--peer-diagnostics', 'on'],
+                                           cwd=runtime)
     client = None
     ended = False
 
@@ -89,7 +97,7 @@ def verify_native(server_folder, runtime, output, keys, tls, request, mission, m
         player_config.write_text(json.dumps({'role': 'Client', 'address': '127.0.0.1', 'port': udp_port,
                                              'joinTicket': ticket['ticket']}), encoding='utf-8')
         log = runtime / 'player.log'
-        client = start_checked_windows_process([server_folder / 'Runtime/VrCommand.exe', '-batchmode', '-nographics',
+        client = start_checked_windows_process([game, '-batchmode', '-nographics',
                                    '-job-worker-count', '2', '-logFile', str(log), '--vr-config', str(player_config)],
                                   cwd=runtime, creationflags=subprocess.CREATE_NO_WINDOW)
         wait_until(lambda: log.exists() and 'VR_CLIENT_CONNECTED id=' in log.read_text(encoding='utf-8', errors='replace'),
@@ -168,7 +176,7 @@ def verify_native(server_folder, runtime, output, keys, tls, request, mission, m
 
 
 def main():
-    from windows_firewall import require_silent_windows_launch
+    from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch, start_checked_windows_process
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('package', type=Path)
@@ -205,13 +213,20 @@ def main():
     folder = args.package.resolve()
     manifest = legacy.package.verify(folder)
     assert manifest['launcherSourceSha256'] == legacy.sha(ROOT / 'tools/WindowsControlLauncher/ControlLauncher.cs')
-    require_silent_windows_launch(folder / 'Runtime/VrCommand.Api.exe')
-    require_silent_windows_launch(sys.executable)
+    api_exe = folder / 'Runtime/VrCommand.Api.exe'
+    exe = folder / 'Start-Control.exe'
     server_folder = args.server_package.resolve() if args.server_package else None
     if server_folder:
         load_module('package-windows-server').verify(server_folder)
-        require_silent_windows_launch(server_folder / 'Launch-Server.exe')
-        require_silent_windows_launch(server_folder / 'Runtime/VrCommand.exe')
+    try:
+        require_silent_windows_launch(api_exe)
+        require_silent_windows_launch(exe)
+        require_silent_windows_launch(sys.executable)
+        if server_folder:
+            require_silent_windows_launch(server_folder / 'Launch-Server.exe')
+            require_silent_windows_launch(server_folder / 'Runtime/VrCommand.exe')
+    except WindowsFirewallLaunchError as error:
+        parser.exit(2, f'{error}\n')
     name = 'run-' + uuid.uuid4().hex
     output = ROOT / 'artifacts/control-https-checks' / name
     output.mkdir(parents=True)
@@ -226,7 +241,6 @@ def main():
     other_port = free_port(address)
     while other_port in (local_port, venue_port):
         other_port = free_port(address)
-    exe = str(folder / 'Start-Control.exe')
     password = secrets.token_hex(24)
     env = dict(os.environ)
     env.update({PASSWORD: password, 'ASPNETCORE_PREFERHOSTINGURLS': 'true',
@@ -246,13 +260,14 @@ def main():
             check(probe.connect_ex((ip, port)) != 0, label)
 
     def invoke_init(path, port, label, *extra):
-        subprocess.run([exe, '--init', str(path), '--port', str(port), '--report', str(output / (label + '.json')), *extra],
+        subprocess.run([str(exe), '--init', str(path), '--port', str(port), '--report', str(output / (label + '.json')), *extra],
                        env=env, timeout=40, check=True)
 
     def start(path, label, launch_env):
         ready, final, stop = (output / (label + suffix) for suffix in ('-ready.json', '-final.json', '-stop.request'))
         cmd = [exe, '--run', str(path), '--seconds', '180', '--ready-report', str(ready), '--report', str(final), '--stop-file', str(stop)]
-        return subprocess.Popen(cmd, env=launch_env), ready, final, stop
+        require_silent_windows_launch(api_exe)
+        return start_checked_windows_process(cmd, env=launch_env), ready, final, stop
 
     def reject(path, label, launch_env, *, starts_child=False):
         runner, ready, final, stop = start(path, label, launch_env)
