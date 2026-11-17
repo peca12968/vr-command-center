@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 以原 OpenXR 啟動回條擷取 Quest 單席日誌
+
+- 單席擷取可提供 `--quest-launch-report` 與 `--quest-launch-release`。工具在呼叫 ADB 前核對原房間、席位、場次、入場、埠及發行摘要；原 PID 的 OpenXR 啟動標記與遊戲連線皆確認後才回報 `capture-ready`。完成時保存原日誌內容及回條摘要。 [擷取操作](QUEST3.md#收集-quest-場館驗收日誌)
+- 17 項擷取與 4 項戰後驗收測試通過。模擬 ADB 逐一驗證錯席、換入場、換埠與發行不符在 ADB 前拒絕，PID 不符時尚未開啟 logcat。成功日誌保留原始位元，並通過單場驗收。 [擷取測試](../artifacts/quest-single-bound-capture/capture-tests-confirmed.log) · [戰後驗收](../artifacts/quest-single-bound-capture/field-tests.log)
+- Windows 仍只列出 Quest 檔案傳輸介面，實機驗收待做。GitHub Actions 對 `a0a0760` 因帳務或支出上限未啟動。 [USB 檢查](../artifacts/quest-single-bound-capture/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44032099878)
+
 ## 2026-11-17 單場核對 Quest OpenXR 啟動回條
 
 - 單席 `-RequireOpenXR` 回條保存原場次、席位、入場及公告埠。單場驗收接受原回條與同一份發行報告，逐席比對封存名冊、原 PID 及日誌中早於最終戰績的 OpenXR 啟動標記。 [驗收操作](EXTERNAL_CLIENTS.md#核對單場-quest-openxr-啟動回條)
