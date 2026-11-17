@@ -93,13 +93,13 @@ export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) 
     }
   }
 
-  function replaySeat(player) {
+  function replaySeat(player, latestDamage = false) {
     const { actor, busy, pending } = current();
     if (!active || !target || actor?.role !== 'Master' || busy || pending || !players?.includes(player)) return;
     const { room, throughCombatSequence } = player;
     openReplay({ mode: 'replay', complete: true, sessionId: room.sessionId, roomId: room.roomId,
       streamId: room.streamId, throughSequence: room.worldSequence, throughCombatSequence,
-      playerId: player.playerId, playerName: player.name, playerScore: { ...player.score, roomId: room.roomId } });
+      playerId: player.playerId, playerName: player.name, playerScore: { ...player.score, roomId: room.roomId }, latestDamage });
   }
 
   function render() {
@@ -124,6 +124,13 @@ export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) 
       replay.addEventListener('click', () => replaySeat(player));
       const actions = document.createElement('div');
       actions.className = 'button-row'; actions.append(button, replay);
+      if (player.score.hitsReceived > 0) {
+        const damage = document.createElement('button');
+        damage.type = 'button'; damage.className = 'quiet small'; damage.textContent = '跳到最近中彈';
+        damage.setAttribute('aria-label', `跳到${seatLabel}最近中彈`);
+        damage.addEventListener('click', () => replaySeat(player, true));
+        actions.append(damage);
+      }
       row.insertCell().append(actions);
       for (const value of [...countFields.map(field => player.score[field]), `${player.score.accuracyPercent}%`, player.score.health])
         row.insertCell().textContent = value;

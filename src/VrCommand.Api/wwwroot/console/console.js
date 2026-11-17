@@ -1479,13 +1479,23 @@ async function openVenueDepartures(batch, session, scope) {
       const replay = element('button', '個人回放', 'quiet small');
       replay.type = 'button';
       replay.setAttribute('aria-label', `開啟房間 ${player.roomId} ${player.name} 的個人回放`);
-      replay.addEventListener('click', () => {
+      function openReplay(latestDamage) {
         if (!current() || state.busy || state.pending) return;
         tab('world', { mode: 'replay', complete: true, sessionId: body.sessionId, streamId: body.streamId,
           roomId: player.roomId, throughSequence: body.worldSequence, throughCombatSequence: body.finalStreamSequence,
-          playerId: player.playerId, playerName: player.name, playerScore: player });
-      });
-      return row([player.roomId, player.name, ...scores.map(key => player[key]), `${player.accuracyPercent}%`, player.health, csv, replay]);
+          playerId: player.playerId, playerName: player.name, playerScore: player, latestDamage });
+      }
+      replay.addEventListener('click', () => openReplay(false));
+      const actions = element('div', '', 'button-row');
+      actions.append(replay);
+      if (player.hitsReceived > 0) {
+        const damage = element('button', '跳到最近中彈', 'quiet small');
+        damage.type = 'button';
+        damage.setAttribute('aria-label', `跳到房間 ${player.roomId} ${player.name} 最近中彈`);
+        damage.addEventListener('click', () => openReplay(true));
+        actions.append(damage);
+      }
+      return row([player.roomId, player.name, ...scores.map(key => player[key]), `${player.accuracyPercent}%`, player.health, csv, actions]);
     }));
     status.textContent = '';
     $('venue-departed-table').hidden = false;

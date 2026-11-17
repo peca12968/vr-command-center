@@ -1683,6 +1683,7 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
       await departureTable.waitFor();
       const departureCells = await departureTable.locator('tbody td').allTextContents();
       assert.deepEqual(departureCells, ['1', departed.name, '1', '0', '0', '0', '0', '0%', '100', '下載 CSV', '個人回放']);
+      assert.equal(await departureTable.getByRole('button', {name:/最近中彈/}).count(), 0);
       const csvButton = departureTable.getByRole('button', { name: `下載房間 1 ${departed.name} 的個人戰績 CSV` });
       if (mode === 'Linked') {
         const substituted = async route => {
