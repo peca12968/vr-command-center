@@ -23,6 +23,7 @@ import { mountConnections, validDestination } from './connection-ui.js';
 import { mountClosure } from './closure-ui.js';
 import { placementHistory } from './placement-history.js';
 import { mountPlacementMove } from './placement-move.js';
+import { verifyBlobSha256 } from './file-integrity.js';
 const replay = mountReplay();
 const $ = id => document.getElementById(id);
 const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
@@ -156,13 +157,7 @@ async function readVenueTicketArchive(response, request, signal) {
       || Number(response.headers.get('Content-Length')) > limit) throw new Error();
     const file = await response.blob();
     if (file.size < 1 || file.size > limit) throw new Error();
-    // Fetch verifies the bytes locally, including on HTTP management pages.
-    const local = URL.createObjectURL(file);
-    try {
-      const verified = await fetch(local, { integrity: 'sha256-' + digest, signal });
-      if (!verified.ok) throw new Error();
-      await verified.arrayBuffer();
-    } finally { URL.revokeObjectURL(local); }
+    await verifyBlobSha256(file, digest, signal);
     return file;
   } catch {
     throw Object.assign(new Error('無法核對五房連線檔的原始內容，請重新配票。'), { code: 'venue-archive-unverified' });
@@ -1146,7 +1141,13 @@ function venueBeginRows(targets, policy, playersPerRoom) {
     return target.roomIds.map(roomId => {
       const row = { roomId, sessionId: target.sessionId, sessionSequence: target.sessionSequence,
         ...roomReadiness.venueBegin(target, roomId, policy, playersPerRoom) };
-      if (policy !== 'normal' && session && state.rooms.some(room => room.id === roomId && room.sessionId === session.id)) {
+      const original = session && state.rooms.some(room => room.id === roomId && room.sessionId === session.id);
+      if (original) {
+        row.mode = session.environment.mode;
+        if (row.mode === 'MR') row.alignment = /^[a-f0-9]{64}$/.test(session.roomAlignment?.[`room${roomId}`] ?? '')
+          ? '已鎖定校正檔' : '校正檔尚未鎖定';
+      }
+      if (policy !== 'normal' && original) {
         const occupied = new Set(session.players.filter(player => player.roomId === roomId).map(player => player.seat));
         row.seats = Array.from({ length: 5 }, (_, index) => {
           if (index >= playersPerRoom) return occupied.has(index) ? 'OutsideStage' : 'NotInStage';
@@ -1202,6 +1203,26 @@ async function openVacantBeginSeat(row, seat) {
   if (current()) notify('原空席已變更或無法確認。請重新核對全館開場清單。', true);
 }
 
+async function openVenueAlignment(row) {
+  if (!master() || state.busy || state.pending || $('operations-view').hidden || !isOriginalBeginRoom(row)) return;
+  const epoch = state.epoch, view = operationsViewEpoch;
+  let selection = selectionEpoch;
+  if (state.session?.id !== row.sessionId) {
+    selection++;
+    await selectSession(row.sessionId, String(row.roomId));
+  }
+  if (!master() || state.epoch !== epoch || operationsViewEpoch !== view || selectionEpoch !== selection) return;
+  if (!isOriginalBeginRoom(row) || state.session?.id !== row.sessionId || state.session.sequence !== row.sessionSequence
+      || state.session.environment.mode !== 'MR' || $('mr-alignment-pins').hidden) {
+    notify('原 MR 場次已變更，請重新核對全館開場清單。', true);
+    return;
+  }
+  const file = $(`mr-alignment-file-${row.roomId}`);
+  const target = file && !file.hidden && !file.disabled ? file : $('mr-alignment-title');
+  target.scrollIntoView({ block: 'center' });
+  target.focus({ preventScroll: true });
+}
+
 function renderVenueBegin(targets, waiting, policy, playersPerRoom) {
   const summary = $('venue-begin-evidence'), list = $('venue-begin-rooms');
   const rows = venueBeginRows(targets, policy, playersPerRoom);
@@ -1213,8 +1234,10 @@ function renderVenueBegin(targets, waiting, policy, playersPerRoom) {
   const signature = JSON.stringify([rows, locked]);
   if (list.dataset.rows === signature) return;
   list.dataset.rows = signature;
-  list.replaceChildren(...rows.map(({ roomId, sessionId, state: status, text, origin }) => {
-    const item = element('li', `房間 ${roomId} · ${text}` + (origin ? ` · 錄製來源 ${origin}` : ''));
+  list.replaceChildren(...rows.map(row => {
+    const { roomId, sessionId, state: status, text, origin, mode, alignment } = row;
+    const item = element('li', `房間 ${roomId} · ${text}` + (mode ? ` · ${mode}` : '')
+      + (alignment ? ` · ${alignment}` : '') + (origin ? ` · 錄製來源 ${origin}` : ''));
     item.dataset.beginRoom = roomId;
     item.dataset.beginState = status;
     if (sessionId) {
@@ -1227,6 +1250,13 @@ function renderVenueBegin(targets, waiting, policy, playersPerRoom) {
         await selectSession(sessionId, String(roomId));
         focusRoster(sessionId, roomId);
       });
+      item.append(' ', button);
+    }
+    if (mode === 'MR') {
+      const button = element('button', '查看 MR 校正', 'quiet small');
+      button.type = 'button'; button.disabled = locked;
+      button.setAttribute('aria-label', `查看房間 ${roomId} MR 校正`);
+      button.addEventListener('click', () => void openVenueAlignment(row));
       item.append(' ', button);
     }
     return item;
@@ -2030,6 +2060,14 @@ async function sendPending() {
   try {
     const response = await api(pending.path, pending.method, pending.body, pending.requestId, pending.admissionId);
     if (state.pending !== pending) return;
+    if (pending.kind === 'command' && pending.body.action === 'SetRoomAlignment' &&
+        (response?.commandId !== pending.body.commandId || `/sessions/${response?.session?.id}/commands` !== pending.path
+          || typeof response?.duplicate !== 'boolean' || response.appliedAtSequence !== pending.body.expectedSequence + 1
+          || !Number.isSafeInteger(response.session.sequence) || response.session.sequence < response.appliedAtSequence
+          || venueMissionRooms.some(room => {
+            const key = `room${room}`;
+            return (response.session.roomAlignment?.[key] ?? null) !== (pending.body.roomAlignment[key] ?? null);
+          }))) throw new Error('Incomplete room alignment receipt');
     const roomPolicy = pending.body?.roomEnemyPolicy;
     const expectedSetting = pending.body?.expectedSettingSequence ?? roomPolicy?.expectedPolicySequence;
     if (expectedSetting != null) {

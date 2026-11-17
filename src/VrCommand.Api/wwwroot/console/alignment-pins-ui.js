@@ -1,3 +1,5 @@
+import { verifyBlobSha256 } from './file-integrity.js';
+
 const $ = id => document.getElementById(id);
 const hashPattern = /^[a-f0-9]{64}$/;
 const fileLimit = 16 * 1024;
@@ -85,6 +87,10 @@ export function mountAlignmentPins({ state, checkFile, pin }) {
       if (!applies()) return;
       if (result?.roomId !== room) { draft.status = `此檔案屬於房間 ${result?.roomId ?? '未知'}。`; return; }
       if (!hashPattern.test(result.sha256 ?? '')) { draft.status = '校正檔核對結果不完整。'; return; }
+      const digest = btoa(String.fromCharCode(...result.sha256.match(/../g).map(byte => Number.parseInt(byte, 16))));
+      try { await verifyBlobSha256(file, digest); }
+      catch { draft.status = '校正檔原始內容與核對結果不符，請重新選檔。'; return; }
+      if (!applies()) return;
       draft.hash = result.sha256;
       draft.status = '已核對，可鎖定';
     } catch (error) {

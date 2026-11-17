@@ -194,6 +194,7 @@ async function main() {
     }
     if (process.argv.includes('--mr-pins-only')) {
       await require('./mr-alignment-pins-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
+      await require('./venue-mr-alignment-browser.cjs')({ context, api, tokens, base, check, captureErrors });
       check(browserErrors.length === 0, 'MR pin checks have no uncaught browser or policy errors');
       await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), result: 'passed', scope: 'MR file upload and pinning against a real API and Chromium' }, null, 2));
       console.log(`PASS: ${checks} focused MR pin checks. Screenshots: ${screenshots}`); return;
@@ -625,6 +626,7 @@ async function main() {
     await require('./mission-template-browser.cjs')({ context, api, tokens, directory, root, base, screenshots, check, captureErrors, availablePort, dotnet });
     await require('./ticket-download-fence.cjs').checkTicketDownloadFence({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./saved-layout-identity-browser.cjs')({ context, api, tokens, base, check, captureErrors });
+    await require('./venue-mr-alignment-browser.cjs')({ context, api, tokens, base, check, captureErrors });
     await require('./archived-independent-plan-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./venue-mission-file-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./session-reprepare-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
