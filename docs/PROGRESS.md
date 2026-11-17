@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 逐筆核對五房交接與原場次封存
+
+- `3306835` 的 0.2.23 開發版在兩種版本 4 交接驗證指令提供 `--events-directory`。從原事件檔重建已結束且戰鬥封存的場次，核對座位綁定及每筆模擬回饋的原串流、執行階段、入場與事件。事件檔保存在交接 ZIP 外。 [匯出與核對指令](HARDWARE.md#離線核對五房排演結果)
+- 正式 0.31.264 管理服務以本機 AF_UNIX 跑合併與獨立模式，各 25 個模擬席位、5 筆原管理回饋。離線核對報告與 ZIP 得出相同結果，兩種模式都拒絕原事件 ID、接受時間、串流、入場遭改寫的交接檔及缺少封存的原事件檔。取消及逾時的模擬訊號也逐筆核對。另通過 36 項 CLI 檢查，既有三份交接 ZIP 的雜湊與讀回結果相符。 [封存驗收](../artifacts/hardware-original-events-0223/ipc-api/checks.json) · [入場與狀態](../artifacts/hardware-original-events-0223/original-binding-and-status.json) · [CLI 結果](../artifacts/hardware-original-events-0223/cli.log) · [舊版讀回](../artifacts/hardware-original-events-0223/historical-reviews.json)
+- 防火牆查核拒絕啟動 Python 與 .NET 的監聽測試，0.2.23 即時排演和正式封裝待驗。Quest USB 目前可見檔案傳輸介面，ADB 偵錯介面及廠商設備仍待驗。GitHub Actions 回報帳務或支出上限，測試工作未啟動。 [防火牆查核](../artifacts/hardware-original-events-0223/firewall.json) · [Quest USB](../artifacts/hardware-original-events-0223/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44054850642)
+
 ## 2026-11-17 補查無人值守的本機連線測試
 
 - 桌面場館、Unity 冒煙與入場及 TCP 測試會在探測連接埠前查核 Python，啟動或重啟 TCP 管理 API 時也重新查核實際的執行檔。查核拒絕時記錄原因並停止該流程，離線與 AF_UNIX 測試可繼續。
