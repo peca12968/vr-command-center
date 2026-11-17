@@ -6,6 +6,7 @@
 - 正式建置與解壓包各通過 10 項 Chromium 檢查，每輪建立五房獨立、合併及逐房選版三批，共 11 個準備場次。逐一比對原任務完整定義，再結束並釋放房間。任務庫新增版本後仍使用原選定版，第 2 房單獨換版及未保存草稿均已核對。 [解壓驗收](../artifacts/mission-select-launch-031267/final-browser/browser-checks.json) · [畫面](../artifacts/mission-select-launch-031267/final-browser/library-shortcut.png)
 - 解壓版首輪在啟動判定逾時，但健康檢查已回傳 200，保存日誌的啟動文字遭覆寫。Windows 子程序排演確認，共用日誌位置的讀取會改變子程序的寫入位置。IPC 工具改用獨立檔案控制代碼讀取已完成的行。修正後同一解壓包完成上述瀏覽器檢查，另通過合併與獨立各 25 席、重啟後回放的既有 IPC 驗證，TCP 監聽、UDP 端點及殘留場次均為零。 [原日誌](../artifacts/mission-select-launch-031267/extracted-browser/server.log) · [位置排演](../artifacts/mission-select-launch-031267/log-cursor.json) · [五房 IPC](../artifacts/mission-select-launch-031267/venue-ipc.json)
 - ZIP 為 53,507,645 位元組，解壓核對 595 檔，並與既有 Windows 玩家、伺服器及 Quest 0.50.12／77 APK 完成離線發行核對。第一個建置快照與最後調整的來源不同，另建目前來源後才封裝。實體頭盔、跨機 25 人與廠商硬體仍待驗收。 [管理包](../artifacts/mission-select-launch-031267/VRCommand-ControlServer-0.31.267.zip) · [發行核對](../artifacts/mission-select-launch-031267/venue-release.json)
+- GitHub Actions 對產品提交 `9c00d75` 回報帳務或支出上限，工作未啟動。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44139059500)
 
 ## 2026-11-18 搜尋已保存的任務
 
