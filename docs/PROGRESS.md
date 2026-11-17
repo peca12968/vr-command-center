@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 五房硬體模擬交接核對事件序號
+
+- `d50c988` 將五房排演報告升為版本 4。各批記錄原串流及執行階段序號，交接驗證逐筆核對，並拒絕同場次跨房重複的事件、回報及序號。使用同一份模擬資料重現 0.2.22 將兩個事件算成三次確認。新版格式拒絕這筆重複，舊格式仍可讀取並顯示未執行逐筆核對。 [操作方式](HARDWARE.md#離線核對五房排演結果) · [舊版反例](../artifacts/hardware-handoff-0223/legacy-counterexample.json)
+- 編譯後的 0.2.23 開發版通過 31 項離線 CLI 驗證，涵蓋資料夾、產生 ZIP、重讀 ZIP、合併與獨立模式。既有三份交接 ZIP 雜湊及結果相符，0.2.22 原包 10 檔也通過新封裝工具的離線核對。 [離線測試](../artifacts/hardware-handoff-0223/cli-final.log) · [既有交接](../artifacts/hardware-handoff-0223/historical-reviews.json)
+- Windows 防火牆查核攔下這台電腦的 Python 和 .NET 監聽流程，0.2.23 的即時排演及正式套件驗收待執行。廠商設備及 Quest USB 偵錯仍待驗。GitHub Actions 因帳務或支出上限未啟動。 [防火牆查核](../artifacts/hardware-handoff-0223/firewall-final.json) · [USB 查核](../artifacts/hardware-handoff-0223/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44052466557)
+
 ## 2026-11-17 指定獨立房間套用敵軍策略
 
 - 控制台 0.31.264 的「全館敵軍策略」可勾選執行中的獨立房間。管理端在同一交易核對所選房間與原設定版本。回條、重試與批次匯出保存原範圍，封存驗收會讀取批次房號並核對各房原畫格。合併場保留全場及原單房策略入口。 [操作說明](LAYOUT.md#全館敵軍策略) · [封存驗收](EXTERNAL_CLIENTS.md#核對五房環境與敵軍指令的執行畫格)
