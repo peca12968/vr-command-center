@@ -43,6 +43,7 @@ const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: nul
 const liveSettingDrafts = { environment: null, enemies: null };
 let comparedVersion = null;
 let checkedTemplate = null, templateEpoch = 0, loadedText = null;
+let draftLoad = null;
 const objectHistory = placementHistory();
 const world = mountWorld(() => state.key, logout, venueEnemyText, master, download);
 const report = mountReport(() => state, logout, () => { renderStatistics(); closure.update(); });
@@ -166,17 +167,19 @@ async function readTicketArchive(response, request, signal, room) {
   }
 }
 
-async function api(path, method = 'GET', body, requestId, admissionId, responseType = 'json') {
+async function api(path, method = 'GET', body, requestId, admissionId, responseType = 'json', requestSignal) {
   const controller = new AbortController(), epoch = state.epoch;
+  const signal = requestSignal ? AbortSignal.any([requestSignal, controller.signal]) : controller.signal;
   const timeout = setTimeout(() => controller.abort(), 8000);
   try {
     const binary = body instanceof Blob;
     const roomArchive = responseType === 'room-ticket-archive';
     const archiveRequest = roomArchive || responseType === 'venue-ticket-archive' ? uuid() : null;
-    const response = await fetch('/api' + path, { method, headers: { Authorization: 'Bearer ' + state.key, 'Content-Type': binary ? 'application/octet-stream' : 'application/json', ...(requestId ? { 'Idempotency-Key': requestId } : {}), ...(admissionId ? { 'If-Match-Admission': admissionId } : {}), ...(archiveRequest ? { 'X-VrCommand-Archive-Request': archiveRequest } : {}) }, body: binary || body === undefined ? body : JSON.stringify(body), signal: controller.signal, cache: 'no-store' });
+    const response = await fetch('/api' + path, { method, headers: { Authorization: 'Bearer ' + state.key, 'Content-Type': binary ? 'application/octet-stream' : 'application/json', ...(requestId ? { 'Idempotency-Key': requestId } : {}), ...(admissionId ? { 'If-Match-Admission': admissionId } : {}), ...(archiveRequest ? { 'X-VrCommand-Archive-Request': archiveRequest } : {}) }, body: binary || body === undefined ? body : JSON.stringify(body), signal, cache: 'no-store' });
     if (epoch !== state.epoch) throw new Error('登入狀態已變更，已忽略舊回應。');
-    const content = archiveRequest && response.ok ? await readTicketArchive(response, archiveRequest, controller.signal, roomArchive)
+    const content = archiveRequest && response.ok ? await readTicketArchive(response, archiveRequest, signal, roomArchive)
       : responseType === 'blob' && response.ok ? await response.blob() : await response.text();
+    requestSignal?.throwIfAborted();
     if (epoch !== state.epoch) throw new Error('登入狀態已變更，已忽略舊回應。');
     if (!response.ok) {
       let message = '操作未完成，請重新整理後確認。', layout, code, maxCount, roomIds, roomId, seat, workstationIssues, blockedRooms, reviews;
@@ -231,7 +234,7 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
     return result;
   } finally { clearTimeout(timeout); }
 }
-async function run(action, independentRead = false) {
+async function run(action, independentRead = false, signal) {
   if (state.busy) return;
   const epoch = state.epoch; let refreshFailed = false;
   finishPropGesture(); state.busy = true; applyPermissions();
@@ -245,11 +248,12 @@ async function run(action, independentRead = false) {
         refreshFailed = true;
       }
     }
-    if (epoch !== state.epoch || !state.actor) return;
+    if (signal?.aborted || epoch !== state.epoch || !state.actor) return;
     await action();
-    if (refreshFailed && epoch === state.epoch && state.actor) notify('已讀取任務；背景列表更新失敗，請稍後重新整理。', true);
+    if (!signal?.aborted && refreshFailed && epoch === state.epoch && state.actor) notify('已讀取任務；背景列表更新失敗，請稍後重新整理。', true);
   }
   catch (error) {
+    if (signal?.aborted) return;
     const message = error.status || error instanceof MissionVersionMismatch || error.code === 'room-archive-unverified'
       ? error.message : '連線或操作結果未確認，請重新整理查看。';
     notify(message + (state.pending && !error.status ? ' 可使用「重試確認結果」確認原命令。' : ''), true, error.beginReviews);
@@ -267,6 +271,7 @@ function runSession(action) {
   });
 }
 function logout() {
+  draftLoad?.abort();
   roomEnemyDraft = roomEnemyPolicySequences = null;
   state.settingRevisions = liveSettingDrafts.environment = liveSettingDrafts.enemies = null;
   selectionEpoch++;
@@ -2420,11 +2425,11 @@ function requireMissionHistory(history, seriesId, minimum) {
     || !Number.isSafeInteger(history.headNumber) || history.headNumber < minimum || !Array.isArray(history.versions))
     throw new MissionVersionMismatch();
 }
-async function rememberHead(history, epoch) {
+async function rememberHead(history, epoch, signal) {
   const index = state.catalog.findIndex(row => row.seriesId === history.seriesId), known = state.catalog[index];
-  if (known && known.number >= history.headNumber) return epoch === state.epoch;
-  const revision = await api(`/missions/${encodeURIComponent(history.headId)}/version`);
-  if (epoch !== state.epoch) return false;
+  if (known && known.number >= history.headNumber) return epoch === state.epoch && !signal?.aborted;
+  const revision = await api(`/missions/${encodeURIComponent(history.headId)}/version`, 'GET', undefined, undefined, undefined, 'json', signal);
+  if (signal?.aborted || epoch !== state.epoch) return false;
   requireMissionVersion(revision, history.headId, history.seriesId, history.headNumber);
   const currentIndex = state.catalog.findIndex(row => row.seriesId === history.seriesId), current = state.catalog[currentIndex];
   if (current && current.number >= revision.number) return true;
@@ -2449,16 +2454,24 @@ function renderHistory(selected) {
   if (comparedVersion && comparedVersion.mission.id !== $('mission-version').value) clearMissionComparison();
   $('history-status').textContent = history ? `已讀取 ${history.versions.length} 版 · 本次查詢最新第 ${history.headNumber} 版` : '';
 }
-async function loadDraft({ id, seriesId, number }, older = false) {
+function requestDraft(version, older = false) {
+  if (state.busy || $('missions-view').hidden) return;
+  const request = draftLoad = new AbortController();
+  void run(() => loadDraft(version, older, request.signal), true, request.signal).finally(() => {
+    if (draftLoad === request) draftLoad = null;
+  });
+}
+
+async function loadDraft({ id, seriesId, number }, older, signal) {
   const epoch = state.epoch;
-  const history = await api(`/missions/${id}/history`);
-  if (epoch !== state.epoch) return;
+  const history = await api(`/missions/${id}/history`, 'GET', undefined, undefined, undefined, 'json', signal);
+  if (signal.aborted || epoch !== state.epoch) return;
   requireMissionHistory(history, seriesId, number);
   const targetId = older ? id : history.headId;
-  const revision = await api(`/missions/${encodeURIComponent(targetId)}/version`);
-  if (epoch !== state.epoch) return;
+  const revision = await api(`/missions/${encodeURIComponent(targetId)}/version`, 'GET', undefined, undefined, undefined, 'json', signal);
+  if (signal.aborted || epoch !== state.epoch) return;
   requireMissionVersion(revision, targetId, seriesId, older ? number : history.headNumber);
-  if (!await rememberHead(history, epoch)) return;
+  if (!await rememberHead(history, epoch, signal) || signal.aborted || epoch !== state.epoch) return;
   const mission = revision.mission;
   const draft = mission.definition;
   fillDraft(draft);
@@ -2707,7 +2720,7 @@ for (const id of ['prop-asset', 'prop-x', 'prop-y', 'prop-z', 'prop-yaw']) $(id)
 
 function tab(name, worldTarget = null) {
   if (name !== 'operations') { operationsViewEpoch++; clearVenueMissionFile(); closeVenueDepartures(); }
-  if (name !== 'missions') { placement.clearTrial(); clearMissionTemplate(); clearPropCopies(); propMove.reset(); }
+  if (name !== 'missions') { draftLoad?.abort(); placement.clearTrial(); clearMissionTemplate(); clearPropCopies(); propMove.reset(); }
   finishPropGesture();
   $('world-return-venue-begin').hidden = !(name === 'world' && master() && worldTarget?.witness?.kind === 'blocked-begin');
   const trackingReturn = $('world-return-tracking');
@@ -2872,13 +2885,13 @@ $('load-mission').addEventListener('click', () => {
   const id = $('edit-mission').value;
   const selected = state.catalog.find(row => row.mission.id === id);
   if (selected && confirmDraftDiscard('載入最新版'))
-    run(() => loadDraft({ id, seriesId: selected.seriesId, number: selected.number }), true);
+    requestDraft({ id, seriesId: selected.seriesId, number: selected.number });
 });
 $('load-version').addEventListener('click', () => {
   const id = $('mission-version').value;
   const history = state.history, selected = history?.versions.find(row => row.id === id);
   if (selected && confirmDraftDiscard('載入選取版本'))
-    run(() => loadDraft({ id, seriesId: history.seriesId, number: selected.number }, true), true);
+    requestDraft({ id, seriesId: history.seriesId, number: selected.number }, true);
 });
 $('export-mission-template').addEventListener('click', () => {
   const id = $('mission-version').value, epoch = state.epoch, view = templateEpoch;
