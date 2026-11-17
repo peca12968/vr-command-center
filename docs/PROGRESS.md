@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 核對每房場地報告的原任務版本
+
+- 控制台 0.31.245 在準備場次時核對場地報告與保存版本的 `missionId`。合併場次及五房獨立都會拒絕其他版本的報告。同一批只有一房不符時，建立仍停用，其他房已核對的圖仍可查看。服務拒絕建立時也會指明版本，以原報告標示衝突物件。 [場地檢查](LAYOUT.md)
+- 上一版解壓包收到其他版本的合格報告後仍開放建立，反例已保存。新版正式包用 IPC 和 Chromium 通過 7 項，含兩種模式的替代報告與實際第 5 房場地拒絕，拒絕後活動場次為零。首個新版夾具在手動重查後過早讀取第 1 房平面圖，改為等待該房回應後通過。另通過 14 項歷史任務回歸和 133 項 Node 測試。 [正式包場地驗證](../artifacts/saved-layout-identity-031245/package-final/checks.json) · [歷史任務回歸](../artifacts/closure-mission-version-031244/package-031245-archive/checks.json)
+- `88010bb` 的正式管理包核對 589 檔，並與既有 Windows／Quest 0.50.12 通過離線發行核對。本機 IPC 測試的 TCP 監聽及 UDP 端點均為零。Quest 3 仍無 ADB 偵錯介面。GitHub Actions 因帳務或支出上限未啟動。 [Windows 管理包](../artifacts/saved-layout-identity-031245/final/VRCommand-ControlServer-0.31.245.zip) · [發行核對](../artifacts/saved-layout-identity-031245/final/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44008675583)
+
 ## 2026-11-17 依原場次版本重開歷史五房任務
 
 - 控制台 0.31.244 在套用全館收尾批次前，逐一比對原場次保存的任務版本 ID。五房獨立中任一房收到同名新版，或合併場次收到同名新版時，保留原準備選擇和任務草稿。原版仍可預覽條件並建立新場次。 [操作與 API](MISSION_VERSIONS.md#從全館收尾套用五房原版本)
