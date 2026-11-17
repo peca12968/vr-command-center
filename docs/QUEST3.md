@@ -513,7 +513,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
     -DeviceMap .\device-map.json -ReleaseReport .\venue-release.json -CheckOnly
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
     -DeviceMap .\device-map.json -ReleaseReport .\venue-release.json -DeployMappedSeats `
-    -ManagementApi http://127.0.0.1:5081
+    -ManagementApi http://127.0.0.1:5081 -SaveDeploymentReport .\quest-deploy-first.json
 ```
 
 批次預檢會先核對所有指定裝置。`apk-hash-mismatch` 表示版本代碼相符但 APK 位元組不同。`apk-unverified` 表示無法讀出 APK 的雜湊，或 Android 回傳多個套件檔。正式部署逐席開始寫入前會再核對一次。若第二次核對失敗，該席不寫入設定，後續席位標記為 `not-attempted`。`apkVerified: true` 表示該席已完成當階段的 APK 核對，入場及追蹤仍由主控台驗證。
@@ -590,13 +590,17 @@ pwsh -NoProfile -NonInteractive -File .\scripts\deploy-quest.ps1 `
 
 #### 從原部署報告重試未完成席位
 
-正式部署請將 JSON 輸出保存到新的私人檔案。排除故障後，提供最近一次 `phase: "deployment"` 且 `complete: false` 的原始報告，搭配原部署 ZIP、原裝置清單與相同 APK 核對條件。部分清單沿用 `-AllowPartialMap`。下例使用原發行報告核對 APK。若首次使用 `-ExpectedVersionCode`，重試沿用相同版本代碼。
+正式部署建議加上 `-SaveDeploymentReport .\quest-deploy-first.json`，選擇既有私人資料夾中的新檔名。工具進入部署階段後會先保存整批席位，並在每席確認啟動後更新完整 JSON。每次更新先寫入同資料夾的暫存檔，再以單次更名發布。部署程序中途關閉時，可讀取最後一次成功保存的報告。
+
+若報告寫到 `failedStep: "launch-game"` 或 `"observe-openxr"`，先到頭盔核對該席實際啟動情況，並用新票券及只列待部署席位的清單補做。部署工具會在送出 Android 啟動指令前先保存 `launch-game`，所以中斷時可辨別哪一席的啟動結果仍待確認。若程序突然關閉時該席仍為 `not-attempted`，該席可能已有暫存或已切換的設定，部署尚未送出啟動。
+
+排除故障後，提供最近一次 `phase: "deployment"` 且 `complete: false` 的原始報告，搭配原部署 ZIP、原裝置清單與相同 APK 核對條件。部分清單沿用 `-AllowPartialMap`。下例使用原發行報告核對 APK。若首次使用 `-ExpectedVersionCode`，重試沿用相同版本代碼。
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
     -DeviceMap .\device-map.json -ReleaseReport .\venue-release.json -DeployMappedSeats `
     -ManagementApi http://127.0.0.1:5081 -RetryIncomplete .\quest-deploy-first.json `
-    > .\quest-deploy-retry.json
+    -SaveDeploymentReport .\quest-deploy-retry.json
 ```
 
 工具跳過報告裡已送出啟動的裝置，只查詢及部署其餘席位。它會核對原 ZIP 雜湊、房席分配、Android 裝置身分及原 APK 條件。原部署報告若記有 `venueReleaseReportSha256`，重試須提交位元組完全相同的發行檔，檢查會在聯絡裝置前完成。舊部署的累計重試沿用原 APK 證據範圍。待重試的 ADB 連線若指向另一台頭盔，即使房席清單沒有改動，仍會在寫入前停下。每個待重試席位寫入前仍須通過原五房的線上檢查，所有票券須仍有效。報告只保存加鹽雜湊、發行摘要及必要場次資訊。

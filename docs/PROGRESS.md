@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-17 在部署途中保存 Quest 逐席報告
+
+- `-SaveDeploymentReport` 在第一席寫入前保存整批，逐席記錄待確認的 Android 啟動及已確認席位。報告以同目錄暫存檔發布。正常完成沿用原完整部署格式，重試輸出使用新檔名及前次報告 SHA-256。 [部署重試](QUEST3.md#從原部署報告重試未完成席位)
+- 本機 11 項部署及 33 項 Quest 戰後驗收測試通過。三席模擬測試實際終止 PowerShell。第 2 席正在暫存時重試只啟動第 2、3 席。第 2 席的啟動結果仍待確認時，重試在讀取 ADB 清單前停止。已存在的報告保持原位元組。Windows 仍只辨識到 Quest 的檔案傳輸介面。 [部署回歸](../artifacts/quest-deployment-report/deployment-tests.log) · [戰後驗收回歸](../artifacts/quest-deployment-report/field-results-tests.log)
+
 ## 2026-11-17 在配票前準備 Quest APK
 
 - `-PrepareQuestApks` 使用同一格式的裝置清單與原發行報告，先準備 1 至 25 台 Quest 3 的 APK。安裝及裝置雜湊核對可在五分鐘票券發出前完成。`-CheckOnly` 可列出已核對及待安裝的席位。 [配票前準備](QUEST3.md#配票前準備-quest-apk)

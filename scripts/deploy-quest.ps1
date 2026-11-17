@@ -26,6 +26,7 @@ param(
     [Parameter(Mandatory, ParameterSetName='PrepareApks')][switch]$PrepareQuestApks,
     [Parameter(ParameterSetName='Bundle')][switch]$DeployMappedSeats,
     [Parameter(ParameterSetName='Bundle')][switch]$InstallMissing,
+    [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$SaveDeploymentReport,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$RetryIncomplete,
     [Parameter(ParameterSetName='Bundle')][switch]$VerifyTrackedSeats,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$DeploymentReport,
@@ -1303,7 +1304,7 @@ function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, $R
     $fileSteps = @('resolve-launcher','prepare-device','stage-alignment','stage-connection','check-expiry-before-staging',
         'check-expiry-before-stop','stop-game','activate-connection','verify-active-connection',
         'clean-local-connection','check-expiry-before-launch','launch-game','observe-openxr',
-        'check-apk-before-install','install-apk','verify-installed-apk')
+        'check-apk-before-install','install-apk','verify-installed-apk','save-before-launch')
     for ($index = 0; $index -lt $Map.Count; $index++) {
         $entry = $previous.devices[$index]
         $row = $Map[$index]
@@ -1430,7 +1431,22 @@ function Invoke-QuestApkPreparation([object[]]$Map, $Release, [string]$StagedApk
     return $report
 }
 
-function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Release, $Retry, [string]$StagedApk) {
+function Write-QuestDeploymentReport($Output, $Report) {
+    $name = '.quest-deploy-' + [Guid]::NewGuid().ToString('N') + '.tmp'
+    $temporary = Join-Path (Split-Path -Parent $Output.Path) $name
+    $bytes = [Text.Encoding]::UTF8.GetBytes(($Report | ConvertTo-Json -Depth 4 -Compress) + "`n")
+    $file = [IO.File]::Open($temporary, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try {
+        try { $file.Write($bytes, 0, $bytes.Length); $file.Flush($true) }
+        finally { $file.Dispose() }
+        [IO.File]::Move($temporary, $Output.Path, $Output.Published)
+        $Output.Published = $true
+    } finally {
+        if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+    }
+}
+
+function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Release, $Retry, [string]$StagedApk, $ReportOutput) {
     $expectedHash = [string]$Release.sha256
     $originalMap = $Map
     if ($Retry) { $Map = @($Map | Select-Object -Skip $Retry.Completed.Count) }
@@ -1486,6 +1502,7 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
     }
     $WarningPreference = 'SilentlyContinue'
     foreach ($device in $devices) { $device.status = 'not-attempted'; $device.Remove('apkVerified') }
+    if ($ReportOutput) { Write-QuestDeploymentReport $ReportOutput $report }
     for ($index = 0; $index -lt $Map.Count; $index++) {
         $row = $Map[$index]; $device = $devices[$index]
         $target = @('-t', [string]$inventory[$row.serial].TransportId)
@@ -1537,10 +1554,19 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
                     }
                 }
             }
+            $saveLaunch = if ($ReportOutput) {
+                {
+                    $device.filesVerified = $true
+                    $device.status = 'deployment-failed'
+                    $device.failedStep = 'launch-game'
+                    Write-QuestDeploymentReport $ReportOutput $report
+                }
+            }
             Set-QuestConnection $target $connection.Ticket.Config $connection.Ticket $connection.Alignment `
-                -RequestMixedReality:($null -ne $connection.Alignment) -Deployment $deployment -LiveVenue $Venue
+                -RequestMixedReality:($null -ne $connection.Alignment) -Deployment $deployment -LiveVenue $Venue -BeforeLaunch $saveLaunch
             $device.filesVerified = $true
             $device.status = 'launch-requested'
+            $device.Remove('failedStep')
             if ($RequireOpenXR) { $device.openXR = $deployment.OpenXR }
             if ($ExpectedHash) {
                 $device.sessionId = $connection.Ticket.SessionId.ToString('D')
@@ -1561,6 +1587,7 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
             }
             return $report
         }
+        if ($ReportOutput -and $index -lt $Map.Count - 1) { Write-QuestDeploymentReport $ReportOutput $report }
     }
     $report.complete = $true
     return $report
@@ -1703,7 +1730,7 @@ function Update-QuestPlayerTicket($ConnectionFile, $Ticket, $Target) {
 }
 
 function Set-QuestConnection([string[]]$Target, $Config, $Ticket, $Alignment, [switch]$UsePassthrough, [switch]$RequestMixedReality,
-    [hashtable]$Deployment = @{}, $LiveVenue, $LiveSeat) {
+    [hashtable]$Deployment = @{}, $LiveVenue, $LiveSeat, [scriptblock]$BeforeLaunch) {
     $Deployment.Step = 'resolve-launcher'
     $activity = Get-QuestLauncherActivity $Target
     $nonce = if ($RequireOpenXR) { [Guid]::NewGuid().ToString('N') }
@@ -1758,6 +1785,12 @@ function Set-QuestConnection([string[]]$Target, $Config, $Ticket, $Alignment, [s
     } finally { Remove-Item -LiteralPath $stagedConfig }
     $Deployment.Step = 'check-expiry-before-launch'
     if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired before launch. Download a fresh connection file.' }
+    if ($BeforeLaunch) {
+        $Deployment.Step = 'save-before-launch'
+        & $BeforeLaunch
+        $Deployment.Step = 'check-expiry-before-launch'
+        if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired before launch. Download a fresh connection file.' }
+    }
     $Deployment.Step = 'launch-game'
     Start-QuestCheckedActivity $Target $activity $nonce
     if ($RequireOpenXR) {
@@ -1983,6 +2016,9 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
     if ($RetryIncomplete -and (-not $DeployMappedSeats -or -not $DeviceMap)) {
         throw 'Use -RetryIncomplete with -DeployMappedSeats and the original -DeviceMap.'
     }
+    if ($SaveDeploymentReport -and (-not $DeployMappedSeats -or -not $DeviceMap -or $CheckOnly -or $VerifyTrackedSeats)) {
+        throw 'Use -SaveDeploymentReport with -DeployMappedSeats and -DeviceMap.'
+    }
     if ($AllHeadsets -and (-not $VerifyTrackedSeats -or $DeviceMap -or $AllowPartialMap)) {
         throw 'Use -AllHeadsets only with -VerifyTrackedSeats and without a device map or partial selection.'
     }
@@ -2025,12 +2061,20 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
         $release = if ($ReleaseReport) { Read-QuestRelease $ReleaseReport }
         $versionCode = if ($release) { $release.versionCode } else { $ExpectedVersionCode }
         if ($DeployMappedSeats) {
+            $reportOutput = if ($SaveDeploymentReport) {
+                $path = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($SaveDeploymentReport)
+                if (-not [IO.Directory]::Exists((Split-Path -Parent $path)) -or (Test-Path -LiteralPath $path)) {
+                    throw 'Choose a new deployment report file in an existing directory.'
+                }
+                @{ Path = $path; Published = $false }
+            }
             $retry = if ($RetryIncomplete) { Read-QuestDeploymentRetry $venue $map $versionCode $release }
             $deploymentLock = Enter-QuestDeployment
             $stagedApk = $null
             try {
                 if ($InstallMissing) { $stagedApk = New-VerifiedQuestApk $apk $release.sha256 }
-                $result = Invoke-MappedQuestSeats $venue $map $versionCode $release $retry $stagedApk
+                $result = Invoke-MappedQuestSeats $venue $map $versionCode $release $retry $stagedApk $reportOutput
+                if ($reportOutput) { Write-QuestDeploymentReport $reportOutput $result }
             } finally {
                 if ($stagedApk) { Remove-Item -LiteralPath $stagedApk -ErrorAction SilentlyContinue }
                 $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose()

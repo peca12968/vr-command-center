@@ -2824,31 +2824,7 @@ else:
         mapping, document = self.device_map()
         release, _, release_env = self.release_report()
         apk = Path(release_env['VR_QUEST_FLEET_APK'])
-        wrapper = self.root / 'management-receipt.ps1'
-        wrapper.write_text(r'''
-function Invoke-WebRequest {
-    param($Uri, $Method, $ContentType, $Headers, $Body, [switch]$NoProxy,
-          $MaximumRedirection, $TimeoutSec, [switch]$SkipHttpErrorCheck)
-    if ($Uri.AbsolutePath -cne '/api/vr-deployment/venue-check' -or $Method -cne 'Post' -or
-        $Headers.Authorization -cne 'Bearer fixture-master') { throw 'Unexpected management request' }
-    $request = ConvertFrom-Json -InputObject $Body
-    $stale = $request.requireLiveSource -and $env:VR_QUEST_TEST_SOURCE_STALE -and
-        [IO.File]::Exists((Join-Path $env:VR_QUEST_FLEET_FIXTURE 'fixture-01/installed.apk'))
-    $rows = foreach ($room in $request.rooms) {
-        for ($seat = 0; $seat -lt $room.connectionFiles.Count; $seat++) {
-            $status = if ($stale -and $room.roomId -eq 1 -and $seat -eq 0) { 'source-stale' } else { 'matched' }
-            @{ roomId = $room.roomId; seat = $seat; status = $status; headset = 'Quest3' }
-        }
-    }
-    $result = @{ topology = $request.topology; allMatched = -not $stale; seats = @($rows) }
-    if ($request.requireLiveSource) { $result.liveSourceVerified = $result.allMatched }
-    @{ StatusCode = 200; Content = ($result | ConvertTo-Json -Depth 5 -Compress) }
-}
-$options = $args[1..($args.Count - 1)]
-& $args[0] @options
-exit $LASTEXITCODE
-''', encoding='utf-8')
-        command = ['pwsh', '-NoProfile', '-NonInteractive', '-File', str(wrapper),
+        command = ['pwsh', '-NoProfile', '-NonInteractive', '-File', str(ROOT / 'tests/fixtures/mock-quest-management.ps1'),
                    str(ROOT / 'scripts/deploy-quest.ps1'), '-VenueBundle', str(bundle),
                    '-DeviceMap', str(mapping), '-ReleaseReport', str(release),
                    '-AdbPath', str(ROOT / 'tests/fixtures/mock-quest-fleet.ps1'),
@@ -2920,6 +2896,86 @@ exit $LASTEXITCODE
             room, seat = row['roomId'], row['seat']
             readback = json.loads((fleet / row['serial'] / 'vr-connection.json').read_bytes())
             self.assertEqual(configs[room][f'room-{room:02}-seat-{seat:02}.json'], readback)
+
+    def test_save_mapped_quest_deployment_report_recovers_after_process_exit(self):
+        files, _ = self.vr_bundle('Independent')
+        bundle = self.write_bundle(files)
+        mapping, document = self.device_map()
+        document['seats'] = [row for row in document['seats'] if row['serial'] in ('fixture-01', 'fixture-02', 'fixture-03')]
+        mapping.write_text(json.dumps(document), encoding='utf-8')
+        release, _, release_env = self.release_report()
+        command = ['pwsh', '-NoProfile', '-NonInteractive', '-File', str(ROOT / 'tests/fixtures/mock-quest-management.ps1'),
+                   str(ROOT / 'scripts/deploy-quest.ps1'), '-VenueBundle', str(bundle),
+                   '-DeviceMap', str(mapping), '-AllowPartialMap', '-ReleaseReport', str(release),
+                   '-AdbPath', str(ROOT / 'tests/fixtures/mock-quest-fleet.ps1'),
+                   '-DeployMappedSeats', '-ManagementApi', 'http://127.0.0.1:1']
+
+        def options(fleet, gate=None):
+            return dict(cwd=fleet, encoding='utf-8', env={**os.environ, **release_env, 'VR_COMMAND_MASTER_KEY': 'fixture-master',
+                'VR_QUEST_FLEET_FIXTURE': str(fleet), 'VR_QUEST_FLEET_FAULTS': '{}', 'VR_QUEST_FLEET_FRESH': '',
+                'VR_QUEST_TEST_SOURCE_STALE': '',
+                'VR_QUEST_FLEET_HOLD_AFTER_STAGE': 'fixture-02' if gate == 'stage' else '',
+                'VR_QUEST_FLEET_HOLD_AFTER_LAUNCH': 'fixture-02' if gate == 'launch' else ''})
+
+        for stage, signal in (('stage', 'connection-staged.request'), ('launch', 'first-launch.request')):
+            with self.subTest(stage=stage):
+                fleet = self.root / stage
+                fleet.mkdir()
+                report = fleet / 'original deployment.json'
+                report.write_bytes(b'original report')
+                output = ['-SaveDeploymentReport', report.name]
+                collision = subprocess.run([*command, *output], capture_output=True, timeout=20, **options(fleet))
+                self.assert_rejected(collision, 'Choose a new deployment report file')
+                self.assertEqual(b'original report', report.read_bytes())
+                self.assertFalse((fleet / 'transport.log').exists())
+                report.unlink()
+
+                with subprocess.Popen([*command, *output], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                      **options(fleet, stage)) as process:
+                    try:
+                        deadline = time.monotonic() + 15
+                        marker = fleet / signal
+                        while not marker.exists() and process.poll() is None and time.monotonic() < deadline:
+                            time.sleep(.05)
+                        if process.poll() is not None:
+                            stdout, stderr = process.communicate()
+                            self.fail(f'Deployment exited before {stage}: {stdout}\n{stderr}')
+                        self.assertTrue(marker.exists(), f'Deployment did not reach {stage}')
+                        original = report.read_bytes()
+                        checkpoint = json.loads(original)
+                        self.assertEqual(('deployment', False), (checkpoint['phase'], checkpoint['complete']))
+                        second_status = 'not-attempted' if stage == 'stage' else 'deployment-failed'
+                        self.assertEqual(['launch-requested', second_status, 'not-attempted'],
+                                         [row['status'] for row in checkpoint['devices']])
+                        if stage == 'launch':
+                            self.assertEqual('launch-game', checkpoint['devices'][1]['failedStep'])
+                        self.assertNotRegex(original.decode(), r'fixture-\d+|HARDWARE-SERIAL|joinTicket')
+                    finally:
+                        if process.poll() is None:
+                            process.kill()
+                        process.communicate(timeout=10)
+
+                self.assertEqual(original, report.read_bytes())
+                self.assertFalse(list(fleet.glob('.quest-deploy-*.tmp')))
+                transport = fleet / 'transport.log'
+                old_calls = transport.read_bytes()
+                result = subprocess.run([*command, '-RetryIncomplete', str(report), '-SaveDeploymentReport', 'resumed.json'],
+                                        capture_output=True, timeout=25, **options(fleet))
+                self.assertEqual(original, report.read_bytes())
+                if stage == 'launch':
+                    self.assert_rejected(result, 'Confirm the previous launch outcome')
+                    self.assertEqual(old_calls, transport.read_bytes())
+                    self.assertFalse((fleet / 'resumed.json').exists())
+                    continue
+                self.assertEqual(0, result.returncode, result.stderr)
+                resumed = json.loads((fleet / 'resumed.json').read_bytes())
+                self.assertEqual(json.loads(result.stdout), resumed)
+                self.assertTrue(resumed['complete'])
+                self.assertEqual(hashlib.sha256(original).hexdigest(), resumed['previousDeploymentSha256'])
+                self.assertEqual(checkpoint['devices'][0], resumed['devices'][0])
+                new_calls = transport.read_bytes()[len(old_calls):].decode().splitlines()
+                self.assertNotIn('-t 101', '\n'.join(new_calls))
+                self.assertEqual(['102', '103'], [line.split()[1] for line in new_calls if ' shell am start ' in line])
 
     def test_device_map_reads_all_25_and_reports_faults_without_device_writes(self):
         files, _ = self.bundle('Independent')
