@@ -1099,8 +1099,9 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const seatRows = page.locator('#venue-debrief-seat-rows tr');
     const activeReplacement = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [4] }, 'Master', 201);
     active.add(activeReplacement.id);
+    const replacementPlayerId = randomUUID();
     await api(`/sessions/${activeReplacement.id}/players`, 'POST',
-      { playerId: randomUUID(), roomId: 4, name: 'Replacement fixture seat', headset: 'Quest3' });
+      { playerId: replacementPlayerId, roomId: 4, name: 'Replacement fixture seat', headset: 'Quest3' });
     await showSeats(4).click();
     await detailStatus.filter({ hasText: '已確認 0／2 席' }).waitFor();
     const beforeReceipt = await api(detailPath);
@@ -1126,18 +1127,24 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       && (await seatRows.evaluateAll(rows => rows.map(row => [...row.cells].slice(4).map(cell => cell.textContent).join('|')))).join(';')
         === '0|0|0|0|0|0%|100;0|0|0|0|0|0%|100',
       'The opted-in receipt includes the original final score of both unconfirmed seats and the browser renders every metric');
-    const brokenScore = async route => {
-      const response = await route.fetch();
-      const original = await response.json();
-      original.players[0].score.ammoUsed = -1;
-      await route.fulfill({ response, json: original });
-    };
-    await page.route(detailRoute, brokenScore);
-    try {
-      await page.locator('#venue-debrief-seats-refresh').click();
-      await detailStatus.filter({ hasText: '暫時無法確認原席位回條' }).waitFor();
-      check(await seatRows.count() === 0, 'An invalid score clears the table without keeping prior values');
-    } finally { await page.unroute(detailRoute, brokenScore); }
+    for (const [mutate, label] of [
+      [player => { player.score.ammoUsed = -1; }, 'An invalid score'],
+      [player => { player.score.ammoUsed = 1; }, 'A plausible score from another recording'],
+      [player => { player.playerId = replacementPlayerId; }, 'A substituted player ID']
+    ]) {
+      const substitute = async route => {
+        const response = await route.fetch();
+        const original = await response.json();
+        mutate(original.players[0]);
+        await route.fulfill({ response, json: original });
+      };
+      await page.route(detailRoute, substitute);
+      try {
+        await page.locator('#venue-debrief-seats-refresh').click();
+        await detailStatus.filter({ hasText: '暫時無法確認原席位回條' }).waitFor();
+        check(await seatRows.count() === 0, `${label} clears the table without keeping prior values`);
+      } finally { await page.unroute(detailRoute, substitute); }
+    }
     const repeatedPlayer = async route => {
       const response = await route.fetch();
       const body = await response.json();

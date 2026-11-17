@@ -4,6 +4,7 @@ const $ = id => document.getElementById(id);
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const sequence = value => Number.isSafeInteger(value) && value >= 0;
 const countFields = ['ammoUsed', 'shotsHit', 'kills', 'hitsReceived', 'damageTaken'];
+const scoreFields = [...countFields, 'accuracyPercent', 'health'];
 
 function validScore(score) {
   return score && countFields.every(field => sequence(score[field])) && score.shotsHit <= score.ammoUsed
@@ -11,18 +12,36 @@ function validScore(score) {
     && sequence(score.health) && score.health <= 100;
 }
 
-function validatedPlayers(body, room) {
+function validatedPlayers(body, room, { session, frame }) {
+  const packet = frame?.packet, stream = session?.combatStream;
+  if (session?.id !== room.sessionId || session.state !== 'Ended' || !session.roomIds?.includes(room.roomId)
+    || stream?.streamId !== room.streamId || stream.sealed !== true || !Array.isArray(session.players)
+    || packet?.sequence !== room.worldSequence || packet.frame?.phase !== 'Ended'
+    || !sequence(packet.observedSequence) || packet.observedSequence < room.appliedAtSequence
+    || packet.observedSequence > session.sequence || packet.throughCombatSequence !== stream.acceptedSequence
+    || !Array.isArray(frame.statistics)) throw new Error('Original archive mismatch');
+  const roster = session.players.filter(player => player.roomId === room.roomId);
   if (body?.version !== 1 || body.requestId !== room.batchId || body.sessionId !== room.sessionId
     || body.roomId !== room.roomId || body.streamId !== room.streamId || body.worldSequence !== room.worldSequence
     || !sequence(body.throughSequence) || body.throughSequence < room.appliedAtSequence || !sequence(body.finalStreamSequence)
+    || body.throughSequence !== session.sequence || body.finalStreamSequence !== stream.acceptedSequence
     || !Array.isArray(body.players) || body.players.length !== room.rosterCount
+    || roster.length !== room.rosterCount
     || new Set(body.players.map(player => player?.seat)).size !== room.rosterCount
     || new Set(body.players.map(player => player?.playerId)).size !== room.rosterCount
     || !body.players.every(player => Number.isInteger(player?.seat) && player.seat >= 1 && player.seat <= 5
-      && uuid.test(player.playerId ?? '') && typeof player.name === 'string' && typeof player.acknowledged === 'boolean' && validScore(player.score))
+      && uuid.test(player.playerId ?? '') && typeof player.name === 'string' && typeof player.acknowledged === 'boolean' && validScore(player.score)
+      && roster.some(original => original.seat + 1 === player.seat && original.id === player.playerId && original.name === player.name)
+      && matchesScore(frame.statistics, player, room.roomId))
     || body.players.filter(player => player.acknowledged).length < room.confirmedCount) throw new Error('Mismatch');
   return [...body.players].sort((a, b) => a.seat - b.seat)
     .map(player => ({ ...player, room, throughSequence: body.throughSequence, throughCombatSequence: body.finalStreamSequence }));
+}
+
+function matchesScore(statistics, player, roomId) {
+  const rows = statistics.filter(row => row?.playerId === player.playerId);
+  return rows.length === 1 && rows[0].roomId === roomId && rows[0].name === player.name
+    && scoreFields.every(field => rows[0][field] === player.score[field]);
 }
 
 export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) {
@@ -168,24 +187,36 @@ export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) 
       const path = `/api/venue/closure/${requested.batchId}`;
       const detailPath = requested.roomId === null ? '/debrief-seats'
         : `/rooms/${requested.roomId}/debrief-receipts?includeScores=true&includePlayerIds=true`;
-      const response = await fetch(path + detailPath, {
-        headers: { Authorization: 'Bearer ' + state.key }, cache: 'no-store', signal: request.signal
-      });
+      async function get(pathname) {
+        const response = await fetch(pathname, {
+          headers: { Authorization: 'Bearer ' + state.key }, cache: 'no-store', signal: request.signal
+        });
+        if (response.status === 401 && inScope()) unauthorized();
+        if (!response.ok) throw new Error('Unavailable');
+        return response.json();
+      }
+      const originalRooms = requested.rooms ?? [requested];
+      const archives = new Map();
+      for (const room of originalRooms) {
+        if (archives.has(room.sessionId)) continue;
+        const sessionPath = `/api/sessions/${room.sessionId}`;
+        archives.set(room.sessionId, Promise.all([get(sessionPath), get(`${sessionPath}/world/frames/${room.worldSequence}`)])
+          .then(([session, frame]) => ({ session, frame })));
+      }
+      const [body, originals] = await Promise.all([get(path + detailPath), Promise.all(archives.values())]);
       if (!inScope()) return;
-      if (response.status === 401) { unauthorized(); return; }
-      if (!response.ok) throw new Error('Unavailable');
-      const body = await response.json();
-      if (!inScope()) return;
+      const archiveBySession = new Map([...archives.keys()].map((id, index) => [id, originals[index]]));
       if (target.roomId === null) {
         if (body?.version !== 1 || body.requestId !== target.batchId || !Array.isArray(body.rooms)
           || body.rooms.length !== target.rooms.length) throw new Error('Mismatch');
         const returned = new Map(body.rooms.map(room => [room?.roomId, room]));
-        players = target.rooms.flatMap(room => validatedPlayers(returned.get(room.roomId), room));
-      } else players = validatedPlayers(body, target);
+        players = target.rooms.flatMap(room => validatedPlayers(returned.get(room.roomId), room, archiveBySession.get(room.sessionId)));
+      } else players = validatedPlayers(body, target, archiveBySession.get(target.sessionId));
     } catch { if (inScope()) status.textContent = '暫時無法確認原席位回條，可重新讀取。'; }
     finally {
       clearTimeout(timeout);
       if (inScope()) {
+        request.abort();
         controller = null; render();
         if (uuid.test(focusPlayer ?? '')) rows.querySelector(`[data-venue-debrief-player="${focusPlayer}"]`)?.focus();
       }
