@@ -188,7 +188,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]);
     const roomRead = canWriteClips() ? response('/api/rooms', signal)
       .then(result => result.json()).catch(() => []) : [];
-    let recordings;
+    let recordings, roomTarget;
     liveRoomControls();
     recordingControls();
     $('world-list-status').textContent = '';
@@ -211,6 +211,10 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
           picker.value = '';
           recordingControls(); reviewControls();
           message('目前無法讀取原場次的錄製。請回到房間與場次重新開啟。', true);
+          return;
+        }
+        if (target.minimumSequence !== undefined) {
+          roomTarget = target;
           return;
         }
         picker.value = target.sessionId;
@@ -245,7 +249,10 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
       const rooms = await roomRead;
       if (listController === controller) listController = null;
       if (recordings && request === listEpoch && active && getKey() === key) bindLiveRooms(rooms, recordings);
-      if (request === listEpoch && active && getKey() === key) recordingControls();
+      if (request === listEpoch && active && getKey() === key) {
+        recordingControls();
+        if (roomTarget) void switchLiveRoom(roomTarget.roomId, roomTarget);
+      }
       liveRoomControls();
     }
   }
@@ -296,9 +303,14 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     return packet.events.every(event => typeof event?.playerId === 'string' && players.has(event.playerId)
       && (event.hasRay === false || (event.hasRay === true && recordedPointInRoom(event.origin, roomId, 6.01))));
   }
-  async function switchLiveRoom(roomId) {
+  async function switchLiveRoom(roomId, target = null) {
     const recording = liveRooms.get(roomId), picker = $('world-recording');
-    if (!active || !canWriteClips() || !recording || roomSwitch || listController || connecting || picker.disabled) return;
+    if (!active || !canWriteClips() || roomSwitch || listController || connecting || picker.disabled) return;
+    if (!recording || target && (recording.header.sessionId !== target.sessionId || recording.header.streamId !== target.streamId
+      || recording.header.origin !== target.origin)) {
+      if (target) message(`無法確認房間 ${roomId} 的原場次錄製，請重新核對追蹤總覽。`, true);
+      return;
+    }
     const { sessionId, streamId } = recording.header;
     const request = roomSwitch = new AbortController();
     const signal = AbortSignal.any([request.signal, AbortSignal.timeout(8000)]);
@@ -307,8 +319,9 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
       const endpoint = `/api/sessions/${sessionId}/world`, scope = `?observerRoomId=${roomId}`;
       const verified = await (await response(endpoint + scope, signal)).json();
       if (!matchesRoomRecording(verified, roomId) || verified.header.sessionId !== sessionId || verified.header.streamId !== streamId
-        || verified.complete !== false
+        || verified.header.origin !== recording.header.origin || verified.complete !== false
         || !Number.isSafeInteger(verified.acceptedSequence) || verified.acceptedSequence < 1
+        || target && verified.acceptedSequence < target.minimumSequence
         || !Number.isSafeInteger(verified.durationMilliseconds) || verified.durationMilliseconds < 0)
         throw new Error('Room recording changed');
       const value = await (await response(`${endpoint}/frames/${verified.acceptedSequence}${scope}`, signal)).json();

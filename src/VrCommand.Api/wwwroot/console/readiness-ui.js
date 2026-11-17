@@ -413,7 +413,13 @@ export function venueTrackingRow(report, room, session, elapsed) {
     text: [`追蹤 ${tracked} / ${room.capacity} 席`, ...details].join(' · ') };
 }
 
-export function mountRoomReadiness(getState, unauthorized, venueUpdated, describeClimate, describeEnemies, openPoseFrame) {
+function venueTrackingObservation(view, room, session) {
+  const { streamId, origin } = session?.combatStream ?? {};
+  return view.worldSequence && typeof streamId === 'string' && ['GameServer', 'Simulation'].includes(origin)
+    ? { mode: 'live', roomId: room.id, sessionId: session.id, streamId, origin, minimumSequence: view.worldSequence } : null;
+}
+
+export function mountRoomReadiness(getState, unauthorized, venueUpdated, describeClimate, describeEnemies, openObservation) {
   let active = false, controller, report, started = 0, attempted = -Infinity, failed = false;
   const trackingClock = new Intl.DateTimeFormat('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
   function settingView(room, session, elapsed, kind) {
@@ -569,7 +575,8 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     const rows = panel.hidden ? [] : scoped.map(({ room, session }) => {
       const view = venueTrackingRow(current, room, session, elapsed);
       const target = view.worldSequence ? roomPoseFrameTarget(current, room, session, elapsed, actor) : null;
-      return { room: room.id, ...view, poseAvailable: !!target && target.throughSequence === view.worldSequence };
+      const live = venueTrackingObservation(view, room, session);
+      return { room: room.id, ...view, live, poseAvailable: !!target && target.throughSequence === view.worldSequence };
     });
     const tracked = rows.reduce((total, row) => total + (row.tracked ?? 0), 0);
     const confirmed = rows.filter(row => row.tracked !== undefined).length;
@@ -585,17 +592,36 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     }
     const { busy, pending } = getState();
     if (list.children.length !== rows.length) list.replaceChildren(...rows.map(() => {
-      const item = document.createElement('li'), detail = document.createElement('span'), button = document.createElement('button');
+      const item = document.createElement('li'), detail = document.createElement('span');
+      const actions = document.createElement('span'), watch = document.createElement('button'), button = document.createElement('button');
+      actions.className = 'button-row';
+      watch.type = 'button'; watch.className = 'quiet small'; watch.textContent = '即時觀戰';
+      watch.addEventListener('click', () => {
+        const { rooms, sessions, actor, busy, pending } = getState();
+        if (!active || failed || document.visibilityState !== 'visible' || actor?.role !== 'Master' || busy || pending) return;
+        const room = rooms.find(value => value.id === Number(watch.dataset.trackingWatchRoom));
+        const session = sessions.find(value => value.id === watch.dataset.sessionId);
+        if (!room || !session || room.sessionId !== session.id || session.combatStream?.streamId !== watch.dataset.streamId) return;
+        const target = venueTrackingObservation(venueTrackingRow(report, room, session, performance.now() - started), room, session);
+        if (target) openObservation(target);
+      });
       button.type = 'button'; button.className = 'quiet small'; button.textContent = '檢視姿態中斷快照';
       button.addEventListener('click', () => {
         const target = poseFrame(Number(item.dataset.liveTrackingRoom));
-        if (target && String(target.throughSequence) === item.dataset.worldSequence) openPoseFrame(target);
+        if (target && String(target.throughSequence) === item.dataset.worldSequence) openObservation(target);
       });
-      item.append(detail, button); return item;
+      actions.append(watch, button); item.append(detail, actions); return item;
     }));
     for (const [index, row] of rows.entries()) {
-      const item = list.children[index], [detail, button] = item.children;
+      const item = list.children[index], [detail, actions] = item.children, [watch, button] = actions.children;
       item.dataset.liveTrackingRoom = row.room; item.dataset.liveTrackingState = row.state;
+      watch.dataset.trackingWatchRoom = row.room;
+      watch.dataset.sessionId = row.live?.sessionId ?? '';
+      watch.dataset.streamId = row.live?.streamId ?? '';
+      watch.setAttribute('aria-label', `房間 ${row.room} 即時觀戰`);
+      watch.hidden = !row.live;
+      watch.disabled = watch.hidden || busy || !!pending;
+      actions.hidden = watch.hidden && !row.poseAvailable;
       const buttonLabel = `房間 ${row.room} 檢視姿態中斷快照`;
       if (button.getAttribute('aria-label') !== buttonLabel) button.setAttribute('aria-label', buttonLabel);
       if (row.worldSequence) item.dataset.worldSequence = row.worldSequence;
