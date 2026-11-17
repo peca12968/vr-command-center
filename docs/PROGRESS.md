@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 核對分批部署的 Quest 裝置重複使用
+
+- 新 Quest 部署報告保存依同一組場次計算的裝置指紋。原日誌擷取在讀取前與發布前核對指紋。分批合併追蹤與戰後驗收會拒絕同一裝置被計入兩個已有成功啟動紀錄的席位，錯誤只列房號與席號。既有報告仍可提交，新摘要會列出可比對的席數。 [合併取樣](QUEST3.md#核對頭盔追蹤席位) · [封存驗收](EXTERNAL_CLIENTS.md#核對封存席位的-quest-發行-apk)
+- 151 項 Python 封存測試及 2 項裝置清單測試通過。Windows PowerShell 以模擬 ADB 和替代管理回覆實跑兩種模式的部署，核對不同 ZIP 位元組仍保留同組場次指紋、不同 ADB 目標回報同一裝置時拒絕合併，及改動重試指紋時停在寫入前。Python 封存專項各用 10 席 Quest 的測試資料核對重複、未啟動不計與不同場次拒絕。 [PowerShell 驗證](../artifacts/quest-venue-device-proof-20261117/first/checks.json) · [Python 測試](../artifacts/quest-venue-device-proof-20261117/field-tests.log)
+- GitHub Actions 對 `6f2568e` 回報帳務或支出上限，工作未啟動。本機 Quest USB 仍無 ADB 介面，實機與跨機驗收待完成。 [USB 狀態](../artifacts/quest-venue-device-proof-20261117/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43986040775)
+
 ## 2026-11-17 將逐席 Quest OpenXR 納入場館驗收
 
 - 單批 `venue.json` 與六批 `stages.json` 可用 `requireQuestOpenXR` 要求每批至少一席 Quest 且所有 Quest 席位都有原部署與同一程序的 OpenXR 就緒日誌。單批及六批收件報告按房號、席號區分缺啟動證據和日誌不符。未啟用時沿用原證據核對流程。 [操作方式](EXTERNAL_CLIENTS.md#核對封存席位的-quest-發行-apk)
