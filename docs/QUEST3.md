@@ -166,6 +166,8 @@ python .\scripts\probe-quest-venue.py --adb $adb --device-map .\device-map.json 
 
 若首次已核對 Windows 原啟動批次，重試也要提供相同原檔。場次更新或兩份原檔的 SHA-256 改變時，須用新計畫開始新的預檢批次。
 
+新版 Quest 回條會將探測到的端點場次、任務版本與修訂記在 `networkPlanSessions`。重試及合併全館資料會核對這些欄位。同一台頭盔或相同 IP、埠及席位換到新場次時，請開始新的預檢批次。獨立模式的部分席位回條可與全館清單合併，逐一核對其探測的房組。使用含場次修訂的網路清單時，舊回條若缺少這些欄位，需要原 Windows 啟動計畫與預覽才能沿用。
+
 ```powershell
 python .\scripts\probe-quest-venue.py --adb $adb --device-map .\device-map.json `
   --network-plan .\quest-network.json --count 5 --timeout-ms 900 `

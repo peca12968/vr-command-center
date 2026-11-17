@@ -375,6 +375,87 @@ class QuestUdpVenuePlanTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'binding is used'):
             self.plan()
 
+    def test_quest_subset_report_stays_with_the_original_session_revision(self):
+        self.devices['seats'] = self.devices['seats'][:1]
+        full_sources = [{'roomId': room, 'seat': 5, 'address': f'192.168.10.{25 + room * 5}'} for room in range(1, 6)]
+        self.network['sources'] = full_sources[-1:]
+
+        def sample(shell, adb, directory, group, device, count, timeout_ms):
+            completed = (datetime.now(timezone.utc) - timedelta(seconds=2)).isoformat()
+            common = {'version': 1, 'scope': 'authenticated-udp-only', 'stage': 'finished', 'complete': True,
+                      'port': group['port'], 'requested': count, 'matched': count, 'completedAtUtc': completed,
+                      'exchangeSha256': 'a' * 64}
+            listener, probe = directory / 'listener.json', directory / 'probe.json'
+            listener.write_text(json.dumps(dict(common, mode='listen', localAddress=group['address'],
+                                                peerAddress=device['address'], samples=[])), encoding='utf-8')
+            probe.write_text(json.dumps(dict(common, mode='probe', localAddress=device['address'], peerAddress=group['address'],
+                                             samples=[{'sample': 1, 'roundTripMs': 2}])), encoding='utf-8')
+            metadata, _ = quest_venue.pair_metadata(listener, probe)
+            return {'roomId': device['roomId'], 'seat': device['seat'], 'complete': True, 'stage': 'verified',
+                    'listener': listener.name, 'probe': probe.name, 'exchangeSha256': common['exchangeSha256'], **metadata}
+
+        for topology in ('Independent', 'Linked'):
+            with self.subTest(mode=topology):
+                if topology == 'Linked':
+                    self.network.update(mode=topology, endpoints=[
+                        {'roomIds': [1, 2, 3, 4, 5], 'address': '192.168.10.10', 'port': 7777}])
+                for number, endpoint in enumerate(self.network['endpoints'], 1):
+                    endpoint.update(sessionId=f'00000000-0000-4000-8000-{number:012}',
+                                    missionId=f'00000000-0000-4000-8000-{100 + number:012}', sessionSequence=3)
+                mode, groups = self.plan()
+                original = self.root / f'{mode}-original'
+                with patch.object(quest_venue, 'probe_seat', side_effect=sample), redirect_stderr(io.StringIO()):
+                    batch = quest_venue.probe_venue([], Path('adb'), mode, groups, original, 1, 900)
+                old_report = original / 'preflight-report.json'
+                self.assertTrue(batch['complete'])
+                target = next(endpoint for endpoint in self.network['endpoints'] if 5 in endpoint['roomIds'])
+                fields = ('roomIds', 'sessionId', 'missionId', 'sessionSequence')
+                self.assertEqual([{key: target[key] for key in fields}], batch['networkPlanSessions'])
+                self.assertNotIn('device-5-5', old_report.read_text(encoding='utf-8'))
+                retry = self.root / f'{mode}-retry'
+                with patch.object(quest_venue, 'probe_seat', side_effect=AssertionError('Unexpected probe')) as unexpected, redirect_stderr(io.StringIO()):
+                    reused = quest_venue.probe_venue([], Path('adb'), mode, groups, retry, 1, 900, old_report)
+                self.assertEqual(1, reused['reusedSeats'])
+                unexpected.assert_not_called()
+
+                full = self.root / f'{mode}-full.json'
+                full.write_text(json.dumps(dict(self.network, sources=full_sources)), encoding='utf-8')
+                output = self.root / f'{mode}-merged.json'
+                merged = quest_venue.preflight.check_venue(full, None, [old_report], output)
+                self.assertEqual(1, merged['verifiedSources'])
+                self.assertEqual(5, merged['expectedSources'])
+                field = quest_venue.field
+                venue_network = field.read_venue_network_plan(full, mode, 1)
+                expected_rooms = [row['roomIds'] for row in self.network['endpoints']]
+                expected_sessions = {tuple(row['roomIds']): row['sessionId'] for row in self.network['endpoints']}
+                pairs, binding = field.read_udp_preflight_batch(old_report, mode, expected_rooms,
+                    expected_sessions=expected_sessions, venue_network=venue_network)
+                self.assertEqual({tuple(target['roomIds'])}, pairs.keys())
+                self.assertIsNone(binding)
+
+                malformed = dict(batch, networkPlanSessions=[])
+                malformed_report = self.root / f'{mode}-malformed.json'
+                malformed_report.write_text(json.dumps(malformed), encoding='utf-8')
+                with self.assertRaisesRegex(ValueError, 'Invalid UDP report launch sessions'):
+                    quest_venue.preflight.check_venue(full, None, [malformed_report], output)
+
+                target['sessionSequence'] += 1
+                _, replacement = self.plan()
+                refused = self.root / f'{mode}-refused'
+                with patch.object(quest_venue, 'probe_seat', side_effect=AssertionError('Unexpected probe')) as unexpected, redirect_stderr(io.StringIO()):
+                    with self.assertRaisesRegex(ValueError, 'original Quest plan'):
+                        quest_venue.probe_venue([], Path('adb'), mode, replacement, refused, 1, 900, old_report)
+                unexpected.assert_not_called()
+                self.assertFalse(refused.exists())
+
+                full.write_text(json.dumps(dict(self.network, sources=full_sources)), encoding='utf-8')
+                with self.assertRaisesRegex(ValueError, 'launch sessions differ from the original network plan'):
+                    quest_venue.preflight.check_venue(full, None, [old_report], output)
+                new_network = field.read_venue_network_plan(full, mode, 1)
+                with self.assertRaisesRegex(ValueError, 'launch sessions differ from the original network plan'):
+                    field.read_udp_preflight_batch(old_report, mode, expected_rooms, expected_sessions=expected_sessions,
+                                                   venue_network=new_network)
+
     def test_cli_rejects_unused_room_binding_before_touching_adb_or_output(self):
         launch, preview = write_guarded_launch(self.root, 'Independent', self.network['endpoints'], 'original')
         self.devices['seats'] = self.devices['seats'][-1:]
@@ -390,6 +471,32 @@ class QuestUdpVenuePlanTests(unittest.TestCase):
         self.assertIn('Windows endpoint for room(s) 5 (port-mismatch)', rejected.stderr)
         self.assertEqual('', rejected.stdout)
         self.assertFalse(output.exists())
+
+    def test_legacy_quest_retry_can_use_its_original_windows_launch_proof(self):
+        self.devices['seats'] = self.devices['seats'][:1]
+        self.network['sources'] = self.network['sources'][:1]
+        mode, groups = self.plan()
+        launch, preview = write_guarded_launch(self.root, mode, self.network['endpoints'], 'original')
+        original = self.root / 'legacy'
+        launcher, _ = quest_venue.launcher_proof(launch, preview, original)
+        failed_seat = {'roomId': 5, 'seat': 5, 'stage': 'device', 'complete': False}
+        with patch.object(quest_venue, 'probe_seat', return_value=failed_seat), redirect_stderr(io.StringIO()):
+            old = quest_venue.probe_venue([], Path('adb'), mode, groups, original, 1, 900, launcher=launcher)
+        self.assertNotIn('networkPlanSessions', old)
+
+        stamps = quest_venue.field.read_udp_launcher_document(launch, preview=False)[2]
+        for row in self.network['endpoints']:
+            original_session = stamps[tuple(row['roomIds'])]
+            row.update({key: original_session[key] for key in ('sessionId', 'missionId', 'sessionSequence')})
+        _, current_groups = self.plan()
+        retry = self.root / 'migrated'
+        launcher, _ = quest_venue.launcher_proof(launch, preview, retry)
+        with patch.object(quest_venue, 'probe_seat', return_value=failed_seat) as probe, redirect_stderr(io.StringIO()):
+            migrated = quest_venue.probe_venue([], Path('adb'), mode, current_groups, retry, 1, 900,
+                                               original / 'preflight-report.json', launcher=launcher)
+        probe.assert_called_once()
+        self.assertEqual([5], migrated['networkPlanSessions'][0]['roomIds'])
+        self.assertNotEqual(old['planSha256'], migrated['planSha256'])
 
     def test_failed_seat_and_duplicate_exchange_do_not_claim_complete_group(self):
         mode, groups = self.plan()

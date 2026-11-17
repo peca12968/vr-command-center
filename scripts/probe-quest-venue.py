@@ -54,23 +54,24 @@ def load_plan(device_map_path, network_plan_path, *, launcher_preview=None):
         for group in checked['groups']:
             field.require(not group['issues'], 'Quest network plan differs from the Windows endpoint for room(s) '
                           + ', '.join(map(str, group['roomIds'])) + ' (' + ', '.join(group['issues']) + ')')
-    return mode, group_devices(endpoints, sources, serials)
+    return mode, group_devices(endpoints, sources, serials, launch_sessions)
 
 
-def group_devices(endpoints, sources, serials):
+def group_devices(endpoints, sources, serials, launch_sessions):
     groups = []
     for rooms, (address, port) in sorted(endpoints.items()):
         devices = [{'roomId': room, 'seat': seat, 'serial': serials[room, seat], 'address': sources[room, seat]}
                    for room, seat in sorted(serials) if room in rooms]
         if devices:
-            groups.append({'roomIds': list(rooms), 'address': address, 'port': port, 'devices': devices})
+            groups.append({'roomIds': list(rooms), 'address': address, 'port': port, 'devices': devices,
+                           **({'launchSession': launch_sessions[rooms]} if rooms in launch_sessions else {})})
     return groups
 
 
 def load_venue_retry(device_map, network_plan, retry_report, output, launch_plan=None, preview=None, launcher=None):
     serials = field.read_quest_device_map(device_map)
     document, raw = field.read_quest_document(network_plan)
-    mode, endpoints, sources, _ = field.parse_quest_network_plan(document, allow_shared_sources=True)
+    mode, endpoints, sources, launch_sessions = field.parse_quest_network_plan(document, allow_shared_sources=True)
     field.require(serials.keys() <= sources.keys(), 'Every mapped Quest seat must exist in the original venue network plan')
     checked = preflight.check_venue(network_plan, None, [], output, launcher_preview=preview, launch_plan=launch_plan,
                                     retry_report=retry_report, inspect_retry=True)
@@ -82,7 +83,7 @@ def load_venue_retry(device_map, network_plan, retry_report, output, launch_plan
                if source['status'] != 'verified' for seat in source['seats']}
     selected = {seat: serial for seat, serial in serials.items() if seat in pending}
     field.require(len({sources[seat] for seat in selected}) == len(selected), 'Use a distinct IPv4 for each pending mapped Quest seat')
-    return mode, group_devices(endpoints, sources, selected), len(pending - serials.keys())
+    return mode, group_devices(endpoints, sources, selected, launch_sessions), len(pending - serials.keys())
 
 
 def path_reference(path, directory):
@@ -195,12 +196,24 @@ def probe_seat(shell, adb, directory, group, device, count, timeout_ms):
     return result
 
 
-def read_retry(path, mode, groups, plan_hash, count, timeout_ms, launcher):
+def plan_digest(mode, groups):
+    return hashlib.sha256(json.dumps([mode, groups], sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest()
+
+
+def read_retry(path, mode, groups, plan_hash, launch_sessions, count, timeout_ms, launcher):
     previous = read_json(report_bytes(path, limit=256 * 1024))
     require(type(previous) is dict and field.integer(previous.get('version'), 1, 1) == 1
             and previous.get('scope') == 'quest-udp-preflight-only' and previous.get('mode') == mode
-            and previous.get('planSha256') == plan_hash and type(previous.get('sampleCount')) is int
+            and type(previous.get('sampleCount')) is int
             and previous['sampleCount'] == count, 'Retry must use the original Quest plan and sample count.')
+    previous_sessions = field.udp_report_network_sessions(previous, mode)
+    if launch_sessions and previous_sessions is None and launcher is not None:
+        # Older receipts can still prove the revision through their matching original Windows files.
+        legacy_groups = [{key: value for key, value in group.items() if key != 'launchSession'} for group in groups]
+        plan_hash = plan_digest(mode, legacy_groups)
+    else:
+        require(previous_sessions == (launch_sessions or None), 'Retry must use the original Quest plan and launch sessions.')
+    require(previous.get('planSha256') == plan_hash, 'Retry must use the original Quest plan and sample count.')
     previous_timeout = previous.get('sampleTimeoutMs')
     field.require(type(previous_timeout) is int and previous_timeout == timeout_ms,
                   'Retry must use the recorded Quest sample timeout; start a new batch if it differs or is missing')
@@ -251,8 +264,9 @@ def reuse_seat(row, previous_directory, directory, group, device, count, timeout
 
 
 def probe_venue(shell, adb, mode, groups, directory, count, timeout_ms, retry_report=None, *, launcher=None):
-    plan_hash = hashlib.sha256(json.dumps([mode, groups], sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest()
-    previous = read_retry(retry_report, mode, groups, plan_hash, count, timeout_ms, launcher) if retry_report else {}
+    plan_hash = plan_digest(mode, groups)
+    launch_sessions = {tuple(group['roomIds']): group['launchSession'] for group in groups if 'launchSession' in group}
+    previous = read_retry(retry_report, mode, groups, plan_hash, launch_sessions, count, timeout_ms, launcher) if retry_report else {}
     directory.mkdir()
     deadline = time.monotonic() + 20 * 60
     stopped = Event()
@@ -329,7 +343,10 @@ def probe_venue(shell, adb, mode, groups, directory, count, timeout_ms, retry_re
     report = {'version': 1, 'scope': 'quest-udp-preflight-only', 'mode': mode, 'complete': all(seat['complete'] for seat in seats),
               'planSha256': plan_hash, 'sampleCount': count, 'sampleTimeoutMs': timeout_ms, 'interrupted': stopped.is_set(),
               'expectedSeats': len(seats), 'verifiedSeats': sum(seat['complete'] for seat in seats),
-              'reusedSeats': sum(seat['stage'] == 'reused' for seat in seats), 'groups': results, **(launcher or {})}
+              'reusedSeats': sum(seat['stage'] == 'reused' for seat in seats), 'groups': results,
+              **({'networkPlanSessions': [{'roomIds': list(rooms), **session} for rooms, session in sorted(launch_sessions.items())]}
+                 if launch_sessions else {}),
+              **(launcher or {})}
     with (directory / 'preflight-report.json').open('x', encoding='utf-8', newline='\n') as output:
         json.dump(report, output, indent=2)
         output.write('\n')

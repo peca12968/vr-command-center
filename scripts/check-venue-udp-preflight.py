@@ -164,6 +164,7 @@ def load_pairs(pairs_path, batch_paths, mode, endpoints, sources, binding, venue
         groups = report.get('groups')
         seat_rows = type(groups) is list and any(type(group) is dict and 'seats' in group for group in groups)
         if report.get('scope') == 'quest-udp-preflight-only' and (report.get('complete') is False or seat_rows):
+            field.udp_report_network_sessions(report, mode, venue_network)
             pairs.extend(quest_batch_pairs(report, path, mode, endpoints, sources))
             launch = field.read_udp_launch_binding(report, path.parent, mode)
         else:
