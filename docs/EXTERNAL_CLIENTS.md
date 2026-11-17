@@ -847,7 +847,7 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json --inspect-c
 {"action": "SetEnvironment", "phaseReport": "rooms-1-and-4.json", "roomIds": [1, 4]}
 ```
 
-工具核對原批次恰好包含所列房間的原場次，並從各自的錄製找出對應的執行畫格。結果中的 `roomIds` 和 `sessionsVerified` 列出此項已確認的房間及場次數。整批驗收仍使用原五房收尾資料及各場錄製。未指定 `roomIds` 時，批次須涵蓋原收尾的所有場次。合併場及敵軍批次請使用全館格式。
+工具核對原批次恰好包含所列房間的原場次，並從各自的錄製找出對應的執行畫格。結果中的 `roomIds` 和 `sessionsVerified` 列出此項已確認的房間及場次數。整批驗收仍使用原五房收尾資料及各場錄製。0.31.264 的指定獨立房敵軍批次直接從原報告的 `latestEnemies.roomIds` 取得範圍，使用 `--venue-control-batch SetEnemies <批次報告>` 即可。其餘未列範圍的批次須涵蓋原收尾的所有場次。
 
 用 `prepare-venue-field-manifest.py` 整理封存時，可直接加上 `--scoped-environment-batch '1,4' '.\rooms-1-and-4.json'`。全館天氣與敵軍報告分別可用 `--venue-control-batch SetEnvironment '.\weather.json'` 和 `--venue-control-batch SetEnemies '.\enemies.json'`。每個原報告各使用一次對應參數。工具會在寫出新清單前核對原環境與敵軍指令的執行畫格。
 

@@ -1,7 +1,7 @@
-export function mountVenueClimateScope(changed) {
-  const scope = document.getElementById('venue-environment-scope');
-  const group = document.getElementById('venue-environment-rooms');
-  const button = document.getElementById('venue-apply-environment');
+export function mountVenueSettingScope(setting, label, changed) {
+  const scope = document.getElementById(`venue-${setting}-scope`);
+  const group = document.getElementById(`venue-${setting}-rooms`);
+  const button = document.getElementById(`venue-apply-${setting}`);
   const picked = new Map();
   let running = [];
   const roomTarget = (targets, room) => targets.find(target => target.roomIds.length === 1 && target.roomIds[0] === room);
@@ -23,7 +23,7 @@ export function mountVenueClimateScope(changed) {
   function selection(targets) {
     if (scope.value !== 'rooms') return { targets };
     if (targets.some(target => target.roomIds.length > 1))
-      return { targets: [], reason: '合併場次共用環境，請改選「所有執行中場次」。' };
+      return { targets: [], reason: `合併場次共用${label}，請改選「所有執行中場次」。` };
     const roomIds = [...picked.keys()].sort((a, b) => a - b);
     if (!roomIds.length) return { targets: [], reason: '請勾選要調整的獨立房間。' };
     const chosen = roomIds.map(room => roomTarget(targets, room));

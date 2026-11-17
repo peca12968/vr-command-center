@@ -17,7 +17,8 @@ public record VenuePhasePlan(VenuePhaseTarget[] Pause, VenuePhaseTarget[] Resume
 public enum VenueEnemyApplicationState { Current, Superseded, Ended }
 public record VenueEnemyBatchSession(Guid SessionId, int[] RoomIds, long AppliedAtSequence, int TargetCount, VenueEnemyApplicationState State,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int[]? SupersededRoomIds = null);
-public record VenueEnemyBatch(Guid RequestId, DateTimeOffset RecordedAtUtc, EnemyBehavior Behavior, bool AutoAttack, VenueEnemyBatchSession[] Sessions);
+public record VenueEnemyBatch(Guid RequestId, DateTimeOffset RecordedAtUtc, EnemyBehavior Behavior, bool AutoAttack, VenueEnemyBatchSession[] Sessions,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int[]? RoomIds = null);
 public enum VenueEnvironmentApplicationState { Current, Superseded, Ended }
 public record VenueEnvironmentBatchSession(Guid SessionId, int[] RoomIds, long AppliedAtSequence, VenueEnvironmentApplicationState State);
 public record VenueEnvironmentBatch(Guid RequestId, DateTimeOffset RecordedAtUtc, Weather Weather, TimeOfDay TimeOfDay, bool Lightning,
@@ -29,7 +30,8 @@ public record VenuePhaseApplied(Guid SessionId, long AppliedAtSequence);
 public record VenuePhaseReceipt(Guid RequestId, ControlAction Action, VenuePhaseApplied[] Sessions, bool Duplicate,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool RequireFullTracking = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool RequireFullParticipation = false,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? PlayersPerRoom = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? PlayersPerRoom = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int[]? RoomIds = null);
 public record VenueEndBatch(Guid RequestId, DateTimeOffset RecordedAtUtc, VenuePhaseApplied[] Sessions);
 public record VenueEndSummary(Guid RequestId, DateTimeOffset RecordedAtUtc, int[] RoomIds, string[] MissionNames, int SessionCount);
 public record VenueEndHistory(VenueEndSummary[] Batches, Guid? NextBefore);
@@ -152,7 +154,7 @@ public sealed partial class SessionManager
                 entry.Read<ControlCommand>().Enemies!.Count, state,
                 state == VenueEnemyApplicationState.Current && rooms.Length > 0 ? rooms : null);
         }).OrderBy(target => target.RoomIds[0]).ToArray();
-        return new(batch.Id, batch.RecordedAtUtc, policy.Behavior, policy.AutoAttack, targets);
+        return new(batch.Id, batch.RecordedAtUtc, policy.Behavior, policy.AutoAttack, targets, ScopedEnemyRooms(entries));
     }
 
     public VenueEndBatch? ReadLatestVenueEnd(OperatorIdentity actor)
@@ -246,10 +248,11 @@ public sealed partial class SessionManager
         var pilotSeats = NormalizeVenueBeginSeats(playersPerRoom, begin && requireFullRoster);
         var environment = action == ControlAction.SetEnvironment;
         var enemies = action == ControlAction.SetEnemies;
-        if (roomIds is not null && (!environment || roomIds.Length is < 1 or > RoomCount
+        if (roomIds is not null && (!(environment || enemies) || roomIds.Length is < 1 or > RoomCount
             || roomIds.Any(room => room is < 1 or > RoomCount) || roomIds.Distinct().Count() != roomIds.Length))
-            throw new ArgumentException("Select distinct rooms 1–5 only for a venue environment change.");
+            throw new ArgumentException("Select distinct rooms 1–5 only for a venue environment or enemy policy change.");
         var selectedRooms = roomIds?.ToHashSet();
+        var scopedEnemies = enemies && selectedRooms is not null;
         if (environment ? climate is not { Weather: { } weather, TimeOfDay: { } time, Lightning: not null }
             || !Enum.IsDefined(weather) || !Enum.IsDefined(time) : climate is not null)
             throw new ArgumentException("Provide weather, time of day and lightning for a venue environment change.");
@@ -274,6 +277,7 @@ public sealed partial class SessionManager
                 if (existing[0].Actor != actor || original.Action != action || existing[0].Venue!.RequireFullTracking != requireFullTracking
                     || existing[0].Venue!.RequireFullParticipation != requireFullParticipation
                     || existing[0].Venue!.PlayersPerRoom != pilotSeats
+                    || existing[0].Venue!.ScopedEnemies != scopedEnemies
                     || (selectedRooms is not null && !selectedRooms.SetEquals(existing.SelectMany(entry => Find(entry.SessionId).View.RoomIds)))
                     || ClimateOf(original) != climate || EnemyPolicyOf(original) != enemyPolicy
                     || !existing.Select(entry => new VenuePhaseFence(entry.SessionId, entry.Venue!.PhaseSinceSequence,
@@ -286,7 +290,8 @@ public sealed partial class SessionManager
             if (selectedRooms is not null)
             {
                 targets = targets.Where(history => history.View.RoomIds.Any(selectedRooms.Contains)).ToArray();
-                if (!selectedRooms.SetEquals(targets.SelectMany(history => history.View.RoomIds)))
+                if (scopedEnemies && targets.Any(history => history.View.Mode != SessionMode.Independent)
+                    || !selectedRooms.SetEquals(targets.SelectMany(history => history.View.RoomIds)))
                     throw new VenuePhaseChangedException(selectedRooms.Order().ToArray());
             }
             var current = targets.Select(history => new VenuePhaseFence(history.View.Id, history.PhaseSinceSequence,
@@ -318,7 +323,7 @@ public sealed partial class SessionManager
                         enemies ? history.EnemiesSinceSequence : null, requireFullTracking,
                         requireFullTracking ? witnesses![history.View.Id].BeginFrame : null, requireFullParticipation,
                         requireFullParticipation ? witnesses![history.View.Id].BeginFrame : null,
-                        enemies ? history.RoomEnemiesSinceSequence : null, pilotSeats));
+                        enemies ? history.RoomEnemiesSinceSequence : null, pilotSeats, scopedEnemies));
             }).ToArray();
             var views = entries.Select((entry, index) => SessionProjection.Apply(targets[index].View, entry)).ToArray();
             store.AppendBatch(entries);
@@ -399,9 +404,12 @@ public sealed partial class SessionManager
     private static VenueEnemyPolicy? EnemyPolicyOf(ControlCommand command) => command.Enemies is { } settings
         ? new(settings.Behavior, settings.AutoAttack) : null;
 
-    private static VenuePhaseReceipt Receipt(Guid requestId, ControlAction action, IReadOnlyList<SessionEvent> entries, bool duplicate) =>
+    private int[]? ScopedEnemyRooms(IReadOnlyList<SessionEvent> entries) => entries[0].Venue!.ScopedEnemies
+        ? entries.Select(entry => Find(entry.SessionId).View.RoomIds.Single()).Order().ToArray() : null;
+
+    private VenuePhaseReceipt Receipt(Guid requestId, ControlAction action, IReadOnlyList<SessionEvent> entries, bool duplicate) =>
         new(requestId, action, Applied(entries), duplicate, entries[0].Venue!.RequireFullTracking, entries[0].Venue!.RequireFullParticipation,
-            entries[0].Venue!.PlayersPerRoom);
+            entries[0].Venue!.PlayersPerRoom, ScopedEnemyRooms(entries));
 
     private static VenuePhaseApplied[] Applied(IEnumerable<SessionEvent> entries) =>
         entries.Select(entry => new VenuePhaseApplied(entry.SessionId, entry.Sequence)).ToArray();
@@ -449,6 +457,7 @@ public sealed partial class SessionManager
                         || entry.Venue.RequireFullTracking != first.Venue.RequireFullTracking
                         || entry.Venue.RequireFullParticipation != first.Venue.RequireFullParticipation
                         || entry.Venue.PlayersPerRoom != first.Venue.PlayersPerRoom
+                        || entry.Venue.ScopedEnemies != first.Venue.ScopedEnemies
                         || (entry.Venue.TrackingFrame is null) != (first.Venue.TrackingFrame is null)
                         || ClimateOf(other) != climate || EnemyPolicyOf(other) != enemyPolicy;
                 }))

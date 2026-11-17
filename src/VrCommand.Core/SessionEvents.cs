@@ -17,7 +17,8 @@ public record VenueTransition(long PhaseSinceSequence, int TargetCount,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool RequireFullParticipation = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTrackingFrame? ParticipationFrame = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? RoomEnemiesSinceSequence = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? PlayersPerRoom = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? PlayersPerRoom = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool ScopedEnemies = false);
 public record SessionEvent(int SchemaVersion, Guid EventId, Guid SessionId, long Sequence,
     DateTimeOffset RecordedAtUtc, SessionEventKind Kind, JsonElement Payload, OperatorIdentity? Actor = null,
     Guid? RequestId = null, [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTransition? Venue = null,
@@ -209,6 +210,7 @@ internal static class SessionProjection
         var fullRoster = venue.RequireFullTracking || venue.RequireFullParticipation;
         if (command.Action != ControlAction.SetEnvironment && venue.EnvironmentSinceSequence is not null
             || command.Action != ControlAction.SetEnemies && (venue.EnemiesSinceSequence is not null || venue.RoomEnemiesSinceSequence is not null)
+            || venue.ScopedEnemies && (command.Action != ControlAction.SetEnemies || session?.Mode != SessionMode.Independent)
             || fullRoster && command.Action != ControlAction.Begin
             || venue.PlayersPerRoom is { } seats && (!fullRoster || seats is not (1 or 2)
                 || (venue.TrackingFrame ?? venue.ParticipationFrame) is null)

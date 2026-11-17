@@ -24,6 +24,12 @@ void Reject<T>(Action action, string message) where T : Exception
 var directory = Path.Combine(Path.GetTempPath(), "vr-command-checks-" + Guid.NewGuid().ToString("N"));
 try
 {
+    if (args.SequenceEqual(["--venue-setting-scope"]))
+    {
+        VenueClimateScopeChecks.Run(Check, directory);
+        Console.WriteLine($"{checks} venue setting scope checks passed.");
+        return;
+    }
     var draft = new MissionDraft("夜間防衛", "守住目標", 900,
         new(ExperienceMode.VR, Weather.Storm, TimeOfDay.Night, true),
         new(8, EnemyBehavior.Hold, true), [new("sandbag", new(1, 0, 2), 90)]);

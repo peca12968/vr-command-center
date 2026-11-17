@@ -2275,6 +2275,49 @@ class FieldResultsTests(unittest.TestCase):
                 field.read_venue_control_batches([reference], {row['sessionId']: row for row in linked['sessions']},
                                                  linked, linked_time, root.joinpath, mode='Linked')
 
+    def test_independent_scoped_enemy_batch_infers_original_rooms_and_requires_their_running_frames(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, closure = venue_fixture(root, 'Independent', with_journals=True)
+            phase = root / 'scoped-enemies.json'
+            reference = {'action': 'SetEnemies', 'phaseReport': phase.name}
+            manifest['venueControlBatches'] = [reference]
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            policy = {'behavior': 'Patrol', 'autoAttack': False}
+            batch = {'requestId': id_for(2019), 'recordedAtUtc': '2026-11-09T00:00:01+00:00', 'roomIds': [2, 5], **policy,
+                     'sessions': [dict(sessionId=row['sessionId'], roomIds=row['roomIds'], appliedAtSequence=4, state='Current')
+                                  for row in closure['sessions'] if row['roomIds'][0] in (2, 5)]}
+            phase.write_text(json.dumps({'latestEnemies': batch}), encoding='utf-8')
+
+            def apply_policy(packet):
+                if packet['frame']['phase'] == 'Running':
+                    packet['observedSequence'] = 4
+                    packet['frame'].update(policy)
+
+            for room in (2, 5):
+                entry = manifest['sessions'][room - 1]
+                world = json.loads((root / entry['launcherReport']).read_bytes())['finalWorld']
+                world_journal(root / entry['worldJournal'], world, preparing_sequence=3, edit_packet=apply_policy)
+            report = field.verify_venue(path)
+            self.assertEqual(25, report['players'])
+            self.assertEqual([2, 5], report['venueControlBatches'][0]['roomIds'])
+            self.assertEqual([2, 5], sorted(row['roomIds'][0] for row in report['sessions'] if row['worldJournal'].get('venueControlFrames')))
+            reference['roomIds'] = [1, 5]
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'differ from the original scoped enemy batch'):
+                field.verify_venue(path)
+            del reference['roomIds']
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            batch['roomIds'] = [2, 4]
+            phase.write_text(json.dumps({'latestEnemies': batch}), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'differs from the original room or session'):
+                field.verify_venue(path)
+            batch['roomIds'] = [2, 5]
+            batch['sessions'][1]['appliedAtSequence'] = 5
+            phase.write_text(json.dumps({'latestEnemies': batch}), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'lacks an exact Running frame'):
+                field.verify_venue(path)
+
     def test_linked_room_enemy_policy_checks_use_the_exact_original_running_frame(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

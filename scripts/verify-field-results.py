@@ -3289,22 +3289,28 @@ def read_venue_control_batches(references, expected, closure, recorded_at, evide
         require(type(reference) is dict and set(reference) in (fields, fields | {'roomIds'})
                 and reference['action'] in ('SetEnvironment', 'SetEnemies'), 'Invalid venue control batch reference')
         action = reference['action']
-        scope = {}
-        original = expected
-        if 'roomIds' in reference:
-            require(mode == 'Independent' and action == 'SetEnvironment',
-                    'Venue control roomIds requires an Independent environment batch')
-            rooms = reference['roomIds']
-            require(type(rooms) is list and 1 <= len(rooms) <= 5
-                    and all(type(room) is int and 1 <= room <= 5 for room in rooms) and len(set(rooms)) == len(rooms),
-                    'Venue environment roomIds must contain distinct room numbers from 1 to 5')
-            original = {sid: row for sid, row in expected.items() if row['roomIds'][0] in rooms}
-            require(len(original) == len(rooms), 'Venue environment roomIds differ from the original closure')
-            scope = {'roomIds': sorted(rooms)}
         phase = read_json(content(evidence_path(reference['phaseReport'])))
         require(type(phase) is dict, 'Invalid venue phase report')
         batch = phase.get('latestEnvironment' if action == 'SetEnvironment' else 'latestEnemies')
         require(type(batch) is dict, 'Venue phase report lacks the selected original control batch')
+        scope = {}
+        original = expected
+        explicit_scope = 'roomIds' in reference
+        scoped_enemy = action == 'SetEnemies' and 'roomIds' in batch
+        if explicit_scope or scoped_enemy:
+            require(mode == 'Independent' and (action == 'SetEnvironment' or scoped_enemy),
+                    'Venue control roomIds requires an Independent environment batch or an original scoped enemy batch')
+            rooms = batch['roomIds'] if scoped_enemy else reference['roomIds']
+            require(type(rooms) is list and 1 <= len(rooms) <= 5
+                    and all(type(room) is int and 1 <= room <= 5 for room in rooms) and len(set(rooms)) == len(rooms),
+                    'Venue setting roomIds must contain distinct room numbers from 1 to 5')
+            if scoped_enemy and explicit_scope:
+                declared = reference['roomIds']
+                require(type(declared) is list and all(type(room) is int for room in declared) and sorted(declared) == sorted(rooms),
+                        'Selected rooms differ from the original scoped enemy batch')
+            original = {sid: row for sid, row in expected.items() if row['roomIds'][0] in rooms}
+            require(len(original) == len(rooms), 'Venue setting roomIds differ from the original closure')
+            scope = {'roomIds': sorted(rooms)}
         request = identity(batch['requestId'])
         when = datetime.fromisoformat(batch['recordedAtUtc'])
         require(request != closure['requestId'] and request not in batches and when.utcoffset() is not None
@@ -3319,7 +3325,8 @@ def read_venue_control_batches(references, expected, closure, recorded_at, evide
                     'Invalid venue enemy batch policy')
         targets = batch['sessions']
         require(type(targets) is list and len(targets) == len(original),
-                'Venue environment batch must cover exactly the selected rooms' if scope
+                'Venue environment batch must cover exactly the selected rooms' if scope and action == 'SetEnvironment'
+                else 'Scoped venue enemy batch must cover exactly the selected rooms' if scope
                 else 'Venue control batch must cover every original session')
         seen = set()
         for target in targets:

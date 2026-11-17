@@ -180,6 +180,8 @@
           <p id="venue-enemies-targets" class="hint">等待執行中場次。</p>
           <p class="hint">調整攻擊方式與自動攻擊。各場保留原有的敵軍目標數。</p>
           <form id="venue-enemies-form"><fieldset id="venue-enemies-fields" disabled>
+            <label>套用範圍<select id="venue-enemies-scope"><option value="all">所有執行中場次</option><option value="rooms">指定獨立房間</option></select></label>
+            <div id="venue-enemies-rooms" class="form-row" role="group" aria-label="要調整敵軍策略的獨立房間" hidden></div>
             <label>攻擊方式<select id="venue-behavior"><option value="Hold">守備</option><option value="Patrol">巡邏</option><option value="Advance">推進</option></select></label>
             <label class="check"><input id="venue-auto-attack" type="checkbox">自動攻擊</label>
             <button id="venue-apply-enemies" type="submit" class="secondary">套用到執行中場次</button>
@@ -644,7 +646,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.263 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.264 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

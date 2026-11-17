@@ -11,7 +11,7 @@ import { mountVenueServerPlan } from './venue-server-plan-ui.js';
 import { mountVenueLaunchReview } from './venue-launch-review-ui.js';
 import { mountVenueHardwareReview } from './venue-hardware-review-ui.js';
 import { mountVenueRoster } from './venue-roster-ui.js';
-import { mountVenueClimateScope } from './venue-climate-scope-ui.js';
+import { mountVenueSettingScope } from './venue-setting-scope-ui.js';
 import { mountOperatorNetwork } from './operator-network-ui.js';
 import { mountReport, mountVenueReport, venueScoreFields } from './report-ui.js';
 import { matchesDebriefCsv } from './report-csv.js';
@@ -68,7 +68,10 @@ const venueRoster = mountVenueRoster({ getState: () => state, canRegister: maste
   state.pending = { kind: 'venue-roster-join', path: '/venue/roster-admissions', method: 'POST', body: { seats } };
   await sendPending();
 }) });
-const venueClimateScope = mountVenueClimateScope(applyVenuePermissions);
+const venueSettingScopes = {
+  SetEnvironment: mountVenueSettingScope('environment', '環境', applyVenuePermissions),
+  SetEnemies: mountVenueSettingScope('enemies', '敵軍策略', applyVenuePermissions)
+};
 const operatorNetwork = mountOperatorNetwork(() => state, api, download, uuid);
 const alignmentPins = mountAlignmentPins({ state: () => state,
   checkFile: file => api('/room-alignment/check-file', 'POST', file),
@@ -320,7 +323,7 @@ function logout() {
   $('statistics-scope').hidden = true; $('statistics-scope-status').textContent = '';
   $('ticket-room').replaceChildren(); delete $('ticket-room').dataset.session;
   $('venue-environment-form').reset();
-  venueClimateScope.reset();
+  Object.values(venueSettingScopes).forEach(scope => scope.reset());
   $('venue-enemies-form').reset();
   $('mission-form').reset(); $('launch-mission').replaceChildren(); $('edit-mission').replaceChildren(); renderLaunchPreview(launchPlan()); renderHistory(); renderProps(); $('draft-status').textContent = '尚未儲存的草稿'; $('session-panel').hidden = true; notify('');
 }
@@ -1147,7 +1150,10 @@ function renderVenueSettingBatch(locked, kind) {
       && (!enemy || session.supersededRoomIds === undefined || (Array.isArray(session.supersededRoomIds)
         && session.supersededRoomIds.length <= session.roomIds.length
         && new Set(session.supersededRoomIds).size === session.supersededRoomIds.length
-        && session.supersededRoomIds.every(room => session.roomIds.includes(room)))));
+        && session.supersededRoomIds.every(room => session.roomIds.includes(room)))))
+    && (!enemy || batch.roomIds === undefined || (Array.isArray(batch.roomIds)
+      && batch.sessions.every(session => session.roomIds.length === 1)
+      && JSON.stringify(batch.roomIds) === JSON.stringify(batch.sessions.flatMap(session => session.roomIds).sort((a, b) => a - b))));
   const rows = valid ? batch.sessions.flatMap(session => session.roomIds.map(room => ({ room, session, ...settingBatchRoom(kind, batch, session, room) })))
     .sort((a, b) => a.room - b.room) : [];
   panel.hidden = !rows.length || new Set(rows.map(row => row.room)).size !== rows.length;
@@ -1408,7 +1414,7 @@ function applyVenuePermissions() {
   $('venue-end').disabled = locked || !end.length;
   for (const [panel, action] of [['venue-environment', 'SetEnvironment'], ['venue-enemies', 'SetEnemies']]) {
     const allTargets = venueTargets(action);
-    const { targets, reason } = action === 'SetEnvironment' ? venueClimateScope.update(allTargets, locked) : { targets: allTargets };
+    const { targets, reason } = venueSettingScopes[action].update(allTargets, locked);
     $(panel).hidden = !master();
     $(panel + '-fields').disabled = locked || !allTargets.length;
     const overridden = action === 'SetEnemies' ? venueEnemyOverrides(targets) : '';
@@ -1476,7 +1482,7 @@ async function venuePhase(action, { environment, enemyPolicy, beginView } = {}) 
     && !$('operations-view').hidden && document.visibilityState === 'visible';
   if (!master() || state.pending || (action === 'Begin' && !currentBegin())) return;
   const allTargets = venueTargets(action);
-  const { targets, roomIds } = action === 'SetEnvironment' ? venueClimateScope.selection(allTargets) : { targets: allTargets };
+  const { targets, roomIds } = venueSettingScopes[action]?.selection(allTargets) ?? { targets: allTargets };
   const policy = action === 'Begin' ? venueBeginPolicy() : 'normal';
   const playersPerRoom = venueBeginSize(policy);
   if (!targets.length || (policy !== 'normal' && targets.flatMap(target => target.roomIds).length !== 5)
@@ -2323,6 +2329,7 @@ async function sendPending() {
           || ['requireFullTracking', 'requireFullParticipation'].some(policy =>
             (response[policy] === undefined ? false : response[policy]) !== (pending.body[policy] ?? false))
           || response.playersPerRoom !== pending.body.playersPerRoom
+          || (pending.body.action === 'SetEnemies' && JSON.stringify(response.roomIds) !== JSON.stringify(pending.body.roomIds))
           || !Array.isArray(response.sessions) || response.sessions.length !== targets.length
           || targets.some(target => !response.sessions.some(row => row?.sessionId === target.sessionId
             && Number.isSafeInteger(row.appliedAtSequence) && (pending.body.action === 'Begin'
