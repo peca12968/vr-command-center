@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 逐房回查原敵軍策略
+
+- 管理包 0.31.251 可按原房間查找全館敵軍策略生效時的第一格。當其他房間採用自己的策略，原畫格仍可用於未改動的房間。選定房間改用自訂、改回沿用全館或全場再下達策略時，應用新的序號界線。全館批次表可辨認由分房指令覆寫的個別房間。 [主控操作](LAYOUT.md#核對最近一批敵軍策略)
+- 新舊包各以合併及獨立 25 個模擬席位測試。新包找回第 5 房第 3 格及在場／存活各 1 名，拒絕替換的觀察序號。合併場第 2 房被覆寫前沒有原策略畫格，清除覆寫後仍保持無原畫格。相同策略覆寫及權限邊界通過，重啟後查找一致。未打包的瀏覽器來源測試因缺少生成的離線播放器結束為失敗。正式解壓包通過四項敵軍與四項天候瀏覽器檢查，以及先前的 125 項 Node 測試。IPC 無 TCP 監聽、UDP 端點及活動場次。 [敵軍 API 與重啟驗證](../artifacts/enemy-revision-replay-031251/package-api.json) · [天候回歸](../artifacts/environment-revision-replay-031250/package-031251-api.json)
+- `ffd0806` 管理包核對 595 檔，與原 Windows 玩家、伺服器及 Quest 0.50.12 通過離線發行核對。GitHub Actions 因帳務或支出上限未啟動。 [Windows 管理包](../artifacts/enemy-revision-replay-031251/VRCommand-ControlServer-0.31.251.zip) · [發行核對](../artifacts/enemy-revision-replay-031251/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44018734296)
+
 ## 2026-11-17 回查原天候仍生效的執行畫格
 
 - 管理包 0.31.250 以原環境命令至下次覆寫前的管理序號查找執行畫格。暫停、恢復等命令可推進序號，原天候仍生效時會讀回原畫格。相同天候的新命令也會劃出新界線。回放核對找到畫格的實際觀察序號。 [全館環境操作](ENVIRONMENT.md#核對最近一批環境指令)
