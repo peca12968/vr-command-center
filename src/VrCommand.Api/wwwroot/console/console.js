@@ -1140,9 +1140,24 @@ function venueBeginSize(policy) {
   return policy === 'normal' ? 5 : Number($('venue-begin-size').value);
 }
 function venueBeginRows(targets, policy, playersPerRoom) {
-  const rows = targets.flatMap(target => target.roomIds.map(roomId => ({
-    roomId, sessionId: target.sessionId, sessionSequence: target.sessionSequence, ...roomReadiness.venueBegin(target, roomId, policy, playersPerRoom)
-  })));
+  const rows = targets.flatMap(target => {
+    const session = state.sessions.find(session => session.id === target.sessionId
+      && session.state === 'Preparing' && session.sequence === target.sessionSequence);
+    return target.roomIds.map(roomId => {
+      const row = { roomId, sessionId: target.sessionId, sessionSequence: target.sessionSequence,
+        ...roomReadiness.venueBegin(target, roomId, policy, playersPerRoom) };
+      if (policy !== 'normal' && session && state.rooms.some(room => room.id === roomId && room.sessionId === session.id)) {
+        const occupied = new Set(session.players.filter(player => player.roomId === roomId).map(player => player.seat));
+        row.seats = Array.from({ length: 5 }, (_, index) => {
+          if (index >= playersPerRoom) return occupied.has(index) ? 'OutsideStage' : 'NotInStage';
+          if (!occupied.has(index)) return 'Vacant';
+          const status = venueBeginSeatState(row, index);
+          return status === 'Vacant' ? 'Unknown' : status;
+        });
+      }
+      return row;
+    });
+  });
   if (policy !== 'normal' && rows.length) {
     for (const roomId of [1, 2, 3, 4, 5])
       if (!rows.some(row => row.roomId === roomId)) rows.push({ roomId, state: 'NotPreparing', text: '尚無準備中的目標場次' });
@@ -1152,19 +1167,39 @@ function venueBeginRows(targets, policy, playersPerRoom) {
 
 const reviewableBeginSeatStates = new Set(['AwaitingAdmission', 'WaitingRevision', 'AwaitingPose', 'PoseUnavailable',
   'Eliminated', 'NeedsTracking', 'OutsideStage']);
+let vacantBeginSelection = 0;
+
+function isOriginalBeginRoom({ sessionId, sessionSequence, roomId }) {
+  return venueTargets('Begin').some(target => target.sessionId === sessionId
+    && target.sessionSequence === sessionSequence && target.roomIds.includes(roomId));
+}
 
 async function openVenueRosterSeat(row, seat) {
   const { sessionId, sessionSequence, roomId } = row;
   if (!master() || state.busy || state.pending || $('operations-view').hidden) return;
-  const isOriginal = () => venueTargets('Begin').some(target => target.sessionId === sessionId
-    && target.sessionSequence === sessionSequence && target.roomIds.includes(roomId));
   const changed = () => notify('原席位的準備名冊已變更。請重新核對全館開場清單。', true);
-  if (!isOriginal()) { changed(); return; }
+  if (!isOriginalBeginRoom(row)) { changed(); return; }
   const epoch = state.epoch, view = operationsViewEpoch, selection = selectionEpoch + 1;
   await selectSession(sessionId, String(roomId));
   if (!master() || state.epoch !== epoch || operationsViewEpoch !== view || selectionEpoch !== selection) return;
-  if (!isOriginal() || state.session?.sequence !== sessionSequence || state.session.state !== 'Preparing'
+  if (!isOriginalBeginRoom(row) || state.session?.sequence !== sessionSequence || state.session.state !== 'Preparing'
     || !focusRoster(sessionId, roomId, seat)) changed();
+}
+
+async function openVacantBeginSeat(row, seat) {
+  if (!master() || state.busy || state.pending || $('operations-view').hidden) return;
+  const request = ++vacantBeginSelection, epoch = state.epoch, view = operationsViewEpoch, selection = selectionEpoch;
+  const current = () => request === vacantBeginSelection && state.epoch === epoch && view === operationsViewEpoch
+    && selection === selectionEpoch && master() && !state.busy && !state.pending
+    && venueBeginPolicy() !== 'normal' && seat <= venueBeginSize(venueBeginPolicy());
+  try {
+    if (state.refreshPromise) { try { await state.refreshPromise; } catch { /* Read the roster again below. */ } }
+    if (!current()) return;
+    await refresh();
+    if (!current()) return;
+    if (isOriginalBeginRoom(row) && venueRoster.focusVacant({ ...row, seat })) return;
+  } catch { /* Leave the original draft in place. */ }
+  if (current()) notify('原空席已變更或無法確認。請重新核對全館開場清單。', true);
 }
 
 function renderVenueBegin(targets, waiting, policy, playersPerRoom) {
@@ -1210,11 +1245,13 @@ function renderVenueBegin(targets, waiting, policy, playersPerRoom) {
       cell.dataset.beginSeat = index + 1;
       cell.dataset.seatState = status;
       cell.classList.toggle('ready-player', status === 'Tracked' || status === 'Simulated');
-      if (row.sessionId && reviewableBeginSeatStates.has(status)) {
+      const vacant = status === 'Vacant' && policy !== 'normal' && index < playersPerRoom;
+      if (row.sessionId && (vacant || reviewableBeginSeatStates.has(status))) {
         const button = element('button', beginSeatLabels[status], 'quiet small');
         button.type = 'button'; button.disabled = locked;
-        button.setAttribute('aria-label', `查看房間 ${row.roomId} 第 ${index + 1} 席名冊：${beginSeatLabels[status]}`);
-        button.addEventListener('click', () => void openVenueRosterSeat(row, index + 1));
+        button.setAttribute('aria-label', vacant ? `填寫房間 ${row.roomId} 第 ${index + 1} 席名冊`
+          : `查看房間 ${row.roomId} 第 ${index + 1} 席名冊：${beginSeatLabels[status]}`);
+        button.addEventListener('click', () => vacant ? void openVacantBeginSeat(row, index + 1) : void openVenueRosterSeat(row, index + 1));
         cell.replaceChildren(button);
       }
       tr.append(cell);

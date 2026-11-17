@@ -140,6 +140,17 @@ export function mountVenueRoster({ getState, canRegister, uuid, download, regist
   });
   return {
     render,
+    focusVacant({ roomId, seat, sessionId, sessionSequence }) {
+      if (!canRegister() || panel.closest('#operations-view[hidden]') || getState().busy || getState().pending) return false;
+      const row = rows[(roomId - 1) * 5 + seat - 1];
+      const session = currentSession(row);
+      if (session?.id !== sessionId || session.sequence !== sessionSequence || occupant(session, row)) return false;
+      panel.open = true;
+      render();
+      row.name.scrollIntoView({ block: 'center' });
+      row.name.focus({ preventScroll: true });
+      return true;
+    },
     accepted(seats) {
       for (const { roomId, seat } of seats) {
         const row = rows[(roomId - 1) * 5 + seat];
