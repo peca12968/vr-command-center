@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 Quest 補擷取沿用已完成的頭盔指紋
+
+- `eb56dfd` 的補擷取報告沿用同一批先前各輪的成功席位指紋。舊版會讓只選一席的補擷取通過，即使該裝置已為另一席完成擷取。新版在開啟日誌前攔下，只查待補席位。舊版報告仍可讀取，指紋從新版記錄的成功席位開始累計。 [修正前結果](../artifacts/quest-capture-retry-devices-20261117/before.log) · [補擷取操作](QUEST3.md#重試未完成的-quest-擷取席位)
+- 24 項擷取及封存測試、9 項場館測試通過。兩種連線模式各以 25 席模擬，舊頭盔補擷取被拒絕並保留原 24 份日誌，改用正確裝置後只補 1 席。封存驗收另以正式 CLI 每種模式各核對 25 席，測試確認直接複製另一席的指紋會被拒絕。 [補擷取結果](../artifacts/quest-capture-retry-devices-20261117/full-retry.json) · [封存驗收](../artifacts/quest-capture-retry-devices-20261117/venue-cli.json) · [本機測試](../artifacts/quest-capture-retry-devices-20261117/field.log)
+- 本機仍只辨識 Quest 檔案傳輸介面，實體頭盔待 USB 偵錯可用。GitHub Actions 因帳務或支出上限未啟動。 [USB 查核](../artifacts/quest-capture-retry-devices-20261117/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44047440053)
+
 ## 2026-11-17 五房擷取拒絕重複頭盔
 
 - `c568512` 在同批開始前以裝置序號比對所有選取席位。舊版接受兩個 ADB 連線指向同一副頭盔，新版在開啟日誌前將涉及席位標為未完成，其他席照常擷取。序號只留在記憶體。 [修正前測試](../artifacts/quest-capture-duplicate-devices-20261117/before.log) · [操作說明](QUEST3.md#一次擷取五房-quest-日誌)
