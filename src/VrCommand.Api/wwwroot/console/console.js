@@ -225,7 +225,10 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
       error.workstationIssues = workstationIssues; error.beginReviews = reviews; throw error;
     }
     if (responseType === 'blob' || archiveRequest) return content;
-    return content ? JSON.parse(content) : null;
+    const result = content ? JSON.parse(content) : null;
+    if (responseType === 'mission-save' && (!archiveId.test(result?.id) || response.headers.get('Location') !== '/api/missions/' + result.id))
+      throw new MissionVersionMismatch();
+    return result;
   } finally { clearTimeout(timeout); }
 }
 async function run(action, independentRead = false) {
@@ -1991,16 +1994,23 @@ function matchesPreparedSession(session, mode, roomIds, expected) {
     || session.roomIds.length !== roomIds.length || !roomIds.every((roomId, index) => session.roomIds[index] === roomId)
     || mission?.id !== expected.id || mission.schemaVersion !== expected.schemaVersion || mission.createdAtUtc !== expected.createdAtUtc)
     return false;
-  const actual = mission.definition, original = expected.definition;
+  return matchesMissionDefinition(mission.definition, expected.definition);
+}
+function matchesMissionDefinition(actual, original, coordinatesMatch = (saved, expected) => saved === expected) {
   return actual?.name === original.name && actual.briefing === original.briefing && actual.durationSeconds === original.durationSeconds
     && ['mode', 'weather', 'timeOfDay', 'lightning'].every(field => actual.environment?.[field] === original.environment[field])
     && ['count', 'behavior', 'autoAttack'].every(field => actual.enemies?.[field] === original.enemies[field])
     && Array.isArray(actual.props) && actual.props.length === original.props.length
     && original.props.every((prop, index) => {
       const saved = actual.props[index];
-      return saved?.assetId === prop.assetId && saved.yawDegrees === prop.yawDegrees
-        && ['x', 'y', 'z'].every(axis => saved.position?.[axis] === prop.position[axis]);
+      return saved?.assetId === prop.assetId && coordinatesMatch(saved.yawDegrees, prop.yawDegrees)
+        && ['x', 'y', 'z'].every(axis => coordinatesMatch(saved.position?.[axis], prop.position[axis]));
     });
+}
+// The API stores positions and angles as Single and may return a shorter decimal spelling.
+function matchesSavedCoordinate(saved, expected) {
+  const stored = Math.fround(expected);
+  return Number.isFinite(expected) && Number.isFinite(saved) && Number.isFinite(stored) && Math.fround(saved) === stored;
 }
 function renderIndependentReceipt(sessions = [], versions = []) {
   const rows = sessions.map((session, index) => {
@@ -2073,7 +2083,8 @@ async function sendPending() {
   const pending = state.pending, epoch = state.epoch;
   if (!pending) return;
   try {
-    const response = await api(pending.path, pending.method, pending.body, pending.requestId, pending.admissionId);
+    const missionSave = pending.kind === 'mission-create' || pending.kind === 'mission-revise';
+    const response = await api(pending.path, pending.method, pending.body, pending.requestId, pending.admissionId, missionSave ? 'mission-save' : 'json');
     if (state.pending !== pending) return;
     if (pending.kind === 'command' && pending.body.action === 'SetRoomAlignment' &&
         (response?.commandId !== pending.body.commandId || `/sessions/${response?.session?.id}/commands` !== pending.path
@@ -2092,21 +2103,23 @@ async function sendPending() {
         throw new Error('Setting command receipt mismatch');
       if (roomPolicy && roomEnemyDraft?.key === session + '/' + roomPolicy.roomId) roomEnemyDraft.sequence = sequence;
     }
-    if (pending.kind === 'mission-create' || pending.kind === 'mission-revise') {
+    if (missionSave) {
+      if ((pending.accepted && response.id !== pending.accepted) || response.schemaVersion !== 1 || !Number.isFinite(Date.parse(response.createdAtUtc))
+        || !matchesMissionDefinition(response.definition, pending.body, matchesSavedCoordinate)) throw new MissionVersionMismatch();
       pending.accepted = response.id;
       const selectedLaunch = commonLaunchRevision();
-      await refreshData(epoch);
-      if (epoch !== state.epoch) return;
       const parent = pending.parent;
       const revision = await api(`/missions/${response.id}/version`);
       if (epoch !== state.epoch) return;
       requireMissionVersion(revision, response.id, parent?.seriesId ?? response.id, (parent?.number ?? 0) + 1);
-      if (revision.previousId !== (parent?.mission.id ?? null)) throw new MissionVersionMismatch();
-      if (pending.restoredFrom && JSON.stringify(revision.mission.definition) !== JSON.stringify(pending.body))
+      if (revision.previousId !== (parent?.mission.id ?? null) || revision.mission.schemaVersion !== response.schemaVersion
+        || revision.mission.createdAtUtc !== response.createdAtUtc || !matchesMissionDefinition(revision.mission.definition, response.definition))
         throw new MissionVersionMismatch();
       const history = await api(`/missions/${response.id}/history`);
       if (epoch !== state.epoch) return;
       requireMissionHistory(history, revision.seriesId, revision.number);
+      await refreshData(epoch);
+      if (epoch !== state.epoch) return;
       if (!await rememberHead(history, epoch)) return;
       if (!pending.restoredFrom) {
         state.draftBase = revision; state.draftChanged = false; state.draftSavedAt = response.createdAtUtc;

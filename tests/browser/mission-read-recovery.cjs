@@ -241,6 +241,7 @@ module.exports = async function missionReadRecovery({ context, api, tokens, base
     let accepted;
     try {
       await page.locator('#draft-duration').fill('240');
+      await page.locator('#add-sandbag').click();
       const write = page.waitForResponse(response => new URL(response.url()).pathname === revisionPath && response.request().method() === 'POST');
       await page.locator('#save-revision').click();
       accepted = await (await write).json();
@@ -250,10 +251,22 @@ module.exports = async function missionReadRecovery({ context, api, tokens, base
         'An accepted save remains pending when its version read returns the previous revision');
     } finally { await page.unroute(versionRead); }
     try {
+      const genuine = await api(`/missions/${accepted.id}/version`);
+      const changed = structuredClone(genuine);
+      changed.mission.definition.props[0].position.z += 1;
+      const changedRoute = `**/api/missions/${accepted.id}/version`;
+      await page.route(changedRoute, route => route.fulfill({ status: 200, json: changed }), { times: 1 });
+      const read = page.waitForResponse(response => new URL(response.url()).pathname === `/api/missions/${accepted.id}/version`);
+      await page.locator('#retry-command').click();
+      await read;
+      await wait(() => !document.querySelector('#pending-command').hidden && !document.querySelector('#retry-command').disabled
+        && document.querySelector('#notice').textContent.includes('任務版本核對不符'));
+      check(sent.length === 2 && await page.locator('#prop-z').inputValue() === String(genuine.mission.definition.props[0].position.z),
+        'Changing an object with the right version identity cannot mark the original draft saved');
       await page.locator('#retry-command').click();
       await wait(() => document.querySelector('#pending-command').hidden && document.querySelector('#draft-status').textContent.includes('第 4 版'));
       const latestText = await api(`/missions/${savedText.id}/history`);
-      check(sent.length === 2 && sent[0][0] && sent[0][0] === sent[1][0] && sent[0][1] === sent[1][1]
+      check(sent.length === 3 && sent[0][0] && sent.slice(1).every(([key, body]) => key === sent[0][0] && body === sent[0][1])
         && latestText.headId === accepted.id && latestText.headNumber === 4,
         'Confirming the mismatched read retries the exact accepted request and leaves one new immutable revision');
     } finally { page.off('request', onSave); }
