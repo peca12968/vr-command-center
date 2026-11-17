@@ -43,6 +43,10 @@ else:
             return [command, str(fixture), '--fake-adb', *args[1:]]
         return args
 
+    def check_mock_adb(path):
+        # The fixture routes this executable to local inventory and log files.
+        assert str(Path(path).resolve(strict=True)) == command
+
     def run_command(args, *positional, **keywords):
         return run(route(args), *positional, **keywords)
 
@@ -52,5 +56,7 @@ else:
     subprocess.run = run_command
     asyncio.create_subprocess_exec = start_command
     sys.path.insert(0, str(capture.parent))
+    import windows_firewall
+    windows_firewall.require_silent_windows_launch = check_mock_adb
     sys.argv[0] = str(capture)
     runpy.run_path(str(capture), run_name='__main__')

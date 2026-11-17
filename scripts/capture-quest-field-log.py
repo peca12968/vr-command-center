@@ -142,7 +142,7 @@ async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready
             on_ready(pid)
 
 
-def check_device_identity(adb, expected, timeout, venue_device=None):
+def read_device_serial(adb, timeout):
     field.require(timeout > 0, 'Capture timed out before the Quest device identity could be checked')
     try:
         result = subprocess.run([*adb, 'shell', 'getprop', 'ro.serialno'], capture_output=True, timeout=min(5, timeout))
@@ -151,10 +151,17 @@ def check_device_identity(adb, expected, timeout, venue_device=None):
     serial = re.fullmatch(rb'([A-Za-z0-9][A-Za-z0-9._-]{0,127})\r?\n?', result.stdout)
     field.require(result.returncode == 0 and serial is not None and not re.fullmatch(rb'unknown|0+', serial[1], re.I),
                   'Quest device identity could not be read')
-    salt, digest = expected
-    reported = serial[1].decode('ascii').upper()
-    field.require(field.quest_deployment_fingerprint(salt, reported) == digest,
-                  'Quest device identity differs from the original deployment')
+    return serial[1].decode('ascii').upper()
+
+
+def check_device_identity(adb, expected, timeout, venue_device=None):
+    reported = read_device_serial(adb, timeout)
+    if isinstance(expected, str):
+        field.require(reported == expected, 'Quest device identity changed during capture')
+    else:
+        salt, digest = expected
+        field.require(field.quest_deployment_fingerprint(salt, reported) == digest,
+                      'Quest device identity differs from the original deployment')
     if venue_device is not None:
         scope, digest = venue_device
         field.require(field.quest_deployment_fingerprint(scope, reported) == digest,
@@ -178,7 +185,10 @@ async def capture(adb, port, admission, output, seconds, on_ready=report_capture
     partial = output.with_name(output.name + '.partial')
     field.require(not os.path.lexists(output) and not os.path.lexists(partial), 'Choose a new capture output path')
     deadline = time.monotonic() + seconds
-    if device_identity is not None:
+    if device_identity is None:
+        # Use the first physical serial only for this capture. Keep it out of reports and status output.
+        device_identity = await asyncio.to_thread(read_device_serial, adb, deadline - time.monotonic())
+    else:
         await asyncio.to_thread(check_device_identity, adb, device_identity, deadline - time.monotonic(), venue_device)
     remaining = deadline - time.monotonic()
     field.require(remaining > 0, 'Capture timed out before checking the Quest process')
@@ -199,8 +209,7 @@ async def capture(adb, port, admission, output, seconds, on_ready=report_capture
                 except ProcessLookupError:
                     pass
             await asyncio.wait_for(child.communicate(), 5)
-        if device_identity is not None:
-            await asyncio.to_thread(check_device_identity, adb, device_identity, deadline - time.monotonic(), venue_device)
+        await asyncio.to_thread(check_device_identity, adb, device_identity, deadline - time.monotonic(), venue_device)
     publish_capture_file(partial, output)
     return report
 

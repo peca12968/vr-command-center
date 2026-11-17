@@ -318,6 +318,8 @@ assert sys.argv[1] == '-t'
 serial = transports[sys.argv[2]]
 if sys.argv[3:] == ['shell', 'pidof', 'com.vrcommand.quest']:
     print(7342)
+elif sys.argv[3:] == ['shell', 'getprop', 'ro.serialno']:
+    print(f'HARDWARE-{serial}')
 else:
     assert sys.argv[3:] == ['logcat', '-b', 'main', '--pid=7342', '-v', 'threadtime', '-s', 'Unity:I']
     raw = (root / (serial + '.log')).read_bytes()
@@ -425,7 +427,8 @@ if args[2:] == ['shell', 'pidof', 'com.vrcommand.quest']:
     count = root/'pid-count'
     calls = int(count.read_text()) if count.exists() else 0
     count.write_text(str(calls+1))
-    print(settings.get('replacement', '7342') if calls else settings.get('initialPid', '7342'))
+    pids = settings.get('processIds', [settings.get('initialPid', '7342'), settings.get('replacement', '7342')])
+    print(pids[min(calls, len(pids)-1)])
     sys.exit(0)
 assert args[2:] == ['logcat','-b','main','--pid=7342','-v','threadtime','-s','Unity:I']
 (root/'logcat-child').write_text(str(os.getpid()))
@@ -458,6 +461,26 @@ if settings.get('keepRunning', True):
     def capture(self, seconds=4):
         port, expected, _, _ = capture_tool.read_connection(self.original)
         return asyncio.run(capture_tool.capture(self.adb, port, expected, self.output, seconds))
+
+    def test_capture_without_deployment_rejects_headset_swap_before_readiness(self):
+        raw = quest_logcat(self.player_log).encode('utf-8')
+        self.prepare(raw, deviceSerials=['HEADSET-A', 'HEADSET-B'])
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'device identity changed during capture'):
+                self.capture()
+        self.assertTrue(self.partial.exists())
+        self.assertFalse(self.output.exists())
+        self.assertNotIn('capture-ready', stderr.getvalue())
+        self.assertNotIn('HEADSET-', stderr.getvalue())
+
+    def test_capture_without_deployment_rechecks_device_before_publishing(self):
+        raw = quest_logcat(self.player_log).encode('utf-8')
+        self.prepare(raw, deviceSerials=['HEADSET-A', 'HEADSET-A', 'HEADSET-B'])
+        with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'device identity changed during capture'):
+            self.capture()
+        self.assertEqual(raw, self.partial.read_bytes())
+        self.assertFalse(self.output.exists())
 
     def test_bound_capture_checks_original_device_before_read_and_publish(self):
         port, expected, _, _ = capture_tool.read_connection(self.original)
@@ -616,10 +639,11 @@ if settings.get('keepRunning', True):
         self.assertFalse(self.output.exists())
 
     def test_capture_rejects_game_process_replacement_after_terminal_marker(self):
-        self.prepare(quest_logcat(self.player_log).encode('utf-8'), replacement='7450')
+        raw = quest_logcat(self.player_log).encode('utf-8')
+        self.prepare(raw, processIds=['7342', '7342', '7450'])
         with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'original Quest process changed'):
             self.capture()
-        self.assertTrue(self.partial.exists())
+        self.assertEqual(raw, self.partial.read_bytes())
         self.assertFalse(self.output.exists())
 
     def test_capture_rechecks_pid_while_stream_is_idle(self):

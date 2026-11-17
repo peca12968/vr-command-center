@@ -1855,6 +1855,8 @@ if ($PSCmdlet.ParameterSetName -eq 'Venue') {''', 1), encoding='utf-8')
 from pathlib import Path
 if sys.argv[1:] == ['shell', 'pidof', 'com.vrcommand.quest']:
     print(7342)
+elif sys.argv[1:] == ['shell', 'getprop', 'ro.serialno']:
+    print({f'HARDWARE-{serial}'!r})
 else:
     assert sys.argv[1:] == ['logcat', '-b', 'main', '--pid=7342', '-v', 'threadtime', '-s', 'Unity:I']
     if {gate is not None!r}:
@@ -1912,8 +1914,9 @@ else:
         self.assertEqual((False, 1), (report['complete'], report['capturedSeats']))
         failed, healthy = report['seats']
         self.assertFalse(failed['complete'])
-        self.assertIn('Expected one running Quest game process', failed['reason'])
-        self.assertEqual(expected[1, 1][2], (first / failed['partial']).read_bytes())
+        self.assertIn('Quest device identity could not be read', failed['reason'])
+        observed = expected[1, 1][2].splitlines(keepends=True)[:2]
+        self.assertEqual(b''.join(observed), (first / failed['partial']).read_bytes())
         self.assertFalse((first / 'room-01-seat-01-logcat.txt').exists())
         self.assertEqual(expected[1, 2][2], (first / healthy['log']).read_bytes())
         before = {path.name: path.read_bytes() for path in first.iterdir()}
