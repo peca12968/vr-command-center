@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 擷取期間重查 Quest 頭盔與程序
+
+- `94c9711` 在有裝置指紋的單席或批次擷取中，會在每次通報連線就緒前查驗原頭盔與 PID，等待日誌時也會定期重查。舊版在模擬換機後會先發出第二次就緒，再於最後一次檢查中止。新版在重連時拒絕通報並保留已讀的 `.partial`。 [Quest 操作](QUEST3.md#收集-quest-場館驗收日誌) · [修正前](../artifacts/quest-live-capture-device-20261117/before.log)
+- 19 項日誌擷取測試與 1 項單場戰後驗收測試通過。合併場的 25 個模擬席位在原裝置重連後全部完成。獨立場模擬第 5 房第 5 席換機，該席停止、其他 24 席照常完成，全館未通報就緒。以上使用模擬 ADB，無 IP 監聽。 [擷取測試](../artifacts/quest-live-capture-device-20261117/capture.log) · [五房模擬](../artifacts/quest-live-capture-device-20261117/venue-capture.json)
+- Windows 仍只列出 Quest 檔案傳輸介面，實機驗收待 ADB 可用。GitHub Actions 因帳務或支出上限未啟動。 [USB 查核](../artifacts/quest-live-capture-device-20261117/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44043214901)
+
 ## 2026-11-17 將 Quest 單席啟動及日誌綁定到原頭盔
 
 - `f7a4372` 的 `-RequireOpenXR` 單席回條升為 `evidenceVersion: 3`，使用本次啟動識別碼計算裝置指紋。驗證設定切換、啟動和擷取時會重查裝置。模擬環境在相同 ADB 連線識別碼換成另一台頭盔時，舊版仍繼續啟動。新版能在設定啟用前拒絕，若換機發生在擷取中則保留 `.partial`。成功回條省略原始序號。 [Quest 操作](QUEST3.md#收集-quest-場館驗收日誌) · [修正前](../artifacts/quest-device-bound-launch-20261117/before.log)
