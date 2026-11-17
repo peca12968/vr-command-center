@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 核對任務草稿的保存回條
+
+- 控制台 0.31.252 在確認新任務及修訂前，核對回應的 `Location`、任務 ID、送出的完整內容與讀回的保存版本。座標及角度沿用 API 單精度。舊版會接受保留原版本 ID、但替換物件位置的回覆。新版保留草稿、原開場版本及原重試請求。 [任務庫操作](MISSION_VERSIONS.md#控制台操作)
+- 正式解壓包經 Chromium 和本機 AF_UNIX 通過 10 項，含回條內容、位置與同 ID 資料替換、重試不重複建立、單精度、歷史還原及物件復原。另通過 125 項 Node 測試。舊版首輪夾具在保存仍進行時提早判斷，加入等待後兩種舊版反例重現。API 無 TCP 監聽或 UDP 端點，已停止。 [舊版反例](../artifacts/mission-save-receipt-031252/previous-final/checks.json) · [新版驗證](../artifacts/mission-save-receipt-031252/shipped-undo/checks.json)
+- `528ff08` 正式管理包核對 595 檔，與原 Windows 玩家、伺服器及 Quest 0.50.12 通過離線發行核對。GitHub Actions 因帳務或支出上限未啟動。 [Windows 管理包](../artifacts/mission-save-receipt-031252/VRCommand-ControlServer-0.31.252.zip) · [發行核對](../artifacts/mission-save-receipt-031252/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44019786640)
+
 ## 2026-11-17 逐房回查原敵軍策略
 
 - 管理包 0.31.251 可按原房間查找全館敵軍策略生效時的第一格。當其他房間採用自己的策略，原畫格仍可用於未改動的房間。選定房間改用自訂、改回沿用全館或全場再下達策略時，應用新的序號界線。全館批次表可辨認由分房指令覆寫的個別房間。 [主控操作](LAYOUT.md#核對最近一批敵軍策略)
