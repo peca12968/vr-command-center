@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 指定獨立房間套用敵軍策略
+
+- 控制台 0.31.264 的「全館敵軍策略」可勾選執行中的獨立房間。管理端在同一交易核對所選房間與原設定版本。回條、重試與批次匯出保存原範圍，封存驗收會讀取批次房號並核對各房原畫格。合併場保留全場及原單房策略入口。 [操作說明](LAYOUT.md#全館敵軍策略) · [封存驗收](EXTERNAL_CLIENTS.md#核對五房環境與敵軍指令的執行畫格)
+- `02e0111` 正式解壓包核對 595 檔。獨立及合併模式各用 25 個模擬席位。獨立只更新第 2、5 房，三個未選房間的序號與策略相同。模擬首份回條少一房後，原請求重試取回正確回條，各房只更新一次。合併全場一次套用，兩批均以原來源畫格確認。8 項瀏覽器、21 項 .NET、3 項 Python 與 134 項 Node 檢查通過。管理程序無 TCP 監聽或 UDP 端點。 [獨立](../artifacts/venue-enemy-scope-031264/final-browser/independent/checks.json) · [合併](../artifacts/venue-enemy-scope-031264/final-browser/linked/checks.json) · [核心與重啟](../artifacts/venue-enemy-scope-031264/core.log)
+- 0.31.264 管理包通過與既有 Windows 遊戲包及 Quest APK 的離線發行核對。USB 仍只有 Quest 檔案傳輸介面，實機待測。GitHub Actions 因帳務或支出上限未啟動。 [管理包](../artifacts/venue-enemy-scope-031264/final-package/VRCommand-ControlServer-0.31.264.zip) · [發行核對](../artifacts/venue-enemy-scope-031264/final-package/venue-release.json) · [USB 查核](../artifacts/venue-enemy-scope-031264/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44051103216)
+
 ## 2026-11-17 從全館開場回條開啟原房觀戰
 
 - 控制台 0.31.263 收到全館開場回條後提供「本次開場觀戰」。各房核對原場次、錄製來源、開場生效序號與近期執行畫格，確認後才開啟觀戰。場次清單暫時讀取失敗時保留回條，畫格過期時停用捷徑。 [操作說明](PLAYER_READINESS.md#五房追蹤驗收開場)
