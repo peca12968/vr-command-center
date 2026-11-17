@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 從五房開場清單定位名冊席位
+
+- 管理台 0.31.242 的全館開場逐席清單可點選已登記的待處理席位，直接打開原房名冊並定位該列。讀取後再核對準備場次及原名冊修訂。重新整理時依原入場識別保留焦點，換人時顯示重新核對提示。 [席位定位操作](PLAYER_READINESS.md#五房追蹤驗收開場)
+- 正式解壓包以本機 IPC、Chromium 和測試快照通過 10 項。五房獨立和合併各演練 10 席及 25 席，皆在第 5 房第 1 席顯示需追蹤並定位原入場，開場保持停用。合併測試在讀名冊期間同席換人，未把焦點移給替換者。瀏覽器無管理寫入，清理後活動場次、API 的 TCP 監聽及 UDP 端點均為零。Node 133 項通過。 [10 席結果](../artifacts/venue-begin-seat-link-031242/package-final/checks.json) · [25 席結果](../artifacts/venue-begin-seat-link-031242/package-25-seat/checks.json)
+- 管理包核對 589 檔，與既有 Windows／Quest 0.50.12 通過離線發行核對。Quest 3 仍未出現 ADB 偵錯介面，跨機與頭盔實測待驗。GitHub Actions 對 `feb98c6` 回報帳務或支出上限，工作未啟動。 [Windows 管理包](../artifacts/venue-begin-seat-link-031242/final/VRCommand-ControlServer-0.31.242.zip) · [發行核對](../artifacts/venue-begin-seat-link-031242/final/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44004706150)
+
 ## 2026-11-17 從個人回放返回原批次戰績
 
 - 管理台 0.31.241 從分房、全館席位或離場明細開啟個人回放後，可按「返回原批次戰績」。會重讀同一批次、核對原場次與雙封存，再開啟原明細並恢復未確認篩選。玩家仍在清單時，焦點回到該列。 [操作方式](SESSION_CLOSURE.md#從全館收尾查看席位)
