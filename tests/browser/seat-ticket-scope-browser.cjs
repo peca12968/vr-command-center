@@ -11,6 +11,12 @@ module.exports = async function seatTicketScopeBrowser({ context, api, tokens, b
     await verifyReceipt(mode);
   }
 
+  async function downloadedBytes(file) {
+    const chunks = [];
+    for await (const chunk of await file.createReadStream()) chunks.push(chunk);
+    return Buffer.concat(chunks);
+  }
+
   async function verifyReceipt(mode) {
     const page = await context.newPage();
     captureErrors(page);
@@ -80,9 +86,7 @@ module.exports = async function seatTicketScopeBrowser({ context, api, tokens, b
       const filePromise = page.waitForEvent('download');
       await seat.click();
       const seatFile = await filePromise;
-      const chunks = [];
-      for await (const chunk of await seatFile.createReadStream()) chunks.push(chunk);
-      const config = JSON.parse(Buffer.concat(chunks));
+      const config = JSON.parse(await downloadedBytes(seatFile));
       const admitted = await api('/player-tickets/validate', 'POST', { sessionId: session.id, ticket: config.joinTicket, protocolVersion: 2 }, 'GameServer');
       check(admitted.admissionId === player.admissionId && admitted.seat === player.seat && admitted.roomId === roomId
         && config.address === address && config.port === port && config.roomAlignmentSha256 === (isMr ? pin : undefined),
@@ -93,7 +97,7 @@ module.exports = async function seatTicketScopeBrowser({ context, api, tokens, b
       const roomReply = page.waitForResponse(response => response.url() === roomPath && response.request().method() === 'POST');
       await roomButton.click();
       const initial = await roomDownload, initialResponse = await roomReply;
-      const headers = await initialResponse.allHeaders(), body = await initialResponse.body();
+      const headers = await initialResponse.allHeaders(), body = await downloadedBytes(initial);
       const requestHeader = 'x-vrcommand-archive-request';
       assert.equal(initial.suggestedFilename(), 'room-04-connections.zip');
       assert.equal(headers['repr-digest'], `sha-256=:${createHash('sha256').update(body).digest('base64')}:`);
@@ -109,7 +113,7 @@ module.exports = async function seatTicketScopeBrowser({ context, api, tokens, b
         await roomButton.click();
         const file = await otherFile, response = await otherReply;
         assert.equal(file.suggestedFilename(), 'room-03-connections.zip');
-        const otherHeaders = await response.allHeaders(), otherBody = await response.body();
+        const otherHeaders = await response.allHeaders(), otherBody = await downloadedBytes(file);
         await file.delete();
         await page.locator('#ticket-room').selectOption(String(roomId));
         check(await blocked(roomPath, roomButton, request => request.fulfill({ status: 200, headers: otherHeaders, body: otherBody }),
