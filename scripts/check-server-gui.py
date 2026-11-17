@@ -1,5 +1,5 @@
 """Prepare an isolated API, then observe real server GUI selection/start/seal/close. No UI input."""
-import argparse,importlib.util,ipaddress,json,os,shutil,socket,subprocess,time,urllib.error,urllib.request,uuid
+import argparse,importlib.util,ipaddress,json,os,shutil,socket,subprocess,sys,time,urllib.error,urllib.request,uuid
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 def module(name,file):
@@ -16,6 +16,7 @@ def main():
     require_silent_windows_launch(folder / 'Launch-Server.exe')
     require_silent_windows_launch(folder / 'Runtime/VrCommand.exe')
     require_silent_windows_launch(args.control_package / 'Runtime/VrCommand.Api.exe')
+    require_silent_windows_launch(sys.executable)
     out=ROOT/'artifacts/server-gui'/('run-'+uuid.uuid4().hex);out.mkdir(parents=True,exist_ok=False);runtime=args.runtime_root.resolve()/out.name;runtime.mkdir(parents=True,exist_ok=False);data=runtime/'control';port=free(socket.SOCK_DGRAM);api=None;api_witness=None;gui=None;witness=None;errors=[];observed=None;stopped=False;gui_report=None;gui_work=None;session=None;result=None;other_session=None
     client=None;client_log=runtime/'fixture-client.log'
     reports=Path(os.environ['LOCALAPPDATA'])/'VrCommand/GameServerReports';old=set(reports.glob('*.json')) if reports.exists() else set()
@@ -33,7 +34,8 @@ def main():
             raise
     try:
         subprocess.run([str(exe),'--init',str(data),'--port',str(free()),'--report',str(out/'init.json')],check=True,timeout=30);marker=read(data/'control-instance.json');keys=read(data/'operator-keys.json')['OperatorKeys'];uri='http://127.0.0.1:'+str(marker['port'])
-        api=subprocess.Popen([str(exe),'--run',str(data),'--seconds','600','--ready-report',str(ready),'--stop-file',str(stop),'--report',str(out/'api-final.json')]);deadline=time.monotonic()+40
+        require_silent_windows_launch(args.control_package / 'Runtime/VrCommand.Api.exe')
+        api=start_checked_windows_process([str(exe),'--run',str(data),'--seconds','600','--ready-report',str(ready),'--stop-file',str(stop),'--report',str(out/'api-final.json')]);deadline=time.monotonic()+40
         while not ready.exists():
             if api.poll() is not None or time.monotonic()>deadline:raise RuntimeError('API did not become ready')
             time.sleep(.05)
@@ -45,7 +47,8 @@ def main():
         player=roster['players'][0]
         save('fixture-roster.json',{'sessionId':session,'players':roster['players'],
              'scope':'One registered Windows Simulation client for the diagnostics check.' if args.check_peer_diagnostics else 'Roster only; no client launched or player connection claimed.'})
-        gui=subprocess.Popen([str(folder/'Launch-Server.exe')],cwd=runtime);stage('select-instance',guiPid=gui.pid,instance=str(data/'control-instance.json'),sessionId=session,udpPort=port)
+        require_silent_windows_launch(folder / 'Runtime/VrCommand.exe')
+        gui=start_checked_windows_process([str(folder/'Launch-Server.exe')],cwd=runtime);stage('select-instance',guiPid=gui.pid,instance=str(data/'control-instance.json'),sessionId=session,udpPort=port)
         powershell=Path(os.environ['WINDIR'])/'System32/WindowsPowerShell/v1.0/powershell.exe'
         def children():
             script='$rows = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = '+str(gui.pid)+'" | Where-Object { $_.Name -eq "VrCommand.exe" } | ForEach-Object { [pscustomobject]@{ pid = $_.ProcessId; image = $_.ExecutablePath } }); ConvertTo-Json -InputObject $rows -Compress'

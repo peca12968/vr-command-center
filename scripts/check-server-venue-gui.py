@@ -14,6 +14,7 @@ from pathlib import Path
 import shutil
 import socket
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -83,6 +84,7 @@ def main():
     require_silent_windows_launch(folder / 'Launch-Server.exe')
     require_silent_windows_launch(executable)
     require_silent_windows_launch(args.control_package / 'Runtime/VrCommand.Api.exe')
+    require_silent_windows_launch(sys.executable)
     out = ROOT / 'artifacts/server-venue-gui' / ('run-' + uuid.uuid4().hex)
     out.mkdir(parents=True)
     runtime = args.runtime_root.resolve() / out.name
@@ -171,7 +173,8 @@ def main():
                         '--report', str(out / 'init.json')], check=True, timeout=45)
         marker = gui_check.read(data / 'control-instance.json')
         base = f'http://{LOOPBACK}:{marker["port"]}'
-        api = subprocess.Popen([str(control), '--run', str(data), '--seconds', '900',
+        require_silent_windows_launch(args.control_package / 'Runtime/VrCommand.Api.exe')
+        api = start_checked_windows_process([str(control), '--run', str(data), '--seconds', '900',
                                 '--ready-report', str(out / 'api-ready.json'),
                                 '--stop-file', str(out / 'api-stop.request'), '--report', str(out / 'api-final.json')])
         api_ready = wait_for(lambda: (out / 'api-ready.json').is_file() and gui_check.read(out / 'api-ready.json'),
@@ -213,7 +216,8 @@ def main():
         plan_path = runtime / 'venue-plan.json'
         write_json(plan_path, plan)
         save('plan.json', plan)
-        window = subprocess.Popen([str(folder / 'Launch-Server.exe'), '--venue-window', str(plan_path)], cwd=runtime)
+        require_silent_windows_launch(executable)
+        window = start_checked_windows_process([str(folder / 'Launch-Server.exe'), '--venue-window', str(plan_path)], cwd=runtime)
         stage('review-and-start-window', guiPid=window.pid, plan=str(plan_path), servers=entries)
         wait_for(lambda: review(out / 'preview.review.json', 'topology', args.topology), 360, 'reviewed GUI plan', window)
         ready_path, ready = wait_for(lambda: launcher_report('ready', 'ready'), 120, 'actual GUI launcher readiness', window)

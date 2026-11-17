@@ -53,6 +53,126 @@ class NetworkPlanPreparationTests(unittest.TestCase):
         path.write_text(json.dumps(value), encoding='utf-8')
         return path
 
+    def test_verified_start_checks_firewall_and_udp_evidence_after_preview(self):
+        port = 7777
+        launch, preview = guarded_documents('Linked', [port])
+        rooms = list(range(1, 6))
+        seats = [{'roomId': room, 'seat': 1} for room in rooms]
+        preview['servers'][0]['registeredSeats'] = seats
+        launch_path = self.store('launch.json', launch)
+        preview_path = self.store('preview.json', preview)
+        network = self.store('network.json', {'version': 1, 'mode': 'Linked',
+            'endpoints': [{'roomIds': rooms, 'address': LOOPBACK, 'port': port}],
+            'sources': [{**seat, 'address': '127.0.0.2'} for seat in seats]})
+        completed = datetime.now(timezone.utc) - timedelta(seconds=2)
+        peer = '127.0.0.2'
+        common = {'version': 1, 'stage': 'finished', 'port': port, 'requested': 1, 'matched': 1,
+                  'complete': True, 'scope': 'authenticated-udp-only', 'completedAtUtc': completed.isoformat(),
+                  'exchangeSha256': hashlib.sha256(b'fixture').hexdigest()}
+        listener = self.store('listener.json', dict(common, mode='listen', localAddress=LOOPBACK, peerAddress=peer, samples=[]))
+        probe = self.store('probe.json', dict(common, mode='probe', localAddress=peer, peerAddress=LOOPBACK,
+                                             samples=[{'sample': 1, 'roundTripMs': 2}]))
+        pairs = self.store('pairs.json', {'version': 1, 'pairs': [{'listener': listener.name, 'probe': probe.name}]})
+        issued = subprocess.run([sys.executable, str(ROOT / 'scripts/check-venue-udp-preflight.py'),
+                                 '--network-plan', str(network), '--output', str(self.root / 'readiness.json'),
+                                 '--pairs', str(pairs), '--launch-plan', str(launch_path), '--launcher-preview', str(preview_path)],
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(0, issued.returncode, issued.stderr)
+        inputs = (listener, probe, preview_path, network, launch_path, self.root / 'readiness.json')
+        originals = {path: path.read_bytes() for path in inputs}
+        expires = completed + timedelta(minutes=30)
+        launcher = self.root / 'package' / 'Launch-Server.exe'
+        launcher.parent.mkdir()
+        launcher.touch()
+        spec = importlib.util.spec_from_file_location('start_verified_venue', ROOT / 'scripts/start-verified-venue.py')
+        start = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(start)
+        firewall = SimpleNamespace(WindowsFirewallLaunchError=RuntimeError, require_silent_windows_launch=Mock())
+
+        for case, rejected in (
+            ('firewall-changed-during-preview', 'Windows Firewall policy changed'),
+            ('elapsed-during-preview', 'UDP preflight expired before starting room'),
+            ('probe-replaced', 'UDP pair differs from its original files'),
+            ('network-replaced', 'The original network plan or launch evidence changed'),
+            ('bind-too-late', 'UDP binding is outside the original preflight window for room'),
+            ('bind-too-late-without-receipt', 'UDP binding is outside the original preflight window for room'),
+            ('same-window', None),
+            ('launcher-deadline-support', None),
+        ):
+            with self.subTest(case=case):
+                for path, raw in originals.items():
+                    if path.read_bytes() != raw:
+                        path.write_bytes(raw)
+                work = self.root / case
+                work.mkdir()
+                receipt = work / 'start.json'
+                if case == 'launcher-deadline-support':
+                    (launcher.parent / 'server-package.json').write_text(
+                        json.dumps({'schemaVersion': 1, 'venueUdpDeadlineVersion': 1}), encoding='utf-8')
+                args = SimpleNamespace(verify_only=False, launcher=launcher, launch_plan=launch_path, network_plan=network,
+                                       readiness=self.root / 'readiness.json', require_distinct_remote_roster=False,
+                                       retry_output=None, release_report=None, work=work / 'game',
+                                       ready_report=work / 'ready.json', report=work / 'terminal.json',
+                                       start_receipt=None if case.endswith('without-receipt') else receipt,
+                                       peer_diagnostics=False, tracked_vr=False, seconds=60)
+                after_preview = expires + timedelta(seconds=1) if case == 'elapsed-during-preview' else expires - timedelta(seconds=1)
+                observed = expires + timedelta(microseconds=1) if case.startswith('bind-too-late') else expires
+
+                guard = firewall.require_silent_windows_launch
+                guard.reset_mock(side_effect=True)
+
+                def live_preview(command, *, env, timeout):
+                    self.assertEqual('--venue-check', command[1])
+                    self.assertEqual('1', env['VR_COMMAND_UNATTENDED'])
+                    Path(command[4]).write_bytes(originals[preview_path])
+                    if case == 'firewall-changed-during-preview':
+                        guard.side_effect = RuntimeError('Windows Firewall policy changed')
+                    if case in ('probe-replaced', 'network-replaced'):
+                        replaced = probe if case == 'probe-replaced' else network
+                        replaced.write_bytes(originals[replaced] + b'\n')
+                    return SimpleNamespace(returncode=0)
+
+                @contextmanager
+                def game(command, *, env):
+                    self.assertEqual('--venue-run', command[1])
+                    self.assertEqual('1', env['VR_COMMAND_UNATTENDED'])
+                    if case == 'launcher-deadline-support':
+                        index = command.index('--udp-deadlines')
+                        window = json.loads(Path(command[index + 1]).read_bytes())
+                        exact_stamp = json.loads(originals[listener].splitlines()[-1])['completedAtUtc']
+                        fractional = exact_stamp.split('+')[0].removesuffix('Z').partition('.')[2]
+                        tail = fractional[6:7] or '0'
+                        ending = expires.isoformat(timespec='microseconds').replace('+00:00', tail + '+00:00')
+                        self.assertEqual({'version': 1, 'planSha256': hashlib.sha256(originals[launch_path]).hexdigest(),
+                                          'groups': [{'roomIds': rooms, 'expiresAtUtc': ending}]}, window)
+                    else:
+                        self.assertNotIn('--udp-deadlines', command)
+                    args.ready_report.write_text(json.dumps({'topology': 'Linked', 'status': 'venue-ready', 'instanceId': 'instance',
+                        'servers': [{'roomIds': rooms, 'ready': {'udpBinding': {'observedAtUtc': observed.isoformat()}}}]}),
+                        encoding='utf-8')
+                    args.report.write_text(json.dumps({'topology': 'Linked', 'status': 'venue-sealed-stopped',
+                        'instanceId': 'instance', 'complete': True, 'readyPublished': True}), encoding='utf-8')
+                    yield SimpleNamespace(wait=lambda: 0)
+
+                process = Mock(side_effect=game)
+                with (patch.dict(sys.modules, windows_firewall=firewall), patch.object(start, 'own_launcher_processes'),
+                      patch.dict(os.environ, {'VR_COMMAND_UNATTENDED': '0'}),
+                      patch.object(start, 'datetime', SimpleNamespace(now=lambda zone: after_preview, fromisoformat=datetime.fromisoformat)),
+                      patch.object(start, 'subprocess', SimpleNamespace(Popen=process, run=live_preview))):
+                    if rejected:
+                        with self.assertRaisesRegex(start.field.EvidenceError, rejected):
+                            start.launch(args)
+                    else:
+                        self.assertEqual(0, start.launch(args))
+                self.assertEqual(case.startswith('bind-too-late') or rejected is None, process.called)
+                self.assertEqual(rejected is None, receipt.exists())
+                if case == 'firewall-changed-during-preview':
+                    self.assertEqual(3, guard.call_count)
+                    guard.assert_called_with(launcher.parent / 'Runtime' / 'VrCommand.exe')
+                    self.assertFalse(any(path.exists() for path in (args.work, args.ready_report, args.report)))
+                if receipt.exists():
+                    self.assertEqual(after_preview.isoformat(), json.loads(receipt.read_bytes())['checkedAtUtc'])
+
     def test_verified_start_receipt_keeps_both_original_server_release_witnesses(self):
         spec = importlib.util.spec_from_file_location('start_verified_venue', ROOT / 'scripts/start-verified-venue.py')
         start = importlib.util.module_from_spec(spec)
@@ -709,108 +829,6 @@ class LanPreflightTests(LanPreflightFixtures):
             probe.load_venue_retry(mapping, network, readiness, output, launch, changed_preview, changed_launcher)
         self.assertEqual(evidence, {path: path.read_bytes() for path in evidence})
         self.assertFalse(output.exists())
-
-    def test_verified_start_checks_udp_evidence_after_the_live_preview_and_at_binding(self):
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reserve:
-            reserve.bind((LOOPBACK, 0))
-            port = reserve.getsockname()[1]
-        launch, preview = guarded_documents('Linked', [port])
-        rooms = list(range(1, 6))
-        seats = [{'roomId': room, 'seat': 1} for room in rooms]
-        preview['servers'][0]['registeredSeats'] = seats
-        launch_path = self.venue_json('launch.json', launch)
-        preview_path = self.venue_json('preview.json', preview)
-        network = self.venue_json('network.json', {'version': 1, 'mode': 'Linked',
-            'endpoints': [{'roomIds': rooms, 'address': LOOPBACK, 'port': port}],
-            'sources': [{**seat, 'address': '127.0.0.2'} for seat in seats]})
-        pair = self.venue_pair(port, '127.0.0.2', 'current', encoding='utf-16')
-        pairs = self.venue_json('pairs.json', {'version': 1, 'pairs': [pair]})
-        self.venue_check(network, 'readiness.json', '--pairs', pairs, '--launch-plan', launch_path,
-                         '--launcher-preview', preview_path)
-        listener = self.root / pair['listener']
-        probe = self.root / pair['probe']
-        inputs = (listener, probe, preview_path, network, launch_path, self.root / 'readiness.json')
-        originals = {path: path.read_bytes() for path in inputs}
-        completed = datetime.fromisoformat(json.loads(originals[listener].splitlines()[-1])['completedAtUtc'])
-        expires = completed + timedelta(minutes=30)
-        launcher = self.root / 'package' / 'Launch-Server.exe'
-        launcher.parent.mkdir()
-        launcher.touch()
-        spec = importlib.util.spec_from_file_location('start_verified_venue', ROOT / 'scripts/start-verified-venue.py')
-        start = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(start)
-        firewall = SimpleNamespace(WindowsFirewallLaunchError=RuntimeError, require_silent_windows_launch=Mock())
-
-        for case, rejected in (
-            ('elapsed-during-preview', 'UDP preflight expired before starting room'),
-            ('probe-replaced', 'UDP pair differs from its original files'),
-            ('network-replaced', 'The original network plan or launch evidence changed'),
-            ('bind-too-late', 'UDP binding is outside the original preflight window for room'),
-            ('bind-too-late-without-receipt', 'UDP binding is outside the original preflight window for room'),
-            ('same-window', None),
-            ('launcher-deadline-support', None),
-        ):
-            with self.subTest(case=case):
-                for path, raw in originals.items():
-                    if path.read_bytes() != raw:
-                        path.write_bytes(raw)
-                work = self.root / case
-                work.mkdir()
-                receipt = work / 'start.json'
-                if case == 'launcher-deadline-support':
-                    (launcher.parent / 'server-package.json').write_text(
-                        json.dumps({'schemaVersion': 1, 'venueUdpDeadlineVersion': 1}), encoding='utf-8')
-                args = SimpleNamespace(verify_only=False, launcher=launcher, launch_plan=launch_path, network_plan=network,
-                                       readiness=self.root / 'readiness.json', require_distinct_remote_roster=False,
-                                       retry_output=None, release_report=None, work=work / 'game',
-                                       ready_report=work / 'ready.json', report=work / 'terminal.json',
-                                       start_receipt=None if case.endswith('without-receipt') else receipt,
-                                       peer_diagnostics=False, tracked_vr=False, seconds=60)
-                after_preview = expires + timedelta(seconds=1) if case == 'elapsed-during-preview' else expires - timedelta(seconds=1)
-                observed = expires + timedelta(microseconds=1) if case.startswith('bind-too-late') else expires
-
-                def live_preview(command, *, timeout):
-                    self.assertEqual('--venue-check', command[1])
-                    Path(command[4]).write_bytes(originals[preview_path])
-                    if case in ('probe-replaced', 'network-replaced'):
-                        replaced = probe if case == 'probe-replaced' else network
-                        replaced.write_bytes(originals[replaced] + b'\n')
-                    return SimpleNamespace(returncode=0)
-
-                @contextmanager
-                def game(command):
-                    self.assertEqual('--venue-run', command[1])
-                    if case == 'launcher-deadline-support':
-                        index = command.index('--udp-deadlines')
-                        window = json.loads(Path(command[index + 1]).read_bytes())
-                        exact_stamp = json.loads(originals[listener].splitlines()[-1])['completedAtUtc']
-                        fractional = exact_stamp.split('+')[0].removesuffix('Z').partition('.')[2]
-                        tail = fractional[6:7] or '0'
-                        ending = expires.isoformat(timespec='microseconds').replace('+00:00', tail + '+00:00')
-                        self.assertEqual({'version': 1, 'planSha256': hashlib.sha256(originals[launch_path]).hexdigest(),
-                                          'groups': [{'roomIds': rooms, 'expiresAtUtc': ending}]}, window)
-                    else:
-                        self.assertNotIn('--udp-deadlines', command)
-                    args.ready_report.write_text(json.dumps({'topology': 'Linked', 'status': 'venue-ready', 'instanceId': 'instance',
-                        'servers': [{'roomIds': rooms, 'ready': {'udpBinding': {'observedAtUtc': observed.isoformat()}}}]}),
-                        encoding='utf-8')
-                    args.report.write_text(json.dumps({'topology': 'Linked', 'status': 'venue-sealed-stopped',
-                        'instanceId': 'instance', 'complete': True, 'readyPublished': True}), encoding='utf-8')
-                    yield SimpleNamespace(wait=lambda: 0)
-
-                process = Mock(side_effect=game)
-                with (patch.dict(sys.modules, windows_firewall=firewall), patch.object(start, 'own_launcher_processes'),
-                      patch.object(start, 'datetime', SimpleNamespace(now=lambda zone: after_preview, fromisoformat=datetime.fromisoformat)),
-                      patch.object(start, 'subprocess', SimpleNamespace(Popen=process, run=live_preview))):
-                    if rejected:
-                        with self.assertRaisesRegex(start.field.EvidenceError, rejected):
-                            start.launch(args)
-                    else:
-                        self.assertEqual(0, start.launch(args))
-                self.assertEqual(case.startswith('bind-too-late') or rejected is None, process.called)
-                self.assertEqual(rejected is None, receipt.exists())
-                if receipt.exists():
-                    self.assertEqual(after_preview.isoformat(), json.loads(receipt.read_bytes())['checkedAtUtc'])
 
     def test_venue_linked_shared_sources_and_original_batch(self):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reserved:

@@ -218,15 +218,20 @@ def launch(args):
                           'Use the exact original venue release report from the Windows launcher preview')
         from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
 
-        try:
-            require_silent_windows_launch(launcher.parent / 'Runtime' / 'VrCommand.exe')
-            require_silent_windows_launch(launcher)
-        except WindowsFirewallLaunchError as error:
-            raise field.EvidenceError(str(error)) from error
+        def check_launch_images():
+            try:
+                require_silent_windows_launch(launcher.parent / 'Runtime' / 'VrCommand.exe')
+                require_silent_windows_launch(launcher)
+            except WindowsFirewallLaunchError as error:
+                raise field.EvidenceError(str(error)) from error
+
+        check_launch_images()
+        environment = {**os.environ, 'VR_COMMAND_UNATTENDED': '1'}
         own_launcher_processes()
         if release_args or any('registeredSeats' in row for row in original_preview[2].values()):
             fresh_path = Path(directory) / 'current-preview.json'
-            current = subprocess.run([str(launcher), '--venue-check', str(snapshot), '--report', str(fresh_path), *release_args], timeout=45)
+            current = subprocess.run([str(launcher), '--venue-check', str(snapshot), '--report', str(fresh_path), *release_args],
+                                     env=environment, timeout=45)
             field.require(current.returncode == 0, 'Windows launcher could not verify the original session revisions or server release')
             fresh = field.read_udp_launcher_document(fresh_path, preview=True, include_release=True)
             field.require(fresh == original_preview, 'Current Windows launcher preview differs from the original sessions, seats or bindings')
@@ -236,6 +241,7 @@ def launch(args):
             command.extend(('--peer-diagnostics', 'on'))
         if args.tracked_vr:
             command.extend(('--tracked-vr', 'on'))
+        check_launch_images()
         recheck_launch_inputs(((args.network_plan, checked['networkPlanSha256']), (original_plan, binding['planSha256']),
                                (preview, binding['previewSha256'])), readiness, original)
         expiries = recheck_udp_windows(checked, readiness.parent)
@@ -244,7 +250,7 @@ def launch(args):
                           'verifiedSources': checked['verifiedSources'], 'launchPlanSha256': binding['planSha256'],
                           'networkPlanSha256': checked['networkPlanSha256'],
                           **({'requireDistinctRemoteRoster': True} if distinct else {})}), flush=True)
-        with subprocess.Popen(command) as process:
+        with subprocess.Popen(command, env=environment) as process:
             try:
                 code = process.wait()
             except KeyboardInterrupt:

@@ -152,6 +152,7 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
       const args = packageRoot ? [...gui && packagePathInput ? [] : ['--config', file], ...gui ? [] : ['--launch', '--headless', '--wait'], '--log', log, '--report', report, ...launcherStatus ? ['--status-report', statusPath] : []]
         : ['-batchmode', '-nographics', '-job-worker-count', '2', '-logFile', log, '--vr-config', file];
       requireSilentWindowsLaunch(root, playerExecutable);
+      if (packageRoot) requireSilentWindowsLaunch(root, executable);
       const child = spawn(executable, args, { cwd: path.dirname(executable), windowsHide: !gui, stdio: 'ignore',
         env: { ...process.env, VR_COMMAND_UNATTENDED: '1' } });
       child.on('error', error => { errors.push(error.message); }); const owned = { child, log, player, gui, statusPath, report }; children.push(owned);
@@ -209,6 +210,7 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
       }
       check(true, 'Both actual launchers distinguish their own native Connected marker from process startup');
       const config = JSON.parse(await fs.readFile(path.join(evidence, 'player 1 玩家 &.json'), 'utf8'));
+      requireSilentWindowsLaunch(root, process.execPath);
       const socket = require('node:dgram').createSocket('udp4'); socketsToClose.push(socket);
       await new Promise((resolve, reject) => { socket.once('error', reject); socket.bind(0, '127.0.0.1', resolve); });
       for (const [label, value, expected] of [['rejected', { ...config, joinTicket: 'invalid-status-test-ticket' }, ['Rejected']],
@@ -216,6 +218,7 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
         const file = path.join(evidence, label + '.json'), log = path.join(evidence, label + '.log'), report = path.join(evidence, label + '-launch.json'), statusPath = path.join(evidence, label + '-status.json');
         await fs.writeFile(file, JSON.stringify(value), { flag: 'wx' });
         requireSilentWindowsLaunch(root, playerExecutable);
+        requireSilentWindowsLaunch(root, launcherExecutable);
         const child = spawn(launcherExecutable, ['--config', file, '--launch', '--headless', '--wait', '--log', log, '--report', report, '--status-report', statusPath], {
           cwd: packageRoot, windowsHide: true, stdio: 'ignore', env: { ...process.env, VR_COMMAND_UNATTENDED: '1' },
         });

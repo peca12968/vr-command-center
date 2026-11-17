@@ -433,6 +433,8 @@ def main():
         if not any(args.game_address in ipaddress.IPv4Network(net) for net in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16')):
             p.error('--game-address must be a local private IPv4 address')
         address=str(args.game_address)
+    require_silent_windows_launch(sys.executable)
+    if args.game_address:
         try:free(socket.SOCK_DGRAM,address)
         except OSError:p.error('--game-address must be assigned to this PC')
     folder=args.package.resolve();manifest=package.verify(folder);assert manifest['launcherSourceSha256']==package.digest(ROOT/'tools/WindowsServerLauncher/ServerLauncher.cs')
@@ -470,7 +472,6 @@ def main():
             p.error('The pinned Unity OpenXR package does not contain the expected Windows mock runtime')
     control.package.verify(args.control_package)
     require_silent_windows_launch(args.control_package / 'Runtime/VrCommand.Api.exe')
-    require_silent_windows_launch(sys.executable)
     out=ROOT/'artifacts/server-package-checks'/('run-'+uuid.uuid4().hex);out.mkdir(parents=True,exist_ok=False);runtime=args.runtime_root.resolve()/out.name;runtime.mkdir(parents=True,exist_ok=False)
     (ROOT/'artifacts/server-package-checks-latest-path.txt').write_text(str(out),encoding='utf-8');print(json.dumps({'stage':'starting','directory':str(out)}),flush=True)
     env=dict(os.environ);env.update(PATH=str(Path(os.environ['WINDIR'])/'System32'),DOTNET_ROOT=str(runtime/'absent-dotnet'),DOTNET_MULTILEVEL_LOOKUP='0');exe=folder/'Launch-Server.exe';control_exe=args.control_package.resolve()/'Start-Control.exe';data=runtime/'control';checks=[];runners=[];clients=[];cleanup=[];witnesses=[];api=None;api_witness=None;keys=None;sessions=[];rounds=[];observer=None;observer_log=None;observer_out=out/'closure-ui';observer_stop=out/'closure-ui-stop.request';observer_entry=None
@@ -716,7 +717,8 @@ def main():
         options=['--peer-diagnostics','on'] if diagnostics else []
         if tracked_vr:
             options.extend(('--tracked-vr','on'))
-        child=subprocess.Popen([str(exe),'--run',str(file),'--work',str(work),'--seconds','600','--ready-report',str(ready),'--report',str(report),*options],cwd=out,env=env);entry={'process':child,'readyPath':ready,'reportPath':report,'work':work,'config':value,'label':label,'sessionId':state['id'],'witness':None,'peerDiagnostics':diagnostics};runners.append(entry)
+        require_silent_windows_launch(folder / 'Runtime/VrCommand.exe')
+        child=start_checked_windows_process([str(exe),'--run',str(file),'--work',str(work),'--seconds','600','--ready-report',str(ready),'--report',str(report),*options],cwd=out,env=env);entry={'process':child,'readyPath':ready,'reportPath':report,'work':work,'config':value,'label':label,'sessionId':state['id'],'witness':None,'peerDiagnostics':diagnostics};runners.append(entry)
         def is_ready():
             if child.poll() is not None:raise RuntimeError('Server launcher exited before ready '+label)
             return read(ready) if ready.exists() else None
@@ -1197,7 +1199,8 @@ def main():
         else:
             launch_command = [*guarded_start, '--work', str(work), '--seconds', '600', '--ready-report', str(ready),
                               '--report', str(report), *(['--peer-diagnostics'] if args.peer_diagnostics else [])]
-        process=subprocess.Popen(launch_command,cwd=out,env=env)
+        require_silent_windows_launch(folder / 'Runtime/VrCommand.exe')
+        process=start_checked_windows_process(launch_command,cwd=out,env=env)
         entries=[]
         for index,(state,value) in enumerate(zip(states,values,strict=True)):
             name='linked' if linked else f"room-{state['roomIds'][0]:02}"
@@ -1334,7 +1337,8 @@ def main():
             db.execute(f"""CREATE TRIGGER fixture_reject_fifth_endpoint BEFORE INSERT ON connection_endpoints
                 WHEN NEW.session = '{uuid.UUID(ids[-1])}' BEGIN SELECT RAISE(ABORT, 'fixture endpoint rejection'); END""")
         try:
-            with subprocess.Popen([str(exe),'--venue-run',str(plan),'--work',str(work),'--seconds','60',
+            require_silent_windows_launch(folder / 'Runtime/VrCommand.exe')
+            with start_checked_windows_process([str(exe),'--venue-run',str(plan),'--work',str(work),'--seconds','60',
                 '--ready-report',str(ready),'--report',str(report)],cwd=out,env=env) as process:
                 try: code=process.wait(timeout=120)
                 except subprocess.TimeoutExpired:
@@ -1716,6 +1720,7 @@ def main():
         if archive is not None:
             flags += ['--evidence-zip',str(archive)]
         environment=env if mock is None else {**env,**mock}
+        require_silent_windows_launch(player_folder / 'VrCommand.exe')
         measured_form = args.check_venue_link_form and (person['roomId'], person['seat']) == (5, 0)
         if measured_form:
             form_runner = out / 'release-form-checks.exe'
@@ -1730,11 +1735,12 @@ def main():
             log, report = form_folder / 'player.log', form_folder / 'launch-report.json'
             metrics, archive = form_folder / 'link-metrics.json', form_folder / 'player-evidence.zip'
             with (form_folder / 'form-run.log').open('xb') as diagnostics:
-                child = subprocess.Popen([str(form_runner), '--measured-session', str(player_folder), str(form_folder),
+                require_silent_windows_launch(player_folder / 'Launch-Player.exe')
+                child = start_checked_windows_process([str(form_runner), '--measured-session', str(player_folder), str(form_folder),
                                           str(file), str(args.windows_release_report)], cwd=runtime, env=environment,
                                          stdout=diagnostics, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW)
         else:
-            child=subprocess.Popen([str(player_folder/'Launch-Player.exe'),'--config',str(file),'--launch',
+            child=start_checked_windows_process([str(player_folder/'Launch-Player.exe'),'--config',str(file),'--launch',
                 *flags,'--wait','--log',str(log),'--report',str(report)],cwd=runtime,env=environment)
         client={'process':child,'log':log,'player':person,'sessionId':entry['sessionId'],
             'launcherReport':report,'witness':None,'configPath':file}
@@ -4800,7 +4806,8 @@ def main():
             venue_target.write_text(json.dumps({'schemaVersion': 1, 'kind': 'VrCommand-RemoteGameServer',
                                                 'instanceId': marker['instanceId'], 'managementApiUrl': venue_uri,
                                                 'managementCertificateSha256': venue_pin, 'gameServerKey': keys['GameServer']}), encoding='utf-8')
-        api_ready=out/'control-ready.json';api_stop=out/'control-stop.request';api=subprocess.Popen([str(control_exe),'--run',str(data),'--seconds','1800','--ready-report',str(api_ready),'--stop-file',str(api_stop),'--report',str(out/'control-final.json')],env=control_env,cwd=out)
+        require_silent_windows_launch(args.control_package / 'Runtime/VrCommand.Api.exe')
+        api_ready=out/'control-ready.json';api_stop=out/'control-stop.request';api=start_checked_windows_process([str(control_exe),'--run',str(data),'--seconds','1800','--ready-report',str(api_ready),'--stop-file',str(api_stop),'--report',str(out/'control-final.json')],env=control_env,cwd=out)
         info=wait(lambda:read(api_ready) if api_ready.exists() else None,40,'control startup');api_witness=control.ChildWitness(info['childPid']);check(info['status']=='ready','packaged control API without SDK on PATH');call('verify',['--verify','package'],True)
         if venue_pin:
             check(info['httpsBinding'] == venue_uri and info['uri'] == uri, 'isolated management API publishes separate pinned HTTPS and loopback HTTP bindings')
