@@ -5324,11 +5324,20 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertEqual((2, 5, 1, 1), (report['questCaptureBatchesVerified'], report['questCaptureSeatsVerified'],
                                                report['questCaptureIncompleteReports'], report['questCaptureFailedAttempts']))
                 self.assertEqual(1, report['questCaptureDeviceBindingsVerified'])
+                self.assertEqual(5, report['questCaptureSeatDeviceFingerprintsVerified'])
                 changed_retry = deepcopy(retry)
                 changed_retry['captureBinding']['venueSha256'] = '2' * 64
                 retry_bytes = retry_path.read_bytes()
                 retry_path.write_text(json.dumps(changed_retry), encoding='utf-8')
                 with self.assertRaisesRegex(field.EvidenceError, 'device map differs from the original capture binding'):
+                    field.verify_venue(path)
+                copied_device = deepcopy(retry)
+                fingerprint, = [row for row in copied_device['completedDeviceFingerprints']
+                                if (row['roomId'], row['seat']) == (missing['roomId'], missing['seat'])]
+                fingerprint['sha256'] = first['completedDeviceFingerprints'][0]['sha256']
+                copied_device['completedDeviceFingerprints'] = [fingerprint]
+                retry_path.write_text(json.dumps(copied_device), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'reuse a headset across completed seats'):
                     field.verify_venue(path)
                 retry_path.write_bytes(retry_bytes)
                 self.assertEqual(first_bytes, first_path.read_bytes())
@@ -5354,6 +5363,9 @@ class FieldResultsTests(unittest.TestCase):
                 (root / 'deployment.json').write_bytes(deployment_raw)
                 deployed_hash = hashlib.sha256(deployment_raw).hexdigest()
                 first.pop('captureBinding')
+                first.pop('completedDeviceFingerprints')
+                retry['completedDeviceFingerprints'] = [row for row in retry['completedDeviceFingerprints']
+                                                        if (row['roomId'], row['seat']) == (missing['roomId'], missing['seat'])]
                 first['deploymentSha256'] = retry['deploymentSha256'] = deployed_hash
                 first_path.write_text(json.dumps(first), encoding='utf-8')
                 retry_path.write_text(json.dumps(retry), encoding='utf-8')

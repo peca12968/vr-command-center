@@ -1930,6 +1930,55 @@ else:
                 private_serial = 'headset-x'
                 self.assertNotIn(private_serial, (result.stderr + result.stdout + json.dumps(report)).lower())
 
+    def test_capture_retry_refuses_a_headset_already_used_for_another_seat(self):
+        for topology in ('Linked', 'Independent'):
+            with self.subTest(topology=topology):
+                files, _ = self.vr_bundle(topology)
+                mapping, document = self.device_map()
+                rows = [row for row in document['seats'] if (row['roomId'], row['seat']) in {(1, 1), (5, 1)}]
+                mapping.write_text(json.dumps(dict(document, seats=rows)), encoding='utf-8')
+                private_serial = 'HEADSET-PREVIOUS-SEAT'
+                self.mock_capture_devices(rows, topology, wrong_seat=(5, 1), device_serials={(1, 1): private_serial})
+                first = self.root / f'original-{topology}'
+                command = self.capture_command(files, mapping, first, '--allow-partial-map')
+                initial = subprocess.run(command, cwd=self.root, capture_output=True, encoding='utf-8', timeout=20)
+                self.assertEqual(1, initial.returncode, initial.stderr)
+                report_path = first / 'capture-report.json'
+                report = json.loads(report_path.read_bytes())
+                self.assertEqual(1, report['capturedSeats'])
+                prior = {path.name: path.read_bytes() for path in first.iterdir()}
+
+                calls_path = self.root / 'adb-calls.jsonl'
+                calls_path.unlink()
+                self.mock_capture_devices(rows, topology, device_serials={(5, 1): private_serial})
+                retry = self.root / f'retry-{topology}'
+                command[command.index('--output-directory') + 1] = str(retry)
+                refused = subprocess.run([*command, '--retry-incomplete', str(report_path)], cwd=self.root,
+                                         capture_output=True, encoding='utf-8', timeout=20)
+                self.assertEqual(1, refused.returncode, refused.stderr + refused.stdout)
+                retry_path = retry / 'capture-report.json'
+                failed = json.loads(retry_path.read_bytes())
+                row, = failed['seats']
+                self.assertIn('already completed another capture seat', row['reason'])
+                self.assertEqual((5, 1, False), (row['roomId'], row['seat'], row['complete']))
+                self.assertEqual(report['completedDeviceFingerprints'], failed['completedDeviceFingerprints'])
+                self.assertFalse(list(retry.glob('*logcat*')))
+                calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
+                self.assertEqual([['devices', '-l'], ['-t', '2', 'shell', 'getprop', 'ro.serialno']], calls)
+                self.assertNotIn(private_serial, refused.stderr + refused.stdout + retry_path.read_text(encoding='utf-8'))
+
+                self.mock_capture_devices(rows, topology)
+                final = self.root / f'corrected-{topology}'
+                command[command.index('--output-directory') + 1] = str(final)
+                corrected = subprocess.run([*command, '--retry-incomplete', str(retry_path)], cwd=self.root,
+                                           capture_output=True, encoding='utf-8', timeout=20)
+                self.assertEqual(0, corrected.returncode, corrected.stderr)
+                final_report = json.loads((final / 'capture-report.json').read_bytes())
+                self.assertEqual(1, final_report['capturedSeats'])
+                self.assertEqual([(1, 1), (5, 1)], [(row['roomId'], row['seat']) for row in final_report['completedDeviceFingerprints']])
+                self.assertEqual(report['completedDeviceFingerprints'][0], final_report['completedDeviceFingerprints'][0])
+                self.assertEqual(prior, {path.name: path.read_bytes() for path in first.iterdir()})
+
     def test_capture_rejects_rebound_transport_with_equal_process_id_and_retries_only_failed_seat(self):
         files, _ = self.vr_bundle('Linked')
         mapping, document = self.device_map()
@@ -2177,6 +2226,7 @@ else:
 
         legacy_path = self.root / 'legacy-capture.json'
         del report['captureBinding']
+        del report['completedDeviceFingerprints']
         legacy_path.write_text(json.dumps(report), encoding='utf-8')
         retry_output = self.root / 'unbound legacy retry'
         retry = [*command, '--retry-incomplete', str(legacy_path)]

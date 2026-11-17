@@ -2576,10 +2576,24 @@ def check_udp_report_sealed_session(reported_sessions, session, applied_end):
             'UDP report launch revision differs from the sealed session for room(s) ' + ', '.join(map(str, session['roomIds'])))
 
 
+def quest_capture_device_fingerprints(report):
+    rows = report.get('completedDeviceFingerprints', [])
+    require(type(rows) is list and len(rows) <= 25, 'Invalid completed Quest capture device fingerprints')
+    fingerprints = {}
+    for row in rows:
+        require(type(row) is dict and set(row) == {'roomId', 'seat', 'sha256'} and type(row['sha256']) is str
+                and re.fullmatch(r'[0-9a-f]{64}', row['sha256']), 'Invalid Quest capture device fingerprint')
+        seat = integer(row['roomId'], 1, 5), integer(row['seat'], 1, 5)
+        require(seat not in fingerprints, 'Quest capture repeats a device fingerprint seat')
+        fingerprints[seat] = row['sha256']
+    require(len(set(fingerprints.values())) == len(fingerprints), 'Quest capture reuses a headset across completed seats')
+    return fingerprints
+
+
 def read_quest_capture_report(path, mode):
     report = read_quest_plan_file(path)
     fields = {'version', 'complete', 'topology', 'expectedSeats', 'capturedSeats', 'scope', 'seats'}
-    require(fields <= report.keys() <= fields | {'deploymentSha256', 'partialDeployment', 'captureBinding'}
+    require(fields <= report.keys() <= fields | {'deploymentSha256', 'partialDeployment', 'captureBinding', 'completedDeviceFingerprints'}
             and type(report['complete']) is bool and report['topology'] == mode and report['scope'] == 'quest-logcat-only',
             'Quest capture report has an invalid format or the wrong topology')
     if 'captureBinding' in report:
@@ -2598,7 +2612,7 @@ def read_quest_capture_report(path, mode):
     captured = integer(report['capturedSeats'], 0, count)
     rows = report['seats']
     require(type(rows) is list and len(rows) == count, 'Quest capture report seat totals differ')
-    seen = set()
+    seen, completed = set(), set()
     common = {'roomId', 'seat', 'sessionId', 'port', 'complete'}
     successful = common | {'log', 'logcatPid', 'bytes', 'sha256'}
     failed = common | {'reason'}
@@ -2611,6 +2625,7 @@ def read_quest_capture_report(path, mode):
         integer(row['port'], 1024, 65535)
         log_name = f'room-{seat[0]:02}-seat-{seat[1]:02}-logcat.txt'
         if row['complete']:
+            completed.add(seat)
             require(set(row) == successful and row['log'] == log_name, 'Expected the original Quest capture log name and metadata')
             require(type(row['sha256']) is str and re.fullmatch(r'[0-9a-f]{64}', row['sha256']),
                     'Invalid original Quest capture digest')
@@ -2621,6 +2636,10 @@ def read_quest_capture_report(path, mode):
                     and row.get('partial', log_name + '.partial') == log_name + '.partial', 'Invalid failed Quest capture row')
     require(sum(row['complete'] for row in rows) == captured and report['complete'] == (captured == count),
             'Quest capture report completeness differs from its seat totals')
+    if 'completedDeviceFingerprints' in report:
+        fingerprints = quest_capture_device_fingerprints(report)
+        require('captureBinding' in report and fingerprints.keys() & seen == completed,
+                'Quest device fingerprints differ from the original completed capture seats')
     return report
 
 
@@ -2651,6 +2670,7 @@ def read_quest_capture_batches(spec, mode, expected, evidence_path, shared_netwo
     require(type(reports) is list and 1 <= len(reports) <= 25, 'Provide 1 to 25 Quest capture reports')
     captures, used_seats, deployments = {}, set(), []
     capture_bindings, legacy_capture_scopes = {}, {}
+    capture_device_claims, original_device_claims = {}, {}
     log_issues = []
     incomplete_reports = failed_attempts = 0
     for name in reports:
@@ -2659,6 +2679,14 @@ def read_quest_capture_batches(spec, mode, expected, evidence_path, shared_netwo
         binding = report.get('captureBinding')
         deployment = report.get('deploymentSha256')
         partial = report.get('partialDeployment', False)
+        binding_key = (binding['venueSha256'], binding['salt'], binding['mapSha256'], deployment, partial) if binding else None
+        if 'completedDeviceFingerprints' in report:
+            claims = capture_device_claims.setdefault(binding_key, {})
+            originals = original_device_claims.setdefault(binding_key, set())
+            fingerprints = quest_capture_device_fingerprints(report)
+            for seat, digest in fingerprints.items():
+                require(claims.setdefault(seat, digest) == digest, 'Quest capture reports disagree on a completed headset')
+            originals.update((row['roomId'], row['seat']) for row in report['seats'] if row['complete'])
         if deployment is not None:
             deployments.append((deployment, report['seats'], partial, binding['venueSha256'] if binding else None))
         incomplete_reports += not report['complete']
@@ -2696,9 +2724,8 @@ def read_quest_capture_batches(spec, mode, expected, evidence_path, shared_netwo
             captures.setdefault(session_id, []).append(evidence)
         if device_map is not None:
             scope = {(row['roomId'], row['seat']) for row in report['seats']}
-            if binding is not None:
-                key = (binding['venueSha256'], binding['salt'], binding['mapSha256'], deployment, partial)
-                capture_bindings.setdefault(key, set()).update(scope)
+            if binding_key is not None:
+                capture_bindings.setdefault(binding_key, set()).update(scope)
             elif deployment is not None and not report['complete']:
                 legacy_capture_scopes.setdefault((deployment, partial), []).append(scope)
     if used_seats != sources.keys() or log_issues:
@@ -2719,6 +2746,11 @@ def read_quest_capture_batches(spec, mode, expected, evidence_path, shared_netwo
                 'Quest capture device map differs from the original capture binding')
     if capture_bindings:
         summary['questCaptureDeviceBindingsVerified'] = len(capture_bindings)
+    for key, claims in capture_device_claims.items():
+        require(claims.keys() == original_device_claims[key], 'Provide the original Quest capture report for every retained headset')
+        require(len(set(claims.values())) == len(claims), 'Quest capture reports reuse a headset across completed seats')
+    if capture_device_claims:
+        summary['questCaptureSeatDeviceFingerprintsVerified'] = sum(len(claims) for claims in capture_device_claims.values())
     if observed:
         summary['questCaptureAddressSource'] = 'server-observed'
     if incomplete_reports:

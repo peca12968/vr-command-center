@@ -156,7 +156,10 @@ def read_device_serial(adb, timeout):
 
 
 def check_device_identity(adb, expected, timeout, venue_device=None):
-    reported = read_device_serial(adb, timeout)
+    require_device_identity(read_device_serial(adb, timeout), expected, venue_device)
+
+
+def require_device_identity(reported, expected, venue_device=None):
     if isinstance(expected, str):
         field.require(reported == expected, 'Quest device identity changed during capture')
     else:
@@ -251,6 +254,8 @@ def retry_capture_plan(plan, report_path):
         field.require(binding == capture_binding(plan, binding['salt']),
                       'Retry with the original venue ZIP and Quest device map for the first capture')
     seats = {(row['roomId'], row['seat']): row for row in plan['seats']}
+    completed_devices = field.quest_capture_device_fingerprints(report)
+    field.require(completed_devices.keys() <= seats.keys(), 'Prior Quest capture names an unplanned completed headset seat')
     retry = []
     for row in report['seats']:
         original = seats.get((row['roomId'], row['seat']))
@@ -259,7 +264,7 @@ def retry_capture_plan(plan, report_path):
         if not row['complete']:
             retry.append(original)
     field.require(retry, 'Prior Quest capture report has no incomplete seats')
-    return {**plan, 'seats': retry, 'captureBinding': binding}
+    return {**plan, 'seats': retry, 'captureBinding': binding, 'completedDevices': completed_devices}
 
 
 def bind_deployment(plan, path, *, completed_only=False, after=None):
@@ -341,6 +346,8 @@ async def capture_venue(adb, plan, directory, seconds):
     identities = await asyncio.gather(*(asyncio.to_thread(identify_seat, row) for row in plan['seats']),
                                       return_exceptions=True)
     device_counts = Counter(identity[1] for identity in identities if isinstance(identity, tuple))
+    completed_devices = dict(plan.get('completedDevices', {}))
+    retained_devices = set(completed_devices.values())
     ready_seats = set()
     can_announce_ready = True
     partial_deployment = {'partialDeployment': True} if plan.get('partialDeployment') else {}
@@ -372,10 +379,14 @@ async def capture_venue(adb, plan, directory, seconds):
                 raise identity
             target, serial = identity
             field.require(device_counts[serial] == 1, 'The same Quest headset is assigned to multiple capture seats')
+            fingerprint = field.quest_deployment_fingerprint(binding['salt'], 'quest-capture-device-v1:' + serial)
+            field.require(fingerprint not in retained_devices, 'This Quest headset already completed another capture seat')
+            if 'deviceIdentity' in row:
+                require_device_identity(serial, row['deviceIdentity'], row.get('venueDevice'))
             remaining = deadline - time.monotonic()
             field.require(remaining > 0, 'Capture timed out before checking the Quest process')
             report = await capture(target, source['port'], admission, log, remaining, on_ready,
-                                   device_identity=row.get('deviceIdentity') or serial, venue_device=row.get('venueDevice'),
+                                   device_identity=serial,
                                    openxr=row.get('openXR'),
                                    on_final=close_readiness, on_disconnected=on_disconnected)
         except (field.EvidenceError, OSError, UnicodeError, ValueError, TimeoutError, RecursionError) as error:
@@ -384,6 +395,7 @@ async def capture_venue(adb, plan, directory, seconds):
             print(json.dumps({'stage': 'capture-failed', **seat, 'reason': reason}), file=sys.stderr, flush=True)
             partial = log.with_name(log.name + '.partial')
             return {**source, 'complete': False, 'reason': reason, **({'partial': partial.name} if partial.is_file() else {})}
+        completed_devices[seat_key] = fingerprint
         return {**source, 'complete': True, 'log': log.name, 'logcatPid': report['logcatPid'],
                 'bytes': report['bytes'], 'sha256': report['sha256']}
 
@@ -396,8 +408,10 @@ async def capture_venue(adb, plan, directory, seconds):
         summary['deploymentSha256'] = plan['deploymentSha256']
     report_path = directory / 'capture-report.json'
     staged_report = report_path.with_suffix('.json.partial')
+    device_fingerprints = [{'roomId': room, 'seat': seat, 'sha256': digest}
+                           for (room, seat), digest in sorted(completed_devices.items())]
     with staged_report.open('x', encoding='utf-8') as report:
-        json.dump(dict(summary, seats=seats), report, indent=2)
+        json.dump(dict(summary, seats=seats, completedDeviceFingerprints=device_fingerprints), report, indent=2)
         report.write('\n')
     publish_capture_file(staged_report, report_path)
     return summary

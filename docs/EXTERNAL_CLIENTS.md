@@ -910,6 +910,8 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json --inspect-c
 
 首次與重試的原報告可一併列入。各報告保留原成功與失敗記錄，所有成功席位合起來須剛好涵蓋計畫列出的 Quest 席位，每席只接受一次完整擷取。工具重讀完整日誌核對位元組數和 SHA-256，再核對原程序、房號席位、伺服器觀察到的 IPv4、遊戲端點和戰績確認。成功摘要列出 `questCaptureBatchesVerified` 及 `questCaptureSeatsVerified`，若曾有未完成報告，另列 `questCaptureIncompleteReports` 與 `questCaptureFailedAttempts`。混合場可用 `windowsPlayers` 或 `windowsEvidenceDirectory` 補上 Windows 證據。手動提交 Quest 原日誌可沿用 `players` 及 `logcatPid`。 [重試失敗席位](QUEST3.md#重試未完成的-quest-擷取席位)
 
+若報告含 `completedDeviceFingerprints`，請保留每個已完成席位首次寫入該指紋的原報告。封存驗收會核對同一批基準下的歷次指紋，同一頭盔不可對應兩個完成席位。成功摘要的 `questCaptureSeatDeviceFingerprintsVerified` 列出核對過的席位數。
+
 #### 以原 Quest 裝置對照表驗收收尾
 
 收尾時可在 `questCaptures` 同時指定原 `networkPlan` 與部署時的版本 1 `deviceMap`，兩者須涵蓋相同的 Quest 席位。當擷取引用原部署報告時，工具會依該批部署的原席位重新計算裝置表指紋。分批部署可在裝置表合併各批的原席位與 ADB 標籤。`questDeployment.deviceMapsMatched` 會列出通過指紋核對的原部署報告數。使用 `networkPlan` 時，工具會比對伺服器觀察的來源與現場記錄的 IPv4。開場前的 UDP 預檢沿用原網路計畫。 [裝置與網路計畫](QUEST3.md#批次預檢五房-quest-席位)
