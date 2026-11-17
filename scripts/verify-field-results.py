@@ -249,24 +249,33 @@ def parse_quest_network_plan(plan, *, allow_shared_sources=False):
     expected = {QUEST_ROOMS} if mode == 'Linked' else {(room,) for room in QUEST_ROOMS}
     endpoints = plan['endpoints']
     require(type(endpoints) is list and len(endpoints) == len(expected), 'Provide every game endpoint for the venue mode')
-    groups = {}
+    groups, launch_sessions = {}, {}
+    endpoint_fields = {'roomIds', 'address', 'port'}
+    launch_fields = {'sessionId', 'missionId', 'sessionSequence'}
     for row in endpoints:
-        require(type(row) is dict and set(row) == {'roomIds', 'address', 'port'}, 'Unexpected game endpoint fields')
+        require(type(row) is dict and set(row) in (endpoint_fields, endpoint_fields | launch_fields), 'Unexpected game endpoint fields')
         rooms = row['roomIds']
         require(type(rooms) is list and all(type(room) is int for room in rooms)
                 and tuple(rooms) in expected and tuple(rooms) not in groups, 'Invalid or repeated game endpoint')
-        groups[tuple(rooms)] = quest_network_address(row['address']), integer(row['port'], 1024, 65535)
+        group = tuple(rooms)
+        groups[group] = quest_network_address(row['address']), integer(row['port'], 1024, 65535)
+        if 'sessionId' in row:
+            launch_sessions[group] = {'sessionId': identity(row['sessionId']), 'missionId': identity(row['missionId']),
+                                      'sessionSequence': integer(row['sessionSequence'], 1)}
+    require(not launch_sessions or (launch_sessions.keys() == groups.keys()
+            and len({row['sessionId'] for row in launch_sessions.values()}) == len(groups)),
+            'Network plan must bind every game endpoint to a distinct original launch session')
     require(len(set(groups.values())) == len(groups), 'A game binding is used by more than one endpoint')
     if 'serverIps' in plan:
         servers = read_network_server_ips(plan['serverIps'])
         require({address for address, _ in groups.values()} <= set(servers), 'Server IPv4 inventory must include every advertised endpoint')
         require_distinct_remote_sources(sources, groups.values(), servers)
-    return mode, groups, sources
+    return mode, groups, sources, launch_sessions
 
 
 def read_venue_network_plan(path, mode, players_per_room):
     document, raw = read_quest_document(path)
-    plan_mode, endpoints, sources = parse_quest_network_plan(document, allow_shared_sources=True)
+    plan_mode, endpoints, sources, launch_sessions = parse_quest_network_plan(document, allow_shared_sources=True)
     require(plan_mode == mode and all(sum(seat[0] == room for seat in sources) == players_per_room for room in QUEST_ROOMS),
             'Venue network plan mode or seats per room differ from the declared stage')
     addresses = {seat: ipv4(address) for seat, address in sources.items()}
@@ -274,6 +283,7 @@ def read_venue_network_plan(path, mode, players_per_room):
                 {ipv4(address).is_loopback for address, _ in endpoints.values()}) == 1,
             'Use only loopback or only private LAN addresses in one venue network plan')
     return {'sha256': hashlib.sha256(raw).hexdigest(), 'endpoints': endpoints, 'seats': addresses,
+            **({'launchSessions': launch_sessions} if launch_sessions else {}),
             **({'serverIps': {ipv4(address) for address in document['serverIps']}} if 'serverIps' in document else {})}
 
 
@@ -313,6 +323,12 @@ def check_venue_network_session(plan, session, endpoint, binding):
     rooms = tuple(session['roomIds'])
     require(plan['endpoints'].get(rooms) == (endpoint['address'], endpoint['port']) == (binding['address'], binding['port']),
             'Venue network plan endpoint differs from the original sealed game binding')
+    if 'launchSessions' in plan:
+        original = plan['launchSessions'][rooms]
+        revision = (session.get('combatStream') or {}).get('expectedSequence')
+        require(original['sessionId'] == session['id'] and original['missionId'] == session['mission'].get('id')
+                and type(revision) is int and original['sessionSequence'] == revision,
+                'Venue network plan launch identity or revision differs from the original sealed session')
     seats = {(integer(owner['roomId'], 1, 5), integer(owner['seat'], 0, 4) + 1) for owner in session['players']}
     require(seats == {seat for seat in plan['seats'] if seat[0] in rooms},
             'Venue network plan seats differ from the original sealed roster')
@@ -2180,6 +2196,17 @@ def check_udp_launcher_seats(preview, sources):
     require(not issues, 'Seat inventory differs from the original Windows launcher preview (' + '; '.join(issues) + ')')
 
 
+def check_network_launch_sessions(network_sessions, launcher):
+    if not network_sessions:
+        return
+    bindings = launcher[2]
+    changed = [rooms for rooms, original in sorted(network_sessions.items()) if rooms not in bindings
+               or any(bindings[rooms][field] != value for field, value in original.items())]
+    require(not changed and network_sessions.keys() == bindings.keys(),
+            'Network plan launch identity or revision differs from the original Windows launch for room(s) '
+            + ', '.join(str(room) for group in changed for room in group))
+
+
 def compare_udp_launch_documents(plan, preview):
     plan_sha, mode, planned = plan
     preview_sha, preview_mode, observed = preview
@@ -2483,8 +2510,13 @@ def read_quest_capture_batches(spec, mode, expected, evidence_path, shared_netwo
         endpoints = {}
     else:
         if shared_network is None:
-            plan_mode, endpoints, plan_sources = read_quest_network_plan(evidence_path(spec['networkPlan'], kind='questNetworkPlan'))
+            plan_mode, endpoints, plan_sources, launch_sessions = read_quest_network_plan(
+                evidence_path(spec['networkPlan'], kind='questNetworkPlan'))
             require(plan_mode == mode, 'Quest network plan differs from the venue mode')
+            if launch_sessions:
+                require({rooms: row['sessionId'] for rooms, row in launch_sessions.items()}
+                        == {tuple(row['roomIds']): session_id for session_id, row in expected.items()},
+                        'Quest network plan launch sessions differ from the original sealed batch')
             sources = {seat: ipv4(address) for seat, address in plan_sources.items()}
         else:
             endpoints, sources = shared_network['endpoints'], shared_network['seats']

@@ -134,7 +134,8 @@ export function mountVenueServerPlan(getState, api, download) {
       unexpected.length ? `場次未登記：${unexpected.join('、')}。` : ''
     ].filter(Boolean).join(' ') };
     const payload = { version: 1, mode: current.topology,
-      endpoints: current.servers.map(({ roomIds, port }) => ({ roomIds, address: current.address, port })),
+      endpoints: current.servers.map(({ roomIds, port, sessionId, missionId, sessionSequence }) =>
+        ({ roomIds, address: current.address, port, sessionId, missionId, sessionSequence })),
       sources: inventory.seats };
     const extra = otherIps.value.split('\n').map(line => line.trim()).filter(Boolean);
     if (!extra.length) return { payload };

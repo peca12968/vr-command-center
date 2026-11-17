@@ -25,7 +25,8 @@ def prepare(launch_path, preview_path, seat_path, players_per_room, device_path=
     for rooms, row in sorted(launch[2].items()):
         field.require(row['address'] == row['listenAddress'],
                       'Room(s) ' + ', '.join(map(str, rooms)) + ' require one concrete advertised and listening IPv4 address')
-        endpoints.append({'roomIds': list(rooms), 'address': row['address'], 'port': row['port']})
+        endpoints.append({'roomIds': list(rooms), 'address': row['address'], 'port': row['port'],
+                          'sessionId': row['sessionId'], 'missionId': row['missionId'], 'sessionSequence': row['sessionSequence']})
 
     inventory = field.read_quest_plan_file(seat_path)
     field.require(set(inventory) == {'version', 'seats'}, 'Expected a version 1 seat address inventory')

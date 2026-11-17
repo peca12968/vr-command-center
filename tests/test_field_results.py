@@ -3566,6 +3566,41 @@ class FieldResultsTests(unittest.TestCase):
                 plan_path.write_text(json.dumps(plan), encoding='utf-8')
                 self.assertEqual(original['venueNetworkPlan'], field.verify_venue(path)['venueNetworkPlan'])
 
+    def test_network_plan_with_launch_sessions_requires_same_sealed_revision_and_mission(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, _ = venue_fixture(root, mode, remote=True, room_sizes=(2,) * 5)
+                manifest.update(expectedPlayersPerRoom=2, venueNetworkPlan='network.json')
+                plan = {'version': 1, 'mode': mode, 'endpoints': [], 'sources': []}
+                for index, entry in enumerate(manifest['sessions'], 1):
+                    evidence = root / entry['evidenceZip']
+                    session, stats, endpoint = field.management_zip(evidence)
+                    session['mission']['id'] = id_for(800 + index)
+                    session['combatStream']['expectedSequence'] = 6
+                    launch = root / entry['launcherReport']
+                    report = json.loads(launch.read_bytes())
+                    report['finalCombatStream']['expectedSequence'] = 6
+                    launch.write_text(json.dumps(report), encoding='utf-8')
+                    with zipfile.ZipFile(evidence, 'w') as archive:
+                        for name, record in (('session', session), ('statistics', stats), ('endpoint', endpoint)):
+                            archive.writestr(name + '.json', json.dumps(record))
+                    plan['endpoints'].append({'roomIds': session['roomIds'], 'address': endpoint['address'], 'port': endpoint['port'],
+                        'sessionId': session['id'], 'missionId': session['mission']['id'], 'sessionSequence': 6})
+                    plan['sources'].extend({'roomId': owner['roomId'], 'seat': owner['seat'] + 1, 'address': player['address']}
+                                           for owner, player in zip(session['players'], entry['players'], strict=True))
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                network = root / manifest['venueNetworkPlan']
+                network.write_text(json.dumps(plan), encoding='utf-8')
+                self.assertEqual(10, field.verify_venue(path)['venueNetworkPlan']['verifiedSeats'])
+                for key, value in (('sessionId', id_for(2265)), ('missionId', id_for(2266)), ('sessionSequence', 7)):
+                    with self.subTest(key=key):
+                        changed = deepcopy(plan)
+                        changed['endpoints'][-1][key] = value
+                        network.write_text(json.dumps(changed), encoding='utf-8')
+                        with self.assertRaisesRegex(field.EvidenceError, 'launch identity or revision differs from the original sealed session'):
+                            field.verify_venue(path)
+
     def test_windows_inbox_reconnect_history_marks_problem_files_before_full_verification(self):
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:

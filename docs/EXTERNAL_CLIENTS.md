@@ -396,13 +396,15 @@ python .\scripts\prepare-venue-network-plan.py `
 
 管理台 0.31.174 可在「Windows 遊戲伺服器啟動計畫」匯入席位表，於「伺服器其他 IPv4」每行填一個位址，再下載 UDP 預檢清單。公告位址會自動加入。管理台會在下載前指出共用或誤用伺服器位址的房號與席號。
 
-管理台 0.31.175 會核對席位表的每個房號與席號。匯入前先登記準備中場次的席位。若名冊和席位表有差異，面板會列出表內缺少或場次尚未登記的席位。下載時若場次或名冊已變更，請重新讀取五房場次並確認席位表。預檢清單沿用版本 1，只記錄房號、席號和網路位址。
+管理台 0.31.175 會核對席位表的每個房號與席號。匯入前先登記準備中場次的席位。若名冊和席位表有差異，面板會列出表內缺少或場次尚未登記的席位。下載時若場次或名冊已變更，請重新讀取五房場次並確認席位表。
+
+管理台 0.31.238 與新版準備工具會在版本 1 網路清單的每個端點保存 `sessionId`、`missionId`、`sessionSequence`。給預檢工具原 Windows 啟動計畫與預覽時，工具會逐組比對這三個值。即使原埠、IPv4 與席號都相同，也會拒絕其他場次或修訂。Quest 子集清單保留同一組原端點及場次。只提供網路清單時，可核對 UDP 來源，啟動仍需原預覽與啟動計畫。既有版本 1 清單可沿用原核對流程。
 
 Windows 啟動器 1.21 的 `--venue-check` 預覽也會記錄各場已登記的房號與席號。產生全館網路清單或驗證 UDP 報告時，若提供這份預覽，工具會逐席比對。準備 Quest 專用清單時會先核對完整席位表，再選出指定的 Quest 席位。正式啟動會以同一份啟動計畫重新向管理服務預覽，確認原場次版本、席位及端點。名冊改動後請重新下載計畫、產生預覽並核對 UDP 報告。舊版預覽仍可用於歷史報告的查核。
 
 #### 用原網路清單核對封存席位
 
-在 `venue.json` 加入 `"venueNetworkPlan": "venue-network.json"`，或在 `prepare-venue-field-manifest.py` 加 `--venue-network-plan .\venue-network.json`。使用開場前的全館清單，涵蓋本階段所有 Windows 與 Quest 席位。工具會比對每房原封存端點及原名冊，再將伺服器已確認戰績的 UDP 來源逐席核對。收件模式會列出來源不符的 Windows ZIP，並將對應席位列為待補件。
+在 `venue.json` 加入 `"venueNetworkPlan": "venue-network.json"`，或在 `prepare-venue-field-manifest.py` 加 `--venue-network-plan .\venue-network.json`。使用開場前的全館清單，涵蓋本階段所有 Windows 與 Quest 席位。工具會比對每房原封存端點及原名冊，再將伺服器已確認戰績的 UDP 來源逐席核對。新版清單另核對原場次、任務版本與伺服器附掛來源時使用的名冊修訂號。收件模式會列出來源不符的 Windows ZIP，並將對應席位列為待補件。
 
 新版全館 UDP 預檢回條會保留 `networkPlanSha256`。同時提交清單和新版回條時，驗收會核對兩者引用同一份原檔。舊回條仍核對原雙端 UDP 報告、場次與逐席來源。若同時提供 `windowsStationAddresses`，兩份位址資料須相符。全 Quest 場可在 `questCaptures.networkPlan` 填同一清單路徑，混合場仍可保留原 Quest 子集清單。
 

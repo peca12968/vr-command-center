@@ -115,7 +115,7 @@ class NetworkPlanPreparationTests(unittest.TestCase):
                 plan = json.loads(output.read_bytes())
                 self.assertEqual({'version', 'mode', 'endpoints', 'sources'}, plan.keys())
                 self.assertEqual(rows, plan['sources'])
-                self.assertEqual([{'roomIds': row['roomIds'], 'address': '192.168.5.10', 'port': row['port']}
+                self.assertEqual([{key: row[key] for key in ('roomIds', 'address', 'port', 'sessionId', 'missionId', 'sessionSequence')}
                                   for row in preview_value['servers']], plan['endpoints'])
                 self.assertEqual({'prepared': True, 'mode': mode, 'plannedSeats': 10, 'includedSeats': 10,
                                   'endpointCount': len(ports), 'planSha256': hashlib.sha256(before[launch]).hexdigest(),
@@ -248,6 +248,45 @@ class NetworkPlanPreparationTests(unittest.TestCase):
                 result = subprocess.run(args, capture_output=True, text=True, timeout=15)
                 self.assertEqual(1, result.returncode, result.stderr)
                 self.assertEqual(5, json.loads(readiness.read_bytes())['expectedSources'])
+
+    def test_network_plan_rejects_replacement_launch_with_same_endpoints_and_seats(self):
+        spec = importlib.util.spec_from_file_location('quest_venue_probe', ROOT / 'scripts/probe-quest-venue.py')
+        probe = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(probe)
+        for mode, ports in (('Independent', range(7777, 7782)), ('Linked', [7777])):
+            with self.subTest(mode=mode):
+                launch, preview = guarded_documents(mode, ports, '192.168.5.10')
+                launch_path, preview_path = self.store('original-plan.json', launch), self.store('original-preview.json', preview)
+                rows = [{'roomId': room, 'seat': 1, 'address': f'192.168.5.{20 + room}'} for room in range(1, 6)]
+                seats = self.store('seats.json', {'version': 1, 'seats': rows})
+                devices = self.store('devices.json', {'version': 1, 'seats': [{'roomId': 5, 'seat': 1, 'serial': 'fixture'}]})
+                network = self.root / f'{mode}-network.json'
+                subset = self.root / f'{mode}-subset.json'
+                for output, flags in ((network, ()), (subset, ('--quest-device-map', devices))):
+                    made = prepare_network(launch_path, preview_path, seats, output, '--players-per-room', 1, *flags)
+                    self.assertEqual(0, made.returncode, made.stderr)
+                parsed = probe.field.read_udp_launcher_document(preview_path, preview=True)
+                self.assertEqual(mode, probe.load_plan(devices, subset, launcher_preview=parsed)[0])
+
+                original = launch['servers'][-1]
+                for field, new_value in (('sessionId', '00000000-0000-4000-8000-000000000199'),
+                                         ('missionId', '00000000-0000-4000-8000-000000000198'),
+                                         ('sessionSequence', original['sessionSequence'] + 1)):
+                    with self.subTest(field=field):
+                        new_launch = self.store('replacement-plan.json', {**launch, 'servers':
+                            [*launch['servers'][:-1], {**original, field: new_value}]})
+                        new_preview = self.store('replacement-preview.json', {**preview, 'servers':
+                            [*preview['servers'][:-1], {**preview['servers'][-1], field: new_value}]})
+                        replacement = probe.field.read_udp_launcher_document(new_preview, preview=True)
+                        with self.assertRaisesRegex(probe.field.EvidenceError, 'launch identity or revision differs'):
+                            probe.load_plan(devices, subset, launcher_preview=replacement)
+                        readiness = self.root / 'unwritten.json'
+                        result = subprocess.run([sys.executable, str(ROOT / 'scripts/check-venue-udp-preflight.py'),
+                            '--network-plan', str(network), '--launch-plan', str(new_launch), '--launcher-preview', str(new_preview),
+                            '--output', str(readiness)], capture_output=True, text=True, timeout=15)
+                        self.assertEqual(1, result.returncode, result.stderr)
+                        self.assertIn('launch identity or revision differs', result.stderr)
+                        self.assertFalse(readiness.exists())
 
     def test_distinct_requirement_survives_retry_and_batch_recheck(self):
         launch_value, preview_value = guarded_documents('Linked', [7777], '192.168.5.10')

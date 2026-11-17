@@ -37,6 +37,9 @@ async function download(page, filename, expected) {
   assert.deepEqual(JSON.parse(await fs.readFile(filename, 'utf8')), expected);
 }
 
+const networkEndpoints = plan => plan.servers.map(({ roomIds, port, sessionId, missionId, sessionSequence }) =>
+  ({ roomIds, address: plan.address, port, sessionId, missionId, sessionSequence }));
+
 async function downloadNetwork(page, filename, plan, seats) {
   await page.locator('#venue-server-seat-addresses').setInputFiles({
     name: 'seat-addresses.json', mimeType: 'application/json',
@@ -48,7 +51,7 @@ async function downloadNetwork(page, filename, plan, seats) {
   await file.saveAs(filename);
   assert.deepEqual(JSON.parse(await fs.readFile(filename, 'utf8')), {
     version: 1, mode: plan.topology,
-    endpoints: plan.servers.map(({ roomIds, port }) => ({ roomIds, address: plan.address, port })),
+    endpoints: networkEndpoints(plan),
     sources: seats
   });
 }
@@ -144,7 +147,7 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
     await networkFile.saveAs(networkOutput);
     assert.deepEqual(JSON.parse(await fs.readFile(networkOutput, 'utf8')), {
       version: 1, mode: 'Independent',
-      endpoints: independentPlan.servers.map(({ roomIds, port }) => ({ roomIds, address: independentPlan.address, port })),
+      endpoints: networkEndpoints(independentPlan),
       sources: seats
     });
     check(requests.every(([method, body]) => method === 'GET' && body === null),
@@ -211,7 +214,7 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
     await linkedNetwork.saveAs(linkedOutput);
     assert.deepEqual(JSON.parse(await fs.readFile(linkedOutput, 'utf8')), {
       version: 1, mode: 'Linked',
-      endpoints: [{ roomIds: [1, 2, 3, 4, 5], address: linkedPlan.address, port: linkedPlan.servers[0].port }],
+      endpoints: networkEndpoints(linkedPlan),
       sources: seats
     });
     const otherIps = page.locator('#venue-server-other-ips');
@@ -253,7 +256,9 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
       && (await networkStatus.innerText()).includes('場次未登記：房間 5 席位 1'),
       'Rereading compares the actual occupied seat even when a lower seat is vacant');
     await page.locator(panel).screenshot({ path: path.join(screenshots, 'venue-server-seat-mismatch.png') });
-    await downloadNetwork(page, path.join(screenshots, 'linked-venue-network-updated-seats.json'), linkedPlan, alternateSeats);
+    const currentLinked = shape('Linked', [await api(state(linked.id))]);
+    await downloadNetwork(page, path.join(screenshots, 'linked-venue-network-updated-seats.json'),
+      {...currentLinked, servers: [{...currentLinked.servers[0], port: linkedPlan.servers[0].port}]}, alternateSeats);
     check(unexpected.length === beforeRosterRecheck + 1, 'The corrected seat inventory downloads after the roster reread');
     await page.locator('#venue-server-bind').fill(linkedPlan.listenAddress);
     await end(linked.id);

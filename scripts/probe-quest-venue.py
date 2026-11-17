@@ -45,9 +45,10 @@ def read_json(raw):
 
 def load_plan(device_map_path, network_plan_path, *, launcher_preview=None):
     serials = field.read_quest_device_map(device_map_path)
-    mode, endpoints, sources = field.read_quest_network_plan(network_plan_path)
+    mode, endpoints, sources, launch_sessions = field.read_quest_network_plan(network_plan_path)
     require(serials.keys() == sources.keys(), 'Network sources must match the mapped Quest seats exactly.')
     if launcher_preview is not None:
+        field.check_network_launch_sessions(launch_sessions, launcher_preview)
         checked = field.check_udp_launcher_endpoints(launcher_preview, mode, endpoints)
         field.require(checked['topologyMatches'], 'The Quest network plan uses a different venue mode from the Windows preview')
         for group in checked['groups']:
@@ -69,7 +70,7 @@ def group_devices(endpoints, sources, serials):
 def load_venue_retry(device_map, network_plan, retry_report, output, launch_plan=None, preview=None, launcher=None):
     serials = field.read_quest_device_map(device_map)
     document, raw = field.read_quest_document(network_plan)
-    mode, endpoints, sources = field.parse_quest_network_plan(document, allow_shared_sources=True)
+    mode, endpoints, sources, _ = field.parse_quest_network_plan(document, allow_shared_sources=True)
     field.require(serials.keys() <= sources.keys(), 'Every mapped Quest seat must exist in the original venue network plan')
     checked = preflight.check_venue(network_plan, None, [], output, launcher_preview=preview, launch_plan=launch_plan,
                                     retry_report=retry_report, inspect_retry=True)

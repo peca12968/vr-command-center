@@ -263,7 +263,7 @@ def retained_sources(path, report, mode, expected, launch_check, binding, checke
 def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, launch_plan=None, retry_report=None, inbox=None,
                 *, require_distinct_remote_roster=False, explain_failures=False, inspect_retry=False):
     document, raw = field.read_quest_document(plan)
-    mode, endpoints, sources = field.parse_quest_network_plan(document, allow_shared_sources=True)
+    mode, endpoints, sources, launch_sessions = field.parse_quest_network_plan(document, allow_shared_sources=True)
     inventory_checked = 'serverIps' in document
     require_distinct_remote_roster |= inventory_checked
     plan_hash = hashlib.sha256(raw).hexdigest()
@@ -271,11 +271,13 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
     field.require(launch_plan is None or launcher_preview is not None, 'A launch plan requires its original launcher preview')
     preview = field.read_udp_launcher_document(launcher_preview, preview=True) if launcher_preview else None
     if preview:
+        field.check_network_launch_sessions(launch_sessions, preview)
         field.check_udp_launcher_seats(preview, sources)
     launch_check = field.check_udp_launcher_endpoints(preview, mode, endpoints) if preview else None
     binding = None
     if launch_plan:
         planned = field.read_udp_launcher_document(launch_plan, preview=False)
+        field.check_network_launch_sessions(launch_sessions, planned)
         binding = {'plan': path_reference(launch_plan.resolve(), output.parent),
                    'preview': path_reference(launcher_preview.resolve(), output.parent),
                    **field.compare_udp_launch_documents(planned, preview)}
@@ -452,7 +454,7 @@ def windows_retest_endpoint(plan_path, report, room, seat):
     room, seat = field.integer(room, 1, 5), field.integer(seat, 1, 5)
     document, raw = field.read_quest_document(plan_path)
     field.require(report['networkPlanSha256'] == hashlib.sha256(raw).hexdigest(), 'The original venue network plan changed during recheck')
-    _, endpoints, sources = field.parse_quest_network_plan(document, allow_shared_sources=True)
+    _, endpoints, sources, _ = field.parse_quest_network_plan(document, allow_shared_sources=True)
     field.require((room, seat) in sources, 'The Windows retest seat is not in the original venue network plan')
     group = next(group for group in report['groups'] if room in group['roomIds'])
     source = next(row for row in group['sources'] if {'roomId': room, 'seat': seat} in row['seats'])
