@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 戰後核對 Quest UDP 雙端原檔
+
+- 戰後驗收與全館預檢共用 Quest 逐席回條解析。驗收要求逐席檔案與原房組清單一致，並核對監聽端及探測端 SHA-256。已通過驗收的原始雙端檔在讀取場次證據後會再核對一次。 [封存核對方式](EXTERNAL_CLIENTS.md#核對每個玩家來源的-udp-預檢)
+- 五房合併 5 席的離線專項用原始雙端回條格式及封存資料驗證。原版接受只編輯監聽端或探測端空白，以及只替換逐席檔名的反例。新版只接受原始檔案及相符的逐席清單。封存回歸 156 項、LAN 離線 12 項及 Quest 測試 14 項通過。原六批 Windows 封存重驗仍有 80 筆戰績確認，摘要位元組相同。 [修正前反例](../artifacts/quest-udp-original-pairs-20261117/before.log) · [新版專項](../artifacts/quest-udp-original-pairs-20261117/targeted.log) · [封存回歸](../artifacts/quest-udp-original-pairs-20261117/field-final.log) · [六批封存](../artifacts/quest-udp-original-pairs-20261117/legacy-six-stages.json)
+- 原生 UDP 依防火牆查核略過。Quest 3 仍無 ADB 偵錯介面，實機與跨機 UDP 待驗。GitHub Actions 對 `44caec7` 回報帳務或支出上限，工作未啟動。 [USB 狀態](../artifacts/quest-udp-original-pairs-20261117/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44001728273)
+
 ## 2026-11-17 封存比對 UDP 回條的原場次修訂
 
 - 全館與 Quest UDP 回條若保存 `networkPlanSessions`，封存驗收及清單工具會依房組核對原場次、任務版本、遊戲來源附掛時的場次修訂及結束修訂。可直接用封存的場次資料核對，亦可連同原網路清單驗證。 [封存核對方式](EXTERNAL_CLIENTS.md#核對每個玩家來源的-udp-預檢)
