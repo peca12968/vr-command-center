@@ -427,6 +427,13 @@ Windows 套件及 GUI 驗證在 Python 首次探測本機連接埠前查核 `pyt
 
 Windows 的 `smoke_world.py` 可設定 `VR_COMMAND_WORLD_TEST_WINDOWS_IPC=1`，讓本機迴環流量由通過防火牆查核的 Python 轉送。腳本在每次啟動或重啟時核對管理程序沒有 TCP 監聽或 UDP 端點。
 
+若入站通知仍開啟，可用 `check-venue-world-ipc.py` 在 Windows 直接經由 AF_UNIX 測試正式管理包。HTTP、WebSocket 發布和 SSE 觀戰與回放都使用同一個本機 socket。腳本建立隔離資料，驗證合併 VR 與五房獨立 VR／MR 各 25 席、追蹤中斷攔截開場、全館天候指令、戰損、封存及重啟後逐格回放。`--work-root` 指向已存在的短路徑，報告使用新檔名。姿態及戰鬥來源是測試資料。
+
+```powershell
+$env:VR_COMMAND_UNATTENDED = '1'
+python scripts/check-venue-world-ipc.py --api-exe '<解壓管理包>/Runtime/VrCommand.Api.exe' --work-root '<短路徑資料夾>' --report '<新報告.json>'
+```
+
 直接執行 `check-lan-udp.ps1` 的 `Listen` 或 `Probe` 時，腳本在繫結埠前會檢查目前的 PowerShell 程序。LAN 測試套件會先查核 Python 與 PowerShell。查核拒絕時只略過需要開啟 UDP 埠的測試，原有的離線核對仍會執行。原生姿態測試、伺服器場次目錄測試和硬體模擬整合測試也會查核各自的迴環接收程式。硬體模擬的兩支整合測試皆可用 `--api-exe` 指向已通過查核的管理包。
 
 直接執行 `hardware-mock-peer.py` 也會在開始接收迴環 TCP 連線前核對 Python。自動執行 Windows 原生連線測試時，優先沿用已通過查核的固定執行檔路徑。解壓到新資料夾後，Windows 會以新路徑個別判定。

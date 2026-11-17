@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-17 以 Windows 本機 IPC 驗證五房錄製
+
+- 正式管理包 0.31.247 以 AF_UNIX 直接接收 WebSocket 快照，並提供 HTTP 與 SSE。合併 VR 與五房獨立 VR／MR 各註冊 25 個模擬席位。第 5 房缺一筆姿態時，整批維持準備中。補齊後依原畫格開場，全館套用夜間雷雨，並核對每房一筆受擊及戰損。第 5 房限定觀戰只回傳該房內容，並拒絕第 1 房角色讀取。 [執行方式](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
+- 兩輪共雙封存六筆錄製、24 格及十筆戰鬥事件。重啟管理服務後逐格比對重啟前的資料，並以房控回放比對原即時畫格。管理服務重啟前後都沒有 TCP 監聽或 UDP 端點，隔離場次均已收尾。兩次早期夾具執行分別因世界事件缺敵人 ID 及合併任務的敵人總數少填而被 API 拒絕。正式驗證使用模擬姿態與戰鬥，實機及跨機連線仍待驗。 [Windows IPC 驗證紀錄](../artifacts/windows-no-prompt-guard/world-ipc-verified.json)
+
 ## 2026-11-17 強制 Windows 啟動前防火牆查核
 
 - 移除 `VR_COMMAND_UNATTENDED=0` 可放寬查核的分支。若網域、私人或公用設定檔可能顯示防火牆允許視窗，專案啟動器提前停止並記錄原因。讀回本機有效設定後，五個開發與解壓包路徑均回傳 2，查核前後的 `VrCommand.exe` 程序數均為零。防火牆設定未修改。 [本機查核](../artifacts/windows-no-prompt-guard/firewall-preflight.json)

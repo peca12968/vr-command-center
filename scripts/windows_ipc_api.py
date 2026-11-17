@@ -1,6 +1,7 @@
-"""Forward a checked loopback listener to a Windows process's local Kestrel socket."""
+"""Connect to a Windows process's local Kestrel socket."""
 
 import ctypes
+from http.client import HTTPConnection
 import os
 import select
 import socket
@@ -31,6 +32,15 @@ def connect_unix(address):
     except BaseException:
         sock.close()
         raise
+
+
+class UnixHttpConnection(HTTPConnection):
+    def __init__(self, address):
+        super().__init__('localhost')
+        self.address = address
+
+    def connect(self):
+        self.sock = connect_unix(self.address)
 
 
 class RelayHandler(BaseRequestHandler):

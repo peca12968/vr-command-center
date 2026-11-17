@@ -1,4 +1,4 @@
-"""Minimal loopback WebSocket client for real world-publisher fixtures."""
+"""Minimal local WebSocket client for real world-publisher fixtures."""
 import base64
 import hashlib
 import json
@@ -9,11 +9,26 @@ import sys
 
 
 class WebSocket:
-    def __init__(self, port, route, token):
-        self.sock = socket.create_connection(("127.0.0.1", port), timeout=10)
+    def __init__(self, port, route, token, *, ipc_address=None):
+        if ipc_address is None:
+            host = f"127.0.0.1:{port}"
+            self.sock = socket.create_connection(("127.0.0.1", port), timeout=10)
+        else:
+            if port is not None:
+                raise ValueError("Pass either a loopback port or an IPC address")
+            from windows_ipc_api import connect_unix
+            host = "localhost"
+            self.sock = connect_unix(ipc_address)
         self.file = self.sock.makefile("rb")
+        try:
+            self._upgrade(host, route, token)
+        except BaseException:
+            self.close()
+            raise
+
+    def _upgrade(self, host, route, token):
         key = base64.b64encode(secrets.token_bytes(16)).decode()
-        self.sock.sendall((f"GET {route} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\nAuthorization: Bearer {token}\r\n\r\n").encode())
+        self.sock.sendall((f"GET {route} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\nAuthorization: Bearer {token}\r\n\r\n").encode())
         status = self.file.readline().decode()
         headers = {}
         while (line := self.file.readline()) not in (b"\r\n", b""):
@@ -21,7 +36,6 @@ class WebSocket:
             headers[name.lower()] = value.strip()
         expected = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
         if " 101 " not in status or headers.get("sec-websocket-accept") != expected:
-            self.close()
             raise AssertionError("WebSocket handshake rejected: " + status.strip())
 
     def send(self, value, opcode=1):
