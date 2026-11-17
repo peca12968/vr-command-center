@@ -2650,13 +2650,17 @@ def read_quest_capture_batches(spec, mode, expected, evidence_path, shared_netwo
     reports = spec['reports']
     require(type(reports) is list and 1 <= len(reports) <= 25, 'Provide 1 to 25 Quest capture reports')
     captures, used_seats, deployments = {}, set(), []
+    capture_bindings, legacy_capture_scopes = {}, {}
     log_issues = []
     incomplete_reports = failed_attempts = 0
     for name in reports:
         path = evidence_path(name, kind='questCaptureReport')
         report = read_quest_capture_report(path, mode)
-        if 'deploymentSha256' in report:
-            deployments.append((report['deploymentSha256'], report['seats'], report.get('partialDeployment', False)))
+        binding = report.get('captureBinding')
+        deployment = report.get('deploymentSha256')
+        partial = report.get('partialDeployment', False)
+        if deployment is not None:
+            deployments.append((deployment, report['seats'], partial, binding['venueSha256'] if binding else None))
         incomplete_reports += not report['complete']
         failed_attempts += report['expectedSeats'] - report['capturedSeats']
         for row in report['seats']:
@@ -2690,6 +2694,13 @@ def read_quest_capture_batches(spec, mode, expected, evidence_path, shared_netwo
                     log_issues.append({'roomId': seat[0], 'seat': seat[1], 'file': row['log'], 'reason': reason})
                     continue
             captures.setdefault(session_id, []).append(evidence)
+        if device_map is not None:
+            scope = {(row['roomId'], row['seat']) for row in report['seats']}
+            if binding is not None:
+                key = (binding['venueSha256'], binding['salt'], binding['mapSha256'], deployment, partial)
+                capture_bindings.setdefault(key, set()).update(scope)
+            elif deployment is not None and not report['complete']:
+                legacy_capture_scopes.setdefault((deployment, partial), []).append(scope)
     if used_seats != sources.keys() or log_issues:
         details = {
             'expectedSeats': len(sources), 'reportedCompleteSeats': len(used_seats),
@@ -2700,6 +2711,14 @@ def read_quest_capture_batches(spec, mode, expected, evidence_path, shared_netwo
             details['logIssues'] = sorted(log_issues, key=lambda issue: (issue['roomId'], issue['seat']))
         raise QuestCapturesIncomplete(details)
     summary = {'questCaptureBatchesVerified': len(reports)}
+    for (_, salt, digest, deployment, partial), seats in capture_bindings.items():
+        # A retry retains the fingerprint of its original selected seats. Old incomplete
+        # reports can identify that scope by the exact deployment they referenced.
+        scopes = [seats, *(original for original in legacy_capture_scopes.get((deployment, partial), ()) if seats <= original)]
+        require(any(quest_deployment_map_fingerprint(salt, {seat: device_map[seat] for seat in scope}) == digest for scope in scopes),
+                'Quest capture device map differs from the original capture binding')
+    if capture_bindings:
+        summary['questCaptureDeviceBindingsVerified'] = len(capture_bindings)
     if observed:
         summary['questCaptureAddressSource'] = 'server-observed'
     if incomplete_reports:
@@ -3041,11 +3060,13 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, expected_
                                      release_hash=deployment_release, previous_venue=report.get('previousVenueSha256'))
 
     matched_maps = set()
-    for deployment_digest, seats, partial in capture_reports:
+    for deployment_digest, seats, partial, capture_venue_hash in capture_reports:
         deployment = attempts.get(deployment_digest)
         require(deployment is not None and deployment['complete'] is not partial and deployment['proof'] is not None,
                 'Provide the exact incomplete Quest deployment report referenced by the capture' if partial
                 else 'Provide the exact completed Quest deployment report referenced by the capture')
+        require(capture_venue_hash is None or capture_venue_hash == deployment['proof']['venueSha256'],
+                'Quest capture ZIP differs from the original referenced deployment')
         if capture_device_map is not None and deployment_digest not in matched_maps:
             require(capture_device_map.keys() >= set(deployment['seats']), 'Quest device map lacks a seat from the referenced deployment')
             original_map = {seat: capture_device_map[seat] for seat in deployment['seats']}
@@ -3124,7 +3145,7 @@ def read_venue_quest_evidence(manifest, mode, expected, evidence_path, release, 
             inspect_release_coverage=inspect_release_coverage)
         if references:
             summary['questCaptureDeploymentReportsMatched'] = len(references)
-            partial_deployments = {digest for digest, _, partial in references if partial}
+            partial_deployments = {digest for digest, _, partial, _ in references if partial}
             if partial_deployments:
                 summary['questPartialDeploymentsReferenced'] = len(partial_deployments)
     return captures, endpoints, summary, deployments, deployment_summary, readiness, openxr

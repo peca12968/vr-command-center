@@ -373,9 +373,9 @@ else:
     return path, manifest
 
 
-def observed_quest_capture_spec(root, spec):
+def observed_quest_capture_spec(root, spec, *, serial_prefix='fixture'):
     network = json.loads((root / spec['networkPlan']).read_bytes())
-    rows = [{'roomId': row['roomId'], 'seat': row['seat'], 'serial': f"fixture-{row['roomId']}-{row['seat']}"}
+    rows = [{'roomId': row['roomId'], 'seat': row['seat'], 'serial': f"{serial_prefix}-{row['roomId']}-{row['seat']}"}
             for row in network['sources']]
     (root / 'quest-device-map.json').write_text(json.dumps({'version': 1, 'seats': rows}), encoding='utf-8')
     return {'deviceMap': 'quest-device-map.json', 'reports': spec['reports']}
@@ -3316,7 +3316,7 @@ class FieldResultsTests(unittest.TestCase):
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                path, _ = quest_capture_venue_fixture(root, mode, use_capture_tool=True)
+                path, manifest = quest_capture_venue_fixture(root, mode, use_capture_tool=True)
                 report = field.verify_venue(path)
                 self.assertEqual(25, report['serverAcknowledgements'])
                 self.assertEqual(10, report['questLogcatPlayers'])
@@ -3326,6 +3326,27 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertFalse(report['networkCapacityAccepted'])
                 self.assertNotIn('192.168.', json.dumps(report))
                 self.assertNotIn('logcat.txt', json.dumps(report))
+                self.assertNotIn('questCaptureDeviceBindingsVerified', report)
+
+                capture = manifest['questCaptures']
+                capture['deviceMap'] = observed_quest_capture_spec(root, capture, serial_prefix='mock')['deviceMap']
+                map_path = root / capture['deviceMap']
+                mapping = json.loads(map_path.read_bytes())
+                original = deepcopy(mapping)
+                left, right = mapping['seats'][:2]
+                left['serial'], right['serial'] = right['serial'], left['serial']
+                map_path.write_text(json.dumps(mapping), encoding='utf-8')
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'device map differs from the original capture binding'):
+                    field.verify_venue(path)
+
+                original['seats'].reverse()
+                map_path.write_text(json.dumps(original), encoding='utf-8')
+                capture['reports'].reverse()
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                verified = field.verify_venue(path)
+                self.assertEqual(2, verified.pop('questCaptureDeviceBindingsVerified'))
+                self.assertEqual(report, verified)
 
     def test_venue_accepts_all_quest_seats_without_a_manual_player_list(self):
         for mode in ('Independent', 'Linked'):
@@ -5070,6 +5091,13 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertNotIn('questCaptureAddressSource', checked)
                 self.assertNotIn('fixture-', json.dumps(checked))
 
+                original_capture = capture_path.read_bytes()
+                captured['captureBinding'] = {'venueSha256': '3' * 64, 'salt': proof['salt'], 'mapSha256': proof['mapSha256']}
+                capture_path.write_text(json.dumps(captured), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'capture ZIP differs from the original referenced deployment'):
+                    field.verify_venue(path)
+                capture_path.write_bytes(original_capture)
+
                 changed = json.loads(raw_map)
                 changed['seats'][0]['serial'] = 'another-adb-label'
                 map_path.write_text(json.dumps(changed), encoding='utf-8')
@@ -5252,6 +5280,10 @@ class FieldResultsTests(unittest.TestCase):
                                                                use_capture_tool=True, interrupt_first=True)
                 first_name, retry_name = manifest['questCaptures']['reports']
                 first_path, retry_path = root / first_name, root / retry_name
+                manifest['questCaptures']['deviceMap'] = observed_quest_capture_spec(
+                    root, manifest['questCaptures'], serial_prefix='mock')['deviceMap']
+                manifest['questCaptures']['reports'].reverse()
+                path.write_text(json.dumps(manifest), encoding='utf-8')
                 first_bytes = first_path.read_bytes()
                 first = json.loads(first_bytes)
                 retry = json.loads(retry_path.read_bytes())
@@ -5267,6 +5299,14 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertEqual(25, report['serverAcknowledgements'])
                 self.assertEqual((2, 5, 1, 1), (report['questCaptureBatchesVerified'], report['questCaptureSeatsVerified'],
                                                report['questCaptureIncompleteReports'], report['questCaptureFailedAttempts']))
+                self.assertEqual(1, report['questCaptureDeviceBindingsVerified'])
+                changed_retry = deepcopy(retry)
+                changed_retry['captureBinding']['venueSha256'] = '2' * 64
+                retry_bytes = retry_path.read_bytes()
+                retry_path.write_text(json.dumps(changed_retry), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'device map differs from the original capture binding'):
+                    field.verify_venue(path)
+                retry_path.write_bytes(retry_bytes)
                 self.assertEqual(first_bytes, first_path.read_bytes())
                 self.assertEqual(raw_partial, partial.read_bytes())
                 manifest['questCaptures']['reports'] = [first_name]
@@ -5280,6 +5320,25 @@ class FieldResultsTests(unittest.TestCase):
                 with self.assertRaisesRegex(field.EvidenceError, 'repeats a completed seat'):
                     field.verify_venue(path)
 
+                device_map = field.read_quest_device_map(root / manifest['questCaptures']['deviceMap'])
+                deployment = self.quest_deployment_evidence(root, manifest, 1)
+                deploy_salt = '4' * 32
+                deployment['retry'] = {'version': 1, 'venueSha256': retry['captureBinding']['venueSha256'],
+                    'salt': deploy_salt, 'mapSha256': field.quest_deployment_map_fingerprint(deploy_salt, device_map),
+                    'devices': [f'{index:064x}' for index in range(1, 6)]}
+                deployment_raw = json.dumps(deployment).encode()
+                (root / 'deployment.json').write_bytes(deployment_raw)
+                deployed_hash = hashlib.sha256(deployment_raw).hexdigest()
+                first.pop('captureBinding')
+                first['deploymentSha256'] = retry['deploymentSha256'] = deployed_hash
+                first_path.write_text(json.dumps(first), encoding='utf-8')
+                retry_path.write_text(json.dumps(retry), encoding='utf-8')
+                manifest['questCaptures']['reports'] = [retry_name, first_name]
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                legacy = field.verify_venue(path)
+                self.assertEqual((1, 2, 1), (legacy['questCaptureDeviceBindingsVerified'],
+                    legacy['questCaptureDeploymentReportsMatched'], legacy['questDeployment']['deviceMapsMatched']))
+
     def test_mixed_venue_uses_original_quest_device_map_and_windows_inbox(self):
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
@@ -5290,7 +5349,7 @@ class FieldResultsTests(unittest.TestCase):
                 path.write_text(json.dumps(manifest), encoding='utf-8')
                 baseline = field.verify_venue(path)
                 observed = self.windows_inbox_fixture(root, manifest)
-                observed['questCaptures'] = observed_quest_capture_spec(root, manifest['questCaptures'])
+                observed['questCaptures'] = observed_quest_capture_spec(root, manifest['questCaptures'], serial_prefix='mock')
                 windows = [{'roomId': room, 'seat': seat, 'station': f'PC-{room}-{seat}'}
                            for room in range(1, 6) for seat in range(1, 5)]
                 (root / 'windows-seats.json').write_text(json.dumps({'version': 1, 'seats': windows}), encoding='utf-8')
@@ -5298,6 +5357,7 @@ class FieldResultsTests(unittest.TestCase):
                 path.write_text(json.dumps(observed), encoding='utf-8')
                 report = field.verify_venue(path)
                 self.assertEqual('server-observed', report.pop('questCaptureAddressSource'))
+                self.assertEqual(1, report.pop('questCaptureDeviceBindingsVerified'))
                 self.assertEqual(baseline, report)
                 self.assertEqual((5, 20, 25), (report['questCaptureSeatsVerified'],
                     report['venueRelease']['windows']['seatsVerified'], report['serverAcknowledgements']))
