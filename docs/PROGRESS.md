@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 核對原封存席位與戰績
+
+- 控制台 0.31.248 在單房及全館席位表顯示前，核對原結束名冊、戰鬥封存序號及錄製最後一格。舊版在合併及獨立五房都接受替換玩家、對調席位、替換合理戰績或更改戰鬥尾界。新版遇到不符會清空席位表，重新讀取原資料才恢復操作。 [收尾操作](SESSION_CLOSURE.md#從全館收尾查看席位)
+- 以正式解壓包經 AF_UNIX 和 Chromium 通過 24 項查核。兩種模式各驗 25 個模擬席位，包括原戰績、替換拒絕、全館讀取、跳轉原最近中彈畫格及返回原批次。另通過 125 項 Node 測試。管理服務沒有 TCP 監聽或 UDP 端點。 [合併場驗證](../artifacts/venue-debrief-seat-identity-031248/package-linked/checks.json) · [獨立場驗證](../artifacts/venue-debrief-seat-identity-031248/package-independent/checks.json)
+- `fcfe198` 正式管理包核對 595 檔，與 Windows 啟動器 1.20／1.27.3 及 Windows／Quest 0.50.12 通過離線發行核對。GitHub Actions 因帳務或支出上限未啟動。 [Windows 管理包](../artifacts/venue-debrief-seat-identity-031248/VRCommand-ControlServer-0.31.248.zip) · [發行核對](../artifacts/venue-debrief-seat-identity-031248/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44016017675)
+
 ## 2026-11-17 以 Windows 本機 IPC 驗證五房錄製
 
 - 正式管理包 0.31.247 以 AF_UNIX 直接接收 WebSocket 快照，並提供 HTTP 與 SSE。合併 VR 與五房獨立 VR／MR 各註冊 25 個模擬席位。第 5 房缺一筆姿態時，整批維持準備中。補齊後依原畫格開場，全館套用夜間雷雨，並核對每房一筆受擊及戰損。第 5 房限定觀戰只回傳該房內容，並拒絕第 1 房角色讀取。 [執行方式](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
