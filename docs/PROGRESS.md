@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 封存比對 UDP 回條的原場次修訂
+
+- 全館與 Quest UDP 回條若保存 `networkPlanSessions`，封存驗收及清單工具會依房組核對原場次、任務版本、遊戲來源附掛時的場次修訂及結束修訂。可直接用封存的場次資料核對，亦可連同原網路清單驗證。 [封存核對方式](EXTERNAL_CLIENTS.md#核對每個玩家來源的-udp-預檢)
+- 專項以五房獨立與合併各 5 席及兩種回條格式驗證。省略原網路清單與 Windows 預覽時，封存原值可驗收。只改任務版本或場次修訂時，封存與清單工具均拒絕，且無新驗收清單。封存回歸 155 項、LAN 離線 12 項與 Quest 測試 14 項通過。原六批 Windows 封存重驗逐位元相同，仍有 80 筆戰績確認。 [修正前反例](../artifacts/udp-sealed-revision-20261117/before.log) · [封存專項](../artifacts/udp-sealed-revision-20261117/targeted.log) · [封存回歸](../artifacts/udp-sealed-revision-20261117/field-final.log) · [六批原封存](../artifacts/udp-sealed-revision-20261117/legacy-six-stages.json)
+- 原生 UDP 依防火牆查核略過。Quest 3 仍未出現 ADB 偵錯介面，實機與跨機待驗。GitHub Actions 對 `93b5d8c` 回報帳務或支出上限，工作未啟動。 [USB 狀態](../artifacts/udp-sealed-revision-20261117/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44000696616)
+
 ## 2026-11-17 Quest 分批 UDP 回條保留原場次修訂
 
 - 新版 Quest 回條保存實際探測房組的原場次、任務版本與修訂。Quest 重試把欄位納入原計畫比對；合併全館預檢和依原網路清單驗收封存時也逐組核對。舊回條在原 Windows 啟動計畫和預覽均相符時可沿用。 [Quest 預檢重試](QUEST3.md#重試-quest-udp-預檢席位)
