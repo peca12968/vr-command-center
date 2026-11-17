@@ -113,6 +113,8 @@ Windows 三包原生測試可加 `--prepare-independent-set --mission-template <
 
 主控可用 `GET /api/venue/closure/{id}/linked-plan` 讀取原批次、場次識別、五個房號及保存版本。端點使用 `Cache-Control: no-store`，且只接受包含一個完整合併場次的結束批次。不存在的批次回應 `404`，其他批次回應 `409`。
 
+管理包 0.31.244 的全館收尾會列出各原場次的 `missionId`。主控套用前會逐一比對批次、場次、房間和任務版本 ID。即使任務名稱相同，只要有一房版本不同，整批停止套用，並保留目前的準備選擇與編輯草稿。已保存的歷史批次可直接核對。
+
 ## API
 
 所有端點須 /api Bearer 認證並傳入已認證身分。任務是全館共用範本，Master、RoomController、GameServer 可讀；建立／修訂只允許 Master，受信任的 in-process Internal 可用於工具／匯入，HTTP 不配發 Internal。版本作者來自服務端身分，請求 body 不提供作者欄位。舊 JSON 匯入版標記為 Internal，這表示舊來源沒有作者資訊，不代表可以識別原始操作人。

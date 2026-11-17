@@ -10,7 +10,7 @@ internal sealed record VenueReplayMatch(Guid RequestId, Guid FromSessionId, long
     DateTimeOffset CapturedAtUtc, DateTimeOffset FrameCapturedAtUtc, WorldRecordingInfo Recording, WorldFrameView Frame);
 internal sealed record VenueMissionReplayMatch(Guid RequestId, Guid FromSessionId, long FromFrame, int RoomId,
     long FromTick, long FrameTick, WorldRecordingInfo Recording, WorldFrameView Frame);
-internal sealed record VenueClosureSession(Guid SessionId, long AppliedAtSequence, int[] RoomIds, string MissionName,
+internal sealed record VenueClosureSession(Guid SessionId, long AppliedAtSequence, int[] RoomIds, Guid MissionId, string MissionName,
     VenueArchiveState Combat, VenueArchiveState World, bool FieldEvidenceReady,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueReplay? Replay,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTrackingBegin? TrackingBegin,
@@ -234,7 +234,7 @@ public sealed partial class WorldRecordings
             if (world == VenueArchiveState.Sealed) evidence = BuildFieldEvidence(session, stream, replay!.ThroughSequence, actor, applied.AppliedAtSequence).Evidence;
         }
         var (tracking, participation) = manager.ReadVenueBeginEvidence(session.Id, actor);
-        return (new(session.Id, applied.AppliedAtSequence, session.RoomIds, session.Mission.Definition.Name,
+        return (new(session.Id, applied.AppliedAtSequence, session.RoomIds, session.Mission.Id, session.Mission.Definition.Name,
             combat, world, evidence is not null, replay, tracking, participation, evidence?.RosterDepartures?.Players.Length), evidence);
     }
 

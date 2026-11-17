@@ -12,6 +12,14 @@ module.exports = async function archivedIndependentPlanBrowser({ context, api, t
   const archivePath = id => `/venue/closure/${id}/independent-plan`;
   const linkedPath = id => `/venue/closure/${id}/linked-plan`;
   const selections = () => page.locator('#launch-room-missions-fields select').evaluateAll(fields => fields.map(field => field.value));
+  async function restoreSubstitutedVersion(route, response) {
+    await page.route(route, request => request.fulfill({ status: 200, json: response }), { times: 1 });
+    const read = page.waitForResponse(reply => reply.url().endsWith(route.slice(2)));
+    await restore.click();
+    await read;
+    await page.waitForFunction(() => !document.querySelector('#restore-venue-plan').disabled);
+    assert.match(await notice.innerText(), /無法核對本批五房/);
+  }
   const draft = { name: '結案原任務 A', briefing: '結案前的配置', durationSeconds: 360,
     environment: { mode: 'VR', weather: 'Rain', timeOfDay: 'Night', lightning: false },
     enemies: { count: 2, behavior: 'Hold', autoAttack: false },
@@ -48,7 +56,7 @@ module.exports = async function archivedIndependentPlanBrowser({ context, api, t
     const mrHead = await api(`/missions/${mr.id}/revisions`, 'POST', { ...mrDraft, durationSeconds: 480, props: [] }, 'Master', 201, undefined, randomUUID());
     const linked = await newSession('Linked', [1, 2, 3, 4, 5], vr.id);
     const linkedBatch = await venueEnd();
-    await api(`/missions/${vr.id}/revisions`, 'POST', { ...draft, durationSeconds: 700, props: [] }, 'Master', 201, undefined, randomUUID());
+    const vrHead = await api(`/missions/${vr.id}/revisions`, 'POST', { ...draft, durationSeconds: 700, props: [] }, 'Master', 201, undefined, randomUUID());
     await newSession('Independent', [3], vr.id);
     const partialBatch = await venueEnd();
     const oldPlan = await api(archivePath(archive.requestId));
@@ -71,6 +79,11 @@ module.exports = async function archivedIndependentPlanBrowser({ context, api, t
     await api(linkedPath(archive.requestId), 'GET', undefined, 'Master', 409);
     await api(linkedPath(partialBatch.requestId), 'GET', undefined, 'Master', 409);
     await api(linkedPath(randomUUID()), 'GET', undefined, 'Master', 404);
+    const closurePath = id => `/venue/closure/${id}`;
+    const originalVersions = async id => (await api(closurePath(id))).batch.sessions.map(({ sessionId, missionId }) => [sessionId, missionId]);
+    assert.deepEqual(await originalVersions(archive.requestId), original.sessions.map((session, index) => [session.id, plan[index].missionId]));
+    assert.deepEqual(await originalVersions(linkedBatch.requestId), [[linked.id, vr.id]]);
+    check(true, 'Both closure shapes advertise the original immutable version from each persisted session');
     await login('Room2');
     check(await restore.isHidden(), 'Room control cannot read or apply the archived five-room plan');
     const blocker = await newSession('Independent', [4], vr.id);
@@ -97,6 +110,12 @@ module.exports = async function archivedIndependentPlanBrowser({ context, api, t
     await notice.filter({ hasText: '無法核對本批五房' }).waitFor();
     check(await mode.inputValue() === 'Independent' && await duration.inputValue() === '499',
       'A malformed Linked response leaves the current launch mode and dirty draft intact');
+    const vrReplacement = await api(`/missions/${vrHead.id}/version`);
+    assert.equal(vrReplacement.mission.definition.name, linkedPlan.revision.mission.definition.name);
+    assert.notEqual(vrReplacement.mission.id, linkedPlan.revision.mission.id);
+    await restoreSubstitutedVersion(linkedRoute, { ...linkedPlan, revision: vrReplacement });
+    check(await mode.inputValue() === 'Independent' && await duration.inputValue() === '499',
+      'Linked restore rejects a valid newer revision with the original name and retains the preparation mode and editor draft');
     const linkedRead = page.waitForResponse(response => response.url() === base + '/api' + linkedPath(linkedBatch.requestId));
     await restore.click();
     assert.equal((await linkedRead).headers()['cache-control'], 'no-store');
@@ -123,6 +142,13 @@ module.exports = async function archivedIndependentPlanBrowser({ context, api, t
     await notice.filter({ hasText: '無法核對本批五房' }).waitFor();
     check(await mode.inputValue() === 'Linked' && (await api('/sessions')).map(session => session.id).join() === blocker.id,
       'A mismatched archived session leaves the preparation mode and occupied room untouched');
+    const changed = structuredClone(oldPlan);
+    changed.rooms[3].revision = await api(`/missions/${mrHead.id}/version`);
+    assert.equal(changed.rooms[3].revision.mission.definition.name, oldPlan.rooms[3].revision.mission.definition.name);
+    assert.notEqual(changed.rooms[3].revision.mission.id, oldPlan.rooms[3].revision.mission.id);
+    await restoreSubstitutedVersion(archiveRoute, changed);
+    check(await mode.inputValue() === 'Linked' && await mission.inputValue() === vr.id && await duration.inputValue() === '499',
+      'One valid same-name replacement among five original rooms rejects the entire restore and retains the previous launch selection');
 
     const read = page.waitForResponse(response => response.url() === base + '/api' + archivePath(archive.requestId));
     await restore.click();
