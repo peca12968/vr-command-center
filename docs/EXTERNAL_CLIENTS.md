@@ -719,6 +719,8 @@ Quest 批次已設定 `questLinkCriteria` 時，`issues[].questLinkMetrics` 會�
 
 六批皆有 Quest 席位時，也可在 `stages.json` 加 `questLinkCriteria`，或使用產生器的 `--quest-minimum-replies` 及 `--quest-maximum-p95-ms`。總表與個別批次逐項取較嚴的門檻。只需驗收其中幾批 Quest 時，在各該批清單指定即可。通過後 `questLinkObserved` 提供該批回覆數最低及 p95 最高的原房號與席位。
 
+若六批都要驗收 Quest 的 OpenXR 啟動，建立總清單時加上 `--require-quest-openxr`，或在 `stages.json` 加 `"requireQuestOpenXR": true`。每批須至少有一個 Quest 席位，且該批所有 Quest 席位均須從原部署及日誌通過核對。只有部分批次使用 Quest 時，可在那些批次的 `venue.json` 個別啟用。收件模式會在該批的 `issues[].questOpenXR` 列出缺少部署啟動證據的 `missingSeats` 和日誌核對失敗的 `invalidReports`。 [單批核對方式](#核對封存席位的-quest-發行-apk)
+
 通過量測門檻的批次會在 `windowsLinkObserved` 列出回覆數最低及 p95 最高的房號、席號和數值。多席同值時顯示房號及席號最前的一席。可在總驗收及收件報告直接找出每批最接近門檻的席位。量測未通過的批次仍會在收件問題中顯示逐席結果。
 
 ##### 統一核對追蹤及遊戲射擊
@@ -903,6 +905,8 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json --inspect-c
 使用 `-RetryIncomplete` 續跑時，可在五房 `venue.json` 只填最新的累計報告，或把它與一路承接的原報告一併填入。檔案可任意排序，請保留原始位元組。使用手動分批清單時，填各份報告，各份成功席位必須互不重複。 [Quest 部署操作](QUEST3.md#從原部署報告重試未完成席位)
 
 使用 `-RequireOpenXR` 的部署報告也會核對逐席原 logcat。原 PID 及本次啟動識別值須相符，且 loader、顯示及輸入子系統的就緒記錄須出現在最終戰績之前。成功摘要會列出 `questDeployment.openXRSeatsVerified`。 [部署時核對每席 OpenXR](QUEST3.md#部署時核對每席-openxr)
+
+場館可在準備清單時加 `prepare-venue-field-manifest.py --require-quest-openxr`，或在 `venue.json` 加 `"requireQuestOpenXR": true`，明確要求原部署與原 logcat 提供每個 Quest 席位的 OpenXR 啟動證據。至少須有一個 Quest 席位。正式驗收會在 `questOpenXR` 輸出預期與核對席數。遇到缺件或日誌不符時，以退出碼 1 列出房號、席號與原因。此處核對的是 OpenXR 程序日誌與原戰績，實體頭盔顯示及追蹤沿用各自的測試流程。只驗收 Windows 的批次可省略此欄位。
 
 ```json
 {

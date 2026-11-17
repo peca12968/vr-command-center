@@ -825,6 +825,90 @@ class FieldResultsTests(unittest.TestCase):
         return {'version': 1, 'topology': 'direct-lan' if remote else 'same-host',
                 'minimumConcurrentMilliseconds': 2000, 'venueManifests': names}
 
+    def test_staged_quest_openxr_requires_original_launch_proof_in_every_batch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = self.staged_plan(root, remote=True, quest_links=True)
+            paths = [root / name for name in plan['venueManifests']]
+            stamps, logs = [], []
+            for path in paths:
+                batch = json.loads(path.read_bytes())
+                batch['requireQuestOpenXR'] = False  # Local configuration cannot relax the staged requirement.
+                path.write_text(json.dumps(batch), encoding='utf-8')
+                release_path = path.with_name('release.json')
+                release = json.loads(release_path.read_bytes())
+                release['quest']['versionCode'] = 76
+                release_path.write_text(json.dumps(release), encoding='utf-8')
+                report_path = path.with_name('deployment.json')
+                report = json.loads(report_path.read_bytes())
+                rows = {row['playerId']: row for row in report['devices']}
+                for entry in batch['sessions']:
+                    port = json.loads(path.with_name(entry['launcherReport']).read_bytes())['udpBinding']['port']
+                    for proof in entry.get('players', ()):
+                        if 'logcatPid' not in proof:
+                            continue
+                        log_path, pid = path.with_name(proof['log']), proof['logcatPid']
+                        raw = log_path.read_text(encoding='utf-8')
+                        _, result = field.quest_client_result(raw, pid, port)
+                        row = rows[result['playerId']]
+                        nonce = f"{row['roomId']:032x}"
+                        marker = logcat_line(f'VR_QUEST_OPENXR nonce={nonce} loader=1 display=1 input=1', pid)
+                        row.update(versionCode=76, openXR={'processId': pid, 'nonce': nonce})
+                        log_path.write_text(marker + raw, encoding='utf-8')
+                        logs.append((log_path, raw, row['roomId'], row['seat']))
+                report.update(requireOpenXR=True, expectedVersionCode=76)
+                report_path.write_text(json.dumps(report), encoding='utf-8')
+                stamps.append(report_path)
+
+            path = root / 'stages.json'
+            made = subprocess.run([sys.executable, str(SCRIPT.with_name('prepare-venue-stages.py')),
+                '--topology', 'direct-lan', '--minimum-concurrent-ms', '2000', '--require-quest-openxr',
+                '--output', str(path), *map(str, paths)], capture_output=True, timeout=30)
+            self.assertEqual(0, made.returncode, made.stderr)
+            command = [sys.executable, str(SCRIPT), '--venue-stages', str(path)]
+            accepted = json.loads(subprocess.check_output(command, timeout=30))
+            self.assertIs(accepted['requireQuestOpenXR'], True)
+            self.assertEqual(80, accepted['serverAcknowledgements'])
+            self.assertEqual([5] * 6, [row['questOpenXR']['verifiedSeats'] for row in accepted['stages']])
+            self.assertFalse(accepted['physicalHostsVerified'])
+
+            value = json.loads(stamps[0].read_bytes())
+            value['requireOpenXR'] = False
+            for row in value['devices']:
+                row.pop('openXR')
+            stamps[0].write_text(json.dumps(value), encoding='utf-8')
+            invalid_log, raw, room, seat = logs[5]
+            invalid_log.write_text(raw, encoding='utf-8')
+            inspected = subprocess.run([*command, '--inspect-venue-stages'], capture_output=True, timeout=30)
+            self.assertEqual(1, inspected.returncode, inspected.stderr)
+            absent, invalid = json.loads(inspected.stdout)['issues']
+            self.assertEqual([1], absent['entries'])
+            self.assertEqual({'expectedSeats': 5, 'verifiedSeats': 0, 'invalidReports': [],
+                              'missingSeats': [{'roomId': n, 'seat': 1} for n in range(1, 6)]}, absent['questOpenXR'])
+            self.assertEqual([2], invalid['entries'])
+            self.assertEqual(4, invalid['questOpenXR']['verifiedSeats'])
+            self.assertEqual([{'roomId': room, 'seat': seat, 'reason': 'Original Quest OpenXR launch marker must precede the final result'}],
+                             invalid['questOpenXR']['invalidReports'])
+            refused = subprocess.run(command, capture_output=True, timeout=30)
+            self.assertEqual(1, refused.returncode)
+            self.assertFalse(refused.stdout)
+
+    def test_required_quest_openxr_does_not_accept_an_all_windows_batch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path, manifest, _ = venue_fixture(Path(directory), 'Independent')
+            self.assertNotIn('questOpenXR', field.verify_venue(path))
+            manifest['requireQuestOpenXR'] = 'true'
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'must be a boolean'):
+                field.verify_venue(path)
+            manifest['requireQuestOpenXR'] = True
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            refused = subprocess.run([sys.executable, str(SCRIPT), '--venue-manifest', str(path)],
+                                     capture_output=True, timeout=30)
+            self.assertEqual(1, refused.returncode)
+            self.assertEqual({'expectedSeats': 0, 'verifiedSeats': 0, 'missingSeats': [], 'invalidReports': []},
+                             json.loads(refused.stdout)['questOpenXR'])
+
     def test_verified_start_reports_each_original_digest_mismatch(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -4201,6 +4285,13 @@ class FieldResultsTests(unittest.TestCase):
                 with self.assertRaises(field.QuestLinkCriteriaFailed) as missing:
                     field.verify_venue(thresholds)
                 self.assertEqual(5, len(missing.exception.metrics['missingSeats']))
+                openxr_path = output.with_name('venue-with-required-openxr.json')
+                prepared = subprocess.run([*command, '--require-quest-openxr', '--output', str(openxr_path)], capture_output=True)
+                self.assertEqual(0, prepared.returncode, prepared.stderr.decode())
+                self.assertIs(json.loads(openxr_path.read_bytes())['requireQuestOpenXR'], True)
+                with self.assertRaises(field.QuestOpenXRIncomplete) as missing_openxr:
+                    field.verify_venue(openxr_path)
+                self.assertEqual(5, len(missing_openxr.exception.coverage['missingSeats']))
                 self.assertTrue(all(not Path(value).is_absolute() for value in (
                     generated['questCaptures']['deviceMap'], generated['questCaptures']['networkPlan'],
                     generated['venueNetworkPlan'],
@@ -4561,6 +4652,24 @@ class FieldResultsTests(unittest.TestCase):
                     capture_path.write_text(json.dumps(report), encoding='utf-8')
                     with self.assertRaisesRegex(field.EvidenceError, reason):
                         field.verify_venue(path)
+                    manifest['requireQuestOpenXR'] = True
+                    path.write_text(json.dumps(manifest), encoding='utf-8')
+                    with self.assertRaises(field.QuestOpenXRIncomplete) as refused:
+                        field.verify_venue(path)
+                    self.assertEqual(24, refused.exception.coverage['verifiedSeats'])
+                    [issue] = refused.exception.coverage['invalidReports']
+                    self.assertEqual((captured['roomId'], captured['seat']), (issue['roomId'], issue['seat']))
+                    self.assertIn(reason, issue['reason'])
+                    manifest.pop('requireQuestOpenXR')
+                    path.write_text(json.dumps(manifest), encoding='utf-8')
+                source.write_bytes(marker + raw)
+                captured.update(bytes=len(marker + raw), sha256=hashlib.sha256(marker + raw).hexdigest())
+                capture_path.write_text(json.dumps(report), encoding='utf-8')
+                manifest['requireQuestOpenXR'] = True
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                strict = field.verify_venue(path)
+                self.assertEqual({'expectedSeats': 25, 'verifiedSeats': 25, 'missingSeats': [], 'invalidReports': []},
+                                 strict['questOpenXR'])
 
     def test_quest_capture_matches_exact_referenced_deployment(self):
         for mode in ('Independent', 'Linked'):

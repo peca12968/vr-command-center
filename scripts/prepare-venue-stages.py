@@ -24,6 +24,7 @@ def prepare(args, output):
         ('requireCompleteVenueRelease', args.require_complete_venue_release),
         ('requireTrackedRoster', args.require_tracked_roster),
         ('requireConcurrentFire', args.require_concurrent_fire),
+        ('requireQuestOpenXR', args.require_quest_openxr),
     ):
         if enabled:
             plan[key] = True
@@ -85,6 +86,8 @@ def main():
     parser.add_argument('--windows-maximum-p95-ms', type=int)
     parser.add_argument('--quest-minimum-replies', type=int)
     parser.add_argument('--quest-maximum-p95-ms', type=int)
+    parser.add_argument('--require-quest-openxr', action='store_true',
+                        help='Require launch proof for every Quest seat and at least one Quest seat per batch')
     args = parser.parse_args()
     try:
         output = args.output.resolve()

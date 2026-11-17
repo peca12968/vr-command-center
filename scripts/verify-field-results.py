@@ -69,6 +69,12 @@ class QuestLinkReportMissing(EvidenceError):
     pass
 
 
+class QuestOpenXRIncomplete(EvidenceError):
+    def __init__(self, coverage):
+        super().__init__('Quest OpenXR requires an original launch proof for every Quest log, and at least one Quest seat')
+        self.coverage = coverage
+
+
 class ConcurrentRosterIncomplete(EvidenceError):
     def __init__(self, message, overlap):
         super().__init__(message)
@@ -1435,7 +1441,8 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                    quest_deployments=None, require_distinct_remote_roster=False, control_batches=(),
                    observed_quest_addresses=None, quest_readiness=(), planned_seat_addresses=None, reconnect_sources=None,
                    tracked_vr_start=None, roster_departures=None, topology_witness=None, require_quest_link_metrics=False,
-                   quest_link_criteria=None, quest_link_issues=None, quest_openxr_launches=None, room_enemy_policy_checks=None):
+                   quest_link_criteria=None, quest_link_issues=None, quest_openxr_launches=None, quest_openxr_status=None,
+                   room_enemy_policy_checks=None):
     integer(size, 0 if roster_departures is not None else 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(not verify_player_sources or world_journal is not None, 'Player source verification requires the original closed world journal')
@@ -1536,6 +1543,7 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
             else:
                 quest_link_rows.append({**location, **samples})
         if (capture_seat is not None or pid is not None and quest_deployments is not None
+                or pid is not None and quest_openxr_status is not None
                 or player_sources is not None or verify_reconnect_history or planned_seat_addresses is not None):
             seat = integer(owner['seat'], 0, 4) + 1
         if capture_seat is not None:
@@ -1544,12 +1552,21 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
         if pid is not None and quest_deployments is not None:
             require(quest_deployments.pop((room, seat), None) == (session_id, player_id, owner['admissionId'], port),
                     f'Quest deployment does not match the original admission and endpoint for room {room} seat {seat}')
+        if pid is not None and (quest_deployments is not None or quest_openxr_status is not None):
             proof = quest_openxr_launches.get((room, seat)) if quest_openxr_launches is not None else None
-            if proof is not None:
+            if proof is None:
+                if quest_openxr_status is not None:
+                    quest_openxr_status[room, seat] = ('missing', None)
+            else:
                 try:
                     verify_quest_openxr_log(log, pid, proof)
                 except EvidenceError as error:
-                    raise EvidenceError(f'Quest OpenXR launch for room {room} seat {seat}: {error}') from error
+                    if quest_openxr_status is None:
+                        raise EvidenceError(f'Quest OpenXR launch for room {room} seat {seat}: {error}') from error
+                    quest_openxr_status[room, seat] = ('invalid', str(error))
+                else:
+                    if quest_openxr_status is not None:
+                        quest_openxr_status[room, seat] = ('verified', None)
         planned = reconnect_sources.get((room, seat)) if reconnect_sources is not None else None
         if planned is None:
             require(observed[0] == expected_ip, 'UDP peer differs from the declared source or is reused')
@@ -3292,7 +3309,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
                        inspect_missing=False, inspect_roster=False,
                        staged_roster=None, staged_link_criteria=None, expected_stage=None, inspect_roster_minimum=None,
                        staged=False, staged_quest_link_criteria=None, staged_require_server_release=False,
-                       staged_release_sha256=None):
+                       staged_release_sha256=None, staged_require_quest_openxr=False):
     manifest_path = manifest_path.resolve(strict=True)
     with manifest_path.open('rb') as stream:
         raw_manifest = limited_read(stream)
@@ -3315,6 +3332,9 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     require(topology in ('same-host', 'direct-lan') and mode in ('Independent', 'Linked'), 'Invalid venue topology or mode')
     require_quest_link_metrics = manifest.get('requireQuestLinkMetrics', False)
     require(type(require_quest_link_metrics) is bool, 'requireQuestLinkMetrics must be a boolean')
+    require_quest_openxr = manifest.get('requireQuestOpenXR', False)
+    require(type(require_quest_openxr) is bool, 'requireQuestOpenXR must be a boolean')
+    quest_openxr_status = {} if require_quest_openxr or staged_require_quest_openxr else None
     require_server_release = manifest.get('requireServerRelease', False)
     require(type(require_server_release) is bool, 'requireServerRelease must be a boolean')
     if expected_stage is not None:
@@ -3784,7 +3804,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
                                          roster_departures=departures, tracked_vr_start=documents.get('tracked-vr-start.json'),
                                          topology_witness=historical_ips if final_counts is not None else None,
                                          require_quest_link_metrics=require_quest_link_metrics, quest_link_criteria=quest_link_criteria,
-                                         quest_link_issues=quest_link_issues, quest_openxr_launches=quest_openxr)
+                                         quest_link_issues=quest_link_issues, quest_openxr_launches=quest_openxr,
+                                         quest_openxr_status=quest_openxr_status)
         for paths in source_paths or ():
             hashes = original_pairs.get(paths)
             if hashes is not None:
@@ -3833,6 +3854,20 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     require(recorded_at in end_times and not expected, 'Closure time or session set differs from the terminal evidence')
     require(not admission_ids.intersection(departed_admissions), 'A departed admission is also used in the final venue roster')
     require(not quest_deployments, 'Quest deployment reports include seats without original Quest logcat evidence')
+    quest_openxr_coverage = {}
+    if quest_openxr_status is not None:
+        coverage = {'expectedSeats': quest_players, 'verifiedSeats': 0, 'missingSeats': [], 'invalidReports': []}
+        for (room, seat), (status, reason) in sorted(quest_openxr_status.items()):
+            location = {'roomId': room, 'seat': seat}
+            if status == 'verified':
+                coverage['verifiedSeats'] += 1
+            elif status == 'missing':
+                coverage['missingSeats'].append(location)
+            else:
+                coverage['invalidReports'].append({**location, 'reason': reason})
+        if not quest_players or coverage['verifiedSeats'] != quest_players:
+            raise QuestOpenXRIncomplete(coverage)
+        quest_openxr_coverage = {'questOpenXR': coverage}
     if quest_openxr:
         deployment_summary['openXRSeatsVerified'] = len(quest_openxr)
     require(not quest_readiness, 'Quest readiness refers to a session outside the original closure')
@@ -3918,6 +3953,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
             **({'distinctRemoteRoster': {'seatsVerified': len(player_ids), 'distinctSourceAddresses': len(remote),
                 'connectionsVerified': reconnect_summary['reconnectHistory']['observedConnections']}} if require_distinct_remote_roster else {}),
             **({'questLogcatPlayers': quest_players} if quest_players else {}),
+            **quest_openxr_coverage,
             **({'questLinkMetricsVerified': quest_players} if require_quest_link_metrics or quest_link_policy else {}),
             **quest_link_policy,
             **({**capture_summary, 'questCaptureSeatsVerified': quest_players} if capture_supplied else {}),
@@ -3973,7 +4009,7 @@ def staged_batch_report(report, batch):
             'worldJournalsVerified': report['worldJournalsVerified'], 'concurrentRoster': report['concurrentRoster'],
             **({'serverRelease': server_release} if server_release is not None else {}),
             **seat_proofs,
-            **{key: report[key] for key in ('combatJournalsVerified', 'distinctRemoteRoster', 'windowsLinkCriteria', 'questLinkCriteria',
+            **{key: report[key] for key in ('combatJournalsVerified', 'distinctRemoteRoster', 'windowsLinkCriteria', 'questLinkCriteria', 'questOpenXR',
                                            'questLinkMetricsVerified',
                                            'windowsStationAddresses', 'venueNetworkPlan', 'reconnectSourcePlan',
                                            'verifiedVenueStart') if key in report}, **observed}
@@ -4003,7 +4039,7 @@ def verify_venue_stages(plan_path, *, inspect=False):
     roster_options = ('requireTrackedRoster', 'requireConcurrentFire')
     optional = {'expectedStages', 'requireDistinctRemoteRoster', 'requireVerifiedVenueStart', 'requireServerRelease',
                 'requireCompleteVenueRelease', 'venueReleaseReportSha256',
-                'windowsLinkCriteria', 'questLinkCriteria', *roster_options}
+                'windowsLinkCriteria', 'questLinkCriteria', 'requireQuestOpenXR', *roster_options}
     require(type(plan) is dict and required <= plan.keys() <= required | optional,
             'Invalid staged venue plan fields')
     integer(plan['version'], 1, 1)
@@ -4011,6 +4047,9 @@ def verify_venue_stages(plan_path, *, inspect=False):
     quest_link_criteria = read_link_criteria(plan, 'Quest')
     link_policy = {key: value for key, value in (('windowsLinkCriteria', link_criteria), ('questLinkCriteria', quest_link_criteria))
                    if value is not None}
+    require_quest_openxr = plan.get('requireQuestOpenXR', False)
+    require(type(require_quest_openxr) is bool, 'Staged requireQuestOpenXR must be a boolean')
+    quest_openxr_policy = {'requireQuestOpenXR': require_quest_openxr} if 'requireQuestOpenXR' in plan else {}
     topology = plan['topology']
     require(topology in ('same-host', 'direct-lan'), 'Invalid staged venue topology')
     minimum = integer(plan['minimumConcurrentMilliseconds'], 1000, 900000)
@@ -4068,7 +4107,7 @@ def verify_venue_stages(plan_path, *, inspect=False):
                                                staged_roster=staged_roster, staged_link_criteria=link_criteria,
                                                expected_stage=expected_stage, staged=True, staged_quest_link_criteria=quest_link_criteria,
                                                staged_require_server_release=require_server_release and not complete_release,
-                                               staged_release_sha256=release_pin)
+                                               staged_release_sha256=release_pin, staged_require_quest_openxr=require_quest_openxr)
             key = (report['mode'], report['players'])
             require(key in stage_keys, 'Staged venue evidence must cover each mode and seat count exactly once')
             require(report['declaredTopology'] == topology, 'Venue batch topology differs from the staged plan')
@@ -4093,6 +4132,9 @@ def verify_venue_stages(plan_path, *, inspect=False):
             continue
         except QuestLinkCriteriaFailed as error:
             reject(f'Venue manifest entry {index}: {error}', index, questLinkMetrics=error.metrics)
+            continue
+        except QuestOpenXRIncomplete as error:
+            reject(f'Venue manifest entry {index}: {error}', index, questOpenXR=error.coverage)
             continue
         except ConcurrentRosterIncomplete as error:
             reject(f'Venue manifest entry {index}: {error}', index, concurrentRoster=error.overlap)
@@ -4162,14 +4204,15 @@ def verify_venue_stages(plan_path, *, inspect=False):
             status = 'conflict' if index in affected else 'verified'
             results.append({**entry, 'status': status, **entries[index]})
         return {'version': 1, 'scope': 'staged-venue-inspection', 'complete': not issues,
-                'planSha256': hashlib.sha256(raw_plan).hexdigest(), **link_policy, **server_release_policy, **complete_release_policy,
+                'planSha256': hashlib.sha256(raw_plan).hexdigest(), **link_policy, **quest_openxr_policy,
+                **server_release_policy, **complete_release_policy,
                 'entries': results, 'issues': issues,
                 'missingStages': [{'mode': mode, 'players': players} for mode, players in stage_keys if (mode, players) not in stages]}
     results = [entries[stages[key][0]] for key in stage_keys]
     return {'version': 1, 'consistent': True, 'declaredTopology': topology,
             'planSha256': hashlib.sha256(raw_plan).hexdigest(), 'venueReleaseSha256': next(iter(releases)),
             'minimumConcurrentMilliseconds': minimum, 'requireDistinctRemoteRoster': distinct,
-            **link_policy, **server_release_policy, **complete_release_policy,
+            **link_policy, **quest_openxr_policy, **server_release_policy, **complete_release_policy,
             **({'requireVerifiedVenueStart': require_start} if 'requireVerifiedVenueStart' in plan else {}),
             **{key: requirements[key] for key in roster_options if key in plan}, 'stages': results,
             'serverAcknowledgements': sum(stage['serverAcknowledgements'] for stage in results),
@@ -4289,6 +4332,9 @@ def main():
                             quest_readiness_reports=[read_quest_json(path) for path in args.quest_readiness_report or ()],
                             tracked_vr_start=evidence.get('tracked-vr-start.json'), roster_departures=evidence.get('roster-departures.json'),
                             require_quest_link_metrics=args.require_quest_link_metrics, quest_link_criteria=quest_link_criteria)
+    except QuestOpenXRIncomplete as error:
+        print(json.dumps({'version': 1, 'consistent': False, 'questOpenXR': error.coverage}, indent=2))
+        parser.exit(1, f'Field evidence rejected. {error}.\n')
     except ConcurrentRosterIncomplete as error:
         print(json.dumps({'version': 1, 'consistent': False, 'concurrentRoster': error.overlap}, indent=2))
         parser.exit(1, f'Field evidence rejected. {error}.\n')
