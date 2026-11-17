@@ -71,8 +71,10 @@ def main():
     control_root, server_root = args.control_package.resolve(), args.server_package.resolve()
     control_manifest = controls.package.verify(control_root)
     server_manifest = server_package.verify(server_root)
+    control_exe, server_exe = control_root / 'Start-Control.exe', server_root / 'Launch-Server.exe'
+    require_silent_windows_launch(control_exe)
     require_silent_windows_launch(control_root / 'Runtime/VrCommand.Api.exe')
-    require_silent_windows_launch(server_root / 'Launch-Server.exe')
+    require_silent_windows_launch(server_exe)
     require_silent_windows_launch(server_root / 'Runtime/VrCommand.exe')
     require_silent_windows_launch(sys.executable)
     run = 'run-' + uuid.uuid4().hex
@@ -80,9 +82,9 @@ def main():
     runtime = args.runtime_root.resolve() / run
     out.mkdir(parents=True, exist_ok=False)
     runtime.mkdir(parents=True, exist_ok=False)
-    env = dict(os.environ, PATH=str(Path(os.environ['WINDIR']) / 'System32'), DOTNET_ROOT=str(runtime / 'absent-dotnet'))
+    env = dict(os.environ, PATH=str(Path(os.environ['WINDIR']) / 'System32'),
+               DOTNET_ROOT=str(runtime / 'absent-dotnet'), VR_COMMAND_UNATTENDED='1')
     data = runtime / 'control'
-    control_exe, server_exe = control_root / 'Start-Control.exe', server_root / 'Launch-Server.exe'
     api_port, = free_ports(1, socket.SOCK_STREAM)
     udp_ports = free_ports(len(groups), socket.SOCK_DGRAM)
     base = f'http://127.0.0.1:{api_port}'
@@ -102,11 +104,10 @@ def main():
     def read(path):
         return json.loads(path.read_text(encoding='utf-8'))
 
-    def spawn(name, command, *, game=False):
-        start = start_checked_windows_process if game else subprocess.Popen
-        child = start(list(map(str, command)), cwd=runtime, env=env,
-                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                 creationflags=subprocess.CREATE_NO_WINDOW)
+    def spawn(name, command):
+        child = start_checked_windows_process(list(map(str, command)), cwd=runtime, env=env,
+                                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                              creationflags=subprocess.CREATE_NO_WINDOW)
         children[name] = child
         return child
 
@@ -223,7 +224,7 @@ def main():
             config, path = runtime / (name + '.json'), runtime / (name + '.log')
             save(config, {'role': 'Client', 'address': '127.0.0.1', 'port': entry['port'], 'joinTicket': ticket})
             process = spawn(name, [server_root / 'Runtime/VrCommand.exe', '-batchmode', '-nographics', '-job-worker-count', '2',
-                                   '-logFile', path, '--vr-config', config], game=True)
+                                   '-logFile', path, '--vr-config', config])
             entry['clients'].append({'player': player, 'process': process, 'log': path})
 
     def phase(action):
@@ -373,6 +374,7 @@ def main():
     print(json.dumps({'run': run, 'expect': args.expect, 'topology': args.topology, 'playersPerRoom': args.players_per_room,
                       'directory': str(out)}), flush=True)
     try:
+        require_silent_windows_launch(control_exe)
         subprocess.run(list(map(str, [control_exe, '--init', data, '--port', api_port, '--report', out / 'control-init.json'])),
                        env=env, cwd=runtime, check=True, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW)
         keys = read(data / 'operator-keys.json')['OperatorKeys']
@@ -524,4 +526,9 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    from windows_firewall import WindowsFirewallLaunchError
+
+    try:
+        main()
+    except WindowsFirewallLaunchError as error:
+        sys.exit(str(error))

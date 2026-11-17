@@ -33,6 +33,7 @@
 ## 2026-11-17 避免 Windows 背景啟動跳出防火牆視窗
 
 - 開發版遊戲的文件指令改走 `start-windows-vr.ps1`，Windows 玩家包的量測指令改走 `Launch-Player.exe`。開發版入口以實際 EXE 路徑強制查核無人值守條件。現行網域、私人和公用設定檔均開啟入站通知，實測開發版、解壓伺服器版和玩家版三個路徑均回傳 2，前後皆無 `VrCommand` 程序。以不接收網路連線的測試程式核對查核通過時的參數傳遞及退出碼。 [無人值守操作](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
+- 管理服務重啟測試會在每次開啟管理啟動器、伺服器啟動器與遊戲前重新查核，並將無人值守設定傳給舊套件。以本機有效防火牆設定複測，開發版入口退出碼 2，管理重啟在 `Start-Control.exe` 啟動前退出，兩輪均查得 `VrCommand.exe` 程序為零。防火牆查核和啟動測試共 7 項通過。 [管理重啟拒絕紀錄](../artifacts/mr-venue-pilot-031236/restart-firewall-check-final.log)
 
 ## 2026-11-17 即時觀戰重連與回看後返回
 
