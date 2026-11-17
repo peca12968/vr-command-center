@@ -1,5 +1,15 @@
 # Windows 可攜玩家包
 
+## 更新原入場票券
+
+啟動器 1.18 可在遊戲仍開啟時更新原連線檔。從控制台下載同一場次、同一入場的新檔，將命令中的路徑替換為啟動遊戲時的原檔、新檔與尚未存在的報告。三個路徑都使用本機完整路徑。
+
+```powershell
+.\Launch-Player.exe --refresh-player-ticket 'F:\玩家\本場連線.json' 'F:\玩家\新票券.json' --report 'F:\玩家\票券更新結果.json'
+```
+
+工具核對同一場次、玩家、入場識別、房號、席位及 IPv4／UDP 埠，確認新票券依本機時間仍有效且效期沒有縮短。更新採完整檔案替換，再讀回確認。報告為 `ticket-file-refreshed` 或 `ticket-file-current` 時，可在原遊戲按 Reconnect，Windows OpenXR 玩家可使用對應的重連按鍵。`ticket-refresh-unconfirmed` 時可核對來源及路徑，再用新報告檔名重試。簽章及目前入場由遊戲伺服器驗證。 [入場與重連](RECONNECT.md)
+
 2026-11-16 啟動器 1.17.1／Windows 遊戲 0.50.12 的 ZIP 為 84,955,866 位元組，SHA-256 `293ff3db322dd0e76c0896096a124de67a6f8f749fe7298ba842718fc1d8f962`。解壓核對 331 筆清單。命令列啟動錯誤寫入指定報告或終端機，程式以錯誤碼退出。 [玩家包](../artifacts/windows-unattended-20261116-1730/VRCommand-Player-0.50.12-launcher-1.17.1-win-x64.zip) · [離線檢查](../artifacts/windows-unattended-20261116-1730/launcher-offline.log)
 
 2026-11-16 啟動器 1.17／Windows 遊戲 0.50.11 的 ZIP 為 84,952,986 位元組，SHA-256 `dd985b0aed61f4cbe5e00b548c08bff4dc653df35997dacc3805beefc740d171`。解壓核對 331 筆清單。程序報告與驗收 ZIP 記錄原場館發行檔的摘要。 [玩家包](../artifacts/windows-player-release-report-1170-05011.zip) · [共同發行報告](../artifacts/venue-release-windows-player-report-1170-05011.json)

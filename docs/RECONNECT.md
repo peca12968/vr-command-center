@@ -1,5 +1,7 @@
 # 桌面重連與入場識別
 
+Windows 啟動器 1.18 可核對新舊票券的同一入場，並更新原遊戲會重新讀取的連線檔。更新確認後，在原遊戲按 Reconnect。 [Windows 票券更新](WINDOWS_PLAYER_PACKAGE.md#更新原入場票券)
+
 Quest端新增[右手B鍵重連](QUEST_RECONNECT.md)，沿用同一重讀原票券路徑與伺服器驗證；焦點／追蹤／冷卻後須放開重按。Unity0.34／code41、NGO29與API/UI0.30，當次真正建置與無頭盔限制見PROGRESS；下文0.19為原桌面歷史。
 
 Unity 遊戲端 v0.19.0／Android code20／NGO protocol18；管理 API 仍為 0.16.0、驗票 protocol 2，場次 envelope 6／世界 schema 1 不變。更新所有遊戲伺服器與玩家程式，不混用 NGO 16／17／18。Prepare 會在既有 Arena 上將設定 16／17 升為 18，保留 scene／PlayerAvatar 的 GUID、本地 file ID 及 NGO hash；不分平台重建場景。

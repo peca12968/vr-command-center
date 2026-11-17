@@ -4,6 +4,7 @@ Uses only freshly created fixture configs; does not connect to a game server.
 Actual downloaded-ticket admission is checked separately by check-external-native.cjs.
 """
 import argparse
+import base64
 from datetime import datetime
 import importlib.util
 import json
@@ -20,6 +21,67 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('player_package', ROOT / 'scripts/package-windows-player.py')
 package = importlib.util.module_from_spec(spec); spec.loader.exec_module(package)
+
+
+def check_ticket_refresh(folder, directory):
+    launcher = folder / 'Launch-Player.exe'
+    fixture = directory / 'Ticket renewal 玩家'
+    fixture.mkdir()
+    current = fixture / 'original 玩家.json'
+    renewal = fixture / 'new ticket.json'
+    correlation = [uuid.uuid4().bytes_le for _ in range(3)]
+    now = int(time.time())
+    findings = []
+
+    def config(expiry, ids=correlation, room=2, seat=0, **fields):
+        payload = b'\x02' + b''.join(ids) + bytes((room, seat)) + struct.pack('>q', expiry) + uuid.uuid4().bytes
+        ticket = 'v2.' + base64.urlsafe_b64encode(payload).decode() + '.' + 'a' * 43
+        return dict({'role': 'Client', 'address': '192.0.2.52', 'port': 17777, 'joinTicket': ticket}, **fields)
+
+    def write(target, value):
+        target.write_bytes(('\ufeff' + json.dumps(value, indent=2).replace('\n', '\r\n') + '\r\n').encode('utf-8'))
+
+    def run(label, status='ticket-refresh-unconfirmed'):
+        output = fixture / (str(len(findings)) + '.json')
+        before = current.read_bytes()
+        incoming = renewal.read_bytes()
+        completed = subprocess.run([str(launcher), '--refresh-player-ticket', str(current), str(renewal), '--report', str(output)],
+                                   capture_output=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
+        ok = status != 'ticket-refresh-unconfirmed'
+        assert completed.returncode == (0 if ok else 1), label
+        assert json.loads(output.read_bytes()) == {'status': status, 'complete': ok}, label
+        assert b'v2.' not in completed.stdout + completed.stderr and b'v2.' not in output.read_bytes(), label
+        assert renewal.read_bytes() == incoming, label
+        assert current.read_bytes() == (incoming if status == 'ticket-file-refreshed' else before), label
+        assert not list(fixture.glob('*.tmp')), label
+        findings.append(label); print('PASS:', label, flush=True)
+
+    write(current, config(now - 45))
+    write(renewal, config(now + 240))
+    run('Renews an expired ticket from the identical admission and endpoint, retaining incoming raw bytes', 'ticket-file-refreshed')
+    run('Replaying the original renewal confirms the already current bytes', 'ticket-file-current')
+    for index, name in enumerate(('session', 'player', 'admission')):
+        ids = correlation.copy()
+        ids[index] = uuid.uuid4().bytes_le
+        write(renewal, config(now + 250, ids=ids))
+        run('Rejects a replacement with a different ' + name)
+    variants = [('room', {'room': 3}), ('seat', {'seat': 1}), ('IP address', {'address': '192.0.2.53'}), ('UDP port', {'port': 17778}),
+                ('server role', {'role': 'Server'}), ('invalid ticket shape', {'joinTicket': 'not-a-ticket'})]
+    for label, fields in variants:
+        write(renewal, config(now + 250, **fields))
+        run('Rejects an unexpected ' + label + ' without changing the original')
+    write(renewal, config(now - 1))
+    run('Rejects an expired replacement')
+    write(renewal, config(now + 180))
+    run('Rejects a valid-time replacement that is older than the installed ticket')
+    write(renewal, config(now + 250))
+    lock = current.with_name(current.name + '.refresh.lock')
+    with lock.open('xb'):
+        run('Rejects concurrent renewal while the original is reserved')
+    lock.unlink()
+    run('Accepts the same renewal after the original is available again', 'ticket-file-refreshed')
+    assert not lock.exists()
+    return findings
 
 
 def check_openxr_preflight(folder, directory, mock_manifest):
@@ -200,6 +262,7 @@ def main():
         findings.append(label); print('PASS:', label, flush=True)
 
     check('Actual launcher verifies the full extracted runtime', ['--verify'], success=True)
+    findings.extend(check_ticket_refresh(folder, directory))
     rejected = subprocess.run([str(folder / 'Launch-Player.exe'), '--launch', '--headless'], cwd=directory,
                               stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                               timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)

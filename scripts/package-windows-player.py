@@ -45,6 +45,7 @@ README = '''VR Command Windows 玩家包
 WASD移動；方向鍵或按住右鍵拖曳瞄準；Space／左鍵射擊；R換彈；B任務簡報；Escape關閉簡報。
 任務由控制人員開始、暫停與結束。啟動器顯示「正在等待最終戰績」時，請保留遊戲視窗。等待期間若中斷，可請控制人員從原場次確認戰績。
 同次入場斷線可在遊戲的Reconnect按鈕重新讀取原路徑的最新票券。
+啟動器 1.18 可用 --refresh-player-ticket "原連線.json" "新連線.json" --report "新更新報告.json" 更新同一入場的原檔。三個參數使用本機完整路徑。更新確認後，在原遊戲內重新連線。
 
 Windows 開發版自 0.46.0 起支援連線量測。指定新 JSON 絕對路徑，上層目錄須已存在。結果含往返時間、逾時與 Unity 更新次數。
 啟動器 1.5 可在 --launch --wait --log 新日誌 --report 新程序報告 加上 --link-metrics 新量測.json。程序結束時會在程序報告保存原日誌與量測檔的 SHA-256，供封存驗收核對。請保留三個原檔。
@@ -162,7 +163,7 @@ def package(player, output, compiler):
                         '/resource:' + str(ROOT / 'scripts/check-windows-firewall-notifications.ps1') + ',FirewallPreflight.ps1',
                         '/out:' + str(folder / 'Launch-Player.exe'), str(source),
                         str(ROOT / 'tools/WindowsFirewallPreflight.cs')], check=True)
-        manifest = {'version': 1, 'platform': 'Windows-x64', 'launcherVersion': '1.17.2', 'createdAtUtc': datetime.now(timezone.utc).isoformat(),
+        manifest = {'version': 1, 'platform': 'Windows-x64', 'launcherVersion': '1.18', 'createdAtUtc': datetime.now(timezone.utc).isoformat(),
                     'build': receipt, 'launcherSourceSha256': digest(source), 'scope': 'Offline portable PC player; no tickets; not a signature or network/device verification',
                     'files': [{'path': file.relative_to(folder).as_posix(), 'bytes': file.stat().st_size, 'sha256': digest(file)}
                               for file in sorted(folder.rglob('*')) if file.is_file()]}

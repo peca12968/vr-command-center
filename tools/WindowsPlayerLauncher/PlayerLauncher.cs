@@ -68,20 +68,22 @@ internal static class PlayerLauncher
     private static Dictionary<string, object> Read(string path, long max, string expectedHash = null, Action<string> recordHash = null)
     {
         using (var file = File.OpenRead(path))
+            return Read(file, max, expectedHash, recordHash);
+    }
+    private static Dictionary<string, object> Read(Stream file, long max, string expectedHash = null, Action<string> recordHash = null)
+    {
+        Require(file.Length <= max, "檔案過大，請重新取得正確檔案。");
+        if (expectedHash != null || recordHash != null)
         {
-            Require(file.Length <= max, "檔案過大，請重新取得正確檔案。");
-            if (expectedHash != null || recordHash != null)
-            {
-                var actualHash = Hash(file);
-                Require(expectedHash == null || actualHash == expectedHash, "本機玩家包清單與場館發行報告不同。");
-                if (recordHash != null) recordHash(actualHash);
-                file.Position = 0;
-            }
-            using (var reader = new StreamReader(file, Encoding.UTF8))
-            {
-                var value = Map(Json.DeserializeObject(reader.ReadToEnd()));
-                Require(value != null, "檔案格式不正確。"); return value;
-            }
+            var actualHash = Hash(file);
+            Require(expectedHash == null || actualHash == expectedHash, "本機玩家包清單與場館發行報告不同。");
+            if (recordHash != null) recordHash(actualHash);
+            file.Position = 0;
+        }
+        using (var reader = new StreamReader(file, Encoding.UTF8, true, 1024, leaveOpen: true))
+        {
+            var value = Map(Json.DeserializeObject(reader.ReadToEnd()));
+            Require(value != null, "檔案格式不正確。"); return value;
         }
     }
     private static void PlainPath(string path)
@@ -163,7 +165,11 @@ internal static class PlayerLauncher
     }
     private static Dictionary<string, object> Config(string path)
     {
-        PlainPath(path); var value = Read(path, 32768);
+        PlainPath(path);
+        return Config(Read(path, 32768));
+    }
+    private static Dictionary<string, object> Config(Dictionary<string, object> value)
+    {
         Require(value.Count == 4 && value.ContainsKey("role") && value.ContainsKey("address") && value.ContainsKey("port") && value.ContainsKey("joinTicket"),
             "請選擇控制台下載的四欄玩家連線檔。");
         var address = Text(value, "address"); var ticket = Text(value, "joinTicket"); IPAddress parsed;
@@ -202,6 +208,72 @@ internal static class PlayerLauncher
     private static bool LocalFullPath(string path)
     {
         return path != null && Regex.IsMatch(path, @"\A[A-Za-z]:[\\/][^:\x00-\x1f]*\z");
+    }
+    private static string RefreshTicket(string current, string renewal)
+    {
+        PlainPath(current); PlainPath(renewal);
+        // Serialize concurrent refreshes of the same connection file. Unity can still read it.
+        using (var guard = new FileStream(current + ".refresh.lock", FileMode.CreateNew, FileAccess.Write, FileShare.None, 1, FileOptions.DeleteOnClose))
+        using (var original = new FileStream(current, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))
+        using (var replacement = File.OpenRead(renewal))
+        {
+            string originalHash = null, replacementHash = null;
+            var a = Config(Read(original, 32768, recordHash: hash => originalHash = hash));
+            var b = Config(Read(replacement, 32768, recordHash: hash => replacementHash = hash));
+            var oldTicket = Text(a, "joinTicket"); var newTicket = Text(b, "joinTicket");
+            var oldSeat = TicketPreview.Read(oldTicket); var newSeat = TicketPreview.Read(newTicket);
+            Require(oldSeat != null && oldSeat.SameAdmission(newSeat)
+                && Text(a, "address") == Text(b, "address") && Number(a, "port") == Number(b, "port"),
+                "The connection files must use the original admission, seat and endpoint.");
+            Require(newSeat.ExpiresAtUtc > DateTimeOffset.UtcNow && newSeat.ExpiresAtUtc >= oldSeat.ExpiresAtUtc,
+                "The replacement ticket is expired or older than the current ticket.");
+            if (oldTicket == newTicket)
+            {
+                Require(Hash(current) == originalHash, "The original file changed during renewal.");
+                return "ticket-file-current";
+            }
+            var temporary = current + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                replacement.Position = 0;
+                using (var staged = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                    replacement.CopyTo(staged);
+                    staged.Flush(true);
+                }
+                Require(Hash(temporary) == replacementHash && Hash(current) == originalHash, "The connection file changed during renewal.");
+                File.Replace(temporary, current, null);
+                Require(Hash(current) == replacementHash, "The updated file could not be confirmed.");
+                return "ticket-file-refreshed";
+            }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        }
+    }
+    private static int RefreshTicketCommand(string[] args)
+    {
+        string report = null;
+        try
+        {
+            Require(args.Length == 5 && args[3] == "--report" && LocalFullPath(args[1])
+                && LocalFullPath(args[2]) && LocalFullPath(args[4]), "Use three absolute local paths.");
+            var current = Path.GetFullPath(args[1]); var renewal = Path.GetFullPath(args[2]); var output = Path.GetFullPath(args[4]);
+            Require(!SamePath(current, renewal) && !SamePath(current, output) && !SamePath(renewal, output)
+                && !current.StartsWith(Root, StringComparison.OrdinalIgnoreCase) && !output.StartsWith(Root, StringComparison.OrdinalIgnoreCase)
+                && !File.Exists(output) && !Directory.Exists(output), "Use separate files and a new report outside the player package.");
+            PlainPath(Path.GetDirectoryName(output));
+            report = output;
+            var status = RefreshTicket(current, renewal);
+            Report(report, new { status, complete = true }, replaceExisting: false);
+            return 0;
+        }
+        catch (Exception)
+        {
+            // Neither the connection files nor exceptions are safe to copy to diagnostics.
+            if (report != null)
+                try { Report(report, new { status = "ticket-refresh-unconfirmed", complete = false }, replaceExisting: false); } catch { }
+            Console.Error.WriteLine("Ticket refresh not confirmed. Check the original seat, endpoint and file paths, then retry.");
+            return 1;
+        }
     }
     private static bool IsX64Dll(string path)
     {
@@ -428,6 +500,7 @@ internal static class PlayerLauncher
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Length > 0 && args[0] == "--refresh-player-ticket") return RefreshTicketCommand(args);
         if (Array.IndexOf(args, "--check-openxr") >= 0) return CheckOpenXrCommand(args);
         string config = null, log = null, linkMetrics = null, releasePath = null, report = null, evidenceZip = null;
         bool launch = false, wait = false, headless = false, verify = false, openXR = false, invalidEvidenceOption = false;
@@ -588,14 +661,14 @@ internal static class PlayerLauncher
     }
     internal sealed class TicketPreview
     {
+        private Guid session, player, admission;
         public int Room { get; private set; }
         public int Seat { get; private set; }
         public DateTimeOffset ExpiresAtUtc { get; private set; }
 
         public static TicketPreview Read(string ticket)
         {
-            // Only read the public display fields of the current v2 layout. Unknown shapes
-            // still reach the original game path, which checks the signature and admission.
+            // The v2 fields support local review. Signature validation stays with the game server.
             if (ticket == null || ticket.Length != 147 ||
                 !Regex.IsMatch(ticket, @"\Av2\.[A-Za-z0-9_-]{100}\.[A-Za-z0-9_-]{43}\z")) return null;
             var payload = Convert.FromBase64String(ticket.Substring(3, 100).Replace('-', '+').Replace('_', '/'));
@@ -603,8 +676,23 @@ internal static class PlayerLauncher
             long seconds = 0;
             for (var offset = 51; offset < 59; offset++) seconds = (seconds << 8) | payload[offset];
             if (seconds <= 0 || seconds > 253402300799L) return null;
-            return new TicketPreview { Room = payload[49], Seat = payload[50] + 1,
+            return new TicketPreview { session = TicketId(payload, 1), player = TicketId(payload, 17), admission = TicketId(payload, 33),
+                Room = payload[49], Seat = payload[50] + 1,
                 ExpiresAtUtc = DateTimeOffset.FromUnixTimeSeconds(seconds) };
+        }
+
+        private static Guid TicketId(byte[] payload, int offset)
+        {
+            var bytes = new byte[16];
+            Buffer.BlockCopy(payload, offset, bytes, 0, bytes.Length);
+            return new Guid(bytes);
+        }
+
+        internal bool SameAdmission(TicketPreview other)
+        {
+            return other != null && session != Guid.Empty && player != Guid.Empty && admission != Guid.Empty
+                && session == other.session && player == other.player && admission == other.admission
+                && Room == other.Room && Seat == other.Seat;
         }
 
         public string SeatLabel { get { return "連線檔標示　房間 " + Room + "／席位 " + Seat; } }
