@@ -2057,10 +2057,18 @@ function Set-QuestConnection([string[]]$Target, $Config, $Ticket, $Alignment, [s
     }
 }
 
+function Confirm-QuestSmokeConfigAbsent([string[]]$Target) {
+    $config = '/sdcard/Android/data/com.vrcommand.quest/files/vr-connection.json'
+    Invoke-QuestAdb ($Target + @('shell', 'test', '!', '-e', $config)) | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not confirm the Quest has no existing player configuration.' }
+}
+
 function Invoke-QuestFirstLaunch([string]$Apk, $Release) {
     $deviceTarget = Get-SingleQuestTarget $Serial
     $model = @(Invoke-QuestAdb ($deviceTarget + @('shell', 'getprop', 'ro.product.model')) 2>$null)
     if ($LASTEXITCODE -ne 0 -or $model.Count -ne 1 -or $model[0].Trim() -cne 'Quest 3') { throw 'Select an authorized Meta Quest 3.' }
+    $originalDeviceSerial = Read-QuestDeviceSerial $deviceTarget
+    if (-not $originalDeviceSerial) { throw 'Could not confirm the original Quest device identity. First-launch test stopped.' }
 
     $package = 'com.vrcommand.quest'
     $installed = @(Invoke-QuestAdb ($deviceTarget + @('shell', 'pm', 'list', 'packages', '-u', '--user', 'current', $package)) 2>$null)
@@ -2070,19 +2078,25 @@ function Invoke-QuestFirstLaunch([string]$Apk, $Release) {
         if (-not $appPresent) { throw 'No existing VR Command app to resume. Run -SmokeTest without -ResumeSmokeTest to install.' }
     } else {
         if ($appPresent) { throw 'The first-launch test requires a headset without an existing VR Command app. Use -ResumeSmokeTest to check the matching APK without a player configuration.' }
+        Confirm-QuestSmokeConfigAbsent $deviceTarget
         $stagedApk = New-VerifiedQuestApk $Apk $Release.sha256
-        try { Install-QuestReleaseApk $deviceTarget $stagedApk }
+        try {
+            Confirm-QuestDeviceSerial $deviceTarget $originalDeviceSerial
+            Confirm-QuestSmokeConfigAbsent $deviceTarget
+            Install-QuestReleaseApk $deviceTarget $stagedApk
+        }
         finally { Remove-Item -LiteralPath $stagedApk -ErrorAction SilentlyContinue }
     }
     if ((Get-QuestApkStatus $deviceTarget $Release.sha256) -cne 'ready') { throw 'Installed Quest APK could not be verified against the release report.' }
 
-    $config = '/sdcard/Android/data/com.vrcommand.quest/files/vr-connection.json'
-    Invoke-QuestAdb ($deviceTarget + @('shell', 'test', '!', '-e', $config)) | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Could not confirm the Quest has no existing player configuration. App launch was skipped.' }
     $activity = Get-QuestLauncherActivity $deviceTarget
     $nonce = if ($RequireOpenXR) { [Guid]::NewGuid().ToString('N') }
+    Confirm-QuestDeviceSerial $deviceTarget $originalDeviceSerial
+    Confirm-QuestSmokeConfigAbsent $deviceTarget
     Start-QuestCheckedActivity $deviceTarget $activity $nonce -Restart:$ResumeSmokeTest
     $observation = Read-QuestLaunchedProcess $deviceTarget $nonce
+    Confirm-QuestDeviceSerial $deviceTarget $originalDeviceSerial
+    Confirm-QuestSmokeConfigAbsent $deviceTarget
     $report = [ordered]@{
         phase = 'quest-first-launch'; status = 'process-observed'; model = 'Quest 3'; versionCode = $Release.versionCode
         apkVerified = $true; apkSha256 = $Release.sha256; venueReleaseReportSha256 = $Release.reportSha256

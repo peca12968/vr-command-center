@@ -164,12 +164,16 @@ switch ($args[2]) {
                 if (($args[4..9] -join ' ') -ceq 'list packages -u --user current com.vrcommand.quest') {
                     if (Test-Path -LiteralPath $installedApp) { 'package:com.vrcommand.quest' }
                     if ($env:QUEST_TEST_FAIL -eq 'disconnect-after-inventory') { [IO.File]::WriteAllText($disconnected, 'original transport gone') }
+                    if ($env:QUEST_TEST_FAIL -eq 'different-device-after-inventory') { [IO.File]::WriteAllText($replacedDevice, 'replacement') }
                     exit 0
                 }
                 if (($args[4..13] -join ' ') -ceq 'resolve-activity --brief --user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p com.vrcommand.quest') {
                     if ($env:QUEST_TEST_FAIL -eq 'missing-activity') { 'No activity found'; exit 0 }
                     'priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=false'
                     if ($env:QUEST_TEST_FAIL -eq 'launch-short') { 'com.vrcommand.quest/com.vrcommand.quest.MainActivity'; exit 0 }
+                    if ($env:QUEST_TEST_FAIL -eq 'config-before-smoke-launch') {
+                        [IO.File]::WriteAllText((Join-Path $remote 'vr-connection.json'), '{}')
+                    }
                     'com.vrcommand.quest/com.unity3d.player.UnityPlayerActivity'
                     exit 0
                 }
@@ -253,6 +257,9 @@ switch ($args[2]) {
         if ($env:QUEST_TEST_FAIL -eq 'log-unavailable') { exit 1 }
         if ($env:QUEST_TEST_FAIL -eq 'process-restarted') { [IO.File]::WriteAllText((Join-Path $remote 'observed-process'), '4242') }
         if ($env:QUEST_TEST_FAIL -eq 'different-device-after-launch') { [IO.File]::WriteAllText($replacedDevice, 'replacement') }
+        if ($env:QUEST_TEST_FAIL -eq 'config-after-smoke-launch') {
+            [IO.File]::WriteAllText((Join-Path $remote 'vr-connection.json'), '{}')
+        }
         if ($env:QUEST_TEST_FAIL -eq 'process-crashed') { 'E/AndroidRuntime( 4242): FATAL EXCEPTION: main' }
         'I/Unity   ( 4242): startup fixture log'
         if (Test-Path -LiteralPath $probeNonce) {
@@ -425,13 +432,13 @@ class QuestDeployTests(unittest.TestCase):
         self.provision_apk()
         run_cases = (
             ('deploy', lambda: self.run_script('-Serial', 'fixture', failure='disconnect-after-model'),
-             'APK installation failed', ' install -r '),
+             'APK installation failed', ' install -r ', 1),
             ('first-launch', lambda: self.run_smoke(failure='disconnect-after-inventory'),
-             'installation did not return Success', ' install -R '),
+             'Could not confirm the Quest has no existing player configuration', ' install -R ', 0),
             ('ticket-refresh', lambda: self.run_refresh('disconnect-after-pull'),
-             'could not be copied', ' push '),
+             'could not be copied', ' push ', 1),
         )
-        for operation, invoke, message, attempted in run_cases:
+        for operation, invoke, message, attempted, attempt_count in run_cases:
             with self.subTest(operation=operation):
                 for name in ('adb.log', 'disconnected', 'replacement.log'):
                     (self.root / name).unlink(missing_ok=True)
@@ -448,7 +455,7 @@ class QuestDeployTests(unittest.TestCase):
                 commands = self.commands.read_text(encoding='utf-8').splitlines()
                 self.assertEqual('devices -l', commands[0])
                 self.assertTrue(all(line.startswith('-t 41 ') for line in commands[1:]))
-                self.assertEqual(1, sum(attempted in line for line in commands))
+                self.assertEqual(attempt_count, sum(attempted in line for line in commands))
                 self.assertEqual(original, active.read_bytes() if active.exists() else None)
 
     def test_single_quest_selection_requires_one_usable_transport(self):
@@ -772,14 +779,14 @@ class QuestDeployTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256((self.root/'sample.apk').read_bytes()).hexdigest(), receipt['apkSha256'])
         self.assertIs(receipt['installedThisRun'], True)
         self.assertNotIn('startup fixture log', result.stdout)
+        self.assertNotIn('headset-a', result.stdout)
         commands = self.commands.read_text(encoding='utf-8').splitlines()
-        staged = commands[3].split(' --pkg com.vrcommand.quest ', 1)[1]
-        self.assertIn(' install -R --user current ', commands[3])
+        indexes = [next(index for index, command in enumerate(commands) if expected in command) for expected in (
+            'shell test ! -e', ' install -R --user current ', 'sha256sum /data/app/fixture/base.apk',
+            ' shell pm resolve-activity ', ' shell am start -W ', ' logcat -d ')]
+        self.assertEqual(sorted(indexes), indexes)
+        staged = commands[indexes[1]].split(' --pkg com.vrcommand.quest ', 1)[1]
         self.assertFalse(Path(staged).exists())
-        self.assertIn('sha256sum /data/app/fixture/base.apk', commands[5])
-        self.assertIn(' shell pm resolve-activity ', commands[7])
-        self.assertIn(' shell am start -W ', commands[8])
-        self.assertIn(' logcat -d ', commands[10])
         self.assertFalse(list(self.remote.iterdir()))
         self.assert_rejected(self.run_smoke(), 'requires a headset without an existing VR Command app')
         self.assertEqual(1, self.commands.read_text(encoding='utf-8').count(' install '))
@@ -842,7 +849,12 @@ class QuestDeployTests(unittest.TestCase):
             ('fixture', 'model', 'Select an authorized Meta Quest 3', False, False),
             ('fixture', 'install-rejected', 'installation did not return Success', True, False),
             ('fixture', 'installed-apk-mismatch', 'Installed Quest APK could not be verified', True, False),
-            ('fixture', 'existing-config', 'has no existing player configuration', True, False),
+            ('fixture', 'existing-config', 'has no existing player configuration', False, False),
+            ('fixture', 'config-before-smoke-launch', 'has no existing player configuration', True, False),
+            ('fixture', 'config-after-smoke-launch', 'has no existing player configuration', True, True),
+            ('fixture', 'missing-device-identity', 'Could not confirm the original Quest device identity', False, False),
+            ('fixture', 'different-device-after-inventory', 'Could not confirm the original Quest device identity', False, False),
+            ('fixture', 'different-device-after-launch', 'Could not confirm the original Quest device identity', True, True),
             ('fixture', 'missing-activity', 'Could not resolve a launcher activity', True, False),
             ('fixture', 'launch-timeout', 'did not confirm that the Quest launcher activity started', True, True),
             ('fixture', 'adb-log-timeout', 'ADB logcat timed out', True, True),
@@ -854,6 +866,7 @@ class QuestDeployTests(unittest.TestCase):
             with self.subTest(serial=serial, failure=failure):
                 self.commands.unlink(missing_ok=True)
                 (self.root/'installed-app').unlink(missing_ok=True)
+                (self.root/'replaced-device').unlink(missing_ok=True)
                 (self.remote/'observed-process').unlink(missing_ok=True)
                 config = self.remote/'vr-connection.json'
                 config.unlink(missing_ok=True)
@@ -872,6 +885,8 @@ class QuestDeployTests(unittest.TestCase):
                 self.assertNotIn(' force-stop ', commands)
                 if failure == 'existing-config':
                     self.assertEqual(self.player, json.loads(config.read_bytes()))
+                if failure in ('config-before-smoke-launch', 'config-after-smoke-launch'):
+                    self.assertEqual(b'{}', config.read_bytes())
 
     def ticket_refresh(self, installed_expiry, *, mode='MR'):
         identities = [uuid.uuid4() for _ in range(3)]

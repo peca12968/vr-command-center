@@ -54,7 +54,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -SmokeTest -Serial '<ADB 序號
   -ReleaseReport .\artifacts\quest-apk-manifest-20261117\venue-release-final.json
 ```
 
-工具核對指定 Quest 3，在目前 Android 使用者下安裝 APK，並讀回裝置上的 APK 雜湊。沒有既有玩家設定時，工具等待 Android 確認啟動，接著讀取該程序的 Unity 與 AndroidRuntime 日誌，並在三秒後重查原程序。成功輸出 JSON 的 `status` 為 `process-observed`。`unityLogLines` 是查到的 Unity 日誌列數，允許為零。預設遇到既有安裝會停止。
+工具先核對 Quest 3 型號與裝置識別，並確認頭盔沒有玩家連線設定，才在目前 Android 使用者下安裝 APK。讀回裝置 APK 的雜湊後，會在啟動前再次核對原裝置與連線設定。Android 確認啟動後，工具讀取該程序的 Unity 與 AndroidRuntime 日誌，三秒後重查原程序，再核對裝置及設定才輸出 `status: "process-observed"`。如果找到玩家連線設定，檢查會停止並保留原檔。`unityLogLines` 是查到的 Unity 日誌列數，允許為零。預設遇到既有安裝會停止。
 
 首次安裝、續測、單席部署與票券更新會在每次執行開始時從 `adb devices -l` 取得該裝置的 ADB 連線識別。從型號檢查到最後一步均使用這條連線。原連線消失後，本次指令會停止，可在原頭盔重新連線後用新的一輪核對。若同時有多台已授權裝置，單席部署須用 `-Serial` 指定目標。缺少或重複的連線識別會在寫入前回報 `transport-unavailable` 或 `transport-ambiguous`。 [ADB 命令參考](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/docs/user/adb.1.md)
 

@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-18 Quest 首次啟動核對原裝置及玩家設定
+
+- `-SmokeTest` 在安裝前確認頭盔沒有玩家連線設定，並在安裝前、啟動前和程序觀察後核對同一實體裝置。啟動前及觀察後再次確認玩家設定，既有檔案保留。`-ResumeSmokeTest` 沿用同樣的啟動與觀察檢查。 [首次安裝操作](QUEST3.md#首次安裝與啟動檢查)
+- 舊版模擬反例顯示，已有設定仍嘗試安裝，設定或裝置中途改變仍可能輸出成功。更新後以正式簽章的 0.50.12／77 APK 及模擬 ADB、OpenXR 日誌通過八個情境。既有設定在安裝前停止，啟動前及啟動後新增的設定均保留，缺少或變更裝置識別時停止。原 APK 及發行報告的雜湊相符。 [舊版反例](../artifacts/quest-first-launch-20261118/before.log) · [簽章 APK 排演](../artifacts/quest-first-launch-20261118/checks.json)
+- 完整 Windows 部署回歸共 97 項結束，32 項依既有防火牆或執行原則條件略過，其餘通過。原發行核對另通過 12 項。 [最終部署回歸](../artifacts/quest-first-launch-20261118/deployment-regression.log) · [發行回歸](../artifacts/quest-first-launch-20261118/release-tests.log)
+- 初輪回歸保留一項舊測試仍預期斷線後嘗試安裝的失敗，已隨新流程更正為寫入前停止。排演工具先遇到舊發行報告欄位格式不同及 Windows 錯誤輸出編碼問題，修正排演工具後完成上述八個情境。本輪未啟動實機 ADB，防火牆查核仍回報入站通知風險；USB 只見檔案傳輸介面。頭盔實際啟動與 OpenXR 仍待驗收。 [初輪回歸](../artifacts/quest-first-launch-20261118/single-device-regression.log) · [防火牆查核](../artifacts/quest-first-launch-20261118/adb-firewall.log) · [USB 查核](../artifacts/quest-first-launch-20261118/usb-status.json)
+
 ## 2026-11-18 依原預檢續跑 Quest APK 準備
 
 - `-ApkPreparationPlan` 將正式準備及續跑綁定已保存的預檢。安裝前核對適用的原發行報告、裝置表、全部指定頭盔的指紋與 APK 狀態。同一頭盔可重新連線，已核對的新版會略過。正式結果保存原預檢 SHA-256。 [操作方式](QUEST3.md#依原預檢準備或續跑)
