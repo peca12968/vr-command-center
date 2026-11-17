@@ -1830,7 +1830,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Venue') {''', 1), encoding='utf-8')
                 thread.join(timeout=5)
 
     def mock_capture_devices(self, rows, topology, *, held=False, wrong_seat=None, startup_gates=None,
-                             reconnect_gates=None, rebind_seat=None, transport_base=0):
+                             reconnect_gates=None, rebind_seat=None, transport_base=0, device_serials=None):
         expected = {}
         transports = {serial: transport_base + index
                       for index, serial in enumerate(sorted(row['serial'] for row in rows), 1)}
@@ -1849,6 +1849,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Venue') {''', 1), encoding='utf-8')
             ending = line('VR_CLIENT_DEBRIEF_FINAL ' + json.dumps(result)) + line('VR_CLIENT_DISCONNECTED')
             gate = (startup_gates or {}).get((room, seat))
             reconnect_gate = (reconnect_gates or {}).get((room, seat))
+            device_serial = (device_serials or {}).get((room, seat), f'HARDWARE-{serial}')
             outage = line('VR_CLIENT_DISCONNECTED') if reconnect_gate else b''
             restored = line(f'VR_CLIENT_CONNECTED id={index+101}') if reconnect_gate else b''
             (self.root / serial).write_text(f'''import json, sys, time
@@ -1856,7 +1857,7 @@ from pathlib import Path
 if sys.argv[1:] == ['shell', 'pidof', 'com.vrcommand.quest']:
     print(7342)
 elif sys.argv[1:] == ['shell', 'getprop', 'ro.serialno']:
-    print({f'HARDWARE-{serial}'!r})
+    print({device_serial!r})
 else:
     assert sys.argv[1:] == ['logcat', '-b', 'main', '--pid=7342', '-v', 'threadtime', '-s', 'Unity:I']
     if {gate is not None!r}:
@@ -1898,6 +1899,36 @@ else:
         return [sys.executable, str(CAPTURE_FIXTURE), '--adb', sys.executable,
                 '--venue-bundle', str(self.write_bundle(files)), '--device-map', str(mapping),
                 '--output-directory', str(output), '--seconds', '35', *flags]
+
+    def test_capture_refuses_two_transports_for_one_headset_and_preserves_other_seats(self):
+        for topology in ('Linked', 'Independent'):
+            with self.subTest(topology=topology):
+                files, _ = self.vr_bundle(topology)
+                mapping, document = self.device_map()
+                rows = [row for row in document['seats'] if (row['roomId'], row['seat']) in {(1, 1), (2, 1), (5, 1)}]
+                mapping.write_text(json.dumps(dict(document, seats=rows)), encoding='utf-8')
+                expected = self.mock_capture_devices(rows, topology, device_serials={(2, 1): 'HEADSET-X', (5, 1): 'headset-x'})
+                output = self.root / f'capture-{topology}'
+                calls_path = self.root / 'adb-calls.jsonl'
+                calls_path.unlink(missing_ok=True)
+                result = subprocess.run(self.capture_command(files, mapping, output, '--allow-partial-map'), cwd=self.root,
+                                        capture_output=True, encoding='utf-8', timeout=20)
+                self.assertEqual(1, result.returncode, result.stderr + result.stdout)
+                report = json.loads((output / 'capture-report.json').read_bytes())
+                self.assertEqual((False, 3, 1), (report['complete'], report['expectedSeats'], report['capturedSeats']))
+                healthy, *conflicts = report['seats']
+                self.assertEqual(expected[1, 1][2], (output / healthy['log']).read_bytes())
+                for conflict in conflicts:
+                    self.assertFalse(conflict['complete'])
+                    self.assertIn('same Quest headset is assigned to multiple capture seats', conflict['reason'])
+                    self.assertNotIn('partial', conflict)
+                self.assertEqual([healthy['log']], sorted(path.name for path in output.glob('*logcat*')))
+                calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
+                self.assertEqual([['-t', '1']], [call[:2] for call in calls if 'logcat' in call])
+                statuses = [json.loads(line) for line in result.stderr.splitlines()]
+                self.assertNotIn('venue-capture-ready', [status['stage'] for status in statuses])
+                private_serial = 'headset-x'
+                self.assertNotIn(private_serial, (result.stderr + result.stdout + json.dumps(report)).lower())
 
     def test_capture_rejects_rebound_transport_with_equal_process_id_and_retries_only_failed_seat(self):
         files, _ = self.vr_bundle('Linked')
@@ -3675,7 +3706,7 @@ else:
                               [json.loads(line) for line in observed.stderr.splitlines()])
                 self.assertEqual(raw, (captured / 'room-01-seat-01-logcat.txt').read_bytes())
                 self.assertEqual(active, active_path.read_bytes())
-                self.assertEqual(['shell getprop ro.serialno', 'shell pidof com.vrcommand.quest',
+                self.assertEqual(['shell getprop ro.serialno', 'shell getprop ro.serialno', 'shell pidof com.vrcommand.quest',
                                   'logcat -b main --pid=4301 -v threadtime -s Unity:I',
                                   'shell getprop ro.serialno', 'shell pidof com.vrcommand.quest',
                                   'shell pidof com.vrcommand.quest', 'shell getprop ro.serialno'],

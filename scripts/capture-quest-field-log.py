@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import base64
+from collections import Counter
 import hashlib
 import importlib.util
 import json
@@ -331,6 +332,15 @@ async def capture_venue(adb, plan, directory, seconds):
     deadline = time.monotonic() + seconds
     transports = await asyncio.to_thread(read_adb_transports, adb, seconds)
     directory.mkdir()
+
+    def identify_seat(row):
+        target = select_adb_transport(adb, transports, row['serial'])
+        return target, read_device_serial(target, deadline - time.monotonic())
+
+    # Distinct ADB aliases can name the same headset over different transports.
+    identities = await asyncio.gather(*(asyncio.to_thread(identify_seat, row) for row in plan['seats']),
+                                      return_exceptions=True)
+    device_counts = Counter(identity[1] for identity in identities if isinstance(identity, tuple))
     ready_seats = set()
     can_announce_ready = True
     partial_deployment = {'partialDeployment': True} if plan.get('partialDeployment') else {}
@@ -339,7 +349,7 @@ async def capture_venue(adb, plan, directory, seconds):
         nonlocal can_announce_ready
         can_announce_ready = False
 
-    async def capture_seat(row):
+    async def capture_seat(row, identity):
         seat = {'roomId': row['roomId'], 'seat': row['seat']}
         source = dict(seat, sessionId=row['sessionId'], port=row['port'])
         admission = {key: row[key] for key in ('sessionId', 'playerId', 'admissionId', 'roomId')}
@@ -358,11 +368,15 @@ async def capture_venue(adb, plan, directory, seconds):
             report_capture_status(pid, stage='capture-disconnected', **seat)
 
         try:
-            target = select_adb_transport(adb, transports, row['serial'])
+            if isinstance(identity, BaseException):
+                raise identity
+            target, serial = identity
+            field.require(device_counts[serial] == 1, 'The same Quest headset is assigned to multiple capture seats')
             remaining = deadline - time.monotonic()
             field.require(remaining > 0, 'Capture timed out before checking the Quest process')
             report = await capture(target, source['port'], admission, log, remaining, on_ready,
-                                   device_identity=row.get('deviceIdentity'), venue_device=row.get('venueDevice'), openxr=row.get('openXR'),
+                                   device_identity=row.get('deviceIdentity') or serial, venue_device=row.get('venueDevice'),
+                                   openxr=row.get('openXR'),
                                    on_final=close_readiness, on_disconnected=on_disconnected)
         except (field.EvidenceError, OSError, UnicodeError, ValueError, TimeoutError, RecursionError) as error:
             close_readiness()
@@ -373,7 +387,7 @@ async def capture_venue(adb, plan, directory, seconds):
         return {**source, 'complete': True, 'log': log.name, 'logcatPid': report['logcatPid'],
                 'bytes': report['bytes'], 'sha256': report['sha256']}
 
-    seats = await asyncio.gather(*(capture_seat(row) for row in plan['seats']))
+    seats = await asyncio.gather(*(capture_seat(row, identity) for row, identity in zip(plan['seats'], identities, strict=True)))
     captured = sum(row['complete'] for row in seats)
     summary = {'version': 1, 'complete': captured == len(seats), 'topology': plan['topology'],
                'expectedSeats': len(seats), 'capturedSeats': captured, 'scope': 'quest-logcat-only', **partial_deployment}
