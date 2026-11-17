@@ -166,7 +166,7 @@ OpenXR 模式使用 Direct3D 11。顯示和輸入子系統開始運作後，遊�
 
 自 0.50.7 起，Windows 開發版的 Unity PlayerConnection 只監聽本機 `127.0.0.1`，並停用區網發現廣播。場館玩家仍以主控公告的遊戲 IPv4 與 UDP 埠入場。 [Unity Profiler 連線說明](https://docs.unity3d.com/2022.2/Documentation/Manual/profiler-profiling-applications.html)
 
-可在 `scripts/check-player-package.py` 加上 `--check-local-profiler`，對解壓後的 Windows 玩家包量測實際監聽。此步驟以空白的測試目錄啟動玩家並保存 `local-profiler.json`。
+可在 `scripts/check-player-package.py` 加上 `--check-local-profiler`，對解壓後的 Windows 玩家包量測實際監聽。此步驟以空白的測試目錄啟動玩家並保存 `local-profiler.json`。原生驗證在離線檢查完成後才執行。防火牆查核拒絕啟動時，終端機及 `checks.json` 的 `skipped` 會記錄略過項目和原因，指令退出碼為 2。未要求原生驗證時，離線檢查通過即回傳 0。 [無人值守的 Windows 測試](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
 
 Windows 建置啟用 Touch 與 Unity 的 HTC Vive Controller 兩個 OpenXR 互動設定。Touch 沿用右扳機射擊、A 換彈、B 重讀票券，左手 X／Y 翻頁及關閉簡報。HTC Vive Controller 使用右扳機射擊、右握把換彈、右 Menu 重讀票券，左觸控板按下翻頁、左 Menu 關閉、左握把查看字型授權。實際控制器由 Windows OpenXR 執行環境回報，VIVE XR 的確切型號及相符設定仍待頭盔到場驗收。MR 透視與房間對位沿用 Quest 3 Android 路徑。 [Unity XR 手動啟動](https://docs.unity3d.com/Packages/com.unity.xr.management@4.6/manual/EndUser.html#load-xr-plug-ins) · [HTC Vive 控制器設定](https://docs.unity3d.com/Packages/com.unity.xr.openxr@1.19/manual/features/htcvivecontrollerprofile.html)
 

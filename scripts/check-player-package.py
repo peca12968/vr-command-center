@@ -18,6 +18,8 @@ import sys
 import time
 import uuid
 
+from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch, start_checked_windows_process
+
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('player_package', ROOT / 'scripts/package-windows-player.py')
 package = importlib.util.module_from_spec(spec); spec.loader.exec_module(package)
@@ -188,10 +190,12 @@ def check_openxr_unavailable(folder, directory, base, release=None, manifest_has
                '--log', str(log), '--report', str(report), '--status-report', str(status)]
     if release is not None:
         command += ['--release-report', str(release), '--evidence-zip', str(evidence)]
+    require_silent_windows_launch(folder / 'VrCommand.exe')
+    require_silent_windows_launch(sys.executable)
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as isolated:
         isolated.bind(('127.0.0.1', 0))
         config.write_text(json.dumps(dict(base, port=isolated.getsockname()[1])), encoding='utf-8')
-        with subprocess.Popen(command, cwd=directory, env=env, creationflags=subprocess.CREATE_NO_WINDOW) as process:
+        with start_checked_windows_process(command, cwd=directory, env=env, creationflags=subprocess.CREATE_NO_WINDOW) as process:
             try:
                 code = process.wait(timeout=45)
             except subprocess.TimeoutExpired:
@@ -215,8 +219,6 @@ def check_openxr_unavailable(folder, directory, base, release=None, manifest_has
 
 
 def check_local_profiler(folder, directory):
-    from windows_firewall import start_checked_windows_process
-
     log = directory / 'local-profiler.log'
     command = [str(folder / 'VrCommand.exe'), '-batchmode', '-nographics', '-job-worker-count', '2',
                '-logFile', str(log), '--vr-config', str(directory / 'absent-player-config.json')]
@@ -253,9 +255,18 @@ def check_local_profiler(folder, directory):
             process.wait(timeout=10)
 
 
-def main():
-    from windows_firewall import require_silent_windows_launch
+def check_release_form(runner, folder, directory, config, release, other_release, preflight_manifest):
+    require_silent_windows_launch(folder / 'VrCommand.exe')
+    command = [runner, folder, directory, config, release, other_release, preflight_manifest]
+    result = subprocess.run(command, capture_output=True, timeout=60, creationflags=subprocess.CREATE_NO_WINDOW,
+                            env={**os.environ, 'VR_COMMAND_UNATTENDED': '1'})
+    (directory / 'release-form-run.log').write_bytes(result.stdout + result.stderr)
+    result.check_returncode()
+    reviewed = json.loads((directory / 'release-form-checks.json').read_bytes())
+    assert reviewed['complete'] and reviewed['checks'] == 26
 
+
+def main():
     parser = argparse.ArgumentParser(description=__doc__); parser.add_argument('package_directory', type=Path)
     parser.add_argument('--check-openxr-unavailable', action='store_true', help='Run a graphical player with a missing OpenXR runtime for that process')
     parser.add_argument('--openxr-mock-manifest', type=Path, help='Also run the file preflight against this existing Unity mock manifest')
@@ -268,10 +279,6 @@ def main():
     manifest = package.verify(folder)
     if manifest['launcherSourceSha256'] != package.digest(ROOT / 'tools/WindowsPlayerLauncher/PlayerLauncher.cs'):
         parser.error('Repackage the current launcher source before testing')
-    if args.check_openxr_unavailable:
-        require_silent_windows_launch(sys.executable)
-    if args.check_openxr_unavailable or args.check_local_profiler or args.check_release_form:
-        require_silent_windows_launch(folder / 'VrCommand.exe')
     directory = ROOT / 'artifacts/player-package-checks' / (datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
     directory.mkdir(parents=True, exist_ok=False); findings = []
 
@@ -370,23 +377,6 @@ def main():
     preflight_manifest = check_openxr_preflight(folder, directory, args.openxr_mock_manifest)
     findings.append('Packaged OpenXR preflight reports registry, explicit manifests, PE architecture and output rejections')
     print('PASS:', findings[-1], flush=True)
-    if args.check_local_profiler:
-        check_local_profiler(folder, directory)
-        findings.append('Actual Unity PlayerConnection listens only on loopback with no discovery broadcast')
-        print('PASS:', findings[-1], flush=True)
-    if args.check_openxr_unavailable:
-        check_openxr_unavailable(folder, directory, base, release, manifest_hash)
-        findings.append('Graphical OpenXR launch with a missing runtime exits before admission')
-        print('PASS:', findings[-1], flush=True)
-    if args.check_release_form:
-        result = subprocess.run([str(runner), str(folder), str(directory), str(valid), str(release), str(other_release), str(preflight_manifest)],
-                                capture_output=True, timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
-        (directory / 'release-form-run.log').write_bytes(result.stdout + result.stderr)
-        result.check_returncode()
-        reviewed = json.loads((directory / 'release-form-checks.json').read_bytes())
-        assert reviewed['complete'] and reviewed['checks'] == 26
-        findings.append('Shipped WinForms release selection rejects stale reports and publishes the owned child log digest')
-        print('PASS:', findings[-1], flush=True)
     # A fresh minimal copy is intentionally incomplete. Never alter the delivered package.
     broken = directory / 'broken-package'; broken.mkdir(); shutil.copyfile(folder / 'Launch-Player.exe', broken / 'Launch-Player.exe')
     shutil.copyfile(folder / 'player-package.json', broken / 'player-package.json')
@@ -421,11 +411,33 @@ def main():
     for report in directory.glob('report-*.json'):
         if 'fixture-secret' in report.read_text(encoding='utf-8') or 'fixture-not-a-ticket' in report.read_text(encoding='utf-8'):
             raise AssertionError('Diagnostic report leaked fixture credentials')
-    result = {'complete': True, 'checks': len(findings), 'findings': findings, 'packageDirectory': str(folder),
+    skipped = []
+    native_checks = (
+        (args.check_local_profiler, '--check-local-profiler', check_local_profiler, (folder, directory),
+         'Actual Unity PlayerConnection listens only on loopback with no discovery broadcast'),
+        (args.check_openxr_unavailable, '--check-openxr-unavailable', check_openxr_unavailable,
+         (folder, directory, base, release, manifest_hash), 'Graphical OpenXR launch with a missing runtime exits before admission'),
+        (args.check_release_form, '--check-release-form', check_release_form,
+         (runner, folder, directory, valid, release, other_release, preflight_manifest),
+         'Shipped WinForms release selection rejects stale reports and publishes the owned child log digest'),
+    )
+    for requested, option, run, parameters, finding in native_checks:
+        if not requested:
+            continue
+        try:
+            run(*parameters)
+        except WindowsFirewallLaunchError as error:
+            skipped.append({'option': option, 'reason': str(error)})
+            print(f'SKIP {option}: {error}', file=sys.stderr, flush=True)
+            continue
+        findings.append(finding)
+        print('PASS:', finding, flush=True)
+    result = {'complete': not skipped, 'checks': len(findings), 'findings': findings, 'skipped': skipped, 'packageDirectory': str(folder),
               'launcherSourceSha256': manifest['launcherSourceSha256'],
               'scope': 'Actual Windows launcher preflight and selected startup rejection; no game admission, GUI input or headset verification'}
     (directory / 'checks.json').write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
-    print(json.dumps({'complete': True, 'checks': len(findings), 'directory': str(directory)}))
+    print(json.dumps({'complete': not skipped, 'checks': len(findings), 'skipped': len(skipped), 'directory': str(directory)}))
+    return 2 if skipped else 0
 
 
-if __name__ == '__main__': main()
+if __name__ == '__main__': sys.exit(main())

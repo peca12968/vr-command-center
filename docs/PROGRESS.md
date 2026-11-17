@@ -1,5 +1,15 @@
 # 開發進度
 
+## 2026-11-17 無人值守完成 Windows 玩家包離線驗證
+
+- 玩家包驗證先執行離線項目，再在每項原生檢查前核對本次執行檔。探測 UDP 埠時也核對 Python。防火牆拒絕時，報告記錄個別略過原因，要求原生驗證的指令回傳 2。 [玩家包驗證](WINDOWS_PLAYER_PACKAGE.md#windows-openxr-啟動)
+- 本機三個網路設定檔仍有入站通知。Windows 開發版啟動入口實測回傳 2，查核前後各有零個 `VrCommand.exe` 程序。實際解壓玩家包通過 61 項離線檢查，三項選用的原生檢查均在遊戲啟動前略過。另有 8 項啟動回歸通過。 [解壓玩家包驗證](../artifacts/player-package-checks/20261117-130927-fada1524/checks.json)
+
+## 2026-11-17 預覽已保存的五房配置
+
+- 控制台 0.31.254 可逐房對照已保存的任務版本、環境與場地。五房獨立時可選擇套用部分房間。原編輯草稿及復原紀錄保留，保存訊息顯示服務實際保存的配置名稱。 [配置操作](MISSION_VERSIONS.md#在開場前保存五房任務配置)
+- 正式解壓包以 Windows AF_UNIX 與 Chromium 通過 10 項檢查，無 TCP 監聽、UDP 端點及活動場次。另有 125 項 Node 測試通過。`bfaff84` 管理包核對 595 檔，與現有 Windows 玩家、伺服器及 Quest 0.50.12 通過離線發行核對。GitHub Actions 因帳務或支出上限未啟動。 [管理包](../artifacts/named-venue-plan-preview-031254/VRCommand-ControlServer-0.31.254.zip) · [瀏覽器驗證](../artifacts/named-venue-plan-preview-031254/package-final/checks.json) · [發行核對](../artifacts/named-venue-plan-preview-031254/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44021511273)
+
 ## 2026-11-17 讀回五房配置的原保存紀錄
 
 - 控制台 0.31.253 依配置 ID 查閱原紀錄，比對模式、名稱、保存時間及依房號排列的版本後才套用。舊包會採用清單中被替換、但本身有效的第 5 房任務。新版保留目前準備；若同一原版本讀回不符，會列出所有相關房間。 [五房配置操作](MISSION_VERSIONS.md#在開場前保存五房任務配置)
