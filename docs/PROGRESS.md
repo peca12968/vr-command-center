@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 單席等候 Quest 追蹤就緒
+
+- `-VerifyPlayerTracking` 支援 `-WaitForTrackedSeconds 1..120`，可等候原入場的新鮮準備畫格，並以成功回條交給戰後驗收。查詢在等待期限、票券到期、入場變更、存取拒絕或來源已離開準備階段時停止。單席與五房使用同一套等候流程。 [單席操作](QUEST3.md#單房實機追蹤驗收)
+- 本機通過 9 項部署及 2 項戰後追蹤測試。使用模擬管理回應驗證單席先無追蹤再就緒、逾時回應拒收、票券到期及失效入場提前停止。五房獨立和合併模式各用一房一席確認同輪就緒流程。 [部署測試](../artifacts/quest-single-tracking-wait/deployment-tests.log) · [戰後測試](../artifacts/quest-single-tracking-wait/field-tests.log)
+- Windows 仍只列出 Quest 檔案傳輸介面，實機驗收待做。GitHub Actions 對 `3e30835` 因帳務或支出上限未啟動。 [USB 檢查](../artifacts/quest-single-tracking-wait/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44033452812)
+
 ## 2026-11-17 讀回 Quest 準備畫格後重新核對鮮度
 
 - 單席及使用部署回條的五房追蹤檢查，在完成原畫格讀回後將整次查詢時間加到原取樣年齡。超過既有 1.5 秒期限的席位改為 `source-expired-in-transit`，不產生成功回條。獨立模式依各房原快照判定，合併模式共用原場次的快照。 [追蹤操作](QUEST3.md#單房實機追蹤驗收)
