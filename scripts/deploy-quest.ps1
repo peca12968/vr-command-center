@@ -2321,9 +2321,10 @@ try {
     if ($stagedApk) { Remove-Item -LiteralPath $stagedApk -ErrorAction SilentlyContinue }
 }
 if ($RequireOpenXR) {
-    [ordered]@{ evidenceVersion = 1; status = 'openxr-ready'; roomId = $ticket.RoomId; seat = $ticket.Seat + 1;
+    [ordered]@{ evidenceVersion = 2; status = 'openxr-ready'; roomId = $ticket.RoomId; seat = $ticket.Seat + 1;
         sessionId = $ticket.SessionId.ToString('D'); playerId = $ticket.PlayerId.ToString('D');
         admissionId = $ticket.AdmissionId.ToString('D'); port = $config.port;
+        serverAddressSha256 = Get-QuestSha256 ([Text.Encoding]::UTF8.GetBytes($config.address));
         apkVerified = $true; filesVerified = $true; openXR = $deployment.OpenXR
         venueReleaseReportSha256 = $release.reportSha256 } | ConvertTo-Json -Compress
 } elseif ($UseInstalledApk) {

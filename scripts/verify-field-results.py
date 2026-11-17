@@ -1417,7 +1417,10 @@ def verify(topology, server_ips, launcher, session, statistics, endpoint, server
     if quest_launch_reports or quest_launch_release is not None:
         require(quest_launch_release is not None and quest_player_logs and len(quest_launch_reports) == len(quest_player_logs),
                 'Provide the original Quest release and one launch report per original Quest log')
-        deployments, launches = single_session_quest_launches(quest_launch_reports, quest_launch_release)
+        deployments, launches, server_addresses = single_session_quest_launches(quest_launch_reports, quest_launch_release)
+        for (room, seat), digest in server_addresses.items():
+            require(digest == quest_server_address_sha256(endpoint['address']),
+                    f'Quest launch server address differs from the original endpoint for room {room} seat {seat}')
     report, _ = verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log,
                                len(player_logs) + len(quest_player_logs), player_logs, quest_player_logs=quest_player_logs,
                                world_journal=world_journal, combat_journal=combat_journal, room_alignments=room_alignments, udp_preflight=udp_preflight,
@@ -2945,13 +2948,18 @@ def quest_release_apk(release):
     return version, apk_digest
 
 
+def quest_server_address_sha256(address):
+    require(type(address) is str and re.fullmatch(r'\S+', address), 'Use the original Quest connection server address')
+    return hashlib.sha256(address.encode('utf-8')).hexdigest()
+
+
 def single_session_quest_launches(reports, release_path):
     release, release_hash = read_venue_release(release_path)
     version, _ = quest_release_apk(release)
     require(version >= 74, 'Quest OpenXR launch verification requires APK version code 74 or later')
-    deployments, launches, nonces = {}, {}, set()
+    deployments, launches, server_addresses, nonces = {}, {}, {}, set()
     for report in reports:
-        require(type(report.get('evidenceVersion')) is int and report['evidenceVersion'] == 1
+        require(type(report.get('evidenceVersion')) is int and report['evidenceVersion'] in (1, 2)
                 and report.get('status') == 'openxr-ready' and report.get('apkVerified') is True
                 and report.get('filesVerified') is True,
                 'Use an original single-seat Quest OpenXR launch report')
@@ -2961,9 +2969,13 @@ def single_session_quest_launches(reports, release_path):
         require(location not in deployments and proof[1] not in nonces, 'Quest launch reports repeat a seat or launch identifier')
         deployments[location] = (identity(report.get('sessionId')), identity(report.get('playerId')),
                                  identity(report.get('admissionId')), integer(report.get('port'), 1024, 65535))
+        if report['evidenceVersion'] == 2:
+            digest = report.get('serverAddressSha256')
+            require(type(digest) is str and re.fullmatch(r'[0-9a-f]{64}', digest), 'Invalid Quest launch server address digest')
+            server_addresses[location] = digest
         launches[location] = proof
         nonces.add(proof[1])
-    return deployments, launches
+    return deployments, launches, server_addresses
 
 
 def read_quest_deployments(spec, mode, evidence_path, release=None, *, expected_sessions, release_hash=None, capture_reports=(), capture_device_map=None,

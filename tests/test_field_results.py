@@ -446,7 +446,8 @@ if settings.get('keepRunning', True):
         for key, offset in (('sessionId', 1), ('playerId', 17), ('admissionId', 33)):
             payload[offset:offset+16] = uuid.UUID(self.expected[key]).bytes_le
         self.ticket = 'v2.' + base64.urlsafe_b64encode(payload).decode('ascii') + '.' + 'a' * 43
-        self.original.write_text(json.dumps({'role': 'Client', 'port': 7777, 'joinTicket': self.ticket}), encoding='utf-8-sig')
+        self.original.write_text(json.dumps({'role': 'Client', 'address': self.records[5]['address'], 'port': 7777,
+                                             'joinTicket': self.ticket}), encoding='utf-8-sig')
 
     def prepare(self, log, **settings):
         (self.root/'logcat.bin').write_bytes(log)
@@ -455,11 +456,11 @@ if settings.get('keepRunning', True):
         (self.root/'serial-count').unlink(missing_ok=True)
 
     def capture(self, seconds=4):
-        port, expected, _ = capture_tool.read_connection(self.original)
+        port, expected, _, _ = capture_tool.read_connection(self.original)
         return asyncio.run(capture_tool.capture(self.adb, port, expected, self.output, seconds))
 
     def test_bound_capture_checks_original_device_before_read_and_publish(self):
-        port, expected, _ = capture_tool.read_connection(self.original)
+        port, expected, _, _ = capture_tool.read_connection(self.original)
         raw = quest_logcat(self.player_log, port).encode()
         proof = ('a' * 32, hashlib.sha256(('a' * 32 + '\nHEADSET-A').encode()).hexdigest())
         self.prepare(raw, deviceSerials=['unknown'])
@@ -491,7 +492,7 @@ if settings.get('keepRunning', True):
         self.assertEqual('2', (self.root / 'serial-count').read_text())
 
     def test_bound_capture_requires_original_openxr_process_and_marker_before_ready(self):
-        port, expected, _ = capture_tool.read_connection(self.original)
+        port, expected, _, _ = capture_tool.read_connection(self.original)
         nonce = 'a1' * 16
         marker = f'VR_QUEST_OPENXR nonce={nonce} loader=1 display=1 input=1'
         original = quest_logcat(self.player_log)
@@ -536,7 +537,7 @@ if settings.get('keepRunning', True):
         self.assertEqual(2, readback['serverAcknowledgements'])
 
     def test_capture_waits_for_the_first_original_connection_before_reporting_ready(self):
-        port, admission, _ = capture_tool.read_connection(self.original)
+        port, admission, _, _ = capture_tool.read_connection(self.original)
         ready = []
 
         async def lines():
@@ -646,7 +647,7 @@ if settings.get('keepRunning', True):
     def test_capture_preserves_competing_final_filename_and_complete_partial(self):
         raw = quest_logcat(self.player_log).encode('utf-8')
         self.prepare(raw)
-        port, admission, _ = capture_tool.read_connection(self.original)
+        port, admission, _, _ = capture_tool.read_connection(self.original)
 
         def already_published(_pid):
             with self.output.open('xb') as existing:
@@ -660,7 +661,7 @@ if settings.get('keepRunning', True):
     def test_capture_venue_never_opens_final_report_for_incremental_writing(self):
         raw = quest_logcat(self.player_log).encode('utf-8')
         self.prepare(raw)
-        port, admission, _ = capture_tool.read_connection(self.original)
+        port, admission, _, _ = capture_tool.read_connection(self.original)
         directory = self.root / 'venue'
         report_path = directory / 'capture-report.json'
         plan = {'topology': 'Linked', 'venueSha256': 'a' * 64,
@@ -699,8 +700,10 @@ if settings.get('keepRunning', True):
             'versionCode': 77, 'sha256': 'a' * 64}}), encoding='utf-8')
         launch = self.root / 'launch.json'
         nonce = 'ab' * 16
-        receipt = dict(self.expected, evidenceVersion=1, status='openxr-ready', seat=2, port=7777,
+        config = json.loads(self.original.read_bytes())
+        receipt = dict(self.expected, evidenceVersion=2, status='openxr-ready', seat=2, port=7777,
                        apkVerified=True, filesVerified=True, openXR={'processId': 7342, 'nonce': nonce},
+                       serverAddressSha256=hashlib.sha256(config['address'].encode()).hexdigest(),
                        venueReleaseReportSha256=hashlib.sha256(release.read_bytes()).hexdigest())
         command = [str(capture_spec.origin), '--adb', sys.executable, '--serial', 'fixture-device',
                    '--connection-file', str(self.original), '--output', str(self.output), '--seconds', '4']
@@ -736,6 +739,9 @@ if settings.get('keepRunning', True):
         self.assertFalse((self.root / 'pid-count').exists())
 
         launch.write_text(json.dumps(receipt), encoding='utf-8')
+        self.original.write_text(json.dumps(dict(config, address='192.168.14.99')), encoding='utf-8')
+        run(proof_args, 'server address differs from the original connection')
+        self.original.write_text(json.dumps(config), encoding='utf-8')
         self.prepare(raw, initialPid='7450')
         run(proof_args, 'process differs from the original OpenXR launch', calls_adb=True)
         self.assertFalse(self.partial.exists())
@@ -6045,9 +6051,10 @@ class FieldResultsTests(unittest.TestCase):
                 marker = logcat_line(f'VR_QUEST_OPENXR nonce={nonce} loader=1 display=1 input=1', process).encode()
                 original = log.read_bytes()
                 log.write_bytes(marker + original)
-                receipt = {'evidenceVersion': 1, 'status': 'openxr-ready', 'roomId': owner['roomId'], 'seat': owner['seat'] + 1,
+                receipt = {'evidenceVersion': 2, 'status': 'openxr-ready', 'roomId': owner['roomId'], 'seat': owner['seat'] + 1,
                            'sessionId': session['id'], 'playerId': owner['id'], 'admissionId': owner['admissionId'],
                            'port': endpoint['port'], 'apkVerified': True, 'filesVerified': True,
+                           'serverAddressSha256': hashlib.sha256(endpoint['address'].encode()).hexdigest(),
                            'venueReleaseReportSha256': release_hash, 'openXR': {'processId': process, 'nonce': nonce}}
                 path = root / f"launch-{owner['seat']}.json"
                 path.write_text(json.dumps(receipt), encoding='utf-8')
@@ -6083,6 +6090,8 @@ class FieldResultsTests(unittest.TestCase):
             for change, message in (
                 ({'admissionId': id_for(9999)}, 'original admission and endpoint'),
                 ({'port': endpoint['port'] + 1}, 'original admission and endpoint'),
+                ({'serverAddressSha256': hashlib.sha256(b'192.168.14.99').hexdigest()}, 'server address differs from the original endpoint'),
+                ({'serverAddressSha256': None}, 'Invalid Quest launch server address digest'),
                 ({'openXR': dict(receipt['openXR'], processId=receipt['openXR']['processId'] + 1)}, 'PID differs'),
                 ({'openXR': originals[1][1]['openXR']}, 'repeat a seat or launch identifier'),
             ):
@@ -6091,6 +6100,9 @@ class FieldResultsTests(unittest.TestCase):
                     rejected = run(*flags)
                     self.assertEqual(1, rejected.returncode)
                     self.assertIn(message, rejected.stderr)
+            legacy = {key: value for key, value in receipt.items() if key != 'serverAddressSha256'}
+            path.write_text(json.dumps(dict(legacy, evidenceVersion=1)), encoding='utf-8')
+            self.assertEqual(0, run(*flags).returncode)
             path.write_text(json.dumps(receipt), encoding='utf-8')
             log.write_bytes(original + marker)
             rejected = run(*flags)

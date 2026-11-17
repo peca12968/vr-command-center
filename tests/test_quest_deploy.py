@@ -625,8 +625,9 @@ class QuestDeployTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         receipt = json.loads(result.stdout)
         self.assertEqual(('openxr-ready', True, True), tuple(receipt[key] for key in ('status', 'apkVerified', 'filesVerified')))
-        self.assertEqual((1, 5, 2, str(session), str(player), str(admission), self.player['port']), tuple(
+        self.assertEqual((2, 5, 2, str(session), str(player), str(admission), self.player['port']), tuple(
             receipt[key] for key in ('evidenceVersion', 'roomId', 'seat', 'sessionId', 'playerId', 'admissionId', 'port')))
+        self.assertEqual(hashlib.sha256(self.player['address'].encode()).hexdigest(), receipt['serverAddressSha256'])
         self.assertEqual(hashlib.sha256(release.read_bytes()).hexdigest(), receipt['venueReleaseReportSha256'])
         self.assertNotIn(self.player['joinTicket'], result.stdout)
         self.assertEqual(4242, receipt['openXR']['processId'])

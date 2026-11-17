@@ -38,7 +38,7 @@ def read_connection(path):
     field.require(payload[0] == 2 and 1 <= payload[49] <= 5 and payload[50] <= 4, 'Invalid player ticket claims')
     expected = {key: field.identity(str(uuid.UUID(bytes_le=payload[offset:offset + 16])))
                 for key, offset in (('sessionId', 1), ('playerId', 17), ('admissionId', 33))}
-    return port, dict(expected, roomId=payload[49]), payload[50] + 1
+    return port, dict(expected, roomId=payload[49]), payload[50] + 1, config.get('address')
 
 
 def quest_pid(adb, timeout):
@@ -426,15 +426,18 @@ def main():
         else:
             field.require(all(single), 'Use a serial, connection file and output log together')
             field.require(re.fullmatch(r'[A-Za-z0-9\[][A-Za-z0-9._:%\[\]-]{0,127}', args.serial), 'Use a valid explicit ADB serial')
-            port, admission, seat = read_connection(args.connection_file)
+            port, admission, seat, address = read_connection(args.connection_file)
             openxr = None
             if args.quest_launch_report is not None:
                 launch, raw = field.read_quest_document(args.quest_launch_report)
-                deployments, launches = field.single_session_quest_launches([launch], args.quest_launch_release)
+                deployments, launches, server_addresses = field.single_session_quest_launches([launch], args.quest_launch_release)
                 location = (admission['roomId'], seat)
                 original = (admission['sessionId'], admission['playerId'], admission['admissionId'], port)
                 field.require(deployments.get(location) == original,
                               'Quest launch report differs from the original connection seat, admission or endpoint')
+                if location in server_addresses:
+                    field.require(server_addresses[location] == field.quest_server_address_sha256(address),
+                                  'Quest launch server address differs from the original connection')
                 openxr = launches[location]
             check_adb_startup()
             deadline = time.monotonic() + args.seconds
