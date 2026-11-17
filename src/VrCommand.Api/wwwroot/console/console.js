@@ -46,7 +46,7 @@ const world = mountWorld(() => state.key, logout, venueEnemyText, master, downlo
 const report = mountReport(() => state, logout, () => { renderStatistics(); closure.update(); });
 const venueReport = mountVenueReport(() => state, logout, download);
 const venueHistory = mountVenueHistory(api, selectVenueClosure);
-const venueDebrief = mountVenueDebriefSeats(() => state, logout, download, target => tab('world', target));
+const venueDebrief = mountVenueDebriefSeats(() => state, logout, download, openClosurePlayerReplay);
 const readiness = mountReadiness(() => state, logout, () => Number($('roster-room').value) || null);
 const roomReadiness = mountRoomReadiness(() => state, logout, applyVenuePermissions, venueClimateText, venueEnemyText, target => {
   if (!state.busy && !state.pending) tab('world', target);
@@ -1355,6 +1355,38 @@ async function openReviewedVenueClosure(id, targets, stillCurrent) {
   }
 }
 
+function openClosurePlayerReplay(target, origin) {
+  const epoch = state.epoch;
+  tab('world', { ...target, returnToScores: () => returnToClosureScores(target, origin, epoch) });
+}
+
+async function returnToClosureScores(target, origin, epoch) {
+  if (!master() || state.epoch !== epoch || state.busy || state.pending) return;
+  tab('operations');
+  const selection = venueClosureEpoch, view = operationsViewEpoch;
+  const current = () => master() && state.epoch === epoch && !state.busy && !state.pending
+    && venueClosureEpoch === selection && operationsViewEpoch === view;
+  try {
+    const report = await api(`/venue/closure/${origin.batchId}?includeScores=true&includeDebriefReceipts=true`);
+    if (!current()) return;
+    const batch = report?.batch;
+    const session = batch?.requestId === origin.batchId && Array.isArray(batch.sessions)
+      ? batch.sessions.find(row => row?.sessionId === target.sessionId && row.roomIds?.includes(target.roomId)) : null;
+    if (session?.combat !== 'Sealed' || session.world !== 'Sealed' || session.replay?.streamId !== target.streamId
+      || session.replay.throughSequence !== target.throughSequence) throw new Error('Original closure differs');
+    const departure = origin.departed ? venueDepartureScope(batch, session) : null;
+    if (origin.departed && !departure) throw new Error('Original departure differs');
+    if (!venueHistory.selectOriginal(origin.batchId)) return;
+    venueClosureEpoch++;
+    renderVenueClosure(report);
+    $('venue-closure-title').focus();
+    if (departure) await openVenueDepartures(batch, session, departure, target.playerId);
+    else venueDebrief.resume(origin.roomId, origin.onlyMissing, target.playerId);
+  } catch {
+    if (current()) notify('無法確認原批次戰績。可從全館收尾重新選取。', true);
+  }
+}
+
 async function restoreVenuePlan() {
   const plan = archivedPlan, epoch = state.epoch, selection = venueClosureEpoch, view = operationsViewEpoch;
   if (!plan || $('restore-venue-plan').disabled) return;
@@ -1440,7 +1472,7 @@ async function downloadVenueDeparture(request, player, current) {
   }
 }
 
-async function openVenueDepartures(batch, session, scope) {
+async function openVenueDepartures(batch, session, scope, focusPlayer = null) {
   if (!master() || state.busy || state.pending) return;
   closeVenueDepartures();
   const request = { scope, epoch: state.epoch };
@@ -1478,12 +1510,14 @@ async function openVenueDepartures(batch, session, scope) {
         throughSequence: body.throughSequence, throughCombatSequence: body.finalStreamSequence, score: player }, current));
       const replay = element('button', '個人回放', 'quiet small');
       replay.type = 'button';
+      replay.dataset.venueDepartedReplay = player.playerId;
       replay.setAttribute('aria-label', `開啟房間 ${player.roomId} ${player.name} 的個人回放`);
       function openReplay(latestDamage) {
         if (!current() || state.busy || state.pending) return;
-        tab('world', { mode: 'replay', complete: true, sessionId: body.sessionId, streamId: body.streamId,
+        openClosurePlayerReplay({ mode: 'replay', complete: true, sessionId: body.sessionId, streamId: body.streamId,
           roomId: player.roomId, throughSequence: body.worldSequence, throughCombatSequence: body.finalStreamSequence,
-          playerId: player.playerId, playerName: player.name, playerScore: player, latestDamage });
+          playerId: player.playerId, playerName: player.name, playerScore: player, latestDamage },
+        { batchId: batch.requestId, departed: true });
       }
       replay.addEventListener('click', () => openReplay(false));
       const actions = element('div', '', 'button-row');
@@ -1499,6 +1533,8 @@ async function openVenueDepartures(batch, session, scope) {
     }));
     status.textContent = '';
     $('venue-departed-table').hidden = false;
+    if (archiveId.test(focusPlayer ?? ''))
+      $('venue-departed-rows').querySelector(`[data-venue-departed-replay="${focusPlayer}"]`)?.focus();
   } catch { if (current()) status.textContent = '暫時無法確認離場玩家戰績，可重新開啟。'; }
 }
 

@@ -99,7 +99,8 @@ export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) 
     const { room, throughCombatSequence } = player;
     openReplay({ mode: 'replay', complete: true, sessionId: room.sessionId, roomId: room.roomId,
       streamId: room.streamId, throughSequence: room.worldSequence, throughCombatSequence,
-      playerId: player.playerId, playerName: player.name, playerScore: { ...player.score, roomId: room.roomId }, latestDamage });
+      playerId: player.playerId, playerName: player.name, playerScore: { ...player.score, roomId: room.roomId }, latestDamage },
+    { batchId: room.batchId, roomId: target.roomId, onlyMissing: onlyMissing.checked });
   }
 
   function render() {
@@ -121,6 +122,7 @@ export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) 
       replay.type = 'button'; replay.className = 'quiet small'; replay.textContent = '個人回放';
       replay.setAttribute('aria-label', `開啟${seatLabel}個人回放`);
       replay.dataset.venueDebriefReplay = String(player.seat);
+      replay.dataset.venueDebriefPlayer = player.playerId;
       replay.addEventListener('click', () => replaySeat(player));
       const actions = document.createElement('div');
       actions.className = 'button-row'; actions.append(button, replay);
@@ -154,7 +156,7 @@ export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) 
     panel.hidden = true; onlyMissing.checked = false; status.textContent = ''; render();
   }
 
-  async function read() {
+  async function read(focusPlayer = null) {
     const state = current(), requested = target;
     if (!active || !requested || controller || state.actor?.role !== 'Master') return;
     const request = new AbortController(); controller = request; players = null;
@@ -183,7 +185,10 @@ export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) 
     } catch { if (inScope()) status.textContent = '暫時無法確認原席位回條，可重新讀取。'; }
     finally {
       clearTimeout(timeout);
-      if (inScope()) { controller = null; render(); }
+      if (inScope()) {
+        controller = null; render();
+        if (uuid.test(focusPlayer ?? '')) rows.querySelector(`[data-venue-debrief-player="${focusPlayer}"]`)?.focus();
+      }
     }
   }
 
@@ -222,19 +227,20 @@ export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) 
     } else if (pendingChanged && players) render();
   }
 
-  function open(selection) {
+  function open(selection, filter = null, focusPlayer = null) {
     if (!active || current().actor?.role !== 'Master' || !selection) return;
     close(); target = selection; panel.hidden = false;
-    onlyMissing.checked = selection.roomId === null;
+    onlyMissing.checked = filter ?? (selection.roomId === null);
     title.textContent = selection.roomId === null ? '全館席位戰績回條' : `房間 ${selection.roomId} 的戰績回條`;
-    title.focus(); void read();
+    title.focus(); void read(focusPlayer);
   }
 
   onlyMissing.addEventListener('change', render);
-  refresh.addEventListener('click', read);
+  refresh.addEventListener('click', () => void read());
   missingCsv.addEventListener('click', downloadMissing);
   $('venue-debrief-seats-close').addEventListener('click', close);
   all.addEventListener('click', () => open(batchTarget));
   return { update, available: roomId => rooms.has(roomId), active(on) { active = on; if (!on) close(); },
-    open: roomId => open(rooms.get(roomId)) };
+    open: roomId => open(rooms.get(roomId)),
+    resume(roomId, filter, playerId) { open(roomId === null ? batchTarget : rooms.get(roomId), filter, playerId); } };
 }

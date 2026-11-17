@@ -1269,9 +1269,10 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       && await page.locator('#world-recording').inputValue() === originalSession && await page.locator('#world-room').inputValue() === '4'
       && (await page.locator('#world-review-player-name').innerText()).includes(missing.id.slice(0, 8)),
       'The unconfirmed seat opens its original scoped replay even after the room has been reused');
-    await page.locator('#tab-operations').click();
-    await showSeats(4).click();
+    await page.locator('#world-return-closure-scores').click();
     await detailStatus.filter({ hasText: '已確認 1／2 席' }).waitFor();
+    assert.equal(await picker.inputValue(), evidenceId);
+    assert.ok(await detailPanel.isVisible());
     let releaseCsv, finishCsv, startedCsv = false;
     const csvGate = new Promise(resolve => { releaseCsv = resolve; });
     const csvDone = new Promise(resolve => { finishCsv = resolve; });
