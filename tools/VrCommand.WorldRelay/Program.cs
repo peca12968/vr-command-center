@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Net.Security;
+using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -7,9 +8,18 @@ using VrCommand.Core;
 using VrCommand.Simulation;
 
 var options = args.Chunk(2).ToArray();
-if (options.Any(pair => pair.Length != 2 || pair[0] is not ("--recording" or "--world-journal" or "--combat-journal" or "--demo-room" or "--seconds" or "--environment-demo" or "--base-url" or "--key-file" or "--recover-server" or "--work"))
+if (options.Any(pair => pair.Length != 2 || pair[0] is not ("--recording" or "--world-journal" or "--combat-journal" or "--demo-room" or "--seconds" or "--environment-demo" or "--base-url" or "--key-file" or "--recover-server" or "--work" or "--local-socket"))
     || options.Select(pair => pair[0]).Distinct().Count() != options.Length) throw new ArgumentException("Use --recover-server and --work, or the existing --recording or --world-journal options.");
 var values = options.ToDictionary(pair => pair[0], pair => pair[1]);
+var address = new Uri(values.GetValueOrDefault("--base-url", "http://127.0.0.1:5080"));
+UnixDomainSocketEndPoint? local = null;
+if (values.TryGetValue("--local-socket", out var socketPath))
+{
+    if (!Path.IsPathFullyQualified(socketPath) || address.Scheme != "http" || address.Host != "127.0.0.1"
+        || address.UserInfo.Length != 0 || address.AbsolutePath != "/" || address.Query.Length != 0 || address.Fragment.Length != 0)
+        throw new ArgumentException("Use an absolute local socket and a loopback HTTP management origin.");
+    local = new(Path.GetFullPath(socketPath));
+}
 var codec = new SystemWorldCodec();
 var json = new JsonSerializerOptions(JsonFormat.Options) { IncludeFields = true, IgnoreReadOnlyProperties = false, WriteIndented = false };
 string Write(object value) => JsonSerializer.Serialize(value, json);
@@ -38,8 +48,22 @@ var combatPath = Path.GetFullPath(values.GetValueOrDefault("--combat-journal", p
 var root = new DirectoryInfo(Environment.CurrentDirectory);
 while (!File.Exists(Path.Combine(root.FullName, "VrCommand.slnx"))) root = root.Parent ?? throw new InvalidOperationException("Run from the repository.");
 using var keys = JsonDocument.Parse(File.ReadAllText(values.GetValueOrDefault("--key-file", Path.Combine(root.FullName, "data/operator-keys.local.json"))).TrimStart('\uFEFF'));
-using var http = new HttpClient { BaseAddress = new Uri(values.GetValueOrDefault("--base-url", "http://127.0.0.1:5080")), Timeout = TimeSpan.FromSeconds(10) };
+using var http = Client(address);
 http.DefaultRequestHeaders.Authorization = new("Bearer", keys.RootElement.GetProperty("OperatorKeys").GetProperty("GameServer").GetString());
+HttpClient Client(Uri origin)
+{
+    var client = local is null ? new HttpClient() : new HttpClient(new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false, UseProxy = false,
+        ConnectCallback = (_, cancellation) => LocalSocketTransport.Connect(local, cancellation)
+    });
+    client.BaseAddress = origin;
+    client.Timeout = TimeSpan.FromSeconds(10);
+    return client;
+}
+IWorldConnection WorldConnection(HttpClient client, Guid session, string pin = "") => local is null
+    ? new WorldWebSocket(client.BaseAddress!.ToString(), session, client.DefaultRequestHeaders.Authorization!.Parameter!, pin)
+    : new LocalWorldConnection(client, session);
 async Task<T> Post<T>(HttpClient client, string route, object body)
 {
     using var content = new StringContent(JsonSerializer.Serialize(body, JsonFormat.Options), Encoding.UTF8, "application/json");
@@ -87,8 +111,7 @@ async Task PublishBinary(HttpClient client, TelemetryOutbox combat, WorldOutbox 
         && (source.StreamId != combat.StreamId || source.Origin.ToString() != combat.Origin))
         throw new InvalidDataException("Server stream identity mismatch.");
     await Deliver(client, combat, header.missionClockVersion, session.CombatStream?.RoomEnemyPolicyVersion ?? 0, session.CombatStream);
-    using var publisher = new WorldPublisher(saved, codec, new WorldWebSocket(client.BaseAddress!.ToString(),
-        combat.SessionId, client.DefaultRequestHeaders.Authorization!.Parameter!, certificatePin));
+    using var publisher = new WorldPublisher(saved, codec, WorldConnection(client, combat.SessionId, certificatePin));
     while (saved.Pending != null || (saved.Complete && !saved.Sealed))
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -175,7 +198,17 @@ async Task<ClientWebSocket> Connect(Guid session)
 {
     var socket = new ClientWebSocket(); socket.Options.SetRequestHeader("Authorization", http.DefaultRequestHeaders.Authorization!.ToString());
     var uri = new UriBuilder(http.BaseAddress!) { Scheme = http.BaseAddress!.Scheme == "https" ? "wss" : "ws", Path = "/api/sessions/" + session + "/world/publish" };
-    try { await socket.ConnectAsync(uri.Uri, CancellationToken.None); return socket; } catch { socket.Dispose(); throw; }
+    try
+    {
+        if (local is null) await socket.ConnectAsync(uri.Uri, CancellationToken.None);
+        else
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await socket.ConnectAsync(uri.Uri, http, timeout.Token);
+        }
+        return socket;
+    }
+    catch { socket.Dispose(); throw; }
 }
 async Task<JsonElement> Send(ClientWebSocket socket, string message)
 {
@@ -226,7 +259,7 @@ if (!values.TryGetValue("--demo-room", out var roomValue))
 }
 var room = int.Parse(roomValue); var seconds = int.Parse(values.GetValueOrDefault("--seconds", "3"));
 if (room is < 1 or > 5 || seconds is < 1 or > 60 || File.Exists(path) || File.Exists(combatPath)) throw new ArgumentException("Demo requires a free room 1–5, 1–60 seconds, and new output files.");
-using var master = new HttpClient { BaseAddress = http.BaseAddress, Timeout = http.Timeout };
+using var master = Client(http.BaseAddress!);
 master.DefaultRequestHeaders.Authorization = new("Bearer", keys.RootElement.GetProperty("OperatorKeys").GetProperty("Master").GetString());
 if ((await master.GetFromJsonAsync<RoomView[]>("/api/rooms", JsonFormat.Options))!.Single(entry => entry.Id == room).SessionId.HasValue) throw new InvalidOperationException("Room is occupied; no existing session changed.");
 var mission = await Post<Mission>(master, "/api/missions", new MissionDraft("World recording simulation", "Synthetic tracked rig; no headset attached", 900,
@@ -246,7 +279,7 @@ try
     var header = WorldRecordingHeader.Create(session.Id, queue.StreamId, "Simulation", session.RoomIds, bridge.Props,
         DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
     using var saved = binary ? WorldOutbox.Create(path, header, codec) : null;
-    using var publisher = binary ? new WorldPublisher(saved!, codec, new WorldWebSocket(http.BaseAddress!.ToString(), session.Id, http.DefaultRequestHeaders.Authorization!.Parameter!)) : null;
+    using var publisher = binary ? new WorldPublisher(saved!, codec, WorldConnection(http, session.Id)) : null;
     using var source = binary ? null : new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
     using var socket = binary ? null : await Connect(session.Id);
     async Task SaveSend(object message)

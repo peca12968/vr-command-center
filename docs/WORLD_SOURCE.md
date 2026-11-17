@@ -1,5 +1,20 @@
 # 世界來源、頭手與補送
 
+## 無人值守的本機世界錄製
+
+`VrCommand.WorldRelay` 可用 `--local-socket` 連接已透過 AF_UNIX 啟動的管理服務。HTTP 指令、戰鬥事件與 WebSocket 世界發布都經由指定的本機 socket。`--base-url` 使用 `http://127.0.0.1:<埠>` 格式提供 HTTP 原點，並以 `--key-file` 指定該管理實例的原憑證檔。此模式可用於 `--recording` 舊格式及 `--world-journal` 二進位格式的示範與重送。
+
+```powershell
+dotnet tools/VrCommand.WorldRelay/bin/Release/net10.0/VrCommand.WorldRelay.dll `
+    --world-journal F:/Projects/vr-command-center/artifacts/world-demo/local.worldlog `
+    --base-url http://127.0.0.1:5081 --local-socket C:/vr-local/api.sock `
+    --key-file C:/vr-local/keys.json --demo-room 5 --seconds 3 --environment-demo true
+```
+
+管理服務須已在指定 socket 上啟動，房間須空閒，輸出檔須為新檔。示範會建立一位 Simulation 玩家，使用共用 `ArenaSession` 運算射擊、AI 傷害及場景，再保存和發布世界畫格。示範完成後，可用相同命令移除 `--demo-room`、`--seconds` 及 `--environment-demo`，讀取原來源重送。重啟後的戰績及世界回放由管理服務的原封存讀回。
+
+本機 WebSocket 使用 .NET 提供的 `HttpMessageInvoker` 連線介面，傳輸與 HTTP 沿用同一個本機 socket。 [Microsoft ClientWebSocket.ConnectAsync](https://learn.microsoft.com/en-us/dotnet/api/system.net.websockets.clientwebsocket.connectasync?view=net-10.0)
+
 目前 Unity NGO protocol18／Android code20、bundle0.19.0，API 仍 0.16；真正 Editor 已通過 39 項 EditMode 及 Windows／Quest 同源建置。PC 重連及 Simulated 恢復姿態的 admission 隔離見 [RECONNECT](RECONNECT.md)；不能把桌面快取當 Tracked 或持久世界恢復。下方 v0.13／14 為歷次改動。新 header 預設 environmentVersion 1，舊 journal 保持 0／原始 JSON／checksum，codec 正規化比較支援缺少選用欄位的原樣恢復。`--environment-demo true` 只搭配新 `--demo-room` 產生 Storm／Night／雷電 Simulation；完整聲光規則、UTC 與升級見 [ENVIRONMENT.md](ENVIRONMENT.md)。
 
 v0.14 新增每次入場識別、票券 v2／protocol 2、If-Match-Admission 與跨輪詢重入撤銷，Unity／API 需同版升級並重發舊券，見 [ADMISSION.md](ADMISSION.md)。生成器 NGO protocol 14／bundle 0.14；當時的 15 項 EditMode／建置尚待執行；最新真正 Editor／PC 結果以上方與 NATIVE_VALIDATION 為準，頭盔仍待驗。
