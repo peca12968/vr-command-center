@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 從觀戰返回五房追蹤
+
+- 控制台 0.31.256 從五房總覽開啟即時觀戰或姿態中斷快照後，可按「返回五房追蹤」。控制台重新讀取追蹤資料，並將鍵盤焦點移到已核對的房間，包含在觀戰頁切換後的房間。若開啟的房間來源未通過核對，則回到原先選擇的房間。 [五房追蹤操作](PLAYER_READINESS.md#執行中五房追蹤總覽)
+- 正式解壓包通過 30 項 Chromium 與 125 項 Node 檢查。合併與獨立各使用 25 個模擬席位，確認第 5 房切至第 2 房後以鍵盤回到第 2 房、第 5 房中斷席位快照可正確返回、拒絕錯房和過舊來源時回到原列。另用同一解壓包驗證六份錄製封存及重啟後逐格回放。兩組測試均使用本機 IPC，管理程序沒有 TCP 監聽或 UDP 端點。 [合併場](../artifacts/tracking-return-031256/package-linked/checks.json) · [獨立場](../artifacts/tracking-return-031256/package-independent/checks.json) · [重啟回放](../artifacts/tracking-return-031256/venue-world-ipc.json)
+- `f70e173` 管理包核對 595 檔，與 Windows 玩家、伺服器及 Quest 0.50.12 通過離線發行核對。Windows 仍只辨識 Quest 的檔案傳輸介面，實機與跨機驗收待完成。GitHub Actions 因帳務或支出上限未啟動。 [Windows 管理包](../artifacts/tracking-return-031256/VRCommand-ControlServer-0.31.256.zip) · [成套發行核對](../artifacts/tracking-return-031256/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44029746278)
+
 ## 2026-11-17 從五房追蹤總覽開啟即時觀戰
 
 - 控制台 0.31.255 的五房追蹤列可直接開啟本房上帝俯視。切換前核對場次、串流及來源，再驗證房間畫格和統計範圍，且畫格須達到總覽已確認的序號。快照過期時隱藏入口。 [五房追蹤操作](PLAYER_READINESS.md#執行中五房追蹤總覽)
