@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 五房 MR 與混合試場配票
+
+- 管理台 0.31.236 支援全 MR 獨立／合併及 VR／MR 混合獨立五房選每房 1、2 或 5 席。簽發及讀回逐房核對原場次、名冊、端點及 MR 鎖定校正檔。5／10 席包內記錄 `playersPerRoom`，25 席保留原格式。PowerShell 依原包席數核對驗票回條、部署及擷取規劃。 [MR 部署](QUEST3.md#五房-mr-部署預檢) · [混合部署](QUEST3.md#混合-vr-與-mr-五房部署包)
+- 管理台與實際 API 經本機 IPC 驗證 21 項，橫跨九場共 120 張票券。改動校正檔或在原試場增加席位會拒絕，PowerShell 以實際 API 回條替代 HTTP 傳輸。純 VR 配票回歸 12 項、Node 133 項及 PowerShell ZIP 3 項通過。最初測試夾具誤讀裝置表欄數，另一離線測試誤要求舊 MR 摘要中的 `mode`；兩項修正後沿原驗證流程複測。管理 API 無 TCP 監聽與 UDP 端點，測試場次均已結束。 [MR 與混合結果](../artifacts/mr-venue-pilot-031236/package-final/checks.json) · [VR 回歸](../artifacts/vr-venue-pilot-031235/package-031236-final/checks.json)
+- Windows 管理包 589 檔，與既有 Windows 和 Quest 0.50.12 通過離線發行核對。GitHub Actions 對 `57d6d9e` 回報帳務或支出上限，工作未啟動。USB 有檔案傳輸介面，尚無 ADB 介面，原生與頭盔跨機待驗。 [下載管理包](../artifacts/mr-venue-pilot-031236/final/VRCommand-ControlServer-0.31.236.zip) · [發行核對](../artifacts/mr-venue-pilot-031236/final/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43989873706)
+
 ## 2026-11-17 五房 VR 的 5 人與 10 人試場配票
 
 - 管理台 0.31.235 可按每房 1、2 或 5 席讀取完整名冊並下載原配票 ZIP。獨立與合併都逐房核對現行場次、來源、端點及入場識別。新版 PowerShell 部署、追蹤及擷取規劃按原 ZIP 的席數讀取裝置表，拒絕原包以外的席位。25 席沿用原配票格式。 [管理台配票](EXTERNAL_CLIENTS.md#vr-五房配票) · [Quest 部署](QUEST3.md#直接使用-vr-五房連線-zip)
