@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 Windows 原入場票券更新
+
+- 玩家啟動器 1.18 的 `--refresh-player-ticket` 核對新舊連線檔的場次、玩家、入場、房間、席位、端點及效期。確認後以完整檔案替換原路徑並讀回核對。重送同一份可確認已更新。報告只含結果，原遊戲的重連流程會讀取更新後的檔案。 [Windows 操作](WINDOWS_PLAYER_PACKAGE.md#更新原入場票券)
+- 正式解壓包通過 60 項離線檢查，含 15 項票券更新檢查，另通過 36 項配置檢視與 46 項連線狀態回歸。以原管理包經本機 IPC 實際簽發與驗證票券，獨立和合併各有 25 席。兩場第 5 房原入場的更新成功，重試確認同一檔，測試戰績未變。其他席位與已替換入場均被拒絕。簽發夾具首輪在 Running 重新加入收到 409，改在 Preparing 核對換入場，保留原失敗；正向更新仍在 Running。活動場次、TCP 監聽及 UDP 端點均為零。 [解壓驗證](../artifacts/player-package-checks/20261117-113511-36a2676d/checks.json) · [簽發驗證](../artifacts/windows-ticket-refresh-118/actual-issuer-final/checks.json)
+- 新玩家包 84,959,353 位元組，核對 331 檔，SHA-256 `806701493e95919d917019faa8ae311c84e0d991c14eb926b002df2009e04a8b`。與管理包 0.31.246、Windows 伺服器及 Quest 0.50.12 通過離線發行核對。驗證未啟動遊戲，應用端重連、跨機與頭盔仍待實測。GitHub Actions 對 `848a4b9` 因帳務或支出上限未啟動。 [玩家包](../artifacts/windows-ticket-refresh-118/VRCommand-Player-0.50.12-launcher-1.18-win-x64.zip) · [發行核對](../artifacts/windows-ticket-refresh-118/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44011318875)
+
 ## 2026-11-17 在全館開場清單核對 MR 房間校正
 
 - 控制台 0.31.246 顯示各準備房的 VR／MR 模式，MR 房可直接定位原校正檔欄或鎖定結果。合併場在不同房間間切換保留已核對的原檔。瀏覽器核對原檔 SHA-256 後才允許鎖定，回條不符時保留原命令供重試。 [開場清單](PLAYER_READINESS.md#五房追蹤驗收開場) · [Quest 部署](QUEST3.md#quest-3-場地對位部署)
