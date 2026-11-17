@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 收件與開場核對原 UDP 回條修訂
+
+- 使用新版全館 UDP 回條收件時，核對產出回條的原網路清單 SHA-256、場次、任務版本及修訂。開場重驗也會對照原 Windows 計畫；封存與收件清單工具在提供原網路清單時核對同一組欄位。 [操作與檔案格式](EXTERNAL_CLIENTS.md#從原啟動預覽產生網路清單)
+- 以真實 CLI 處理離線測試資料。原版在獨立與合併模式各錯收 5 席舊回條；修正後兩種模式皆接受原清單，拒絕只更換場次修訂的清單與回條。開場唯讀重驗及封存收件也拒絕改動的回條。LAN 離線 12 項、Quest 計畫 8 項及封存回歸 154 項通過，原生 UDP 由防火牆查核略過。原六批 Windows 封存重驗仍有 80 筆戰績確認，摘要逐位元相同。 [原反例](../artifacts/udp-original-batch-20261117/before.log) · [修正版測試](../artifacts/udp-original-batch-20261117/lan-tests-final.log) · [封存回歸](../artifacts/udp-original-batch-20261117/field-tests.log) · [六批封存重驗](../artifacts/udp-original-batch-20261117/legacy-six-stages.json)
+- GitHub Actions 對 `38a576f` 回報帳務或支出上限，工作未啟動。Quest 3 仍只有檔案傳輸介面，實機及現地跨機 UDP 待驗。 [USB 狀態](../artifacts/udp-original-batch-20261117/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43998766112)
+
 ## 2026-11-17 主控台比對 UDP 回條與目前準備狀態
 
 - 管理台 0.31.239 匯入新版 UDP 回條時，保留原 UDP 測量及待補席數，另以唯讀查詢比對當下的五房模式、準備狀態、原場次、任務版本、修訂和登記席位。回條檔留在瀏覽器。舊回條仍可讀取，正式啟動仍由原工具重驗網路清單、雙端報告與有效期限。 [主控台操作方式](WINDOWS_SERVER_PACKAGE.md#以-udp-預檢報告啟動五房)
