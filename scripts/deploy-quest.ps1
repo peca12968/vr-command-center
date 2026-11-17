@@ -23,6 +23,7 @@ param(
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,2147483647)][int]$ExpectedVersionCode,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Smoke')][Parameter(Mandatory, ParameterSetName='PrepareApks')][ValidateNotNullOrEmpty()][string]$ReleaseReport,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Smoke')][Parameter(ParameterSetName='PrepareApks')][ValidateNotNullOrEmpty()][string]$ApkPath,
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][switch]$UseInstalledApk,
     [Parameter(Mandatory, ParameterSetName='PrepareApks')][switch]$PrepareQuestApks,
     [Parameter(ParameterSetName='Bundle')][switch]$DeployMappedSeats,
     [Parameter(ParameterSetName='Bundle')][switch]$InstallMissing,
@@ -2092,6 +2093,9 @@ if ($PSCmdlet.ParameterSetName -eq 'Smoke') {
 $alignment = $null
 $alignmentHash = $null
 $liveSeat = $null
+if ($UseInstalledApk -and (-not $ReleaseReport -or $ApkPath -or $DeviceMap -or $CheckOnly -or $VerifyTrackedSeats)) {
+    throw 'Use -UseInstalledApk with -ReleaseReport for a single-seat launch and omit -ApkPath.'
+}
 if ($RecordLinkMetrics -and (-not $ReleaseReport -or $CheckOnly -or $VerifyTrackedSeats -or ($DeviceMap -and -not $DeployMappedSeats))) {
     throw 'Use -RecordLinkMetrics with -ReleaseReport when launching a Quest player; a device map also needs -DeployMappedSeats.'
 }
@@ -2227,7 +2231,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
     }
 }
 $release = if ($ReleaseReport) { Read-QuestRelease $ReleaseReport }
-if ($release) { Confirm-LocalQuestApk $apk $release.sha256 }
+if ($release -and -not $UseInstalledApk) { Confirm-LocalQuestApk $apk $release.sha256 }
 if ($CheckOnly) {
     $report = [ordered]@{
         roomId = $ticket.RoomId
@@ -2249,7 +2253,7 @@ if ($CheckOnly) {
     return
 }
 
-if (-not (Test-Path -LiteralPath $apk -PathType Leaf)) { throw 'Build the Quest APK before deploying.' }
+if (-not $UseInstalledApk -and -not (Test-Path -LiteralPath $apk -PathType Leaf)) { throw 'Build the Quest APK before deploying.' }
 $deploymentLock = Enter-QuestDeployment
 $stagedApk = $null
 $deployment = @{}
@@ -2260,14 +2264,16 @@ try {
     $model = ([string]$model).Trim()
     if ($model -ne 'Quest 3') { throw 'Selected device is not a Meta Quest 3. No app was installed.' }
     if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') { Confirm-VenueReadback $venue -RequireLiveSource }
-    if ($release) {
+    if ($release -and -not $UseInstalledApk) {
         $stagedApk = New-VerifiedQuestApk $apk $release.sha256
         $apk = $stagedApk
     }
     if ($liveSeat) { Confirm-QuestPlayerReadback $liveSeat }
-    if ($RequireOpenXR) { Invoke-QuestAdb ($deviceTarget + @('install', '-r', $apk)) *> $null }
-    else { Invoke-QuestAdb ($deviceTarget + @('install', '-r', $apk)) }
-    if ($LASTEXITCODE -ne 0) { throw 'APK installation failed.' }
+    if (-not $UseInstalledApk) {
+        if ($RequireOpenXR) { Invoke-QuestAdb ($deviceTarget + @('install', '-r', $apk)) *> $null }
+        else { Invoke-QuestAdb ($deviceTarget + @('install', '-r', $apk)) }
+        if ($LASTEXITCODE -ne 0) { throw 'APK installation failed.' }
+    }
     if ($release -and (Get-QuestApkStatus $deviceTarget $release.sha256) -cne 'ready') {
         throw 'Installed Quest APK could not be verified against the release report.'
     }
@@ -2282,4 +2288,6 @@ if ($RequireOpenXR) {
     [ordered]@{ status = 'openxr-ready'; roomId = $ticket.RoomId; seat = $ticket.Seat + 1;
         apkVerified = $true; filesVerified = $true; openXR = $deployment.OpenXR
         venueReleaseReportSha256 = $release.reportSha256 } | ConvertTo-Json -Compress
+} elseif ($UseInstalledApk) {
+    Write-Host 'Verified installed Quest client launched. Ticket expiry and server admission still apply.'
 } else { Write-Host 'Quest client installed and launched. Ticket expiry and server admission still apply.' }

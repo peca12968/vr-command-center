@@ -154,6 +154,7 @@ switch ($args[2]) {
                     exit 0
                 }
                 if ($env:QUEST_TEST_RELEASE_HASH -and ($args[4..7] -join ' ') -ceq 'path --user current com.vrcommand.quest') {
+                    if ($env:QUEST_TEST_FAIL -eq 'installed-apk-missing') { exit 0 }
                     'package:/data/app/fixture/base.apk'; exit 0
                 }
                 exit 98
@@ -589,6 +590,44 @@ class QuestDeployTests(unittest.TestCase):
         self.assertIn(' shell am start ', commands[-1])
         self.assertEqual(self.player, json.loads((self.remote/'vr-connection.json').read_bytes()))
         self.assertEqual(expected, hashlib.sha256(apk.read_bytes()).hexdigest())
+
+    def test_single_seat_can_launch_the_verified_installed_apk_without_a_local_copy(self):
+        digest = hashlib.sha256(b'preinstalled APK').hexdigest()
+        release = self.root / 'release.json'
+        self.write(release, {'verified': True, 'scope': 'offline-package-consistency', 'quest': {
+            'applicationId': 'com.vrcommand.quest', 'architecture': 'arm64-v8a', 'signatureV2': True,
+            'versionCode': 77, 'sha256': digest}})
+        flags = ('-UseInstalledApk', '-ReleaseReport', str(release), '-Serial', 'fixture')
+        for options in (('-UseInstalledApk',), (*flags, '-ApkPath', 'unused.apk'), (*flags, '-CheckOnly')):
+            self.assert_rejected(self.run_script(*options), 'Use -UseInstalledApk with -ReleaseReport')
+        self.assertFalse(self.commands.exists())
+
+        active = self.remote / 'vr-connection.json'
+        original = b'previous connection'
+        active.write_bytes(original)
+        for fault in ('installed-apk-missing', 'installed-apk-mismatch'):
+            with self.subTest(fault=fault):
+                self.commands.unlink(missing_ok=True)
+                result = self.run_script(*flags, '-RequireOpenXR', failure=fault, release_hash=digest)
+                self.assert_rejected(result, 'Installed Quest APK could not be verified')
+                commands = self.commands.read_text(encoding='utf-8').splitlines()
+                self.assertEqual(['devices -l', '-t 41 shell getprop ro.product.model',
+                                  '-t 41 shell pm path --user current com.vrcommand.quest'] +
+                                 (['-t 41 shell sha256sum /data/app/fixture/base.apk'] if fault.endswith('mismatch') else []),
+                                 commands)
+                self.assertEqual(original, active.read_bytes())
+
+        self.commands.unlink()
+        result = self.run_script(*flags, '-RequireOpenXR', release_hash=digest)
+        self.assertEqual(0, result.returncode, result.stderr)
+        receipt = json.loads(result.stdout)
+        self.assertEqual(('openxr-ready', True, True), tuple(receipt[key] for key in ('status', 'apkVerified', 'filesVerified')))
+        self.assertEqual(4242, receipt['openXR']['processId'])
+        commands = self.commands.read_text(encoding='utf-8')
+        self.assertNotIn(' install ', commands)
+        self.assertLess(commands.index('sha256sum /data/app/fixture/base.apk'), commands.index(' push '))
+        self.assertLess(commands.index(' push '), commands.index(' am start -W '))
+        self.assertEqual(self.player, json.loads(active.read_bytes()))
 
     def test_single_seat_quest_link_measurement_requires_current_package_and_writes_opt_in(self):
         apk = self.root / 'link build.apk'
@@ -3755,6 +3794,19 @@ else:
         self.assertEqual(2, sum(' push ' in command for command in commands))
         self.assertIn('shell am start', commands[-1])
         self.assertNotIn(config['joinTicket'], result.stdout + result.stderr + ''.join(commands))
+
+        release, release_data, _ = self.release_report()
+        apk.unlink()
+        (self.root / 'adb.log').unlink()
+        result = self.run_bundle(files, '-RoomId', '4', '-Seat', '3', '-Serial', 'fixture', '-AdbPath', str(adb),
+                                 '-UseInstalledApk', '-ReleaseReport', str(release), script=script,
+                                 environment={**environment, 'QUEST_TEST_RELEASE_HASH': release_data['quest']['sha256']})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(config, json.loads((remote / 'vr-connection.json').read_bytes()))
+        self.assertEqual(files['room-04-alignment.json'], (remote / name).read_bytes())
+        commands = (self.root / 'adb.log').read_text(encoding='utf-8')
+        self.assertNotIn(' install ', commands)
+        self.assertLess(commands.index('sha256sum /data/app/fixture/base.apk'), commands.index(' push '))
 
     def test_live_bundle_checks_the_published_endpoint_before_deployment(self):
         files, _ = self.bundle('Linked')

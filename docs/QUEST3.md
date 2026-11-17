@@ -101,6 +101,18 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\quest-player.js
 
 核對通過時可移除 `-CheckOnly`，加入 `-Serial` 和 `-ReleaseReport` 進行部署。工具會在安裝 APK 前和切換頭盔的連線設定前重新核對。同一席在安裝期間若被換掉，工具會保留原啟用中的連線設定，停止本次設定啟用及啟動流程。APK 可能已完成安裝。沒有 `-ManagementApi` 時可沿用本機部署流程。
 
+#### 使用頭盔上已安裝的 APK 加入場次
+
+完成首次啟動檢查或事先安裝後，可加 `-UseInstalledApk` 直接部署單席連線設定。使用原發行報告與最新連線檔即可省去複製 APK 到部署電腦的步驟。工具透過已授權的 ADB 核對指定 Quest 3 目前 Android 使用者的已安裝 APK SHA-256，再寫入設定及啟動。查不到 APK 或雜湊不同時，會保留原裝置上的設定並停止。
+
+```powershell
+pwsh -NoProfile -NonInteractive -File .\scripts\deploy-quest.ps1 -ClientConfig .\quest-player.json `
+  -Serial '<ADB 序號>' -ReleaseReport .\venue-release.json -UseInstalledApk -RequireOpenXR `
+  -ManagementApi http://127.0.0.1:5080
+```
+
+從五房 ZIP 部署單席時，也可搭配 `-VenueBundle`、`-RoomId` 和 `-Seat`。MR 仍使用該席原場次鎖定的校正檔。`-RequireOpenXR` 的成功回條只確認本次程序的 OpenXR 啟動，入場與追蹤依上方單房實機流程核對。
+
 ## 開場前從頭盔執行 UDP 預檢
 
 使用獨立的 `vr-command-quest-udp-probe-0.1.0.apk`（套件 `com.vrcommand.udpprobe`）做場館診斷。它透過已授權的 ADB 裝置執行，從頭盔指定的 IPv4 傳送與 Windows 監聽端相同的 UDP 挑戰。報告可以納入逐來源封存驗收。 [Windows 監聽與封存操作](EXTERNAL_CLIENTS.md#核對每個玩家來源的-udp-預檢) · [Android Debug Bridge](https://developer.android.com/tools/adb)
