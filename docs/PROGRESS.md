@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-17 核對單席票券及整房下載原檔
+
+- 控制台 0.31.247 在下載單席連線檔前核對票券內的場次、玩家、入場、房席及效期。整房 ZIP 以本次請求編號及 SHA-256 核對原檔，下載前再讀原名冊及遊戲來源。 [單席和整房配票](EXTERNAL_CLIENTS.md)
+- 上一版接受同房另一席實際簽發的票券，反例已保存。正式包以本機 IPC 通過 15 項，包含合併 VR 和獨立 MR 的錯席、舊入場、效期不符、其他房 ZIP、重送回應與位元組改動。正常票券由原管理服務驗證；MR 原校正值、端點及整房下載均通過。首輪測試以 Playwright 讀回下載回應取得空內容，改讀下載成品後通過。Node 133 項通過。 [上一版反例](../artifacts/seat-ticket-scope-031247/previous-release/browser.log) · [正式包驗證](../artifacts/seat-ticket-scope-031247/package-downloaded-bytes/checks.json)
+- 五房部署回歸另通過 12 項 VR 和 21 項 MR／混合測試，涵蓋 5、10、25 席與 15 份部署包。合計驗證 200 張管理服務簽發票券；PowerShell 擷取規劃逐席相符。 [VR 部署回歸](../artifacts/vr-venue-pilot-031235/package-031247-vr/checks.json) · [MR／混合部署回歸](../artifacts/mr-venue-pilot-031236/package-031247-mixed/checks.json)
+- `5c64460` 管理包核對 595 檔，與 Windows 玩家啟動器 1.19 及原 Windows／Quest 0.50.12 通過離線發行核對。IPC 無 TCP 監聽或 UDP 端點，活動場次均已清理。Quest 3 仍無 ADB 偵錯介面，實機及跨機待驗。GitHub Actions 因帳務或支出上限未啟動。 [Windows 管理包](../artifacts/seat-ticket-scope-031247/final/VRCommand-ControlServer-0.31.247.zip) · [發行核對](../artifacts/seat-ticket-scope-031247/final/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44013047496)
+
 ## 2026-11-17 在 Windows 玩家視窗更新重連票券
 
 - 啟動器 1.19 在由視窗開啟的遊戲仍執行時提供「更新重連票券」（Alt+T）。比對開局核對的入場與端點後才更新原路徑，並把更新結果與原連線狀態分開顯示。玩家可回原遊戲操作重連。 [操作方式](WINDOWS_PLAYER_PACKAGE.md#更新原入場票券)
