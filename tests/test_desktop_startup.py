@@ -39,7 +39,7 @@ class StartupWitnessTests(unittest.TestCase):
 
 class NativeLaunchTests(unittest.TestCase):
     @unittest.skipUnless(os.name == 'nt', 'Windows Firewall preflight uses PowerShell and Windows executable paths')
-    def test_firewall_preflight_defaults_to_unattended(self):
+    def test_firewall_preflight_cannot_be_overridden_by_inherited_manual_mode(self):
         checker = ROOT / 'scripts/check-windows-firewall-notifications.ps1'
         with tempfile.TemporaryDirectory() as directory:
             image = Path(directory) / 'VrCommand.exe'
@@ -76,9 +76,11 @@ exit $LASTEXITCODE
                 (None, '7', '4', '7', '0', 2),
                 (None, '7', '0', '0', '0', 0),
                 (None, '3', '4', '0', '0', 0),
-                ('0', '7', '4', '0', '0', 0),
+                ('0', '7', '4', '0', '0', 2),
                 ('0', '7', '2', '0', '0', 2),
-                ('0', '7', '2', '2', '0', 0),
+                ('0', '7', '2', '2', '0', 2),
+                ('0', '7', '4', '7', '0', 2),
+                ('0', '7', '0', '0', '0', 0),
                 ('0', '7', '4', '7', '1', 2),
                 ('0', '7', '0', '0', '1', 0),
             ]
@@ -93,8 +95,8 @@ exit $LASTEXITCODE
                                             creationflags=subprocess.CREATE_NO_WINDOW)
                     self.assertEqual(result.returncode, expected, result.stderr)
                     if expected == 2:
-                        message = ('may prompt on the Private profile.' if mode == '0' and force == '0'
-                                   else 'notifications are enabled on: Public.')
+                        profile = 'Private' if notifying == '2' else 'Public'
+                        message = f'notifications are enabled on: {profile}.'
                         self.assertIn(message, result.stderr)
 
     def test_packaged_result_race_rechecks_the_game_before_calling_the_launcher(self):

@@ -407,9 +407,7 @@ python scripts/check-server-package.py '<解壓後的 VRCommand-GameServer>' `
 
 ### 無人值守的 Windows 測試
 
-Windows 啟動前預設採用無人值守查核，涵蓋網域、私人和公用網路設定檔。任一啟用中的防火牆設定檔仍會發出入站通知時，即使程式已有入站規則，也會在啟動前退出並在終端機列出原因。背景工作可接著執行離線建置、封裝和測試。使用舊版套件進行背景測試時，在同一 PowerShell 工作階段設定 `$env:VR_COMMAND_UNATTENDED = '1'`，讓套件內的查核也涵蓋所有設定檔。
-
-人在現場直接開啟套件啟動器時，可以在 PowerShell 工作階段明確設定 `$env:VR_COMMAND_UNATTENDED = '0'`，採用目前網路設定檔與既有入站規則查核。Python 與瀏覽器測試的共用查核、桌面原生程序測試和 Unity 批次建置一律使用無人值守查核，即使呼叫端設了 `0`。
+Windows 啟動前一律採用無人值守查核，涵蓋網域、私人和公用網路設定檔。任一啟用中的防火牆設定檔仍會發出入站通知時，即使程式已有入站規則或工作階段繼承 `VR_COMMAND_UNATTENDED=0`，也會在啟動前退出並列出原因。背景工作可接著執行離線建置、封裝和測試。使用舊版套件進行背景測試時，在同一 PowerShell 工作階段設定 `$env:VR_COMMAND_UNATTENDED = '1'`，讓套件內的查核也涵蓋所有設定檔。
 
 Windows 依執行檔的完整路徑套用程式規則。即使只有同機測試，新解壓路徑的 `vrcommand.exe` 也可能觸發入站連線提示。自動測試優先使用 `127.0.0.1`，並在啟動前核對實際 EXE 路徑及防火牆設定。 [Microsoft Windows 防火牆規則](https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/rules)
 
@@ -435,7 +433,7 @@ Windows 的 `smoke_world.py` 可設定 `VR_COMMAND_WORLD_TEST_WINDOWS_IPC=1`，�
 
 Windows 玩家啟動器 1.17.2、伺服器啟動器 1.27.1 及更新的管理啟動器也內建同一項唯讀查核。無人值守請從套件啟動器進入，由它先查核實際遊戲或管理程式路徑。伺服器啟動器另外在自己試綁 UDP 埠前查核本身。遇到提示風險時，圖形介面在狀態欄顯示原因，命令列退出並保留拒絕原因，無需有人按「允許」。套件完整性核對可直接執行。Unity 建置在啟動 Editor 前也會查核 Unity Package Manager。
 
-若啟用通知的設定檔缺少涵蓋實際 EXE 的入站 TCP 與 UDP 規則，或查核無法完成，工具會在終端機回報並停止啟動。這項檢查只讀取防火牆設定。可用同一支指令檢查其他執行檔的實際路徑。
+若任何啟用中的防火牆設定檔會發出入站通知，或查核無法完成，工具會在終端機回報並停止啟動。這項檢查只讀取防火牆設定。可用同一支指令檢查其他執行檔的實際路徑。
 
 ```powershell
 pwsh -NoProfile -NonInteractive -File .\scripts\check-windows-firewall-notifications.ps1 -Executable .\artifacts\desktop\VrCommand.exe

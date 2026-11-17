@@ -1,4 +1,5 @@
 [CmdletBinding()]
+# Keep -Unattended for callers from existing packages and scripts.
 param([Parameter(Mandatory)][string]$Executable, [switch]$Unattended)
 
 $ErrorActionPreference = 'Stop'
@@ -14,38 +15,12 @@ if ($active -lt 1 -or $active -gt 7) {
     throw 'Could not determine the active Windows Firewall profiles.'
 }
 
-# Unattended runs require notification suppression even if a matching rule exists.
-# Include inactive profiles so a network change during startup does not reopen the prompt.
-if ($Unattended -or $env:VR_COMMAND_UNATTENDED -ne '0') {
-    $notifyingProfiles = @($profiles.GetEnumerator() | Where-Object {
-        $policy.FirewallEnabled($_.Value) -and -not $policy.NotificationsDisabled($_.Value)
-    } | ForEach-Object Key)
-    if ($notifyingProfiles.Count) {
-        [Console]::Error.WriteLine("Unattended startup skipped for $($file.FullName). Windows Firewall inbound notifications are enabled on: $($notifyingProfiles -join ', ').")
-        exit 2
-    }
-    exit 0
-}
-
-# Both an allow rule and a block rule can settle the notification for a program.
-# The caller still verifies whether its loopback traffic works.
-$rules = @($policy.Rules | Where-Object {
-    $_.Enabled -and $_.Direction -eq 1 -and $_.ApplicationName -and
-        [Environment]::ExpandEnvironmentVariables($_.ApplicationName) -eq $file.FullName -and
-        $_.LocalAddresses -eq '*' -and $_.RemoteAddresses -eq '*' -and
-        $_.InterfaceTypes -eq 'All' -and -not $_.Interfaces -and -not $_.ServiceName -and
-        ($_.Protocol -eq 256 -or ($_.Protocol -in 6, 17 -and $_.LocalPorts -eq '*' -and $_.RemotePorts -eq '*'))
-})
-
-foreach ($profile in $profiles.GetEnumerator()) {
-    $mask = $profile.Value
-    if (($active -band $mask) -eq 0) { continue }
-    if (-not $policy.FirewallEnabled($mask) -or $policy.NotificationsDisabled($mask)) { continue }
-
-    $protocols = @($rules | Where-Object { ($_.Profiles -band $mask) -ne 0 } | ForEach-Object Protocol)
-    if (256 -notin $protocols -and (6 -notin $protocols -or 17 -notin $protocols)) {
-        [Console]::Error.WriteLine("Windows Firewall may prompt on the $($profile.Key) profile. No matching inbound TCP and UDP rules found for $($file.FullName).")
-        exit 2
-    }
+# Include inactive profiles because Windows can switch networks while the game is running.
+$notifyingProfiles = @($profiles.GetEnumerator() | Where-Object {
+    $policy.FirewallEnabled($_.Value) -and -not $policy.NotificationsDisabled($_.Value)
+} | ForEach-Object Key)
+if ($notifyingProfiles.Count) {
+    [Console]::Error.WriteLine("Startup skipped for $($file.FullName). Windows Firewall inbound notifications are enabled on: $($notifyingProfiles -join ', ').")
+    exit 2
 }
 exit 0

@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-17 強制 Windows 啟動前防火牆查核
+
+- 移除 `VR_COMMAND_UNATTENDED=0` 可放寬查核的分支。若網域、私人或公用設定檔可能顯示防火牆允許視窗，專案啟動器提前停止並記錄原因。讀回本機有效設定後，五個開發與解壓包路徑均回傳 2，查核前後的 `VrCommand.exe` 程序數均為零。防火牆設定未修改。 [本機查核](../artifacts/windows-no-prompt-guard/firewall-preflight.json)
+- Windows 玩家啟動器 1.20、遊戲伺服器啟動器 1.27.3 與管理包 0.31.247 重新封裝。三個 ZIP 的啟動器均核對內嵌新版查核。玩家包 61 項、桌面啟動 8 項、LAN 離線 13 項通過。管理包以本機 IPC 通過 16 項配票與下載查核，TCP 監聽和 UDP 端點皆為零。原生 LAN 組因查核略過。 [內嵌查核](../artifacts/windows-no-prompt-guard/embedded-guards.json) · [成套發行核對](../artifacts/windows-no-prompt-guard/venue-release.json) · [IPC 驗證](../artifacts/seat-ticket-scope-031247/no-prompt-repack/runtime.json)
+
 ## 2026-11-17 核對單席票券及整房下載原檔
 
 - 控制台 0.31.247 在下載單席連線檔前核對票券內的場次、玩家、入場、房席及效期。整房 ZIP 以本次請求編號及 SHA-256 核對原檔，下載前再讀原名冊及遊戲來源。 [單席和整房配票](EXTERNAL_CLIENTS.md)
