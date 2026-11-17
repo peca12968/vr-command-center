@@ -8,7 +8,8 @@ internal sealed record WorldVenueSetting(Guid SessionId, Guid RequestId, Guid St
     long AppliedAtSequence, long? WorldSequence,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WorldVenueEnemyPopulation[]? EnemyPopulations = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? ObservedSequence = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? SupersededAtSequence = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? SupersededAtSequence = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? RoomId = null);
 internal sealed record WorldVenueEnemyPopulation(int RoomId, int Present, int Alive);
 
 public sealed partial class WorldRecordings
@@ -26,18 +27,20 @@ public sealed partial class WorldRecordings
             ObservedSequence: packet?.observedSequence, SupersededAtSequence: superseded);
     }
 
-    internal WorldVenueSetting ReadWorldVenueEnemies(Guid id, Guid requestId, OperatorIdentity actor, CancellationToken cancellation)
+    internal WorldVenueSetting ReadWorldVenueEnemies(Guid id, Guid requestId, int? roomId, OperatorIdentity actor, CancellationToken cancellation)
     {
-        var (applied, command, _, _) = manager.ReadVenueSettingCommand(id, requestId, ControlAction.SetEnemies, actor);
+        var (applied, command, superseded, through) = manager.ReadVenueSettingCommand(id, requestId, ControlAction.SetEnemies, actor, roomId);
         var enemies = command.Enemies!;
         var info = Info(id, actor);
         var behavior = enemies.Behavior.ToString();
-        var packet = FindOriginalVenueSettingFrame(id, info.AcceptedSequence, applied, applied + 1, candidate => candidate.frame.behavior == behavior
-            && candidate.frame.autoAttack == enemies.AutoAttack && candidate.frame.roomEnemyPolicies is null or { Length: 0 }, cancellation);
+        var packet = FindOriginalVenueSettingFrame(id, info.AcceptedSequence, applied, superseded ?? through + 1,
+            candidate => candidate.frame.behavior == behavior && candidate.frame.autoAttack == enemies.AutoAttack
+                && !(candidate.frame.roomEnemyPolicies?.Any(policy => roomId == null || policy.roomId == roomId) ?? false), cancellation);
         var byRoom = packet?.frame.enemies.ToLookup(enemy => enemy.roomId);
-        var populations = byRoom is null ? null : info.Header.roomIds.Select(room =>
+        var populations = byRoom is null ? null : info.Header.roomIds.Where(room => roomId == null || room == roomId).Select(room =>
             new WorldVenueEnemyPopulation(room, byRoom[room].Count(), byRoom[room].Count(enemy => enemy.health > 0))).ToArray();
-        return new(id, requestId, Guid.Parse(info.Header.streamId), info.Header.roomIds, applied, packet?.sequence, populations);
+        return new(id, requestId, Guid.Parse(info.Header.streamId), info.Header.roomIds, applied, packet?.sequence, populations,
+            packet?.observedSequence, superseded, roomId);
     }
 
     private WorldRecordingPacket? FindOriginalVenueSettingFrame(Guid id, long acceptedSequence, long applied, long upper,

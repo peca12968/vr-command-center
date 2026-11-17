@@ -1035,7 +1035,8 @@ function missionEnemyText(enemies) {
 function settingBatchRoom(kind, batch, session, room) {
   if (session.state === 'Ended') return { status: 'Ended', text: '原場次已結束' };
   const enemy = kind === 'enemies', current = roomReadiness.settingStatus(room, kind, session.sessionId);
-  if (session.state === 'Superseded' || current?.setting.appliedAtSequence > session.appliedAtSequence)
+  if (session.state === 'Superseded' || (enemy && session.supersededRoomIds?.includes(room))
+    || current?.setting.appliedAtSequence > session.appliedAtSequence)
     return { status: 'Superseded', text: enemy ? '已被較新的敵軍設定覆寫' : '已被較新的環境設定覆寫' };
   if (!current?.target || !current.venue || current.setting.appliedAtSequence !== session.appliedAtSequence
     || (enemy ? current.setting.behavior !== batch.behavior || current.setting.autoAttack !== batch.autoAttack
@@ -1053,24 +1054,26 @@ async function openOriginalVenueSetting(kind, batch, session, roomId) {
     && request === venueSettingReview && state.venue?.[key]?.requestId === batch.requestId;
   if (!current()) return;
   try {
-    const original = await api(`/sessions/${session.sessionId}/world/venue-${kind}/${batch.requestId}`);
+    const scope = enemy ? `?roomId=${roomId}` : '';
+    const original = await api(`/sessions/${session.sessionId}/world/venue-${kind}/${batch.requestId}${scope}`);
     if (!current()) return;
     const { streamId, worldSequence, appliedAtSequence, observedSequence, supersededAtSequence } = original;
     if (original.sessionId !== session.sessionId || original.requestId !== batch.requestId || appliedAtSequence !== session.appliedAtSequence
-      || typeof streamId !== 'string' || !Array.isArray(original.roomIds) || !original.roomIds.includes(roomId))
+      || typeof streamId !== 'string' || !Array.isArray(original.roomIds) || !original.roomIds.includes(roomId)
+      || (enemy && original.roomId !== roomId))
       throw new Error('Original venue setting changed');
     if (worldSequence === null) { notify(`原錄製中找不到套用這筆${label}指令的有效執行畫格。`, true); return; }
     if (!Number.isSafeInteger(worldSequence) || worldSequence < 1) throw new Error('Invalid saved frame');
-    if (!enemy && (!Number.isSafeInteger(observedSequence) || observedSequence < appliedAtSequence
-      || (supersededAtSequence !== undefined && (!Number.isSafeInteger(supersededAtSequence) || observedSequence >= supersededAtSequence))))
-      throw new Error('Original environment revision differs');
+    if (!Number.isSafeInteger(observedSequence) || observedSequence < appliedAtSequence
+      || (supersededAtSequence !== undefined && (!Number.isSafeInteger(supersededAtSequence) || observedSequence >= supersededAtSequence)))
+      throw new Error('Original setting revision differs');
     const { weather, timeOfDay, lightning, behavior, autoAttack } = batch;
-    const witness = { kind, exactObserved: true, observedSequence: enemy ? appliedAtSequence : observedSequence,
+    const witness = { kind, exactObserved: true, observedSequence,
       setting: enemy ? { appliedAtSequence, behavior, autoAttack }
       : { appliedAtSequence, weather, timeOfDay, lightning } };
     if (enemy) {
       const rows = original.enemyPopulations;
-      const matching = Array.isArray(rows) && rows.length <= 5 ? rows.filter(row => row?.roomId === roomId) : [];
+      const matching = Array.isArray(rows) && rows.length === 1 ? rows.filter(row => row?.roomId === roomId) : [];
       const population = matching.length === 1 ? matching[0] : null;
       if (!Number.isInteger(population?.present) || population.present < 0 || population.present > 100
         || !Number.isInteger(population.alive) || population.alive < 0 || population.alive > population.present)
@@ -1097,7 +1100,11 @@ function renderVenueSettingBatch(locked, kind) {
       && Number.isSafeInteger(session.appliedAtSequence) && session.appliedAtSequence > 0
       && (!enemy || (Number.isInteger(session.targetCount) && session.targetCount >= 0 && session.targetCount <= 100))
       && Array.isArray(session.roomIds) && session.roomIds.length > 0
-      && session.roomIds.length <= 5 && session.roomIds.every(room => Number.isInteger(room) && room >= 1 && room <= 5));
+      && session.roomIds.length <= 5 && session.roomIds.every(room => Number.isInteger(room) && room >= 1 && room <= 5)
+      && (!enemy || session.supersededRoomIds === undefined || (Array.isArray(session.supersededRoomIds)
+        && session.supersededRoomIds.length <= session.roomIds.length
+        && new Set(session.supersededRoomIds).size === session.supersededRoomIds.length
+        && session.supersededRoomIds.every(room => session.roomIds.includes(room)))));
   const rows = valid ? batch.sessions.flatMap(session => session.roomIds.map(room => ({ room, session, ...settingBatchRoom(kind, batch, session, room) })))
     .sort((a, b) => a.room - b.room) : [];
   panel.hidden = !rows.length || new Set(rows.map(row => row.room)).size !== rows.length;

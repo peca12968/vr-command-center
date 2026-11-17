@@ -1053,9 +1053,9 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
       || packet.frame.phase !== 'Running' || !(packet.frame.tick > 0))) return false;
     if (kind === 'environment') return packet.weather === setting.weather && packet.frame.night === (setting.timeOfDay === 'Night')
       && packet.lightning === setting.lightning;
-    if (exactObserved && packet.frame.roomEnemyPolicies?.length) return false;
     const enemies = packet.frame.enemies.filter(enemy => enemy.roomId === target.roomId);
     const local = packet.frame.roomEnemyPolicies?.find(row => row.roomId === target.roomId);
+    if (exactObserved && local) return false;
     if (typeof inherited === 'boolean' && inherited !== !local) return false;
     const policy = local ?? packet.frame;
     return policy.behavior === setting.behavior && policy.autoAttack === setting.autoAttack

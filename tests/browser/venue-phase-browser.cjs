@@ -676,8 +676,10 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await publishUntil(first, changedEnemies[0], () => batchRoom(1, 'Applied').isVisible());
     check(await batchRoom(2, 'Waiting').isVisible() && await enemyBatch.locator('p').filter({ hasText: '1 / 2 房已確認' }).isVisible(),
       'Latest enemy batch counts only the room whose original source has confirmed');
+    await run(preparing[1], 'Pause');
+    const resumedEnemyRoom = (await run(preparing[1], 'Resume')).session;
     await publishUntil(first, changedEnemies[0], () => {
-      second(changedEnemies[1]);
+      second(resumedEnemyRoom);
       return Promise.all([1, 2].map(room => roomEnemies(room).filter({ hasText: '全館敵軍策略已套用' }).isVisible())).then(rows => rows.every(Boolean));
     });
     check(true, 'Enemy policy is confirmed only by both original game sources');
@@ -719,6 +721,11 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       && (await localEnemies.innerText()).includes('全場目標 2 名 · 本房在場 1 名、存活 1 名'),
       'A valid partial reinforcement separates the configured target from the recorded and living counts');
     const originalEnemy = await api(enemyEvidence(preparing[1]));
+    assert.equal(originalEnemy.observedSequence, resumedEnemyRoom.sequence);
+    assert.equal(originalEnemy.supersededAtSequence, localPolicy.appliedAtSequence);
+    const scopedEnemy = await api(enemyEvidence(preparing[1]) + '?roomId=2');
+    assert.deepEqual(scopedEnemy, { ...originalEnemy, roomId: 2 });
+    await api(enemyEvidence(preparing[1]) + '?roomId=1', 'GET', undefined, 'Master', 400);
     const enemyWatch = `**/api/sessions/${preparing[1]}/world/watch?**`;
     await page.route(enemyWatch, async route => {
       const response = await route.fetch();

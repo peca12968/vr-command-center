@@ -15,7 +15,8 @@ public record VenuePhasePlan(VenuePhaseTarget[] Pause, VenuePhaseTarget[] Resume
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueEnemyBatch? LatestEnemies = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueEnvironmentBatch? LatestEnvironment = null);
 public enum VenueEnemyApplicationState { Current, Superseded, Ended }
-public record VenueEnemyBatchSession(Guid SessionId, int[] RoomIds, long AppliedAtSequence, int TargetCount, VenueEnemyApplicationState State);
+public record VenueEnemyBatchSession(Guid SessionId, int[] RoomIds, long AppliedAtSequence, int TargetCount, VenueEnemyApplicationState State,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int[]? SupersededRoomIds = null);
 public record VenueEnemyBatch(Guid RequestId, DateTimeOffset RecordedAtUtc, EnemyBehavior Behavior, bool AutoAttack, VenueEnemyBatchSession[] Sessions);
 public enum VenueEnvironmentApplicationState { Current, Superseded, Ended }
 public record VenueEnvironmentBatchSession(Guid SessionId, int[] RoomIds, long AppliedAtSequence, VenueEnvironmentApplicationState State);
@@ -108,7 +109,7 @@ public sealed partial class SessionManager
     }
 
     public (long AppliedAtSequence, ControlCommand Command, long? SupersededAtSequence, long ThroughSequence) ReadVenueSettingCommand(Guid sessionId, Guid requestId,
-        ControlAction action, OperatorIdentity actor)
+        ControlAction action, OperatorIdentity actor, int? roomId = null)
     {
         RequireVenueMaster(actor);
         if (action is not (ControlAction.SetEnvironment or ControlAction.SetEnemies))
@@ -120,10 +121,17 @@ public sealed partial class SessionManager
             if (entry is null || command is null || command.Action != action)
                 throw new KeyNotFoundException("No original venue setting command for this session.");
             var history = Find(sessionId);
+            if (roomId is int room && !history.View.RoomIds.Contains(room))
+                throw new ArgumentException("The room is not part of the original session.", nameof(roomId));
+            var currentRevision = action == ControlAction.SetEnvironment ? history.EnvironmentSinceSequence
+                : roomId is int id ? RoomEnemyPolicySequence(id, history.EnemiesSinceSequence, history.RoomEnemyRevisions)
+                : EnemySettingSequence(history.EnemiesSinceSequence, history.RoomEnemyRevisions);
             long? superseded = null;
-            if (action == ControlAction.SetEnvironment && history.EnvironmentSinceSequence > entry.Sequence)
-                superseded = history.Commands.Values.Where(later => later.Sequence > entry.Sequence
-                        && later.Read<ControlCommand>().Action == ControlAction.SetEnvironment)
+            if (currentRevision > entry.Sequence)
+                superseded = history.Commands.Values.Where(later => later.Sequence > entry.Sequence)
+                    .Select(later => (later.Sequence, Command: later.Read<ControlCommand>()))
+                    .Where(later => later.Command.Action == action || (action == ControlAction.SetEnemies
+                        && later.Command.RoomEnemyPolicy is { } local && (roomId == null || local.RoomId == roomId)))
                     .Min(later => (long?)later.Sequence);
             return (entry.Sequence, command, superseded, history.View.Sequence);
         }
@@ -139,8 +147,10 @@ public sealed partial class SessionManager
             var history = Find(entry.SessionId);
             var state = history.View.State == SessionState.Ended ? VenueEnemyApplicationState.Ended
                 : history.EnemiesSinceSequence == entry.Sequence ? VenueEnemyApplicationState.Current : VenueEnemyApplicationState.Superseded;
+            var rooms = history.RoomEnemyRevisions.Keys.Order().ToArray();
             return new VenueEnemyBatchSession(entry.SessionId, [.. history.View.RoomIds], entry.Sequence,
-                entry.Read<ControlCommand>().Enemies!.Count, state);
+                entry.Read<ControlCommand>().Enemies!.Count, state,
+                state == VenueEnemyApplicationState.Current && rooms.Length > 0 ? rooms : null);
         }).OrderBy(target => target.RoomIds[0]).ToArray();
         return new(batch.Id, batch.RecordedAtUtc, policy.Behavior, policy.AutoAttack, targets);
     }
