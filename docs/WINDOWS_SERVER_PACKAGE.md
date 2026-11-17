@@ -417,7 +417,7 @@ Windows 依執行檔的完整路徑套用程式規則。即使只有同機測試
 
 在開發目錄以連線檔啟動 Windows 遊戲時，使用 `scripts/start-windows-vr.ps1 -Config <連線檔>`。若使用其他位置的建置，可指定 `-Executable <VrCommand.exe>`。此入口一律執行無人值守查核。
 
-Unity 冒煙和入場測試會同時核對玩家程式與管理 API 的啟動程式。若 `dotnet.exe` 的路徑未通過查核，可以給 `smoke-unity-player.py` 和 `check-unity-admission.py` 加上 `--api-exe`，指定已通過查核的管理包 `Runtime/VrCommand.Api.exe`。HTTP、回放及管理服務程序測試可使用 `VR_COMMAND_API_EXE` 指向同一執行檔。測試用獨立資料與 `127.0.0.1`。
+Unity 冒煙、入場、桌面場館與 TCP 迴環測試在探測連接埠前查核 `python.exe`。每次啟動或重啟 TCP 管理 API 時，也重新核對實際的管理程式。若 `dotnet.exe` 的路徑未通過查核，可以給 `smoke-unity-player.py` 和 `check-unity-admission.py` 加上 `--api-exe`，指定已通過查核的管理包 `Runtime/VrCommand.Api.exe`。HTTP、回放及管理服務程序測試可使用 `VR_COMMAND_API_EXE` 指向同一執行檔。測試用獨立資料與 `127.0.0.1`。
 
 Windows 套件及 GUI 驗證在 Python 首次探測本機連接埠前查核 `python.exe`，並在建立管理、伺服器或玩家程序前重新查核相應的啟動器及子程式。同機 UDP 轉送及管理 API 故障測試也查核實際執行的 `python.exe`。桌面姿態追蹤、姿態連續性及世界日誌復原診斷在建立測試場次前即執行這項查核。`start-local.ps1` 先完成 Release 建置，再查核 Windows 管理程式。桌面場館、練習模式與操作員工具可用 `--api-exe` 指向已通過查核的管理包 `Runtime/VrCommand.Api.exe`。
 

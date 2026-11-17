@@ -24,11 +24,12 @@ from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 from local_api import checked_api_command
-from windows_firewall import WindowsFirewallLaunchError
+from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch, start_checked_windows_process
 
 ROOT = Path(__file__).resolve().parents[1]
 api_exe = os.environ.get("VR_COMMAND_API_EXE")
 try:
+    require_silent_windows_launch(sys.executable)
     api_command, api_cwd, _ = checked_api_command(SimpleNamespace(api_exe=Path(api_exe) if api_exe else None))
 except WindowsFirewallLaunchError as error:
     raise SystemExit(str(error)) from None
@@ -233,7 +234,7 @@ try:
                 args += ["--OperatorKeyFile", str(key_file)]
             if overrides:
                 process_environment.update(overrides)
-            return subprocess.Popen(
+            return start_checked_windows_process(
                 args, cwd=api_cwd, env=process_environment,
                 stdout=output, stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,

@@ -28,6 +28,7 @@ if not args.player_exe.is_file(): raise RuntimeError('Build the current Unity De
 if not 500<=args.maximum_source_age_ms<=10000: raise ValueError('Source age threshold must be 500–10000 ms')
 try:
     require_silent_windows_launch(args.player_exe)
+    require_silent_windows_launch(sys.executable)
     api_command, api_cwd, _ = checked_api_command(args)
 except WindowsFirewallLaunchError as error:
     parser.exit(1, f'{error}\n')
@@ -84,7 +85,7 @@ def wait_for(predicate,timeout,label):
         time.sleep(.25)
     raise RuntimeError('Timed out: '+label)
 try:
-    api=subprocess.Popen([*api_command,'--urls',base],cwd=api_cwd,env=environment,stdout=api_log,stderr=api_log,creationflags=subprocess.CREATE_NO_WINDOW)
+    api=start_checked_windows_process([*api_command,'--urls',base],cwd=api_cwd,env=environment,stdout=api_log,stderr=api_log,creationflags=subprocess.CREATE_NO_WINDOW)
     processes.append(api)
     wait_for(lambda:request('/health'),20,'isolated API')
     mission=request('/api/missions',{'name':'Unity desktop native integration - Simulation','briefing':'Two actual desktop clients; synthetic head/hand poses, no headset','durationSeconds':120,'environment':{'mode':'VR','weather':'Storm','timeOfDay':'Night','lightning':True},'enemies':{'count':2,'behavior':'Advance','autoAttack':True},'props':[]})

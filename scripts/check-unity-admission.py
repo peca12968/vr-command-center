@@ -14,6 +14,7 @@ import secrets
 import socket
 import struct
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -64,6 +65,7 @@ def main():
         parser.error('Player receipt does not match current sources; build Desktop before this check')
     try:
         require_silent_windows_launch(args.player_exe)
+        require_silent_windows_launch(sys.executable)
         api_command, api_cwd, _ = checked_api_command(args)
     except WindowsFirewallLaunchError as error:
         parser.exit(1, f'{error}\n')
@@ -183,8 +185,8 @@ def main():
 
     try:
         stage('starting')
-        api = subprocess.Popen([*api_command, '--urls', base], cwd=api_cwd, env=environment,
-                               stdout=api_log, stderr=api_log, creationflags=subprocess.CREATE_NO_WINDOW)
+        api = start_checked_windows_process([*api_command, '--urls', base], cwd=api_cwd, env=environment,
+                                           stdout=api_log, stderr=api_log, creationflags=subprocess.CREATE_NO_WINDOW)
         live['api'] = api; all_processes.append(api)
         wait_for(lambda: request('/health'), 30, 'API')
         if request('/').get('version') != '0.31.0': raise RuntimeError('Use API 0.31.0 for the report-capable combat presentation contract')

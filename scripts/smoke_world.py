@@ -22,12 +22,14 @@ import urllib.request
 
 from world_test_socket import WebSocket
 from local_api import api_command as resolve_api_command, checked_api_command
-from windows_firewall import WindowsFirewallLaunchError
+from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch, start_checked_windows_process
 
 ROOT = Path(__file__).resolve().parents[1]
 api_exe = os.environ.get("VR_COMMAND_API_EXE")
 use_ipc = os.name == "nt" and os.environ.get("VR_COMMAND_WORLD_TEST_WINDOWS_IPC") == "1"
 try:
+    if not use_ipc:
+        require_silent_windows_launch(sys.executable)
     resolve_api = resolve_api_command if use_ipc else checked_api_command
     api_command, api_cwd, _ = resolve_api(SimpleNamespace(api_exe=Path(api_exe) if api_exe else None))
 except WindowsFirewallLaunchError as error:
@@ -96,7 +98,8 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory, ExitStack() a
             ipc_endpoint.unlink(missing_ok=True)
             launch = [*api_command, "--urls", "http://unix:/" + str(ipc_endpoint), "--preferHostingUrls", "true"]
         flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-        child = subprocess.Popen(launch, cwd=api_cwd, env=environment, stdout=log, stderr=log, creationflags=flags)
+        start_api = subprocess.Popen if use_ipc else start_checked_windows_process
+        child = start_api(launch, cwd=api_cwd, env=environment, stdout=log, stderr=log, creationflags=flags)
         try:
             for _ in range(150):
                 try:

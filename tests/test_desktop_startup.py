@@ -1,6 +1,7 @@
 import importlib.util
 import os
 from pathlib import Path
+import runpy
 import shutil
 import subprocess
 import sys
@@ -38,6 +39,28 @@ class StartupWitnessTests(unittest.TestCase):
 
 
 class NativeLaunchTests(unittest.TestCase):
+    def test_desktop_venue_rejects_python_before_creating_a_port_probe(self):
+        refusal = windows_firewall.WindowsFirewallLaunchError('Python firewall preflight refused.')
+        with patch.object(windows_firewall, 'require_silent_windows_launch', side_effect=refusal) as guard, \
+                patch.object(m.vm.socket, 'socket') as socket:
+            with self.assertRaisesRegex(windows_firewall.WindowsFirewallLaunchError, 'Python firewall preflight refused'):
+                m.vm.Venue(SimpleNamespace())
+
+        guard.assert_called_once_with(sys.executable)
+        socket.assert_not_called()
+
+    def test_tcp_smoke_scripts_reject_python_before_creating_a_port_probe(self):
+        refusal = windows_firewall.WindowsFirewallLaunchError('Python firewall preflight refused.')
+        for script in ('smoke_api.py', 'smoke_world.py'):
+            with self.subTest(script=script), patch.dict(os.environ, {'VR_COMMAND_WORLD_TEST_WINDOWS_IPC': '0'}), \
+                    patch.object(windows_firewall, 'require_silent_windows_launch', side_effect=refusal) as guard, \
+                    patch.object(m.vm.socket, 'socket') as socket:
+                with self.assertRaisesRegex(SystemExit, 'Python firewall preflight refused'):
+                    runpy.run_path(str(ROOT / 'scripts' / script))
+
+            guard.assert_called_once_with(sys.executable)
+            socket.assert_not_called()
+
     @unittest.skipUnless(os.name == 'nt', 'Control GUI validation uses Windows')
     def test_control_gui_exits_before_opening_port_when_python_preflight_refuses(self):
         spec = importlib.util.spec_from_file_location('control_gui', ROOT / 'scripts/check-control-gui.py')

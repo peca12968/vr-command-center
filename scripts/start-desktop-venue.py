@@ -106,8 +106,11 @@ def player_result_phase(text):
 
 class Venue:
     def __init__(self, args, *, artifact_family='desktop-venue'):
+        from windows_firewall import require_silent_windows_launch
+
         if artifact_family not in ('desktop-venue', 'desktop-demo', 'desktop-capacity', 'desktop-active', 'desktop-debrief', 'desktop-end-race', 'desktop-clock', 'desktop-clock-faults', 'desktop-long', 'desktop-seal-faults', 'desktop-briefing', 'desktop-readiness', 'desktop-first-person', 'desktop-navigation', 'desktop-ai-targeting', 'desktop-crouch', 'desktop-exercise', 'desktop-walkway', 'desktop-journal-recovery', 'desktop-openxr-aim', 'desktop-guarded-openxr', 'desktop-venue-openxr'):
             raise ValueError('Unknown native fixture artifact family')
+        require_silent_windows_launch(sys.executable)
         self.args = args
         self.artifact_family = artifact_family
         self.directory = ROOT / 'artifacts' / artifact_family / (time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
@@ -160,14 +163,16 @@ class Venue:
         raise RuntimeError('Timed out: ' + label)
 
     def start(self):
-        command, cwd, assembly = local_api.checked_api_command(self.args)
+        from windows_firewall import start_checked_windows_process
+
+        command, cwd, assembly = api_command(self.args)
         with assembly.open('rb') as binary:
             assembly_sha256 = hashlib.file_digest(binary, 'sha256').hexdigest()
         environment = {k: v for k, v in os.environ.items() if not k.lower().startswith('operatorkeys__') and k.lower() not in ['operatorkeyfile', 'playerticketsigningkey']}
         environment.update(DataDirectory=str(self.runtime_directory / 'missions'), SessionDataDirectory=str(self.runtime_directory / 'sessions'),
                            OperatorKeyFile=str(self.directory / 'keys.json'), Logging__LogLevel__Default='Warning')
         self.api_log = (self.directory / 'api.log').open('wb')
-        self.processes['api'] = subprocess.Popen([*command, '--urls', self.base], cwd=cwd,
+        self.processes['api'] = start_checked_windows_process([*command, '--urls', self.base], cwd=cwd,
             env=environment, stdout=self.api_log, stderr=self.api_log, creationflags=subprocess.CREATE_NO_WINDOW)
         self.wait(lambda: self.request('/health'), 30, 'API startup')
         version = self.request('/').get('version')
