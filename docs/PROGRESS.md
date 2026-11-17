@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 將逐席 Quest OpenXR 納入場館驗收
+
+- 單批 `venue.json` 與六批 `stages.json` 可用 `requireQuestOpenXR` 要求每批至少一席 Quest 且所有 Quest 席位都有原部署與同一程序的 OpenXR 就緒日誌。單批及六批收件報告按房號、席號區分缺啟動證據和日誌不符。未啟用時沿用原證據核對流程。 [操作方式](EXTERNAL_CLIENTS.md#核對封存席位的-quest-發行-apk)
+- Python 場館封存測試 150 項通過。用合成 logcat 驗證獨立與合併各 25 個 Quest 席位，以及六批 5／10／25 席中的 30 個 Quest 與 50 個 Windows 席位。另驗證缺證據、錯誤日誌與純 Windows 批次在啟用條件時被拒絕。既有 Windows 原生兩種模式各 25 席用原條件重驗，報告逐位元一致，核對 76 份原檔雜湊均相符。 [測試日誌](../artifacts/quest-openxr-field-policy-20261117/field-tests.log) · [原封存複驗](../artifacts/quest-openxr-field-policy-20261117/original-archive-checks.json)
+- GitHub Actions 對 `de0b82d` 回報帳務或支出上限，工作未啟動。本輪在電腦離線驗證，Quest USB 仍只有檔案傳輸介面，實機顯示、追蹤及跨機驗收待完成。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43984654251) · [USB 狀態](../artifacts/quest-openxr-field-policy-20261117/usb-status.json)
+
 ## 2026-11-17 從配置檔一次套用勾選房間
 
 - 管理台 0.31.234 在五房獨立的配置檔預覽可勾選多個房間。各房套用檔案中本房的精確保存版本，保留其他房的選擇及任務草稿。所選房間重新檢查場地，切換模式或更換檔案會清除勾選。 [操作方式](MISSION_VERSIONS.md#在開場前保存五房任務配置)
