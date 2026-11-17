@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 回查原天候仍生效的執行畫格
+
+- 管理包 0.31.250 以原環境命令至下次覆寫前的管理序號查找執行畫格。暫停、恢復等命令可推進序號，原天候仍生效時會讀回原畫格。相同天候的新命令也會劃出新界線。回放核對找到畫格的實際觀察序號。 [全館環境操作](ENVIRONMENT.md#核對最近一批環境指令)
+- 新舊正式包經 Windows AF_UNIX 實測合併及獨立各 25 個模擬席位。舊版兩輪都找不到暫停後恢復的第 3 格，新版可開啟該格，並拒絕觀察序號遭替換的畫格。同設定覆寫後才有畫格時，未觀察的批次仍查不到。服務重啟後逐筆比對一致，TCP 監聽、UDP 端點及活動場次皆零。首輪新包的瀏覽器夾具比對路由時重複加上 `/api`，修正後正式解壓包通過四項瀏覽器檢查。另通過 125 項 Node 測試。 [API 與重啟驗證](../artifacts/environment-revision-replay-031250/package-final-api.json) · [合併場回放](../artifacts/environment-revision-replay-031250/package-final-linked/checks.json) · [獨立場回放](../artifacts/environment-revision-replay-031250/package-final-independent/checks.json)
+- `67521b3` 管理包核對 595 檔，搭配原 Windows 玩家、伺服器與 Quest 0.50.12 通過離線發行核對。GitHub Actions 因帳務或支出上限未啟動。 [Windows 管理包](../artifacts/environment-revision-replay-031250/VRCommand-ControlServer-0.31.250.zip) · [發行核對](../artifacts/environment-revision-replay-031250/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44017737156)
+
 ## 2026-11-17 核對即時重連與封存尾格
 
 - 控制台 0.31.249 在即時觀戰重連遇到同序號時核對整份快照及統計。差異會保留上次已接受畫面、房間及鏡頭。即時封存須與已結束的最後一格及累計時間相符。舊版在兩種拓撲都接受替換天候的同序號、以執行中畫格封存，以及錯誤的封存時間。 [重連操作](WORLD_RECORDING.md#即時觀戰斷線後重新連接)
