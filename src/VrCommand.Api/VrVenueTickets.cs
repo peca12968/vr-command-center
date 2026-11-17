@@ -13,7 +13,7 @@ internal sealed class VrVenueTicketConflict(int roomId, string code) : InvalidOp
 
 internal static partial class VrVenueTickets
 {
-    internal sealed record Request(SessionMode Topology, RoomFence[] Rooms);
+    internal sealed record Request(SessionMode Topology, RoomFence[] Rooms, int PlayersPerRoom = SessionManager.PlayersPerRoom);
     internal sealed record RoomFence(int RoomId, Guid SessionId, Guid StreamId, TicketAdmission?[] Players);
     internal sealed record Seat(int Number, Guid PlayerId, Guid AdmissionId, string Name);
     internal sealed record Room(int RoomId, Guid? SessionId, string? MissionName, ConnectionEndpoint? Endpoint, Seat[] Seats, string? Problem,
@@ -23,9 +23,16 @@ internal static partial class VrVenueTickets
         public bool Ready => Topology is not null && Rooms.All(room => room.Problem is null);
     }
 
-    internal static Preview Read(WorldRecordings worlds, OperatorIdentity actor) => Plan(worlds.ReadVenueSources(null, actor));
+    private static bool SupportedSeatCount(int count) => count is 1 or 2 or SessionManager.PlayersPerRoom;
 
-    private static Preview Plan(Dictionary<Guid, (SessionView Session, ConnectionEndpoint? Endpoint, bool? TicketSourceLive)> sources)
+    internal static Preview Read(WorldRecordings worlds, OperatorIdentity actor, int playersPerRoom)
+    {
+        if (!SupportedSeatCount(playersPerRoom)) throw new ArgumentException("Use 1, 2 or 5 players per room.");
+        return Plan(worlds.ReadVenueSources(null, actor), playersPerRoom);
+    }
+
+    private static Preview Plan(Dictionary<Guid, (SessionView Session, ConnectionEndpoint? Endpoint, bool? TicketSourceLive)> sources,
+        int playersPerRoom)
     {
         var modes = sources.Values.Where(source => source.Session.Environment.Mode == ExperienceMode.VR)
             .Select(source => source.Session.Mode).Distinct().ToArray();
@@ -43,7 +50,7 @@ internal static partial class VrVenueTickets
             var problem = topology is null ? "vr-venue-topology-changed"
                 : endpoint is null ? "vr-venue-endpoint-missing"
                 : topology == SessionMode.Independent && !endpoints.Add((endpoint.Address, endpoint.Port)) ? "vr-venue-endpoint-reused"
-                : seats.Length != SessionManager.PlayersPerRoom ? "vr-venue-roster-incomplete"
+                : seats.Length != playersPerRoom || seats.Where((seat, index) => seat.Number != index + 1).Any() ? "vr-venue-roster-incomplete"
                 : seats.Any(seat => !players.Add(seat.PlayerId) || !admissions.Add(seat.AdmissionId)) ? "vr-venue-roster-reused"
                 : ticketSourceLive == false ? "vr-venue-endpoint-stale"
                 : null;
@@ -54,11 +61,13 @@ internal static partial class VrVenueTickets
 
     internal static async Task<Request> ReadRequest(HttpRequest request, CancellationToken cancellation)
     {
-        const string error = "Provide the current VR session, source and all five admissions for each of the five rooms.";
+        const string error = "Provide each original VR session and source with 1, 2 or 5 current admissions per room.";
         var input = await DeploymentJson.Read<Request>(request, 8192, error, cancellation);
         if (input.Topology is not (SessionMode.Independent or SessionMode.Linked)
+            || !SupportedSeatCount(input.PlayersPerRoom)
             || input.Rooms is not { Length: SessionManager.RoomCount }
-            || input.Rooms.Any(room => room is not { RoomId: >= 1 and <= SessionManager.RoomCount, Players.Length: SessionManager.PlayersPerRoom }
+            || input.Rooms.Any(room => room is not { RoomId: >= 1 and <= SessionManager.RoomCount }
+                || room.Players?.Length != input.PlayersPerRoom
                 || room.SessionId == Guid.Empty || room.StreamId == Guid.Empty)
             || input.Rooms.Select(room => room.RoomId).Distinct().Count() != SessionManager.RoomCount
             || input.Rooms.Select(room => room.SessionId).Distinct().Count() != (input.Topology == SessionMode.Linked ? 1 : SessionManager.RoomCount))
@@ -69,7 +78,7 @@ internal static partial class VrVenueTickets
     internal static byte[] Create(Request request, WorldRecordings worlds, OperatorIdentity actor, PlayerJoinTicketSigner signer)
     {
         var sources = worlds.ReadVenueSources(null, actor);
-        var preview = Plan(sources);
+        var preview = Plan(sources, request.PlayersPerRoom);
         var verified = request.Rooms.OrderBy(room => room.RoomId).Select(input =>
         {
             var room = preview.Rooms[input.RoomId - 1];
@@ -95,7 +104,13 @@ internal static partial class VrVenueTickets
                 seats = item.Room.Seats.Select(seat => new { seat = seat.Number, seat.Name })
             }).ToArray();
             using (var entry = archive.CreateEntry("venue.json").Open())
-                JsonSerializer.Serialize(entry, new { version = 1, mode = "VR", topology = request.Topology, rooms = manifest }, JsonFormat.Options);
+            {
+                if (request.PlayersPerRoom == SessionManager.PlayersPerRoom)
+                    JsonSerializer.Serialize(entry, new { version = 1, mode = "VR", topology = request.Topology, rooms = manifest }, JsonFormat.Options);
+                else
+                    JsonSerializer.Serialize(entry, new { version = 1, mode = "VR", topology = request.Topology,
+                        playersPerRoom = request.PlayersPerRoom, rooms = manifest }, JsonFormat.Options);
+            }
             for (var index = 0; index < verified.Length; index++)
             {
                 var item = verified[index];

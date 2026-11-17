@@ -204,12 +204,15 @@ function Read-VenueRoomTickets([string]$Path, [int]$RoomId, [Guid]$SessionId) {
     } finally { $file.Dispose() }
 }
 
-function Read-VenueTicketStream([IO.Stream]$InputStream, [int]$RoomId, [Guid]$SessionId, [switch]$ForBundle) {
+function Read-VenueTicketStream([IO.Stream]$InputStream, [int]$RoomId, [Guid]$SessionId, [switch]$ForBundle, [int]$PlayersPerRoom = 5) {
     try { $archive = [IO.Compression.ZipArchive]::new($InputStream, [IO.Compression.ZipArchiveMode]::Read, $true) }
     catch { throw "Room $RoomId needs a valid room connection ZIP." }
     try {
-        if ($archive.Entries.Count -ne 5) { throw "Room $RoomId must contain exactly five seat connection files." }
-        foreach ($seat in 1..5) {
+        if ($archive.Entries.Count -ne $PlayersPerRoom) {
+            $count = if ($PlayersPerRoom -eq 5) { 'five' } else { $PlayersPerRoom }
+            throw "Room $RoomId must contain exactly $count seat connection files."
+        }
+        foreach ($seat in 1..$PlayersPerRoom) {
             $entry = $archive.GetEntry(('room-{0:00}-seat-{1:00}.json' -f $RoomId, $seat))
             if ($null -eq $entry) { throw "Room $RoomId is missing the expected seat $seat connection file." }
             try {
@@ -260,6 +263,9 @@ function Confirm-VenueWithManagement([string]$Address, [string]$Topology, [objec
     $endpoint = [Uri]::new($target.Origin, "/api/$($Mode.ToLowerInvariant())-deployment/venue-check")
     $checksHeadset = $Mode -cin @('VR','Mixed')
     $requestBody = @{ topology = $Topology; rooms = $Rooms }
+    $playersPerRoom = if ($Mode -ceq 'VR') { $Rooms[0].connectionFiles.Count } else { 5 }
+    if ($playersPerRoom -ne 5) { $requestBody.playersPerRoom = $playersPerRoom }
+    $expectedSeats = 5 * $playersPerRoom
     if ($RequireLiveSource) { $requestBody.requireLiveSource = $true }
     if ($AllowLoopback -and $Mode -ceq 'VR') { $requestBody.allowLoopback = $true }
     $body = $requestBody | ConvertTo-Json -Compress -Depth 6
@@ -271,7 +277,8 @@ function Confirm-VenueWithManagement([string]$Address, [string]$Topology, [objec
     if ($response.StatusCode -ne 200) { throw 'The management service did not accept the live venue check. Verify the management version and service status.' }
     try { $result = ConvertFrom-Json -InputObject $response.Content }
     catch { throw 'The management service returned an invalid venue check receipt.' }
-    if ($result.topology -cne $Topology -or $result.allMatched -isnot [bool] -or $result.seats -isnot [array] -or $result.seats.Count -ne 25) {
+    if ($result.topology -cne $Topology -or $result.allMatched -isnot [bool] -or
+        $result.seats -isnot [array] -or $result.seats.Count -ne $expectedSeats) {
         throw 'The management service returned an invalid venue check receipt.'
     }
     if ($RequireLiveSource -and ($result.liveSourceVerified -isnot [bool] -or $result.liveSourceVerified -ne $result.allMatched)) {
@@ -281,9 +288,9 @@ function Confirm-VenueWithManagement([string]$Address, [string]$Topology, [objec
     if ($checksHeadset) { $validStatuses += @('endpoint-mismatch', 'venue-unavailable') }
     if ($RequireLiveSource) { $validStatuses += @('source-stale', 'endpoint-mismatch') }
     if ($Mode -cne 'VR') { $validStatuses += @('alignment-not-locked', 'connection-hash-mismatch', 'alignment-invalid', 'alignment-wrong-room', 'alignment-hash-mismatch') }
-    $failures = for ($i = 0; $i -lt 25; $i++) {
-        $room = [int][Math]::Floor($i / 5) + 1
-        $seat = $i % 5
+    $failures = for ($i = 0; $i -lt $expectedSeats; $i++) {
+        $room = [int][Math]::Floor($i / $playersPerRoom) + 1
+        $seat = $i % $playersPerRoom
         $row = $result.seats[$i]
         if (-not (Test-JsonInteger $row.roomId) -or -not (Test-JsonInteger $row.seat) -or
             $row.roomId -ne $room -or $row.seat -ne $seat -or $row.status -cnotin $validStatuses -or
@@ -358,6 +365,14 @@ function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$Selecte
     $isMixed = $BundleEntries -and $manifest.mode -ceq 'Mixed'
     $manifestFields = @('version','topology','rooms')
     if ($isVr -or $isMixed) { $manifestFields += 'mode' }
+    $playersPerRoom = 5
+    if ($isVr -and $manifest.PSObject.Properties['playersPerRoom']) {
+        if (-not (Test-JsonInteger $manifest.playersPerRoom) -or $manifest.playersPerRoom -notin 1,2,5) {
+            throw 'VR venue bundles require 1, 2 or 5 seats per room.'
+        }
+        $playersPerRoom = [int]$manifest.playersPerRoom
+        $manifestFields += 'playersPerRoom'
+    }
     $version = if ($isMixed) { 2 } else { 1 }
     if (-not (Test-JsonInteger $manifest.version) -or $manifest.version -ne $version -or
         ($isMixed -and $manifest.topology -cne 'Independent') -or
@@ -393,16 +408,16 @@ function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$Selecte
             }
         } elseif ($isVr) {
             if ($room.address -isnot [string] -or -not (Test-JsonInteger $room.port) -or
-                $room.seats -isnot [array] -or $room.seats.Count -ne 5 -or
+                $room.seats -isnot [array] -or $room.seats.Count -ne $playersPerRoom -or
                 @($room.PSObject.Properties.Name | Where-Object { $_ -cnotin @('roomId','sessionId','ticketsZip','address','port','seats') }).Count -gt 0) {
                 throw 'Provide the original VR venue room endpoints and seats.'
             }
-            for ($i = 0; $i -lt 5; $i++) {
+            for ($i = 0; $i -lt $playersPerRoom; $i++) {
                 $listed = $room.seats[$i]
                 if (-not (Test-JsonInteger $listed.seat) -or $listed.seat -ne ($i + 1) -or
                     $listed.name -isnot [string] -or [string]::IsNullOrWhiteSpace($listed.name) -or
                     @($listed.PSObject.Properties.Name | Where-Object { $_ -cnotin @('seat','name') }).Count -gt 0) {
-                    throw "Room $($room.roomId) needs the original five named VR seats."
+                    throw "Room $($room.roomId) needs the original named VR seats."
                 }
             }
         } elseif ($room.alignmentFile -isnot [string] -or [string]::IsNullOrWhiteSpace($room.alignmentFile) -or
@@ -425,7 +440,7 @@ function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$Selecte
             catch { throw "Room $id connection ZIP has an invalid size or length." }
             finally { $stream.Dispose() }
             $inner = [IO.MemoryStream]::new($bytes, $false)
-            try { $tickets = @(Read-VenueTicketStream $inner $id $session -ForBundle) }
+            try { $tickets = @(Read-VenueTicketStream $inner $id $session -ForBundle -PlayersPerRoom $playersPerRoom) }
             finally { $inner.Dispose() }
         } else {
             $alignment = Read-RoomAlignment (Get-VenueInputPath $directory $room.alignmentFile) $id
@@ -481,6 +496,10 @@ function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$Selecte
     }
     if ($usesPins -or $isMixed) { $report.alignmentPinsVerified = $true }
     if ($isVr -or $isMixed) { $report.mode = $manifest.mode }
+    if ($playersPerRoom -ne 5) { $report.playersPerRoom = $playersPerRoom }
+    if ($SelectedRoom -and -not $connections.ContainsKey("$SelectedRoom/$SelectedSeat")) {
+        throw "Room $SelectedRoom seat $SelectedSeat is outside the original venue bundle."
+    }
     return @{ Report = $report; Selected = $connections["$SelectedRoom/$SelectedSeat"]; Connections = $connections;
         EarliestExpiry = $earliest; LiveRooms = $liveRooms.ToArray(); PublishedEndpoints = $publishedEndpoints; SeatHeadsets = @{};
         SessionIds = @($sessions | ForEach-Object { $_.ToString('D') } | Sort-Object) }
@@ -547,7 +566,9 @@ function Export-WindowsVenueSeats {
     $venue = Read-VenueBundle $VenueBundle 0 0
     if ($venue.Report.mode -cnotin @('VR','Mixed')) { throw 'Windows staging requires an original VR or mixed venue bundle.' }
     foreach ($row in $map.seats) {
-        if ($venue.Connections["$($row.roomId)/$($row.seat)"].Alignment) {
+        $connection = $venue.Connections["$($row.roomId)/$($row.seat)"]
+        if (-not $connection) { throw "Room $($row.roomId) seat $($row.seat) is outside the original venue bundle." }
+        if ($connection.Alignment) {
             throw "Room $($row.roomId) seat $($row.seat) belongs to an MR room."
         }
     }
@@ -581,14 +602,15 @@ function Export-WindowsVenueSeats {
     ) } | ConvertTo-Json -Depth 4 -Compress
 }
 
-function Read-QuestDeviceMap([string]$Path, [switch]$Partial) {
+function Read-QuestVenueMap($Venue, [string]$Path, [switch]$Partial) {
     $map = (Read-DeploymentJson $Path 16384 'device map').Document
-    $minimum = if ($Partial) { 1 } else { 25 }
+    $count = $Venue.Report.seats
+    $minimum = if ($Partial) { 1 } else { $count }
     if (-not (Test-JsonInteger $map.version) -or $map.version -ne 1 -or $map.seats -isnot [array] -or
-        $map.seats.Count -lt $minimum -or $map.seats.Count -gt 25 -or
+        $map.seats.Count -lt $minimum -or $map.seats.Count -gt $count -or
         @($map.PSObject.Properties.Name | Where-Object { $_ -cnotin @('version','seats') }).Count) {
-        if ($Partial) { throw 'Use a version 1 device map with 1 to 25 seats.' }
-        throw 'Use a version 1 device map with exactly 25 seats.'
+        if ($Partial) { throw "Use a version 1 device map with 1 to $count seats." }
+        throw "Use a version 1 device map with exactly $count seats."
     }
     $seats = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $serials = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
@@ -601,6 +623,9 @@ function Read-QuestDeviceMap([string]$Path, [switch]$Partial) {
         }
         if (-not $seats.Add("$($row.roomId)/$($row.seat)")) { throw "Room $($row.roomId) seat $($row.seat) is mapped more than once." }
         if (-not $serials.Add($row.serial)) { throw "Room $($row.roomId) seat $($row.seat) repeats an ADB serial." }
+        if (-not $Venue.Connections.ContainsKey("$($row.roomId)/$($row.seat)")) {
+            throw "Room $($row.roomId) seat $($row.seat) is outside the original venue bundle."
+        }
     }
     $map.seats | Sort-Object roomId, seat
 }
@@ -1761,8 +1786,8 @@ if ($PSCmdlet.ParameterSetName -eq 'Venue') {
 
 if ($PSCmdlet.ParameterSetName -eq 'CapturePlan') {
     if (-not $ReadCapturePlan) { throw 'Specify -ReadCapturePlan for offline log capture planning.' }
-    $map = @(Read-QuestDeviceMap $DeviceMap -Partial:$AllowPartialMap)
     $venue = Read-VenueBundle $VenueBundle 0 0 -Fingerprint
+    $map = @(Read-QuestVenueMap $venue $DeviceMap -Partial:$AllowPartialMap)
     $seats = foreach ($row in $map) {
         $ticket = $venue.Connections["$($row.roomId)/$($row.seat)"].Ticket
         [ordered]@{
@@ -1839,9 +1864,9 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
             $ExpectedVersionCode -or $ReleaseReport -or $DeployMappedSeats -or $CheckOnly -or ($AllowPartialMap -and -not $DeviceMap)) {
             throw 'Use -VerifyTrackedSeats with -ManagementApi and an optional -DeviceMap; omit deployment and device-check parameters.'
         }
-        $map = @(if ($DeviceMap) { Read-QuestDeviceMap $DeviceMap -Partial:$AllowPartialMap }
-            else { foreach ($room in 1..5) { foreach ($seat in 1..5) { @{ roomId = $room; seat = $seat } } } })
         $venue = Read-VenueBundle $VenueBundle 0 0 -Fingerprint:($DeploymentReport -or $DeploymentReportsFile)
+        $map = @(if ($DeviceMap) { Read-QuestVenueMap $venue $DeviceMap -Partial:$AllowPartialMap }
+            else { foreach ($room in $venue.Report.rooms) { foreach ($seat in 1..$room.seats) { @{ roomId = $room.roomId; seat = $seat } } } })
         if ($DeploymentReport) { $deployment = Read-QuestTrackedDeployment $venue $map $DeploymentReport }
         if ($DeploymentReportsFile) { $bindings = Read-QuestTrackedDeployments $venue $map $DeploymentReportsFile }
         $result = Confirm-TrackedSeats $venue $map -IncludeAllHeadsets:$AllHeadsets
@@ -1868,8 +1893,8 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
         if ($DeployMappedSeats -and ($CheckOnly -or -not $ManagementApi)) {
             throw '-DeployMappedSeats requires -ManagementApi and cannot be combined with -CheckOnly.'
         }
-        $map = @(Read-QuestDeviceMap $DeviceMap -Partial:$AllowPartialMap)
         $venue = Read-VenueBundle $VenueBundle 0 0 -Fingerprint:$DeployMappedSeats
+        $map = @(Read-QuestVenueMap $venue $DeviceMap -Partial:$AllowPartialMap)
         $release = if ($ReleaseReport) { Read-QuestRelease $ReleaseReport }
         $versionCode = if ($release) { $release.versionCode } else { $ExpectedVersionCode }
         if ($DeployMappedSeats) {

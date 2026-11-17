@@ -389,7 +389,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connect
 
 ### 直接使用 VR 五房連線 ZIP
 
-管理包 0.31.42 可核對從「VR 五房配票」下載的原始 `vr-venue-connections.zip`。部署工具讀取 ZIP 裡的 25 份原連線檔，核對房間、席位、場次、端點及本機效期。先在 PowerShell 7 離線預檢，或用 `-RoomId`、`-Seat` 查看指定席位。
+管理包 0.31.42 可核對從「VR 五房配票」下載的原始 `vr-venue-connections.zip`。搭配 0.31.235 管理包及新版部署工具時，ZIP 可包含五房各 1、2 或 5 席。部署工具依原包核對房間、席位、場次、端點及本機效期。先在 PowerShell 7 離線預檢，或用 `-RoomId`、`-Seat` 查看指定席位。
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip
@@ -570,7 +570,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 
 #### 部署指定的 Quest 席位
 
-使用原五房 VR、MR 或混合部署 ZIP。版本 1 的 `device-map.json` 只列這次要部署的 1 至 25 席，房號、席位和 ADB 序號的格式維持相同。加上 `-AllowPartialMap` 即可接受少於 25 席的清單。未指定此選項時，清單仍須有完整 25 席。
+使用原五房 VR、MR 或混合部署 ZIP。版本 1 的 `device-map.json` 只列這次要部署的席位，房號、席位和 ADB 序號的格式維持相同。整批裝置表須涵蓋 ZIP 內的所有席位。只部署其中幾席時加上 `-AllowPartialMap`，所選席位皆須存在於原 ZIP。VR 的 5／10 席試場可直接用該 ZIP 的完整裝置表進行部署、追蹤核對及擷取規劃。
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `

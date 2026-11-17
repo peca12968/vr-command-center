@@ -1320,18 +1320,21 @@ class QuestVenueTests(unittest.TestCase):
         files['venue.json'] = json.dumps(manifest).encode()
         return files, seats
 
-    def vr_bundle(self, topology):
+    def vr_bundle(self, topology, players_per_room=5):
         manifest, seats = self.prepare(topology)
         manifest['mode'] = 'VR'
+        if players_per_room != 5:
+            manifest['playersPerRoom'] = players_per_room
         files = {}
         for room in manifest['rooms']:
             room_id = room['roomId']
             room.pop('alignmentFile')
             room['ticketsZip'] = f'room-{room_id:02}-connections.zip'
-            configs = seats[room_id]
+            configs = dict(list(seats[room_id].items())[:players_per_room])
+            seats[room_id] = configs
             first = next(iter(configs.values()))
             room.update(address=first['address'], port=first['port'],
-                        seats=[{'seat': seat, 'name': f'Player {room_id}/{seat}'} for seat in range(1, 6)])
+                        seats=[{'seat': seat, 'name': f'Player {room_id}/{seat}'} for seat in range(1, players_per_room + 1)])
             tickets = io.BytesIO()
             with zipfile.ZipFile(tickets, 'w') as archive:
                 for name, config in configs.items():
@@ -2170,6 +2173,30 @@ else:
         manifest = json.loads(files['venue.json'])
         manifest['rooms'][3]['port'] = 8888
         self.assert_rejected(self.run_bundle({**files, 'venue.json': json.dumps(manifest)}), 'VR manifest endpoint')
+
+    def test_vr_bundle_pilot_seats_preserve_original_capture_assignments(self):
+        for topology in ('Independent', 'Linked'):
+            for count in (1, 2):
+                with self.subTest(topology=topology, count=count):
+                    files, _ = self.vr_bundle(topology, count)
+                    inspected = self.run_bundle(files)
+                    self.assertEqual(0, inspected.returncode, inspected.stderr)
+                    report = json.loads(inspected.stdout)
+                    self.assertEqual((topology, count, 5 * count), (report['topology'], report['playersPerRoom'], report['seats']))
+                    mapping, document = self.device_map()
+                    document['seats'] = [row for row in document['seats'] if row['seat'] <= count]
+                    mapping.write_text(json.dumps(document), encoding='utf-8')
+                    capture = self.run_bundle(files, '-DeviceMap', str(mapping), '-ReadCapturePlan')
+                    self.assertEqual(0, capture.returncode, capture.stderr)
+                    seats = json.loads(capture.stdout)['seats']
+                    self.assertEqual([(room, seat) for room in range(1, 6) for seat in range(1, count + 1)],
+                                     [(row['roomId'], row['seat']) for row in seats])
+                    self.assert_rejected(self.run_bundle(files, '-RoomId', '5', '-Seat', str(count + 1), '-CheckOnly'),
+                                         'outside the original venue bundle')
+                    document['seats'][-1]['seat'] = count + 1
+                    mapping.write_text(json.dumps(document), encoding='utf-8')
+                    self.assert_rejected(self.run_bundle(files, '-DeviceMap', str(mapping), '-ReadCapturePlan'),
+                                         'outside the original venue bundle')
         with zipfile.ZipFile(io.BytesIO(files['room-04-connections.zip'])) as archive:
             entries = {name: json.loads(archive.read(name)) for name in archive.namelist()}
         entries['room-04-seat-02.json']['roomAlignmentSha256'] = 'f' * 64

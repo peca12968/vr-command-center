@@ -116,6 +116,8 @@ API 使用 `POST /api/sessions/{id}/rooms/{roomId}/players/{playerId}/vr-connect
 
 `vr-venue-connections.zip` 內含 `venue.json`、五個原格式的分房 ZIP 及共 25 份四欄玩家連線檔。分房 ZIP 依房號命名，每個 JSON 依房號與席位命名。票券自簽發起有效五分鐘，請將對應的 JSON 個別交給玩家，整份 ZIP 由主控私下保管。Windows 玩家啟動器可再次核對檔內標示的房間與席位。 [玩家端核對](PLAYER_CONFIG_REVIEW.md#連線檔席位與效期)
 
+管理包 0.31.235 的 VR 五房配票可選每房 1 席或 2 席，對應 5 人與 10 人試場。各房先登記第 1 席或第 1、2 席，等原伺服器公布端點後再讀取五房名冊並下載。每房當前名冊須與選取席數一致。5／10 席 ZIP 的 `venue.json` 另記錄 `playersPerRoom`，並沿用各房原場次、端點與有效票券。 [Quest 試場部署](QUEST3.md#直接使用-vr-五房連線-zip)
+
 管理包 0.31.220 的 VR、MR 與混合五房配票，會先核對此輪的請求編號及 ZIP 原始位元組的 SHA-256，再重新確認原場次、端點與名冊。若回應無法核對，控制台會停在下載前並提示重新配票。核對使用瀏覽器內的檔案內容，無須把已收到的票券傳回管理服務。
 
 ### 依電腦分發 Windows VR 連線檔
@@ -142,9 +144,9 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 `
 
 下載使用各來源已公布的位址和埠。五房獨立須使用各自的端點，合併場共用同一端點。若名冊、場次或來源已變更，請重新讀取五房名冊。尚未填滿的場館可沿用單席或整房配票。
 
-主控可用 `GET /api/vr-deployment/venue` 讀取預覽。向 `POST /api/vr-deployment/venue-bundle` 送出同一預覽的 `topology` 以及五個 `rooms`，每房提供 `roomId`、`sessionId`、公布的 `streamId` 和五筆 `players` 的 `playerId`、`admissionId`。服務以同一份現行場館快照核對所有房間。任何一房不符時回應 409，附對應房號，整批無 ZIP。
+主控可用 `GET /api/vr-deployment/venue` 讀取預覽。向 `POST /api/vr-deployment/venue-bundle` 送出同一預覽的 `topology` 以及五個 `rooms`，每房提供 `roomId`、`sessionId`、公布的 `streamId` 和每席的 `playerId`、`admissionId`。5／10 席試場在預覽查詢及配票 JSON 指定相同的 `playersPerRoom`。服務以同一份現行場館快照核對所有房間。任何一房不符時回應 409，附對應房號，整批無 ZIP。
 
-管理包 0.31.42 提供 `POST /api/vr-deployment/venue-check`，限主控。請求提供 `topology` 與五筆 `rooms`。每房提供 `roomId`、`sessionId` 及依席位排序的五份 Base64 `connectionFiles`，回傳逐席的票券、端點及現行名冊核對狀態，以及成功席的裝置類型。Quest 部署工具可直接讀取原 ZIP 使用此端點。 [Quest 部署操作](QUEST3.md#直接使用-vr-五房連線-zip)
+管理包 0.31.42 提供 `POST /api/vr-deployment/venue-check`，限主控。請求提供 `topology` 與五筆 `rooms`。每房提供 `roomId`、`sessionId` 及依席位排序的 Base64 `connectionFiles`。5／10 席試場另附 `playersPerRoom`。結果回傳逐席的票券、端點、現行名冊核對狀態及成功席的裝置類型。Quest 部署工具可直接讀取原 ZIP 使用此端點。 [Quest 部署操作](QUEST3.md#直接使用-vr-五房連線-zip)
 
 純 VR Windows 匯出另傳 `requireLiveSource: true` 及 `allowLoopback: true`。後者允許純 VR Windows 同機端點，仍須通過票券、名冊及來源時效核對。Quest 的實機部署依原 LAN 條件檢查。
 

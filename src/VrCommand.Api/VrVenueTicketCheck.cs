@@ -6,7 +6,8 @@ namespace VrCommand.Api;
 
 internal static partial class VrVenueTickets
 {
-    internal sealed record CheckRequest(string Topology, CheckRoom[] Rooms, bool RequireLiveSource = false, bool AllowLoopback = false);
+    internal sealed record CheckRequest(string Topology, CheckRoom[] Rooms, bool RequireLiveSource = false, bool AllowLoopback = false,
+        int PlayersPerRoom = SessionManager.PlayersPerRoom);
     internal sealed record CheckRoom(int RoomId, Guid SessionId, byte[][] ConnectionFiles);
     internal sealed record SeatResult(int RoomId, int Seat, string Status, HeadsetKind? Headset = null);
     internal sealed record CheckResult(string Topology, bool AllMatched, SeatResult[] Seats,
@@ -25,10 +26,12 @@ internal static partial class VrVenueTickets
 
     internal static async Task<CheckRequest> ReadCheck(HttpRequest request, CancellationToken cancellation)
     {
-        const string message = "Provide five rooms with five original VR connection files each.";
+        const string message = "Provide five rooms with 1, 2 or 5 original VR connection files each.";
         var files = await DeploymentJson.Read<CheckRequest>(request, 72 * 1024, message, cancellation);
-        if (files.Topology is not ("Linked" or "Independent") || files.Rooms is not { Length: SessionManager.RoomCount }
-            || files.Rooms.Any(room => room is not { RoomId: >= 1 and <= SessionManager.RoomCount, ConnectionFiles.Length: SessionManager.PlayersPerRoom }
+        if (files.Topology is not ("Linked" or "Independent") || !SupportedSeatCount(files.PlayersPerRoom)
+            || files.Rooms is not { Length: SessionManager.RoomCount }
+            || files.Rooms.Any(room => room is not { RoomId: >= 1 and <= SessionManager.RoomCount }
+                || room.ConnectionFiles?.Length != files.PlayersPerRoom
                 || room.SessionId == Guid.Empty || room.ConnectionFiles.Any(file => file is not { Length: > 0 and <= 2048 }))
             || files.Rooms.Select(room => room.RoomId).Distinct().Count() != SessionManager.RoomCount
             || files.Rooms.Select(room => room.SessionId).Distinct().Count() != (files.Topology == "Linked" ? 1 : SessionManager.RoomCount))
@@ -39,12 +42,12 @@ internal static partial class VrVenueTickets
     internal static CheckResult Check(CheckRequest input, WorldRecordings worlds, OperatorIdentity actor, PlayerJoinTicketSigner signer)
     {
         var sources = worlds.ReadVenueSources(null, actor, requireLiveCapture: input.RequireLiveSource);
-        var plan = Plan(sources);
+        var plan = Plan(sources, input.PlayersPerRoom);
         var seats = new List<SeatResult>(SessionManager.MaxPlayers);
         foreach (var room in input.Rooms.OrderBy(room => room.RoomId))
         {
             var current = plan.Rooms[room.RoomId - 1];
-            for (var seat = 0; seat < SessionManager.PlayersPerRoom; seat++)
+            for (var seat = 0; seat < input.PlayersPerRoom; seat++)
             {
                 SeatResult result;
                 if (current.SessionId != room.SessionId || plan.Topology?.ToString() != input.Topology)
@@ -52,7 +55,8 @@ internal static partial class VrVenueTickets
                 else if (current.Endpoint is not { } endpoint || current.Problem == "vr-venue-endpoint-reused"
                     || (input.RequireLiveSource && !input.AllowLoopback && IPAddress.IsLoopback(IPAddress.Parse(endpoint.Address))))
                     result = new(room.RoomId, seat, "endpoint-mismatch");
-                else if (current.Problem == "vr-venue-roster-reused")
+                else if (current.Problem == "vr-venue-roster-reused" || (input.PlayersPerRoom != SessionManager.PlayersPerRoom
+                    && current.Problem == "vr-venue-roster-incomplete"))
                     result = new(room.RoomId, seat, "venue-unavailable");
                 else if (input.RequireLiveSource && current.TicketSourceLive != true)
                     result = new(room.RoomId, seat, "source-stale");

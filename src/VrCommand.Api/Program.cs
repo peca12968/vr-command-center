@@ -613,10 +613,10 @@ app.MapPost("/api/mr-deployment/venue-bundle", async (WorldRecordings worlds, Ht
     var request = await MrVenueBundle.Read(context.Request, context.RequestAborted);
     return VenueTicketArchive(context, MrVenueBundle.Create(request, worlds, actor, ticketSigner), "quest-mr-venue.zip");
 });
-app.MapGet("/api/vr-deployment/venue", (WorldRecordings worlds, HttpContext context) =>
+app.MapGet("/api/vr-deployment/venue", (int? playersPerRoom, WorldRecordings worlds, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";
-    return VrVenueTickets.Read(worlds, Actor(context));
+    return VrVenueTickets.Read(worlds, Actor(context), playersPerRoom ?? SessionManager.PlayersPerRoom);
 });
 app.MapPost("/api/vr-deployment/venue-bundle", async (WorldRecordings worlds, HttpContext context) =>
 {
