@@ -1330,7 +1330,8 @@ class QuestVenueTests(unittest.TestCase):
 param($Source, $Mode)
 $ErrorActionPreference = 'Stop'
 $functions = @('Test-JsonInteger', 'Test-TrackedReadinessSnapshot', 'Get-TrackedSeatStatus', 'New-TrackedSeatReport',
-               'Confirm-PlayerTrackedSeat', 'Read-TrackedSeatReport', 'Get-QuestSha256', 'Confirm-ReadbackFreshness')
+               'New-PlayerTrackedSeatReport', 'Confirm-PlayerTrackedSeat', 'Read-TrackedSeatReport', 'Get-QuestSha256',
+               'Confirm-ReadbackFreshness')
 $ast = [Management.Automation.Language.Parser]::ParseFile($Source, [ref]$null, [ref]$null)
 foreach ($definition in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
                                       $node.Name -cin $functions }, $false)) {
@@ -1399,6 +1400,119 @@ else {
                 if mode.startswith('single-'):
                     self.assertEqual(mode.endswith('-fresh'), 'evidenceVersion' in report)
                     self.assertEqual(mode.endswith('-fresh'), 'admissionSha256' in report['seats'][0])
+
+    def test_single_quest_wait_uses_a_fresh_complete_sample_and_stops_at_original_boundaries(self):
+        session, player, admission = self.session_ids[0], self.players[0], self.admissions[0]
+        snapshot = {'version': 1, 'sessionId': str(session), 'sessionSequence': 7, 'observedSequence': 7,
+                    'sampledAtUtc': '2026-11-17T00:00:00.010Z', 'capturedAtUtc': '2026-11-17T00:00:00Z',
+                    'sourceState': 'Fresh', 'sourceAgeMilliseconds': 10, 'origin': 'GameServer', 'worldSequence': 23,
+                    'players': [{'roomId': 1, 'seat': 0, 'playerId': str(player), 'admissionId': str(admission),
+                                 'state': 'Participating', 'rigKind': 'Tracked', 'canParticipate': True}]}
+        fixture = self.root / 'snapshot.json'
+        fixture.write_text(json.dumps(snapshot), encoding='utf-8')
+        original = ROOT / 'scripts/deploy-quest.ps1'
+        script = self.root / original.name
+        shutil.copyfile(original.with_name('quest-adb-process.ps1'), self.root / 'quest-adb-process.ps1')
+        script.write_text(original.read_text(encoding='utf-8').replace("if ($PSCmdlet.ParameterSetName -eq 'Venue') {", r'''
+$script:sampleCount = 0
+function Read-ManagementJson($Target, $Url, [int]$RequestMilliseconds) {
+    $script:sampleCount++
+    [IO.File]::AppendAllText($env:QUEST_READINESS_AUDIT, "$($Url.AbsolutePath) $RequestMilliseconds`n")
+    $document = Get-Content -LiteralPath $env:QUEST_READINESS_FIXTURE -Raw | ConvertFrom-Json
+    switch ($env:QUEST_READINESS_CASE) {
+        'recover' { if ($script:sampleCount -eq 1) { $document.players[0].rigKind = 'Simulated' } }
+        'changed' { $document.players[0].admissionId = [Guid]::NewGuid().ToString('D') }
+        'ended' { $document.sourceState = 'Ended' }
+        'slow' { Start-Sleep -Milliseconds ($RequestMilliseconds + 75) }
+        'pending' { $document.sourceState = 'WaitingFrame' }
+        'denied' { return @{ Status = 'readiness-access-denied' } }
+    }
+    return @{ Document = $document; Elapsed = 5 }
+}
+function Confirm-PreparingReadinessFrames($Target, $Report, $PlayersBySeat, [int]$RequestMilliseconds) {
+    [IO.File]::AppendAllText($env:QUEST_READINESS_AUDIT, "frame:$($Report.seats[0].worldSequence) $RequestMilliseconds`n")
+}
+function Confirm-VenueReadback($Venue) {
+    foreach ($key in $Venue.Connections.Keys) { $Venue.SeatHeadsets[$key] = 'Quest3' }
+}
+function Read-VenueTrackedReadiness($Target, $Venue, [int]$RequestMilliseconds) {
+    $script:sampleCount++
+    [IO.File]::AppendAllText($env:QUEST_READINESS_AUDIT, "venue $RequestMilliseconds`n")
+    $sampled = [DateTimeOffset]::UtcNow
+    $sessions = @{}
+    foreach ($entry in $Venue.Connections.Values) {
+        $ticket = $entry.Ticket
+        $id = $ticket.SessionId.ToString('D')
+        if (-not $sessions.ContainsKey($id)) {
+            $sessions[$id] = @{ sessionId=$id; sampledAtUtc=$sampled; sourceState='Fresh'; origin='GameServer'; worldSequence=23;
+                                sessionSequence=7; observedSequence=7; sourceAgeMilliseconds=10; players=@() }
+        }
+        $rig = if ($script:sampleCount -eq 1 -and $ticket.RoomId -eq 1) { 'Simulated' } else { 'Tracked' }
+        $sessions[$id].players += @{ roomId=$ticket.RoomId; seat=$ticket.Seat; playerId=$ticket.PlayerId.ToString('D');
+            admissionId=$ticket.AdmissionId.ToString('D'); state='Participating'; rigKind=$rig; canParticipate=$true }
+    }
+    return @{ Sessions=$sessions; SampledAtUtc=$sampled; MaxAge=1500; Elapsed=5 }
+}
+if ($PSCmdlet.ParameterSetName -eq 'Venue') {''', 1), encoding='utf-8')
+        audit = self.root / 'readiness-audit.log'
+        connection = self.root / 'original.json'
+        command = ['pwsh', '-NoProfile', '-NonInteractive', '-File', str(script), '-ClientConfig', str(connection),
+                   '-ManagementApi', 'http://127.0.0.1:1', '-VerifyPlayerTracking']
+        key = 'private-wait-operator-fixture'
+
+        def invoke(mode, seconds, expiry_seconds=30):
+            audit.unlink(missing_ok=True)
+            ticket = make_ticket(1, 0, int(time.time()) + expiry_seconds, session, player, admission)
+            connection.write_text(json.dumps({'role': 'Client', 'address': '192.168.1.10', 'port': 7777,
+                                             'joinTicket': ticket}), encoding='utf-8')
+            flags = ['-WaitForTrackedSeconds', str(seconds)] if seconds is not None else []
+            response = subprocess.run(command + flags, capture_output=True, text=True, encoding='utf-8', timeout=15,
+                                      env={**os.environ, 'VR_COMMAND_MASTER_KEY': key, 'QUEST_READINESS_FIXTURE': str(fixture),
+                                           'QUEST_READINESS_AUDIT': str(audit), 'QUEST_READINESS_CASE': mode})
+            self.assertEqual('', response.stderr)
+            for secret in (key, ticket, str(admission), str(player)):
+                self.assertNotIn(secret, response.stdout)
+            report = json.loads(response.stdout)
+            self.assertEqual(0 if report['complete'] else 1, response.returncode)
+            calls = [line.split() for line in audit.read_text(encoding='utf-8').splitlines()]
+            readiness = [int(ms) for route, ms in calls if route == f'/api/sessions/{session}/readiness']
+            if seconds is not None:
+                self.assertEqual(len(readiness), report['wait']['samples'])
+                self.assertTrue(all(0 < ms <= seconds * 1000 for ms in readiness))
+            return report, calls
+
+        original_report, calls = invoke('recover', None)
+        self.assertNotIn('wait', original_report)
+        self.assertEqual('not-tracked', original_report['seats'][0]['status'])
+        self.assertEqual(1, len(calls))
+        ready, calls = invoke('recover', 5)
+        self.assertEqual({'maximumSeconds': 5, 'samples': 2, 'outcome': 'ready'}, ready['wait'])
+        self.assertEqual((1, 23), (ready['evidenceVersion'], ready['seats'][0]['worldSequence']))
+        self.assertIn('frame:23', [route for route, _ in calls])
+        for mode, outcome in (('changed', 'admission-changed'), ('ended', 'source-outside-preparing'),
+                              ('denied', 'readiness-access-denied'), ('slow', 'timed-out')):
+            with self.subTest(mode=mode):
+                stopped, _ = invoke(mode, 1 if mode == 'slow' else 5)
+                self.assertEqual(outcome, stopped['wait']['outcome'])
+                self.assertEqual(1, stopped['wait']['samples'])
+                self.assertNotIn('evidenceVersion', stopped)
+        expired, _ = invoke('pending', 6, expiry_seconds=3)
+        self.assertEqual('ticket-expired', expired['wait']['outcome'])
+        self.assertEqual('ticket-expired', expired['seats'][0]['status'])
+        self.assertNotIn('evidenceVersion', expired)
+
+        for topology in ('Independent', 'Linked'):
+            with self.subTest(topology=topology):
+                audit.unlink()
+                files, _ = self.vr_bundle(topology, players_per_room=1)
+                result = self.run_bundle(files, '-ManagementApi', 'http://127.0.0.1:1', '-VerifyTrackedSeats', '-AllHeadsets',
+                                         '-WaitForTrackedSeconds', '5', script=script, environment={**os.environ,
+                                            'VR_COMMAND_MASTER_KEY': key, 'QUEST_READINESS_AUDIT': str(audit)})
+                self.assertEqual(0, result.returncode, result.stderr)
+                venue = json.loads(result.stdout)
+                self.assertEqual({'maximumSeconds': 5, 'samples': 2, 'outcome': 'ready'}, venue['wait'])
+                self.assertEqual(['tracked-ready'] * 5, [seat['status'] for seat in venue['seats']])
+                self.assertEqual(['venue'] * 2, [line.split()[0] for line in audit.read_text().splitlines()])
 
     def prepare(self, topology):
         manifest = {'version':1, 'topology':topology, 'rooms':[]}

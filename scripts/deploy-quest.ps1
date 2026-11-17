@@ -34,7 +34,7 @@ param(
     [Parameter(ParameterSetName='Bundle')][switch]$VerifyTrackedSeats,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$DeploymentReport,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$DeploymentReportsFile,
-    [Parameter(ParameterSetName='Bundle')][ValidateRange(1,120)][int]$WaitForTrackedSeconds,
+    [Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='PlayerTracking')][ValidateRange(1,120)][int]$WaitForTrackedSeconds,
     [Parameter(ParameterSetName='Bundle')][switch]$AllHeadsets,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Refresh')][Parameter(ParameterSetName='Venue')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Windows')][Parameter(Mandatory, ParameterSetName='PlayerTracking')][ValidateNotNullOrEmpty()][string]$ManagementApi,
     [Parameter(Mandatory, ParameterSetName='Windows')][ValidateNotNullOrEmpty()][string]$WindowsSeatMap,
@@ -861,11 +861,19 @@ function Confirm-ReadbackFreshness($Report, [hashtable]$Snapshots, [double]$Elap
     }
 }
 
-function Confirm-PlayerTrackedSeat($Target, $Ticket) {
+function New-PlayerTrackedSeatReport($Ticket, [string]$Status, $Snapshot) {
+    $seat = [ordered]@{ sessionId = $Ticket.SessionId.ToString('D'); roomId = $Ticket.RoomId; seat = $Ticket.Seat + 1; status = $Status
+        sourceState = $Snapshot.sourceState; worldSequence = $Snapshot.worldSequence; observedSequence = $Snapshot.observedSequence
+        capturedAtUtc = $Snapshot.capturedAtUtc }
+    return [ordered]@{ phase = 'tracked-readiness'; scope = 'player'; complete = $Status -ceq 'tracked-ready'
+        sampledAtUtc = $Snapshot.sampledAtUtc; seats = @($seat) }
+}
+
+function Confirm-PlayerTrackedSeat($Target, $Ticket, [int]$RequestMilliseconds = 10000) {
     $sessionId = $Ticket.SessionId.ToString('D')
     $url = [Uri]::new($Target.Origin, "/api/sessions/$sessionId/readiness")
     $timer = [Diagnostics.Stopwatch]::StartNew()
-    $reading = Read-ManagementJson $Target $url 10000
+    $reading = Read-ManagementJson $Target $url $RequestMilliseconds
     $snapshot = $reading.Document
     $sample = @{ Status = $reading.Status; Elapsed = $reading.Elapsed; MaxAge = 1500 }
     if (-not $sample.Status -and (-not (Test-TrackedReadinessSnapshot $snapshot $sample.MaxAge) -or $snapshot.sessionId -cne $sessionId)) {
@@ -876,14 +884,12 @@ function Confirm-PlayerTrackedSeat($Target, $Ticket) {
     if ($status -ceq 'tracked-ready' -and ($snapshot.origin -cne 'GameServer' -or -not $snapshot.capturedAtUtc)) {
         $status = 'source-capture-unverified'
     }
-    $seat = [ordered]@{ sessionId = $sessionId; roomId = $Ticket.RoomId; seat = $Ticket.Seat + 1; status = $status
-        sourceState = $snapshot.sourceState; worldSequence = $snapshot.worldSequence; observedSequence = $snapshot.observedSequence
-        capturedAtUtc = $snapshot.capturedAtUtc }
-    $report = [ordered]@{ phase = 'tracked-readiness'; scope = 'player'; complete = $status -ceq 'tracked-ready'
-        sampledAtUtc = $snapshot.sampledAtUtc; seats = @($seat) }
+    if ($status -ceq 'source-not-fresh' -and $snapshot.sourceState -ceq 'Ended') { $status = 'source-outside-preparing' }
+    $report = New-PlayerTrackedSeatReport $Ticket $status $snapshot
+    $seat = $report.seats[0]
     if ($report.complete) {
         $playersBySeat = @{ "$($seat.roomId)/$($seat.seat)" = $Ticket.PlayerId.ToString('D') }
-        Confirm-PreparingReadinessFrames $Target $report $playersBySeat ([int][Math]::Floor(10000 - $timer.Elapsed.TotalMilliseconds))
+        Confirm-PreparingReadinessFrames $Target $report $playersBySeat ([int][Math]::Floor($RequestMilliseconds - $timer.Elapsed.TotalMilliseconds))
         Confirm-ReadbackFreshness $report @{ $sessionId = $snapshot } $timer.Elapsed.TotalMilliseconds $sample.MaxAge
     }
     if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) {
@@ -915,32 +921,26 @@ function Read-TrackedSeatReport($Target, $Venue, [object[]]$Map, [int]$RequestMi
     return $report
 }
 
-function Confirm-TrackedSeats($Venue, [object[]]$Map, [switch]$IncludeAllHeadsets) {
-    Confirm-VenueReadback $Venue
-    $target = Get-ManagementTarget $ManagementApi
-    if (-not $WaitForTrackedSeconds) {
-        return Read-TrackedSeatReport $target $Venue $Map 10000 -IncludeAllHeadsets:$IncludeAllHeadsets
-    }
-
+function Wait-TrackedReadiness([int]$Seconds, [DateTimeOffset]$TicketExpiry, [scriptblock]$ReadSample, [scriptblock]$NewIncomplete) {
     $timer = [Diagnostics.Stopwatch]::StartNew()
-    $limit = 1000 * $WaitForTrackedSeconds
+    $limit = 1000 * $Seconds
     $samples = 0
     $terminal = @('venue-changed','seat-unavailable','admission-changed','seat-headset-mismatch','readiness-invalid','readiness-access-denied',
         'source-capture-unverified','source-outside-preparing')
     $report = $null
     do {
-        $ticketMilliseconds = ($Venue.EarliestExpiry - [DateTimeOffset]::UtcNow).TotalMilliseconds
+        $ticketMilliseconds = ($TicketExpiry - [DateTimeOffset]::UtcNow).TotalMilliseconds
         $remaining = $limit - $timer.Elapsed.TotalMilliseconds
         if ($ticketMilliseconds -lt 1) {
-            $report = New-TrackedSeatReport $Venue $Map @{ Status = 'ticket-expired' } -IncludeAllHeadsets:$IncludeAllHeadsets
+            $report = & $NewIncomplete 'ticket-expired'
             $outcome = 'ticket-expired'; break
         }
         if ($remaining -lt 1) { $outcome = 'timed-out'; break }
         $timeout = [int][Math]::Floor([Math]::Min(10000, [Math]::Min($remaining, $ticketMilliseconds)))
-        $sample = Read-TrackedSeatReport $target $Venue $Map $timeout -IncludeAllHeadsets:$IncludeAllHeadsets
+        $sample = & $ReadSample $timeout
         $samples++
-        if ($Venue.EarliestExpiry -le [DateTimeOffset]::UtcNow) {
-            $report = New-TrackedSeatReport $Venue $Map @{ Status = 'ticket-expired' } -IncludeAllHeadsets:$IncludeAllHeadsets
+        if ($TicketExpiry -le [DateTimeOffset]::UtcNow) {
+            $report = & $NewIncomplete 'ticket-expired'
             $outcome = 'ticket-expired'; break
         }
         if ($timer.Elapsed.TotalMilliseconds -ge $limit) { $outcome = 'timed-out'; break }
@@ -949,14 +949,29 @@ function Confirm-TrackedSeats($Venue, [object[]]$Map, [switch]$IncludeAllHeadset
         if (-not $report.seats.Count) { $outcome = 'no-selected-seats'; break }
         $invalid = $report.seats | Where-Object { $_.status -cin $terminal } | Select-Object -First 1
         if ($invalid) { $outcome = $invalid.status; break }
-        $remaining = [Math]::Min($limit - $timer.Elapsed.TotalMilliseconds, ($Venue.EarliestExpiry - [DateTimeOffset]::UtcNow).TotalMilliseconds)
+        $remaining = [Math]::Min($limit - $timer.Elapsed.TotalMilliseconds, ($TicketExpiry - [DateTimeOffset]::UtcNow).TotalMilliseconds)
         if ($remaining -ge 1) { Start-Sleep -Milliseconds ([int][Math]::Floor([Math]::Min(1000, $remaining))) }
     } while ($true)
     if (-not $report) {
-        $report = New-TrackedSeatReport $Venue $Map @{ Status = 'readiness-unavailable' } -IncludeAllHeadsets:$IncludeAllHeadsets
+        $report = & $NewIncomplete 'readiness-unavailable'
     }
-    $report.wait = [ordered]@{ maximumSeconds = $WaitForTrackedSeconds; samples = $samples; outcome = $outcome }
+    $report.wait = [ordered]@{ maximumSeconds = $Seconds; samples = $samples; outcome = $outcome }
     return $report
+}
+
+function Confirm-TrackedSeats($Venue, [object[]]$Map, [switch]$IncludeAllHeadsets) {
+    Confirm-VenueReadback $Venue
+    $target = Get-ManagementTarget $ManagementApi
+    if (-not $WaitForTrackedSeconds) {
+        return Read-TrackedSeatReport $target $Venue $Map 10000 -IncludeAllHeadsets:$IncludeAllHeadsets
+    }
+    return Wait-TrackedReadiness $WaitForTrackedSeconds $Venue.EarliestExpiry {
+        param($timeout)
+        Read-TrackedSeatReport $target $Venue $Map $timeout -IncludeAllHeadsets:$IncludeAllHeadsets
+    } {
+        param($status)
+        New-TrackedSeatReport $Venue $Map @{ Status = $status } -IncludeAllHeadsets:$IncludeAllHeadsets
+    }
 }
 
 function Get-QuestDeviceInventory {
@@ -2062,7 +2077,16 @@ if ($PSCmdlet.ParameterSetName -eq 'PlayerTracking') {
     if (-not $VerifyPlayerTracking) { throw 'Specify -VerifyPlayerTracking to check the player seat before Begin.' }
     $connection = (Read-DeploymentJson $ClientConfig 4096 'player connection').Document
     $ticket = Read-PlayerConfig $connection
-    $result = Confirm-PlayerTrackedSeat (Get-ManagementTarget $ManagementApi) $ticket
+    $target = Get-ManagementTarget $ManagementApi
+    $result = if ($WaitForTrackedSeconds) {
+        Wait-TrackedReadiness $WaitForTrackedSeconds $ticket.ExpiresAtUtc {
+            param($timeout)
+            Confirm-PlayerTrackedSeat $target $ticket $timeout
+        } {
+            param($status)
+            New-PlayerTrackedSeatReport $ticket $status
+        }
+    } else { Confirm-PlayerTrackedSeat $target $ticket }
     $result | ConvertTo-Json -Depth 4 -Compress
     if (-not $result.complete) { exit 1 }
     return

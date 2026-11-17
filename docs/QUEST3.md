@@ -88,6 +88,8 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\quest-player.js
 
 工具從原連線檔找出場次、房號、席次和入場身分，向管理服務核對本次已連線且有有效追蹤的玩家，並讀回同一張 GameServer 準備中畫格。保存畫格也須在原房含有唯一的原玩家，且該玩家已連線、仍存活並有 `Tracked` 姿態。完成讀回時，取樣時的畫格年齡加上本次查詢時間仍須在 1.5 秒內。成功回條含 `scope: player`、`complete: true`、原世界及管理序號。`evidenceVersion: 1` 回條以入場雜湊供戰後核對，省略票券與金鑰。已換過入場身分、追蹤尚未就緒或場次已開始時，輸出 `complete: false` 及原因，退出碼為 1。這項查詢只讀管理服務，無需 ADB。頭盔畫面和操作仍需在現場驗收。
 
+頭盔剛啟動時，可在同一命令加 `-WaitForTrackedSeconds 30`，讓工具在指定的 1 至 120 秒內自動重查。每次均使用原連線檔的場次與入場識別。票券到期、原入場變更、場次已離開準備階段或無權讀取時會停止。回條的 `wait` 欄位會記錄取樣次數及結束原因。開場仍由操作員在主控台確認。
+
 戰後將原始回條傳給 `verify-field-results.py --quest-readiness-report .\quest-player-readiness.json`，並一同提供原 `.worldlog` 和 `--quest-player` 日誌。若使用舊版工具取得的回條缺少 `evidenceVersion`，須在 Begin 前用新版工具重新取得。 [回條核對方式](EXTERNAL_CLIENTS.md#核對單場-quest-開場追蹤回條)
 
 #### 部署前核對單席連線檔
