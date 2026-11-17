@@ -2739,6 +2739,109 @@ else:
             self.assertEqual({alignment, 'vr-connection.json'}, {file.name for file in directory.iterdir()})
         self.assertNotIn('v2.', result.stdout)
 
+    def test_install_missing_quest_apks_during_mapped_deployment_and_retry(self):
+        files, configs = self.vr_bundle('Independent')
+        bundle = self.write_bundle(files)
+        mapping, document = self.device_map()
+        release, _, release_env = self.release_report()
+        apk = Path(release_env['VR_QUEST_FLEET_APK'])
+        wrapper = self.root / 'management-receipt.ps1'
+        wrapper.write_text(r'''
+function Invoke-WebRequest {
+    param($Uri, $Method, $ContentType, $Headers, $Body, [switch]$NoProxy,
+          $MaximumRedirection, $TimeoutSec, [switch]$SkipHttpErrorCheck)
+    if ($Uri.AbsolutePath -cne '/api/vr-deployment/venue-check' -or $Method -cne 'Post' -or
+        $Headers.Authorization -cne 'Bearer fixture-master') { throw 'Unexpected management request' }
+    $request = ConvertFrom-Json -InputObject $Body
+    $stale = $request.requireLiveSource -and $env:VR_QUEST_TEST_SOURCE_STALE -and
+        [IO.File]::Exists((Join-Path $env:VR_QUEST_FLEET_FIXTURE 'fixture-01/installed.apk'))
+    $rows = foreach ($room in $request.rooms) {
+        for ($seat = 0; $seat -lt $room.connectionFiles.Count; $seat++) {
+            $status = if ($stale -and $room.roomId -eq 1 -and $seat -eq 0) { 'source-stale' } else { 'matched' }
+            @{ roomId = $room.roomId; seat = $seat; status = $status; headset = 'Quest3' }
+        }
+    }
+    $result = @{ topology = $request.topology; allMatched = -not $stale; seats = @($rows) }
+    if ($request.requireLiveSource) { $result.liveSourceVerified = $result.allMatched }
+    @{ StatusCode = 200; Content = ($result | ConvertTo-Json -Depth 5 -Compress) }
+}
+$options = $args[1..($args.Count - 1)]
+& $args[0] @options
+exit $LASTEXITCODE
+''', encoding='utf-8')
+        command = ['pwsh', '-NoProfile', '-NonInteractive', '-File', str(wrapper),
+                   str(ROOT / 'scripts/deploy-quest.ps1'), '-VenueBundle', str(bundle),
+                   '-DeviceMap', str(mapping), '-ReleaseReport', str(release),
+                   '-AdbPath', str(ROOT / 'tests/fixtures/mock-quest-fleet.ps1'),
+                   '-DeployMappedSeats', '-ManagementApi', 'http://127.0.0.1:1']
+
+        def invoke(fleet, *options, faults=None, stale=False, allow_install=True):
+            fleet.mkdir(exist_ok=True)
+            flags = ['-InstallMissing', '-ApkPath', str(apk)] if allow_install else []
+            return subprocess.run([*command, *flags, *options], capture_output=True, encoding='utf-8', timeout=90,
+                env={**os.environ, **release_env, 'VR_COMMAND_MASTER_KEY': 'fixture-master',
+                     'VR_QUEST_FLEET_FIXTURE': str(fleet), 'VR_QUEST_FLEET_FRESH': 'fixture-01,fixture-11,fixture-25',
+                     'VR_QUEST_FLEET_FAULTS': json.dumps(faults or {}), 'VR_QUEST_TEST_SOURCE_STALE': '1' if stale else ''})
+
+        bad_local = self.root / 'bad-local'
+        original_bytes = apk.read_bytes()
+        apk.write_bytes(b'edited APK')
+        self.assert_rejected(invoke(bad_local), 'APK SHA-256 differs')
+        self.assertFalse((bad_local / 'transport.log').exists())
+        apk.write_bytes(original_bytes)
+
+        blocked = self.root / 'blocked'
+        wrong_package = invoke(blocked, faults={'fixture-25': 'package-disabled'})
+        self.assertEqual(1, wrong_package.returncode, wrong_package.stderr)
+        report = json.loads(wrong_package.stdout)
+        self.assertEqual('preflight', report['phase'])
+        self.assertEqual('package-unavailable', report['devices'][-1]['status'])
+        self.assertFalse(list(blocked.glob('fixture-*')))
+        self.assertNotIn(' install ', (blocked / 'transport.log').read_text())
+
+        for name, fault, stale, step in (
+            ('bad-readback', {'fixture-01': 'installed-apk-mismatch'}, False, 'verify-installed-apk'),
+            ('changed-source', {}, True, 'verify-live-venue-after-install'),
+        ):
+            with self.subTest(step=step):
+                fleet = self.root / name
+                result = invoke(fleet, faults=fault, stale=stale)
+                self.assertEqual(1, result.returncode, result.stderr)
+                row = json.loads(result.stdout)['devices'][0]
+                self.assertEqual(step, row['failedStep'])
+                self.assertTrue(row['installedApk'])
+                commands = (fleet / 'adb.log').read_text()
+                self.assertNotIn(' push ', commands)
+                self.assertNotIn(' shell am ', commands)
+
+        fleet = self.root / 'resume'
+        first = invoke(fleet, faults={'fixture-11': 'install-failed'})
+        self.assertEqual(1, first.returncode, first.stderr)
+        before = json.loads(first.stdout)
+        self.assertEqual(['launch-requested'] * 10 + ['deployment-failed'] + ['not-attempted'] * 14,
+                         [row['status'] for row in before['devices']])
+        self.assertEqual('install-apk', before['devices'][10]['failedStep'])
+        prior = self.root / 'original-deployment.json'
+        prior.write_bytes(first.stdout.encode())
+        log_file = fleet / 'adb.log'
+        original_log = log_file.read_text()
+        self.assert_rejected(invoke(fleet, '-RetryIncomplete', str(prior), allow_install=False), 'original APK installation option')
+        self.assertEqual(original_log, log_file.read_text())
+        log_file.unlink()
+        resumed = invoke(fleet, '-RetryIncomplete', str(prior))
+        self.assertEqual(0, resumed.returncode, resumed.stderr)
+        complete = json.loads(resumed.stdout)
+        self.assertTrue(complete['complete'])
+        self.assertEqual(before['devices'][:10], complete['devices'][:10])
+        self.assertEqual(hashlib.sha256(prior.read_bytes()).hexdigest(), complete['previousDeploymentSha256'])
+        self.assertEqual(['fixture-11', 'fixture-25'], [line.split()[1] for line in log_file.read_text().splitlines() if ' install ' in line])
+        self.assertTrue(all(row['apkVerified'] and row['filesVerified'] and row['status'] == 'launch-requested' for row in complete['devices']))
+        self.assertEqual(3, sum(row.get('installedApk', False) for row in complete['devices']))
+        for row in document['seats']:
+            room, seat = row['roomId'], row['seat']
+            readback = json.loads((fleet / row['serial'] / 'vr-connection.json').read_bytes())
+            self.assertEqual(configs[room][f'room-{room:02}-seat-{seat:02}.json'], readback)
+
     def test_device_map_reads_all_25_and_reports_faults_without_device_writes(self):
         files, _ = self.bundle('Independent')
         path, _ = self.device_map()

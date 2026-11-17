@@ -24,6 +24,7 @@ param(
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Smoke')][ValidateNotNullOrEmpty()][string]$ReleaseReport,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Smoke')][ValidateNotNullOrEmpty()][string]$ApkPath,
     [Parameter(ParameterSetName='Bundle')][switch]$DeployMappedSeats,
+    [Parameter(ParameterSetName='Bundle')][switch]$InstallMissing,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$RetryIncomplete,
     [Parameter(ParameterSetName='Bundle')][switch]$VerifyTrackedSeats,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$DeploymentReport,
@@ -1045,7 +1046,12 @@ function New-VerifiedQuestApk([string]$Path, [string]$ExpectedHash) {
     return $stagePath
 }
 
-function Get-MappedQuestStatus($Row, $Inventory, [int]$VersionCode, [string]$ExpectedHash) {
+function Install-QuestReleaseApk([string[]]$Target, [string]$Path) {
+    $output = @(Invoke-QuestAdb ($Target + @('install', '-R', '--user', 'current', '--pkg', 'com.vrcommand.quest', $Path)) 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $output -cnotcontains 'Success') { throw 'Quest APK installation did not return Success.' }
+}
+
+function Get-MappedQuestStatus($Row, $Inventory, [int]$VersionCode, [string]$ExpectedHash, [switch]$AllowMissingApk) {
     $result = [ordered]@{ roomId = $Row.roomId; seat = $Row.seat; status = 'ready' }
     $connected = $Inventory[$Row.serial]
     $status = $connected.Status
@@ -1062,6 +1068,14 @@ function Get-MappedQuestStatus($Row, $Inventory, [int]$VersionCode, [string]$Exp
     $packages = @(Invoke-QuestAdb ($target + @('shell', 'pm', 'list', 'packages', '-e', '--show-versioncode', '--user', 'current', 'com.vrcommand.quest')) 2>$null)
     if ($LASTEXITCODE -ne 0) { $result.status = 'package-query-failed'; return $result }
     $rows = @($packages | Where-Object { $_ -cmatch '\Apackage:com\.vrcommand\.quest versionCode:[0-9]+\s*\z' })
+    if ($AllowMissingApk -and $packages.Count -eq 0) {
+        $knownPackages = @(Invoke-QuestAdb ($target + @('shell', 'pm', 'list', 'packages', '-u', '--user', 'current', 'com.vrcommand.quest')) 2>$null)
+        if ($LASTEXITCODE -ne 0) { $result.status = 'package-query-failed'; return $result }
+        if ($knownPackages.Count -eq 0) {
+            $result.status = 'install-required'
+            return $result
+        }
+    }
     $code = 0L
     if ($rows.Count -ne 1 -or -not [long]::TryParse(($rows[0] -csplit ':')[-1], [ref]$code)) {
         $result.status = 'package-unavailable'; return $result
@@ -1125,11 +1139,12 @@ function Test-QuestDeploymentMap($Venue, [object[]]$Map, $Report) {
         $Report.devices -is [array] -and $Report.devices.Count -eq $Map.Count)
 }
 
-function Test-QuestDeploymentRow($Entry, $Row, $DeviceFingerprint, [int]$VersionCode) {
+function Test-QuestDeploymentRow($Entry, $Row, $DeviceFingerprint, [int]$VersionCode, [switch]$AllowMissingVersion) {
+    $versionMatches = if ($AllowMissingVersion -and $null -eq $Entry.versionCode) { $true }
+        else { (Test-JsonInteger $Entry.versionCode) -and $Entry.versionCode -eq $VersionCode }
     return ($DeviceFingerprint -is [string] -and $DeviceFingerprint -cmatch '\A[0-9a-f]{64}\z' -and
         (Test-JsonInteger $Entry.roomId) -and $Entry.roomId -eq $Row.roomId -and
-        (Test-JsonInteger $Entry.seat) -and $Entry.seat -eq $Row.seat -and
-        (Test-JsonInteger $Entry.versionCode) -and $Entry.versionCode -eq $VersionCode)
+        (Test-JsonInteger $Entry.seat) -and $Entry.seat -eq $Row.seat -and $versionMatches)
 }
 
 function Test-QuestDeployedAdmission($Entry, $Ticket) {
@@ -1277,16 +1292,22 @@ function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, $R
         [bool]$previous.requireOpenXR -ne [bool]$RequireOpenXR) {
         throw 'Retry with the original OpenXR requirement.'
     }
+    if (($previous.PSObject.Properties['installMissing'] -and $previous.installMissing -isnot [bool]) -or
+        [bool]$previous.installMissing -ne [bool]$InstallMissing) {
+        throw 'Retry with the original APK installation option.'
+    }
     $completed = [Collections.Generic.List[object]]::new()
     $statuses = @('not-attempted','device-identity-unavailable','device-identity-changed','apk-unverified',
         'apk-hash-mismatch','ticket-expired','venue-check-failed','seat-headset-mismatch','file-verification-failed','deployment-failed','adb-timeout')
     $fileSteps = @('resolve-launcher','prepare-device','stage-alignment','stage-connection','check-expiry-before-staging',
         'check-expiry-before-stop','stop-game','activate-connection','verify-active-connection',
-        'clean-local-connection','check-expiry-before-launch','launch-game','observe-openxr')
+        'clean-local-connection','check-expiry-before-launch','launch-game','observe-openxr',
+        'check-apk-before-install','install-apk','verify-installed-apk')
     for ($index = 0; $index -lt $Map.Count; $index++) {
         $entry = $previous.devices[$index]
         $row = $Map[$index]
-        if (-not (Test-QuestDeploymentRow $entry $row $proof.devices[$index] $VersionCode)) {
+        $allowMissingVersion = $InstallMissing -and $entry.status -cne 'launch-requested'
+        if (-not (Test-QuestDeploymentRow $entry $row $proof.devices[$index] $VersionCode -AllowMissingVersion:$allowMissingVersion)) {
             throw 'Deployment report rows do not match the original mapped seats.'
         }
         if ($entry.status -ceq 'launch-requested') {
@@ -1306,6 +1327,9 @@ function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, $R
             if ($RequireOpenXR) {
                 $seatResult.openXR = [ordered]@{ processId = [int]$entry.openXR.processId; nonce = $entry.openXR.nonce }
             }
+            if ($InstallMissing -and $entry.installedApk -is [bool] -and $entry.installedApk) {
+                $seatResult.installedApk = $true
+            }
             $completed.Add($seatResult)
         } elseif ($entry.status -cnotin $statuses) {
             throw 'Deployment report has an unknown seat status.'
@@ -1322,7 +1346,7 @@ function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, $R
         ReleaseReportSha256 = $releaseReportHash }
 }
 
-function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Release, $Retry) {
+function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Release, $Retry, [string]$StagedApk) {
     $expectedHash = [string]$Release.sha256
     Confirm-QuestAdbStartup 'Android platform-tools are not installed.'
     $originalMap = $Map
@@ -1330,13 +1354,13 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
     $inventory = Get-QuestDeviceInventory
     $devices = @($Map | ForEach-Object {
         $preflightSeat = $_
-        try { Get-MappedQuestStatus $preflightSeat $inventory $VersionCode $ExpectedHash }
+        try { Get-MappedQuestStatus $preflightSeat $inventory $VersionCode $ExpectedHash -AllowMissingApk:([bool]$StagedApk) }
         catch [TimeoutException] { [ordered]@{ roomId = $preflightSeat.roomId; seat = $preflightSeat.seat; status = 'adb-timeout' } }
     })
     $reportedSerials = [string[]]::new($Map.Count)
     $firstSeatBySerial = [Collections.Generic.Dictionary[string,int]]::new([StringComparer]::OrdinalIgnoreCase)
     for ($index = 0; $index -lt $Map.Count; $index++) {
-        if ($devices[$index].status -cne 'ready') { continue }
+        if ($devices[$index].status -cnotin @('ready','install-required')) { continue }
         $target = @('-t', [string]$inventory[$Map[$index].serial].TransportId)
         try { $reportedSerial = Read-QuestDeviceSerial $target }
         catch [TimeoutException] { $devices[$index].status = 'adb-timeout'; continue }
@@ -1372,7 +1396,7 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
     $checksHeadset = $Venue.Report.mode -cin @('VR','Mixed')
     if ($checksHeadset) { $report.mode = $Venue.Report.mode }
     if (-not $isVr) { $report.alignmentPinsVerified = $true }
-    if ($devices | Where-Object { $_.status -cne 'ready' }) { return $report }
+    if ($devices | Where-Object { $_.status -cnotin @('ready','install-required') }) { return $report }
     Confirm-VenueReadback $Venue
     if ($Venue.Report.managementVerified) { $report.managementVerified = $true }
     if ($checksHeadset -and $Venue.Report.managementVerified) {
@@ -1386,6 +1410,7 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
     $report.phase = 'deployment'
     if ($ExpectedHash) { $report.apkVerificationVersion = 1 }
     if ($RequireOpenXR) { $report.requireOpenXR = $true }
+    if ($StagedApk) { $report.installMissing = $true }
     if ($Retry) {
         $report.retry = $Retry.Proof
         $report.previousDeploymentSha256 = $Retry.PreviousSha256
@@ -1413,7 +1438,7 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
         catch [TimeoutException] { $device.status = 'adb-timeout'; return $report }
         if (-not $reportedSerial) { $device.status = 'device-identity-unavailable'; return $report }
         if ($reportedSerial -cne $reportedSerials[$index]) { $device.status = 'device-identity-changed'; return $report }
-        if ($ExpectedHash) {
+        if ($ExpectedHash -and -not $StagedApk) {
             try { $apkStatus = Get-QuestApkStatus $target $ExpectedHash }
             catch [TimeoutException] { $device.status = 'adb-timeout'; return $report }
             if ($apkStatus -cne 'ready') { $device.status = $apkStatus; return $report }
@@ -1433,6 +1458,33 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
         }
         $deployment = @{}
         try {
+            if ($StagedApk) {
+                $deployment.Step = 'check-apk-before-install'
+                $current = Get-MappedQuestStatus $row $inventory $VersionCode $ExpectedHash -AllowMissingApk
+                if ($current.status -ceq 'install-required') {
+                    if ($connection.Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) {
+                        $device.status = 'ticket-expired'; return $report
+                    }
+                    $deployment.Step = 'install-apk'
+                    Install-QuestReleaseApk $target $StagedApk
+                    $device.installedApk = $true
+                    $deployment.Step = 'verify-installed-apk'
+                    $current = Get-MappedQuestStatus $row $inventory $VersionCode $ExpectedHash
+                }
+                if ($current.status -cne 'ready') { throw 'The installed Quest app could not be verified for this release.' }
+                $device.versionCode = $current.versionCode
+                $device.apkVerified = $true
+                if ($device.installedApk) {
+                    if ($connection.Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) {
+                        $device.status = 'ticket-expired'; return $report
+                    }
+                    $deployment.Step = 'verify-live-venue-after-install'
+                    Confirm-VenueReadback $Venue -RequireLiveSource
+                    if ($checksHeadset -and $Venue.SeatHeadsets["$($row.roomId)/$($row.seat)"] -cne 'Quest3') {
+                        $device.status = 'seat-headset-mismatch'; return $report
+                    }
+                }
+            }
             Set-QuestConnection $target $connection.Ticket.Config $connection.Ticket $connection.Alignment `
                 -RequestMixedReality:($null -ne $connection.Alignment) -Deployment $deployment -LiveVenue $Venue
             $device.filesVerified = $true
@@ -1445,7 +1497,7 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
                 $device.port = $connection.Ticket.Config.port
             }
         } catch {
-            $device.status = if ($deployment.Step -ceq 'verify-live-venue-before-stop') { 'venue-check-failed' }
+            $device.status = if ($deployment.Step -cin @('verify-live-venue-before-stop','verify-live-venue-after-install')) { 'venue-check-failed' }
                 elseif ($_.Exception -is [IO.InvalidDataException]) { 'file-verification-failed' }
                 else { 'deployment-failed' }
             $device.failedStep = $deployment.Step
@@ -1677,10 +1729,8 @@ function Invoke-QuestFirstLaunch([string]$Apk, $Release) {
     } else {
         if ($appPresent) { throw 'The first-launch test requires a headset without an existing VR Command app. Use -ResumeSmokeTest to check the matching APK without a player configuration.' }
         $stagedApk = New-VerifiedQuestApk $Apk $Release.sha256
-        try {
-            $install = @(Invoke-QuestAdb ($deviceTarget + @('install', '-R', '--user', 'current', '--pkg', $package, $stagedApk)) 2>$null)
-            if ($LASTEXITCODE -ne 0 -or $install -cnotcontains 'Success') { throw 'Quest APK installation did not return Success.' }
-        } finally { Remove-Item -LiteralPath $stagedApk -ErrorAction SilentlyContinue }
+        try { Install-QuestReleaseApk $deviceTarget $stagedApk }
+        finally { Remove-Item -LiteralPath $stagedApk -ErrorAction SilentlyContinue }
     }
     if ((Get-QuestApkStatus $deviceTarget $Release.sha256) -cne 'ready') { throw 'Installed Quest APK could not be verified against the release report.' }
 
@@ -1844,10 +1894,13 @@ if ($RecordLinkMetrics -and (-not $ReleaseReport -or $CheckOnly -or $VerifyTrack
 if ($RequireOpenXR -and (-not $ReleaseReport -or $CheckOnly -or $VerifyTrackedSeats -or ($DeviceMap -and -not $DeployMappedSeats))) {
     throw 'Use -RequireOpenXR with -ReleaseReport when launching a Quest player; a device map also needs -DeployMappedSeats.'
 }
-if ($ApkPath -and (-not $ReleaseReport -or $DeviceMap)) {
-    throw 'Use -ApkPath only for a single-seat install with -ReleaseReport.'
+if ($ApkPath -and (-not $ReleaseReport -or ($DeviceMap -and -not $InstallMissing))) {
+    throw 'Use -ApkPath only for a single-seat install with -ReleaseReport, or a mapped deployment with -InstallMissing.'
 }
 if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
+    if ($InstallMissing -and (-not $DeployMappedSeats -or -not $DeviceMap -or -not $ReleaseReport -or $CheckOnly -or $VerifyTrackedSeats)) {
+        throw 'Use -InstallMissing with -DeviceMap, -DeployMappedSeats and -ReleaseReport for live Quest deployment.'
+    }
     if ($WaitForTrackedSeconds -and -not $VerifyTrackedSeats) { throw 'Use -WaitForTrackedSeconds only with -VerifyTrackedSeats.' }
     if ($DeploymentReport -and $DeploymentReportsFile) { throw 'Specify either -DeploymentReport or -DeploymentReportsFile.' }
     if (($DeploymentReport -or $DeploymentReportsFile) -and (-not $VerifyTrackedSeats -or -not $DeviceMap)) {
@@ -1900,8 +1953,14 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
         if ($DeployMappedSeats) {
             $retry = if ($RetryIncomplete) { Read-QuestDeploymentRetry $venue $map $versionCode $release }
             $deploymentLock = Enter-QuestDeployment
-            try { $result = Invoke-MappedQuestSeats $venue $map $versionCode $release $retry }
-            finally { $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose() }
+            $stagedApk = $null
+            try {
+                if ($InstallMissing) { $stagedApk = New-VerifiedQuestApk $apk $release.sha256 }
+                $result = Invoke-MappedQuestSeats $venue $map $versionCode $release $retry $stagedApk
+            } finally {
+                if ($stagedApk) { Remove-Item -LiteralPath $stagedApk -ErrorAction SilentlyContinue }
+                $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose()
+            }
         } else { $result = Invoke-MappedQuestSeats $venue $map $versionCode $release }
         $result | ConvertTo-Json -Depth 4 -Compress
         if (-not $result.complete) { exit 1 }

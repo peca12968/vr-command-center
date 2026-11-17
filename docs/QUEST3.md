@@ -520,6 +520,21 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 
 使用 `-ReleaseReport` 時，預檢與部署報告會記錄整份原發行 JSON 的 `venueReleaseReportSha256`。請將原發行 JSON 和 `-DeployMappedSeats` 的輸出一併保留，包括中途中斷但已有成功席位的報告。成功席位附原場次、玩家、入場及連線埠，可在封存驗收與 logcat 和原戰績對照。 [核對封存席位](EXTERNAL_CLIENTS.md#核對封存席位的-quest-發行-apk)
 
+#### 同批安裝尚未安裝遊戲的 Quest 3
+
+部署 5、10 或 25 席時，可在 `-DeployMappedSeats` 加上 `-InstallMissing`。工具先核對原 APK 的 SHA-256、整批裝置與席位，再對未裝遊戲的 Quest 3 執行首次安裝。只有已安裝且符合原版的遊戲會直接進入設定部署。若 Android 列出停用或保留的套件、版本不符，或 APK 雜湊不同，預檢會報出該席並停止整批。APK 安裝使用 Android 的 `-R` 選項，防止覆寫已存在的套件。 [Android 套件查詢](https://developer.android.com/tools/adb#pm) · [Android 套件管理程式](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/pm/PackageManagerShellCommand.java)
+
+```powershell
+pwsh -NoProfile -NonInteractive -File .\scripts\deploy-quest.ps1 `
+    -VenueBundle .\vr-venue-connections.zip -DeviceMap .\device-map.json `
+    -ReleaseReport .\venue-release.json -ApkPath .\VrCommand.apk `
+    -DeployMappedSeats -InstallMissing -ManagementApi http://127.0.0.1:5081
+```
+
+每席安裝後會讀回版本與 APK 雜湊，重新核對原場次、端點和入場，才寫入設定。`installedApk: true` 表示 Android 已回報安裝成功。`apkVerified: true` 表示已核對裝置上的發行 APK。若 `failedStep` 為 `install-apk`、`verify-installed-apk` 或 `verify-live-venue-after-install`，這一席尚未寫入連線設定。含 `-RequireOpenXR` 的部署仍會在啟動後核對該次 OpenXR 回報。
+
+中途失敗時，保留原部署報告並沿用 `-InstallMissing` 重試。若當時 APK 已安裝完成且讀回相符，重試直接使用該 APK。原報告中已啟動的席位會被略過。 [從原部署報告重試](#從原部署報告重試未完成席位)
+
 #### 啟動前核對裝置檔案
 
 單席與整批部署都會先傳送並核對 MR 原校正檔，再驗證暫存的玩家連線檔。兩項核對通過且票券仍有效時，才停止遊戲。更名之前，同一個裝置端指令會核對暫存連線檔及它所引用的原校正檔 SHA-256。任一檔案不符時，原正式連線檔仍在，批次報告將該席標為 `file-verification-failed`，步驟為 `activate-connection`。切換成功後，工具會再次核對正式連線檔及校正檔，兩項通過才送出啟動指令。批次沿用裝置上已安裝的 APK，單席流程另含 APK 安裝階段。 [ADB 遠端指令](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/docs/user/adb.1.md)

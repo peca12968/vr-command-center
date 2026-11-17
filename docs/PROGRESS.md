@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-17 在五房部署中安裝缺少的 Quest APK
+
+- `-InstallMissing` 允許五房部署工具對尚未裝遊戲的 Quest 3 安裝原發行 APK。開始前核對整批席位、裝置及本機 APK，逐席在原 ADB 連線上裝完後再核對版號、裝置 APK 雜湊及管理來源。Android 回報安裝的席位會在原部署報告留下 `installedApk`。 [五房部署操作](QUEST3.md#同批安裝尚未安裝遊戲的-quest-3)
+- 9 項不開 TCP 或 UDP 監聽的部署回歸通過。新增測試模擬五房獨立 25 席，3 席需首次安裝。第 11 席安裝失敗後，重試保留原前 10 席，只部署其餘 15 席。另驗本機 APK 不符、停用套件、裝置讀回雜湊不符及安裝後來源失效。測試使用模擬 ADB 和管理回條。Windows 目前列出 Meta USB 檔案傳輸介面，仍無 ADB 介面。原 0.50.12／77 APK 實際雜湊與原發行報告相符。 [部署測試](../artifacts/quest-batch-install-missing/deployment-tests.log) · [原發行報告](../artifacts/named-venue-plan-preview-031254/venue-release.json)
+
 ## 2026-11-17 無人值守完成 Windows 玩家包離線驗證
 
 - 玩家包驗證先執行離線項目，再在每項原生檢查前核對本次執行檔。探測 UDP 埠時也核對 Python。防火牆拒絕時，報告記錄個別略過原因，要求原生驗證的指令回傳 2。 [玩家包驗證](WINDOWS_PLAYER_PACKAGE.md#windows-openxr-啟動)

@@ -39,9 +39,20 @@ $serial = $args[1]
 if ($args[0] -cne '-s' -or $serial -cnotmatch '\Afixture-(0[1-9]|1[0-9]|2[0-5])\z') { exit 99 }
 $fault = $faults[$serial]
 $device = Join-Path $root $serial
+$installedApk = Join-Path $device 'installed.apk'
+$appMissing = ($env:VR_QUEST_FLEET_FRESH -csplit ',') -ccontains $serial -and -not [IO.File]::Exists($installedApk)
 $gamePid = 4300 + [int]$serial.Substring(8)
 $openxrProbe = Join-Path $device 'openxr-probe'
 $versionCode = if ($env:VR_QUEST_FLEET_VERSION_CODE) { [int]$env:VR_QUEST_FLEET_VERSION_CODE } else { 61 }
+if ($args[2] -ceq 'install') {
+    if ($args.Count -ne 9 -or ($args[3..7] -join ' ') -cne '-R --user current --pkg com.vrcommand.quest') { exit 98 }
+    if (-not $appMissing -or $fault -ceq 'install-failed') { exit 1 }
+    $null = [IO.Directory]::CreateDirectory($device)
+    Copy-Item -LiteralPath $args[8] -Destination $installedApk
+    if ($fault -ceq 'installed-apk-mismatch') { [IO.File]::AppendAllText($installedApk, 'different APK bytes') }
+    'Success'
+    exit 0
+}
 if ($args[2] -ceq 'push') {
     $null = [IO.Directory]::CreateDirectory($device)
     $file = Join-Path $device ($args[4].Split('/')[-1])
@@ -82,6 +93,10 @@ switch -CaseSensitive ($args[3]) {
         exit 0
     }
     'pm' {
+        if (($args[4..9] -join ' ') -ceq 'list packages -u --user current com.vrcommand.quest') {
+            if (-not $appMissing -or $fault -ceq 'package-disabled') { 'package:com.vrcommand.quest' }
+            exit 0
+        }
         if (($args[4..13] -join ' ') -ceq 'resolve-activity --brief --user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p com.vrcommand.quest') {
             if ($fault -ceq 'missing-activity') { 'No activity found'; exit 0 }
             'com.vrcommand.quest/com.unity3d.player.UnityPlayerActivity'
@@ -94,6 +109,7 @@ switch -CaseSensitive ($args[3]) {
             exit 0
         }
         if (($args[4..10] -join ' ') -cne 'list packages -e --show-versioncode --user current com.vrcommand.quest') { exit 98 }
+        if ($appMissing -or $fault -ceq 'package-disabled') { exit 0 }
         if ($fault -ceq 'package-missing') { "package:com.vrcommand.quest.other versionCode:$versionCode" }
         elseif ($fault -ceq 'version-mismatch') { "package:com.vrcommand.quest versionCode:$($versionCode - 1)" }
         else { "package:com.vrcommand.quest versionCode:$versionCode" }
@@ -124,7 +140,8 @@ switch -CaseSensitive ($args[3]) {
         $path = $args[4]
         if ($path -ceq '/data/app/~~VRGameHash==/com.vrcommand.quest-XR_Package+=/base.apk') {
             if ($fault -ceq 'apk-unreadable') { exit 1 }
-            $hash = (Get-FileHash -LiteralPath $env:VR_QUEST_FLEET_APK -Algorithm SHA256).Hash.ToLowerInvariant()
+            $apk = if ([IO.File]::Exists($installedApk)) { $installedApk } else { $env:VR_QUEST_FLEET_APK }
+            $hash = (Get-FileHash -LiteralPath $apk -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($fault -ceq 'apk-changed') {
                 $reads = @(Get-Content -LiteralPath (Join-Path $root 'adb.log') |
                     Where-Object { $_ -ceq "-s $serial shell sha256sum $path" })
