@@ -22,9 +22,9 @@ try
     }
     if (args.FirstOrDefault() == "--verify-venue-report")
     {
-        if (args.Length != 4 || args[2] != "--report-directory")
-            throw new ArgumentException("Use --verify-venue-report <venue-bindings.json> --report-directory <existing-directory>.");
-        return LiveHardwareGateway.ReviewVenueRun(Path.GetFullPath(args[1]), Path.GetFullPath(args[3]));
+        if (args.Length is not (4 or 6) || args[2] != "--report-directory")
+            throw new ArgumentException("Use --verify-venue-report <venue-bindings.json> --report-directory <existing-directory> [--events-directory <directory>].");
+        return LiveHardwareGateway.ReviewVenueRun(Path.GetFullPath(args[1]), Path.GetFullPath(args[3]), EventsDirectory(4));
     }
     if (args.FirstOrDefault() == "--pack-venue-report")
     {
@@ -34,8 +34,8 @@ try
     }
     if (args.FirstOrDefault() == "--verify-venue-zip")
     {
-        if (args.Length != 2) throw new ArgumentException("Use --verify-venue-zip <venue.zip>.");
-        return LiveHardwareGateway.ReviewVenueHandoff(Path.GetFullPath(args[1]));
+        if (args.Length is not (2 or 4)) throw new ArgumentException("Use --verify-venue-zip <venue.zip> [--events-directory <directory>].");
+        return LiveHardwareGateway.ReviewVenueHandoff(Path.GetFullPath(args[1]), EventsDirectory(2));
     }
     if (args.Length < 4 || (!live && args.Length != 4) || args[0] is not ("--input" or "--live" or "--bind-room" or "--bind-venue") || args[2] != "--output")
         throw new ArgumentException("Use --input, --live, --bind-room or --bind-venue <input.json> --output <new-path>.");
@@ -96,4 +96,12 @@ catch (Exception error) when (LiveHardwareGateway.IsExpectedFailure(error))
     };
     Console.Error.WriteLine(message + error.GetType().Name);
     return 1;
+}
+
+string? EventsDirectory(int index)
+{
+    if (index == args.Length) return null;
+    if (args[index] != "--events-directory" || args[index + 1].StartsWith("--", StringComparison.Ordinal))
+        throw new ArgumentException("Use --events-directory with the original exported event files.");
+    return Path.GetFullPath(args[index + 1]);
 }

@@ -98,18 +98,26 @@ def main():
 
     with tempfile.TemporaryDirectory(prefix='vr-hardware-handoff-') as directory:
         root = Path(directory)
+        sources = root / 'original-events'
+        sources.mkdir()
+        write_json(sources / (identity(1) + '.json'), [])
         for mode in ('Linked', 'Independent'):
             manifest, reports = prepare(root / mode, mode, 4)
             original = invoke('--verify-venue-report', manifest, '--report-directory', reports)
             reviewed = json.loads(original)
             assert reviewed['attemptIdentitiesVerified'] and reviewed['configurationsVerified']
+            assert not reviewed['sourceEventsVerified'] and reviewed['sourceSignalsVerified'] == 0
             assert [room['acknowledged'] for room in reviewed['rooms']] == [2] * 5
             archive = root / (mode + '.zip')
             assert invoke('--pack-venue-report', manifest, '--report-directory', reports, '--output', archive) == original
             assert invoke('--verify-venue-zip', archive) == original
+            invoke('--verify-venue-report', manifest, '--report-directory', reports, '--events-directory', sources, reject=True)
+            invoke('--verify-venue-zip', archive, '--events-directory', sources, reject=True)
         manifest, reports = prepare(root / 'legacy', 'Linked', 3, duplicate_ack)
         legacy = json.loads(invoke('--verify-venue-report', manifest, '--report-directory', reports))
         assert legacy['rooms'][0]['acknowledged'] == 3 and not legacy['attemptIdentitiesVerified']
+        assert not legacy['sourceEventsVerified'] and legacy['sourceSignalsVerified'] == 0
+        invoke('--verify-venue-report', manifest, '--report-directory', reports, '--events-directory', sources, reject=True)
         cases = (
             ('duplicated-ack', duplicate_ack),
             ('duplicated-event', lambda rows: signal(rows, attempt=1).update(eventId=signal(rows)['eventId'])),

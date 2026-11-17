@@ -42,7 +42,7 @@ internal static partial class LiveHardwareGateway
         finally { if (created) File.Delete(staging); }
     }
 
-    internal static int ReviewVenueHandoff(string input)
+    internal static int ReviewVenueHandoff(string input, string? eventsDirectory)
     {
         using var file = File.OpenRead(input);
         if (file.Length is < 1 or > MaxHandoffBytes) throw new InvalidDataException("Unexpected venue ZIP size.");
@@ -56,7 +56,7 @@ internal static partial class LiveHardwareGateway
             if (!entries.Remove(name, out var entry)) throw new InvalidDataException("Missing venue ZIP entry.");
             using var stream = entry.Open();
             return ReadReportBytes(stream, entry.Length, limit);
-        });
+        }, eventsDirectory);
         if (entries.Count != 0) throw new InvalidDataException("Unexpected venue ZIP entry.");
         Console.WriteLine(JsonSerializer.Serialize(review, Wire));
         return 0;

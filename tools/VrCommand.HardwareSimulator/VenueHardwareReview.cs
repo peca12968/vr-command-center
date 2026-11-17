@@ -40,13 +40,14 @@ internal static partial class LiveHardwareGateway
         return ReadReportBytes(path, limit);
     }
 
-    internal static int ReviewVenueRun(string manifestPath, string directory)
+    internal static int ReviewVenueRun(string manifestPath, string directory, string? eventsDirectory)
     {
-        Console.WriteLine(JsonSerializer.Serialize(ReviewVenueRun((name, limit) => ReadVenueRunFile(manifestPath, directory, name, limit)), Wire));
+        Console.WriteLine(JsonSerializer.Serialize(ReviewVenueRun((name, limit) => ReadVenueRunFile(manifestPath, directory, name, limit),
+            eventsDirectory), Wire));
         return 0;
     }
 
-    private static object ReviewVenueRun(Func<string, int, byte[]> read)
+    private static object ReviewVenueRun(Func<string, int, byte[]> read, string? eventsDirectory = null)
     {
         var manifestBytes = read(HandoffManifest, 8192);
         var manifest = ParseVenueManifest(manifestBytes);
@@ -59,13 +60,17 @@ internal static partial class LiveHardwareGateway
 
         var configurationsVerified = report.Version >= 3;
         var attemptIdentitiesVerified = report.Version == 4;
+        if (!attemptIdentitiesVerified && eventsDirectory is not null)
+            throw new InvalidDataException("Source event comparison requires a version 4 venue report.");
+        var sources = eventsDirectory is null ? null : new VenueEventEvidence(eventsDirectory, manifest);
         var eventIds = new HashSet<(Guid Session, Guid Event)>();
         var reportIds = new HashSet<(Guid Session, Guid Report)>();
         var eventSequences = new HashSet<(Guid Session, long Sequence)>();
         var streamSequences = new HashSet<(Guid Session, Guid Stream, long Sequence)>();
         var rooms = report.Rooms.Zip(manifest.Rooms, ReviewRoom).ToArray();
         return new { version = 1, verified = true, rehearsalComplete = report.Complete,
-            report.Mode, report.BindingManifestSha256, configurationsVerified, attemptIdentitiesVerified, simulatedHardwareOnly = true,
+            report.Mode, report.BindingManifestSha256, configurationsVerified, attemptIdentitiesVerified,
+            sourceEventsVerified = sources is not null, sourceSignalsVerified = sources?.SignalsVerified ?? 0, simulatedHardwareOnly = true,
             physicalDeliveryConfirmed = false, rooms };
 
         RoomRunReview ReviewRoom(VenueRunResult row, VenueBindingRoom binding)
@@ -78,6 +83,7 @@ internal static partial class LiveHardwareGateway
                 var configBytes = read("bindings/" + binding.Configuration, 8192);
                 if (row.ConfigurationSha256 != ReportHash(configBytes)) throw new InvalidDataException("Room configuration bytes do not match.");
                 config = RequireVenueConfiguration(ParseConfiguration(configBytes), binding);
+                sources?.VerifyBindings(binding, config);
             }
             else if (row.ConfigurationSha256 is not null) throw new InvalidDataException("Unexpected configuration hash in version 2.");
             var fileName = FormattableString.Invariant($"room-{row.RoomId:00}-report.json");
@@ -134,6 +140,7 @@ internal static partial class LiveHardwareGateway
                         || !eventSequences.Add((room.SessionId, signal.EventSequence))
                         || !streamSequences.Add((room.SessionId, stream, signal.StreamSequence)))
                         throw new InvalidDataException("A hardware attempt repeats a signal or violates its original sequence.");
+                    sources?.VerifySignal(room.SessionId, room.RoomId, stream, attempt.RunningSinceSequence.Value, signal);
                     lastEvent = signal.EventSequence;
                     lastStream = signal.StreamSequence;
                 }

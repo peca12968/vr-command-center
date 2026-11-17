@@ -144,7 +144,16 @@ dotnet .\VrCommand.HardwareSimulator.dll --pack-venue-report ..\venue\venue-bind
 dotnet .\VrCommand.HardwareSimulator.dll --verify-venue-zip ..\rehearsal-01.zip
 ```
 
-打包時須指定新 ZIP 路徑。原檔核對失敗時不會發布 ZIP。版本 3 收錄五房設定，版本 2 收錄可核對的原清單及報告。兩個指令均可離線執行。
+打包時須指定新 ZIP 路徑。原檔核對失敗時不會發布 ZIP。版本 3 及 4 收錄五房設定，版本 2 收錄可核對的原清單及報告。兩個指令均可離線執行。
+
+版本 4 也可逐筆對照場次的原始事件。原場次結束且戰鬥串流封存後，用主控身分讀取 `GET /api/sessions/{id}/events?after=0&limit=500`。每頁以最後一筆的 `sequence` 作為下一頁的 `after`，讀到空頁為止。依序合併為一個 JSON 陣列並以 `<場次 UUID>.json` 儲存，從序號 1 開始，每場上限 32 MiB。合併模式提供一份，獨立模式在同一目錄提供原五場的五份事件檔。事件檔含場次與玩家資料，請保存在交接 ZIP 之外。
+
+```powershell
+dotnet .\VrCommand.HardwareSimulator.dll --verify-venue-zip ..\rehearsal-01.zip --events-directory ..\original-events
+dotnet .\VrCommand.HardwareSimulator.dll --verify-venue-report ..\venue\venue-bindings.json --report-directory ..\rehearsal-01 --events-directory ..\original-events
+```
+
+核對通過時，`sourceEventsVerified` 為 `true`，`sourceSignalsVerified` 為與所提供原事件相符的訊號筆數，涵蓋已確認、已取消和失敗批次。工具會核對原場次的封存、綁定當時的席位與入場，以及各訊號的串流、執行階段和原始事件。可用不帶 `--events-directory` 的原指令單獨核對交接檔。所提供的事件檔及模擬確認仍須由來源方保管，實體送達另由設備驗收。
 
 #### 在主控台查看五房模擬摘要
 
