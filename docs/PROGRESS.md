@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 Quest 分批 UDP 回條保留原場次修訂
+
+- 新版 Quest 回條保存實際探測房組的原場次、任務版本與修訂。Quest 重試把欄位納入原計畫比對；合併全館預檢和依原網路清單驗收封存時也逐組核對。舊回條在原 Windows 啟動計畫和預覽均相符時可沿用。 [Quest 預檢重試](QUEST3.md#重試-quest-udp-預檢席位)
+- 同一 Quest 裝置、席位及位址沿用給不同修訂時，修正前兩種模式都會重用原結果。修正後，離線測試用實際雙端回條格式驗證原修訂可重試及合併，改修訂則在探測及寫檔前拒絕。獨立模式只測第 5 房仍可合併全館待補清單。Quest 測試 14 項、LAN 離線 12 項及封存回歸 154 項通過。原六批 Windows 封存重驗的 80 筆戰績確認與摘要位元組相同。 [修正前反例](../artifacts/quest-udp-venue-revision-20261117/before-revision.log) · [Quest 測試](../artifacts/quest-udp-venue-revision-20261117/quest-verified.log) · [六批封存重驗](../artifacts/quest-udp-venue-revision-20261117/legacy-six-stages.json) · [封存回歸](../artifacts/quest-udp-venue-revision-20261117/field-final.log)
+- 原生 UDP 測試依防火牆查核略過。Quest USB 仍無 ADB 介面，實機及跨機 UDP 待驗。GitHub Actions 對 `891699e` 回報帳務或支出上限，工作未啟動。 [USB 狀態](../artifacts/quest-udp-venue-revision-20261117/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43999755021)
+
 ## 2026-11-17 收件與開場核對原 UDP 回條修訂
 
 - 使用新版全館 UDP 回條收件時，核對產出回條的原網路清單 SHA-256、場次、任務版本及修訂。開場重驗也會對照原 Windows 計畫；封存與收件清單工具在提供原網路清單時核對同一組欄位。 [操作與檔案格式](EXTERNAL_CLIENTS.md#從原啟動預覽產生網路清單)
