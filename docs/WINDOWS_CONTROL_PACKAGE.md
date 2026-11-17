@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-18 管理台 0.31.266 提供任務名稱及簡報搜尋。Windows ZIP 為 53,507,680 位元組，SHA-256 `83db5c97a4be1dd228281ba8d2c4e217568b59742969c4e97ee981a36cef897d`。 [管理包](../artifacts/mission-search-031266/VRCommand-ControlServer-0.31.266.zip) · [任務操作](MISSION_VERSIONS.md#控制台操作)
+
 2026-11-17 管理台 0.31.224 的 Windows ZIP 為 53,411,138 位元組，SHA-256 `8ca674b3496b6d356da8856e0227907e85afa40150c435356984adc73c358080`。解壓逐檔核對 574 筆。主控可匯出整批或單房的未確認席位及原封存戰績。 [管理包](../artifacts/venue-unconfirmed-seats-031224/VRCommand-ControlServer-0.31.224.zip) · [清單操作](SESSION_CLOSURE.md#查看全館未確認席位)
 
 2026-11-17 管理台 0.31.223 的 Windows ZIP 為 53,409,586 位元組，SHA-256 `672e8b0c6fb468bd905df08e01f72d652e7eb39fc3fcfe8e023182b1de11663c`。解壓逐檔核對 574 筆。五房獨立準備可從配置檔預覽套用指定房間的任務版本。 [管理包](../artifacts/venue-mission-one-room-031223/VRCommand-ControlServer-0.31.223.zip) · [配置操作](MISSION_VERSIONS.md#在開場前保存五房任務配置)

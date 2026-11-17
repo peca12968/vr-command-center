@@ -297,6 +297,9 @@ function logout() {
   state.epoch++; state.key = ''; state.actor = null; state.selected = null; state.session = null; state.pending = null;
   setVenuePhase(null);
   state.rooms = []; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
+  $('mission-search').value = '';
+  $('mission-search-status').hidden = true;
+  $('mission-search-status').textContent = '';
   $('venue-full-tracking').checked = false;
   $('venue-full-participation').checked = false;
   $('venue-begin-size').value = '5';
@@ -960,8 +963,9 @@ function applyPermissions() {
   create.disabled = locked || !plan.revision || !plan.available || !placement.canLaunch() || (plan.mixed && !roomPlan.ready());
   $('mission-fields').disabled = locked || !master();
   renderPropHistory();
-  $('load-mission').disabled = locked || !state.missions.length; $('new-mission').disabled = locked || !master();
+  $('load-mission').disabled = locked || !$('edit-mission').value; $('new-mission').disabled = locked || !master();
   $('edit-mission').disabled = locked;
+  $('mission-search').disabled = locked;
   $('mission-version').disabled = locked || !state.history;
   $('load-version').disabled = locked || !state.history;
   $('export-mission-template').hidden = !master();
@@ -2505,8 +2509,18 @@ function missionOptions(launch, edit) {
   const pinned = state.launchPinned;
   const launchEntries = pinned && !entries.some(([id]) => id === pinned.mission.id) ? [...entries, [pinned.mission.id, `${pinned.mission.definition.name} · 第 ${pinned.number} 版（歷史）`]] : entries;
   fillOptions('launch-mission', launchEntries.length ? launchEntries : [['', '請先儲存任務']], launch);
-  fillOptions('edit-mission', entries.length ? entries : [['', '尚無儲存任務']], edit);
+  editMissionOptions(edit);
   placement.scheduleLaunch();
+}
+function editMissionOptions(selected) {
+  const query = $('mission-search').value.trim().toLowerCase();
+  const matches = state.catalog.filter(row => !query || [row.mission.definition.name, row.mission.definition.briefing]
+    .some(text => text.toLowerCase().includes(query)));
+  const entries = matches.map(row => [row.mission.id, `${row.mission.definition.name} · 第 ${row.number} 版`]);
+  const empty = query ? '沒有符合的任務' : '尚無儲存任務';
+  fillOptions('edit-mission', entries.length ? entries : [['', empty]], selected);
+  $('mission-search-status').hidden = !query;
+  $('mission-search-status').textContent = query ? `找到 ${matches.length} 項任務，共 ${state.catalog.length} 項` : '';
 }
 function knownHeadNumber(seriesId) {
   return Math.max(state.catalog.find(row => row.seriesId === seriesId)?.number || 0, state.history?.seriesId === seriesId ? state.history.headNumber : 0);
@@ -2989,6 +3003,10 @@ submit('clock-form', () => command('SetMissionClock', { missionClock: { autoEnd:
 $('reload-clock').addEventListener('click', loadClock);
 $('clock-auto-end').addEventListener('change', () => { state.clockSequence = state.session?.sequence; });
 submit('mission-form', saveMission);
+$('mission-search').addEventListener('input', () => {
+  editMissionOptions();
+  applyPermissions();
+});
 $('load-mission').addEventListener('click', () => {
   const id = $('edit-mission').value;
   const selected = state.catalog.find(row => row.mission.id === id);

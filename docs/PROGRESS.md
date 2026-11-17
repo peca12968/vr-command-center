@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-18 搜尋已保存的任務
+
+- 管理台 0.31.266 可依名稱或簡報搜尋最新版任務，顯示符合筆數，沒有結果時停用載入。更新任務庫時保留查詢及仍符合的原選取識別，登出時清除查詢。 [任務操作](MISSION_VERSIONS.md#控制台操作)
+- 正式建置與 ZIP 解壓後各通過 10 項 Chromium 操作檢查，涵蓋同名任務、簡報及英文大小寫、沒有結果、原草稿與復原紀錄、歷史開場版本，以及選定結果的實際載入。管理服務透過 Windows AF_UNIX，查核為零 TCP 監聽、零 UDP 端點及零殘留場次。126 項既有 Node 模型檢查、7 項封裝檢查通過。 [解壓後瀏覽器驗收](../artifacts/mission-search-031266/extracted-browser/browser-checks.json) · [程序查核](../artifacts/mission-search-031266/extracted-browser/checks.json) · [畫面](../artifacts/mission-search-031266/extracted-browser/search.png)
+- ZIP 為 53,507,680 位元組，解壓核對 595 檔，已與既有 Windows 玩家、伺服器及 Quest 0.50.12／77 APK 完成離線發行核對。實體頭盔、場館跨機及廠商硬體仍待驗收。 [管理包](../artifacts/mission-search-031266/VRCommand-ControlServer-0.31.266.zip) · [發行核對](../artifacts/mission-search-031266/venue-release.json)
+- 首次排演在建立修訂時缺少請求識別而回傳 400；後續請求轉送錯誤造成瀏覽器失敗，另一輪管理服務在 25 秒內未就緒。原輸出保留，修正排演工具並補足程序期限後完成上述驗收。 [首輪](../artifacts/mission-search-031266/publication-browser/browser.log) · [轉送失敗](../artifacts/mission-search-031266/checked-browser/browser.log)
+
 ## 2026-11-18 Quest 首次啟動核對原裝置及玩家設定
 
 - `-SmokeTest` 在安裝前確認頭盔沒有玩家連線設定，並在安裝前、啟動前和程序觀察後核對同一實體裝置。啟動前及觀察後再次確認玩家設定，既有檔案保留。`-ResumeSmokeTest` 沿用同樣的啟動與觀察檢查。 [首次安裝操作](QUEST3.md#首次安裝與啟動檢查)
