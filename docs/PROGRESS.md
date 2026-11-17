@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 主控台比對 UDP 回條與目前準備狀態
+
+- 管理台 0.31.239 匯入新版 UDP 回條時，保留原 UDP 測量及待補席數，另以唯讀查詢比對當下的五房模式、準備狀態、原場次、任務版本、修訂和登記席位。回條檔留在瀏覽器。舊回條仍可讀取，正式啟動仍由原工具重驗網路清單、雙端報告與有效期限。 [主控台操作方式](WINDOWS_SERVER_PACKAGE.md#以-udp-預檢報告啟動五房)
+- 解壓後的正式管理包經本機 IPC 與 Chromium 通過 12 項。五房獨立 5 席與合併 10 席使用實際 CLI 產出的待補回條。同席換人會標記受影響的場次，管理服務回傳 503 時仍保留原結果。管理程序 TCP／UDP 端點皆為零，清理後活動場次為零。Node 133 項、網路清單 10 項及封存回歸 154 項通過。原六批 Windows 封存重驗仍有 80 筆戰績確認，摘要逐位元相同。 [瀏覽器驗證](../artifacts/udp-report-current-review-031239/package-first/checks.json) · [本機 IPC](../artifacts/udp-report-current-review-031239/package-first/runtime.json) · [六批封存重驗](../artifacts/udp-report-current-review-031239/legacy-six-stages.json) · [封存回歸](../artifacts/udp-report-current-review-031239/field-tests.log)
+- 管理包核對 589 檔，與既有 Windows／Quest 0.50.12 通過離線發行核對。GitHub Actions 對 `519fcf5` 回報帳務或支出上限，工作未啟動。Quest 端仍只出現檔案傳輸介面，新版回條的現地 UDP 與頭盔驗收待完成。 [Windows 管理包](../artifacts/udp-report-current-review-031239/final/VRCommand-ControlServer-0.31.239.zip) · [發行核對](../artifacts/udp-report-current-review-031239/final/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43997622940)
+
 ## 2026-11-17 無人值守啟動不得跳出防火牆視窗
 
 - 本機管理 API、PowerShell UDP 探測與 Quest 部署強制採用無人值守查核。桌面戰績測試在每次啟動前核對解壓包的遊戲程式與啟動器。拒絕時由終端機保留原因，離線測試可繼續。
