@@ -1189,7 +1189,9 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
             if (sourceRecord || type === 'frame') watchLive();
             if (nextMode === 'live' && type === 'complete') {
               if (!data.complete || lastLiveSequence < 1 || lastLiveSequence !== data.acceptedSequence
-                || liveBoundary?.sourceKey !== streamGeometry || liveBoundary.sequence !== lastLiveSequence)
+                || liveBoundary?.sourceKey !== streamGeometry || liveBoundary.sequence !== lastLiveSequence
+                || frame?.packet.sequence !== lastLiveSequence || frame.packet.frame.phase !== 'Ended'
+                || data.durationMilliseconds !== frame.packet.elapsedMilliseconds)
                 throw new Error('尚未讀到即時觀戰的封存尾端。');
               info = data; connected = false;
               const selected = $('world-recording').selectedOptions[0];
@@ -1220,6 +1222,9 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
                 if (!hasHeader || !Number.isSafeInteger(current) || current < 1 || current < Math.max(lastLiveSequence, initialLiveSequence))
                   throw new Error('即時觀戰的快照序號不符。');
                 if (current === lastLiveSequence) {
+                  // The API uses the same frame representation for exact reads, replay and live observation.
+                  if (JSON.stringify(data) !== JSON.stringify(frame))
+                    throw new Error('同序號的即時快照內容不同。');
                   liveBoundary = { sourceKey: streamGeometry, sequence: current };
                   if (!received) { received = performance.now(); status(); }
                   continue;

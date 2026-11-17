@@ -123,11 +123,14 @@ module.exports = async function venueTimeReplayBrowser({ context, api, tokens, b
     const room2Frame = await api(`/sessions/${ids[1]}/world/frames/4?observerRoomId=2`);
     const foreignHeader = { ...room2Recording, header: { ...room2Recording.header, streamId: randomUUID() } };
     const foreignFrame = { ...room2Frame, statistics: room2Frame.statistics.map(row => ({ ...row, roomId: 1 })) };
+    const changedFrame = { ...room2Frame, packet: { ...room2Frame.packet,
+      weather: room2Frame.packet.weather === 'Storm' ? 'Clear' : 'Storm' } };
     const earlierFrame = await api(`/sessions/${ids[1]}/world/frames/3?observerRoomId=2`);
     for (const [header, snapshot, error, description] of [
       [foreignHeader, room2Frame, '錄製來源不同', 'Manual reconnection cannot substitute a different recording for the displayed room'],
       [room2Recording, earlierFrame, '快照序號不符', 'Manual reconnection cannot regress to an earlier room snapshot'],
-      [room2Recording, foreignFrame, '快照含其他房間的資料', 'Room-scoped SSE checks statistics even when the sequence matches the displayed snapshot']
+      [room2Recording, foreignFrame, '快照含其他房間的資料', 'Room-scoped SSE checks statistics even when the sequence matches the displayed snapshot'],
+      [room2Recording, changedFrame, '同序號的即時快照內容不同', 'A same-room reconnect checks the contents of a repeated frame before treating it as live']
     ]) {
       const body = [['header', header], ['frame', snapshot]]
         .map(([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`).join('');
@@ -173,12 +176,35 @@ module.exports = async function venueTimeReplayBrowser({ context, api, tokens, b
     await page.locator('#world-refresh').click();
     await page.locator('#world-live-rooms').waitFor({ state: 'hidden' });
     check(await picker.inputValue() === ids[1], 'Ending the venue withdraws live room entries without selecting another recording');
+    const prematureSeal = { ...room2Recording, complete: true };
+    const liveEvents = records => records.map(([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`).join('');
+    await page.route(room2Watch, route => route.fulfill({ status: 200, contentType: 'text/event-stream',
+      body: liveEvents([['header', room2Recording], ['frame', room2Frame], ['complete', prematureSeal]]) }), { times: 1 });
+    await page.locator('#world-live').click();
+    await page.locator('#world-message').filter({ hasText: '尚未讀到即時觀戰的封存尾端' }).waitFor();
+    check(await page.locator('#world-canvas').getAttribute('data-sequence') === '4'
+      && (await page.locator('#world-status').innerText()).includes('錄製未封存'),
+    'A matching sequence alone cannot mark a Running live frame sealed');
     const compare = (room, from = ids[0], sequence = 3, batch = original) =>
       `/venue/closure/${batch}/replay-at?${new URLSearchParams({ fromSessionId: from, fromFrame: sequence, roomId: room })}`;
     const byTick = (...args) => compare(...args).replace('/replay-at?', '/replay-at-tick?');
     await api(compare(2), 'GET', undefined, 'Master', 409);
     await api(byTick(2), 'GET', undefined, 'Master', 409);
     for (const seal of seals) await seal();
+    const terminalInfo = await api(`/sessions/${ids[1]}/world?observerRoomId=2`);
+    const terminalFrame = await api(`/sessions/${ids[1]}/world/frames/5?observerRoomId=2`);
+    await page.route(room2Watch, route => route.fulfill({ status: 200, contentType: 'text/event-stream',
+      body: liveEvents([['header', terminalInfo], ['frame', terminalFrame], ['complete',
+        { ...terminalInfo, durationMilliseconds: terminalInfo.durationMilliseconds + 1 }]]) }), { times: 1 });
+    await page.locator('#world-live').click();
+    await page.locator('#world-message').filter({ hasText: '尚未讀到即時觀戰的封存尾端' }).waitFor();
+    await canvasAt(5);
+    check((await page.locator('#world-status').innerText()).includes('錄製未封存'),
+      'The seal requires the exact duration of the displayed Ended frame');
+    await page.locator('#world-live').click();
+    await page.locator('#world-freshness').filter({ hasText: '場次已封存' }).waitFor();
+    await canvasAt(5);
+    check(await page.locator('#world-room').inputValue() === '2', 'The real live seal returns the same Ended frame and keeps the room');
     const match = await api(compare(2));
     const frame = await api(`/sessions/${ids[1]}/world/frames/3`);
     assert.deepEqual(match.frame, frame);
