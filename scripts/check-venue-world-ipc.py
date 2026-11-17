@@ -62,15 +62,18 @@ class Venue:
                     try:
                         with self.response('/health') as response:
                             response.read()
-                        break
                     except OSError:
-                        time.sleep(.1)
+                        pass
+                    else:
+                        log.seek(0)
+                        bindings = [line.split('Now listening on: ', 1)[1] for line in log.read().decode().splitlines()
+                                    if 'Now listening on: ' in line]
+                        if bindings:
+                            assert bindings == ['http://unix:' + str(self.socket_path)], bindings
+                            break
+                    time.sleep(.1)
                 else:
                     raise RuntimeError('Isolated API did not become ready')
-                log.seek(0)
-                bindings = [line.split('Now listening on: ', 1)[1] for line in log.read().decode().splitlines()
-                            if 'Now listening on: ' in line]
-                assert bindings == ['http://unix:' + str(self.socket_path)], bindings
                 self.check_ip_endpoints(child.pid)
                 yield
                 self.check_ip_endpoints(child.pid)

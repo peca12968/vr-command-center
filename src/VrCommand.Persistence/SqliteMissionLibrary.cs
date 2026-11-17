@@ -166,6 +166,19 @@ public sealed class SqliteMissionLibrary : IDisposable
         }
     }
 
+    public VenueMissionPlan VenuePlan(Guid id, OperatorIdentity actor)
+    {
+        AccessPolicy.AuthorMission(actor);
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            using var command = Command("SELECT id,created,body FROM venue_mission_plans WHERE id=$id", null,
+                ("$id", id.ToString("D")));
+            using var row = command.ExecuteReader();
+            return row.Read() ? ReadVenuePlan(row) : throw new KeyNotFoundException("Venue mission plan does not exist.");
+        }
+    }
+
     public VenueMissionPlan SaveVenuePlan(VenueMissionPlanDraft draft, OperatorIdentity actor, Guid id)
     {
         AccessPolicy.AuthorMission(actor);

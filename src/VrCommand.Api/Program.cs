@@ -197,6 +197,11 @@ app.MapGet("/api/venue/mission-plans", (SqliteMissionLibrary store, HttpContext 
     context.Response.Headers.CacheControl = "no-store";
     return store.VenuePlans(Actor(context));
 });
+app.MapGet("/api/venue/mission-plans/{id:guid}", (Guid id, SqliteMissionLibrary store, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    return store.VenuePlan(id, Actor(context));
+});
 app.MapPost("/api/venue/mission-plans", (VenueMissionPlanDraft draft, SqliteMissionLibrary store, HttpContext context) =>
 {
     var actor = Actor(context);

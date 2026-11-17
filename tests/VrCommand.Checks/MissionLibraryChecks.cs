@@ -40,6 +40,8 @@ internal static class MissionLibraryChecks
             check(savedPlan.Plan.Name == "五房測試" && savedPlan.Plan.MissionIds.SequenceEqual(roomPlan.MissionIds),
                 "A named five-room plan retains the original version and position for every room");
             Reject<AccessDeniedException>(() => library.VenuePlans(room), "Room credentials cannot list venue-wide plans");
+            Reject<AccessDeniedException>(() => library.VenuePlan(planRequest, room), "Room credentials cannot read an individual venue plan");
+            Reject<KeyNotFoundException>(() => library.VenuePlan(Guid.NewGuid(), master), "An unknown venue plan is not replaced with another plan");
             Reject<AccessDeniedException>(() => library.SaveVenuePlan(roomPlan, server, Guid.NewGuid()), "Game servers cannot save venue-wide plans");
             Reject<ArgumentException>(() => library.SaveVenuePlan(roomPlan with { Mode = VenueMissionPlanMode.Linked }, master, Guid.NewGuid()),
                 "A linked plan requires a single common saved version");
@@ -92,7 +94,8 @@ internal static class MissionLibraryChecks
             var manager = new SessionManager(events);
             check(library.History(legacy.Id).HeadId == head && library.Heads().Length == 2 && library.Version(head).Number == 7,
                 "Library restart restores revision heads and separate series");
-            check(Json(library.VenuePlans(master).Single()) == Json(savedPlan) && !savedPlan.Plan.MissionIds.Contains(head),
+            check(Json(library.VenuePlans(master).Single()) == Json(savedPlan) && Json(library.VenuePlan(savedPlan.Id, master)) == Json(savedPlan)
+                && !savedPlan.Plan.MissionIds.Contains(head),
                 "Named venue plans keep exact historical version IDs through revisions and persistence restart");
             check(manager.Get(oldSession).Mission.Id == legacy.Id && manager.Get(newSession).Mission.Id == head,
                 "Event-store restart retains each session's embedded immutable mission");

@@ -70,6 +70,28 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
     assert.deepEqual(independent.value, { schemaVersion: 1, mode: 'IndependentSet', rooms: rooms(ids) });
     check((await api('/sessions')).length === 0, 'Both downloaded configuration files contain only version assignments and need no prior session');
 
+    const savedPlan = await api('/venue/mission-plans', 'POST', { name: '原保存配置', mode: 'IndependentSet', missionIds: ids }, 'Master', 200, undefined, randomUUID());
+    const savedPanel = page.locator('#saved-venue-mission-plans');
+    const savedChoice = page.locator('#saved-venue-plan');
+    await mode.selectOption('Linked');
+    await mission.selectOption(a.id);
+    const planList = '**/api/venue/mission-plans';
+    await page.route(planList, route => route.fulfill({ status: 200,
+      json: [{ ...savedPlan, plan: { ...savedPlan.plan, missionIds: [...ids.slice(0, 4), a.id] } }] }));
+    try {
+      await savedPanel.locator('summary').click();
+      await savedChoice.selectOption(savedPlan.id);
+      await page.locator('#load-venue-plan').click();
+      await page.locator('#notice').filter({ hasText: '無法核對原五房配置' }).waitFor();
+      check(await mode.inputValue() === 'Linked' && await mission.inputValue() === a.id,
+        'Substituting a valid version in a saved list row cannot replace the current preparation');
+    } finally { await page.unroute(planList); }
+    await page.locator('#refresh-venue-plans').click();
+    await page.locator('#load-venue-plan').click();
+    await page.locator('#venue-plan-status').filter({ hasText: '已載入「原保存配置」' }).waitFor();
+    check(await mode.inputValue() === 'IndependentSet' && JSON.stringify(await selected()) === JSON.stringify(ids),
+      'Reading the exact original plan restores all five ordered versions');
+
     const head = await api(`/missions/${a.id}/revisions`, 'POST', { ...template, durationSeconds: 690,
       props: [{ assetId: 'sandbag', position: { x: -2, y: 0, z: 1 }, yawDegrees: -30 }],
       environment: { ...template.environment, weather: 'Fog', timeOfDay: 'Day' },

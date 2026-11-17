@@ -563,6 +563,10 @@ function validSavedVenuePlan(row) {
     && plan.missionIds.length === venueMissionRooms.length && plan.missionIds.every(id => typeof id === 'string' && archiveId.test(id))
     && (plan.mode !== 'Linked' || new Set(plan.missionIds).size === 1);
 }
+function matchesVenuePlan(actual, expected) {
+  return actual.name === expected.name && actual.mode === expected.mode
+    && actual.missionIds.every((id, index) => id === expected.missionIds[index]);
+}
 function renderSavedVenuePlans(selectedId = $('saved-venue-plan').value) {
   const select = $('saved-venue-plan');
   select.replaceChildren(new Option('選擇已保存的配置', ''), ...(savedVenuePlans ?? []).map(({ id, createdAtUtc, plan }) => {
@@ -598,12 +602,21 @@ async function loadSavedVenuePlan() {
   const saved = savedVenuePlans?.find(row => row.id === $('saved-venue-plan').value);
   if (!saved || $('load-venue-plan').disabled) return;
   const epoch = state.epoch, view = operationsViewEpoch;
+  const current = () => state.epoch === epoch && operationsViewEpoch === view && master()
+    && $('saved-venue-mission-plans').open && $('saved-venue-plan').value === saved.id;
   await run(async () => {
-    const revisions = await readVenueMissionRevisions(saved.plan.missionIds);
-    if (state.epoch !== epoch || operationsViewEpoch !== view || !master()) return;
-    if (revisions.some(revision => !revision))
-      throw new MissionVersionMismatch('無法核對已保存配置的任務版本，已保留目前準備選擇。');
-    applyVenueMissionRevisions(saved.plan.mode, revisions);
+    if (!current()) return;
+    const original = await api(`/venue/mission-plans/${saved.id}`);
+    if (!current()) return;
+    if (!validSavedVenuePlan(original) || original.id !== saved.id || original.createdAtUtc !== saved.createdAtUtc
+      || !matchesVenuePlan(original.plan, saved.plan))
+      throw new MissionVersionMismatch('無法核對原五房配置。已保留目前準備選擇，請更新清單後再試。');
+    const revisions = await readVenueMissionRevisions(original.plan.missionIds);
+    if (!current()) return;
+    const missing = venueMissionRooms.filter(room => !revisions[room - 1]);
+    if (missing.length)
+      throw new MissionVersionMismatch(`無法核對房間 ${missing.join('、')} 的原任務版本，已保留目前準備選擇。`);
+    applyVenueMissionRevisions(original.plan.mode, revisions);
     $('venue-plan-status').textContent = `已載入「${saved.plan.name}」。請核對場地，再建立準備場次。`;
   }, true);
 }
@@ -2133,9 +2146,7 @@ async function sendPending() {
         : '任務保存已確認，原版本與既有場次保持不變。可選擇此版本開場。'); return;
     }
     if (pending.kind === 'venue-plan-save') {
-      const { name, mode, missionIds } = pending.body;
-      if (!validSavedVenuePlan(response) || response.id !== pending.requestId || response.plan.name !== name
-          || response.plan.mode !== mode || response.plan.missionIds.some((id, index) => id !== missionIds[index]))
+      if (!validSavedVenuePlan(response) || response.id !== pending.requestId || !matchesVenuePlan(response.plan, pending.body))
         throw new MissionVersionMismatch('無法核對五房配置的保存回條。可使用「重試確認結果」確認原配置。');
       savedVenuePlans = [response, ...(savedVenuePlans ?? []).filter(row => row.id !== response.id)];
       renderSavedVenuePlans(response.id);
