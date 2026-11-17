@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 從五房追蹤總覽開啟即時觀戰
+
+- 控制台 0.31.255 的五房追蹤列可直接開啟本房上帝俯視。切換前核對場次、串流及來源，再驗證房間畫格和統計範圍，且畫格須達到總覽已確認的序號。快照過期時隱藏入口。 [五房追蹤操作](PLAYER_READINESS.md#執行中五房追蹤總覽)
+- 正式解壓包通過 14 項瀏覽器檢查。合併與獨立各使用 25 個模擬席位，逐房驗證第 5、2 房的已保存畫格、實際同房 SSE 起始資料及上帝俯視，拒絕較舊序號和錯房玩家。兩種拓撲共封存六份錄製，API 無 TCP 或 UDP 監聽。另通過 125 項 Node 測試。 [合併場](../artifacts/live-tracking-031255/package-linked/checks.json) · [獨立場](../artifacts/live-tracking-031255/package-independent/checks.json) · [程序紀錄](../artifacts/live-tracking-031255/package-runtime.json)
+- `e17ab7d` 管理包核對 595 檔，搭配現有 Windows 玩家、伺服器及 Quest 0.50.12 通過離線發行核對。Windows 仍只辨識 Quest 的檔案傳輸介面。GitHub Actions 因帳務或支出上限未啟動。 [管理包](../artifacts/live-tracking-031255/VRCommand-ControlServer-0.31.255.zip) · [發行核對](../artifacts/live-tracking-031255/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44028225473)
+
 ## 2026-11-17 復核中斷時的 Quest OpenXR 啟動
 
 - 使用 `-RequireOpenXR` 與 `-SaveDeploymentReport` 部署時，報告在送出啟動前保存該席的識別碼及正式連線檔 SHA-256。`-RecoverOpenXRLaunch` 核對原裝置、APK、設定和原 PID 的 OpenXR 日誌，再將該席記入已啟動並接續後面的席位。 [操作方式](QUEST3.md#復核中斷時的-openxr-啟動)
