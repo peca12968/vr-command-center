@@ -482,7 +482,7 @@ static IResult ArchiveWithDigest(HttpContext context, byte[] archive, string fil
     context.Response.Headers["Repr-Digest"] = $"sha-256=:{Convert.ToBase64String(SHA256.HashData(archive))}:";
     return Results.File(archive, "application/zip", filename);
 }
-static IResult VenueTicketArchive(HttpContext context, byte[] archive, string filename)
+static IResult TicketArchive(HttpContext context, byte[] archive, string filename)
 {
     const string requestHeader = "X-VrCommand-Archive-Request";
     var values = context.Request.Headers[requestHeader];
@@ -552,7 +552,7 @@ app.MapPost("/api/sessions/{id:guid}/rooms/{roomId:int}/join-ticket-bundle", (Gu
     var actor = Actor(context);
     var bundle = RoomTicketBundles.Create(manager.Get(id, actor), roomId, request, actor, ticketSigner, worlds);
     context.Response.Headers.CacheControl = "no-store";
-    return Results.File(bundle, "application/zip", FormattableString.Invariant($"room-{roomId:00}-connections.zip"));
+    return TicketArchive(context, bundle, FormattableString.Invariant($"room-{roomId:00}-connections.zip"));
 });
 app.MapPost("/api/sessions/{id:guid}/rooms/{roomId:int}/players/{playerId:guid}/deployment-check", async (Guid id, int roomId, Guid playerId, SessionManager manager, HttpContext context) =>
 {
@@ -611,7 +611,7 @@ app.MapPost("/api/mr-deployment/venue-bundle", async (WorldRecordings worlds, Ht
     var actor = Actor(context);
     if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue exports require the master operator.");
     var request = await MrVenueBundle.Read(context.Request, context.RequestAborted);
-    return VenueTicketArchive(context, MrVenueBundle.Create(request, worlds, actor, ticketSigner), "quest-mr-venue.zip");
+    return TicketArchive(context, MrVenueBundle.Create(request, worlds, actor, ticketSigner), "quest-mr-venue.zip");
 });
 app.MapGet("/api/vr-deployment/venue", (int? playersPerRoom, WorldRecordings worlds, HttpContext context) =>
 {
@@ -624,7 +624,7 @@ app.MapPost("/api/vr-deployment/venue-bundle", async (WorldRecordings worlds, Ht
     var actor = Actor(context);
     if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue exports require the master operator.");
     var request = await VrVenueTickets.ReadRequest(context.Request, context.RequestAborted);
-    return VenueTicketArchive(context, VrVenueTickets.Create(request, worlds, actor, ticketSigner), "vr-venue-connections.zip");
+    return TicketArchive(context, VrVenueTickets.Create(request, worlds, actor, ticketSigner), "vr-venue-connections.zip");
 });
 app.MapPost("/api/vr-deployment/venue-check", async (WorldRecordings worlds, HttpContext context) =>
 {
@@ -645,7 +645,7 @@ app.MapPost("/api/mixed-deployment/venue-bundle", async (WorldRecordings worlds,
     var actor = Actor(context);
     if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue exports require the master operator.");
     var request = await MixedVenueDeployment.ReadBundle(context.Request, context.RequestAborted);
-    return VenueTicketArchive(context, MixedVenueDeployment.Create(request, worlds, actor, ticketSigner), "vr-mr-venue-deployment.zip");
+    return TicketArchive(context, MixedVenueDeployment.Create(request, worlds, actor, ticketSigner), "vr-mr-venue-deployment.zip");
 });
 app.MapPost("/api/mixed-deployment/venue-check", async (WorldRecordings worlds, HttpContext context) =>
 {

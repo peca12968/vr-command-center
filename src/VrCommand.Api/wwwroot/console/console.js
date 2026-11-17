@@ -24,6 +24,7 @@ import { mountClosure } from './closure-ui.js';
 import { placementHistory } from './placement-history.js';
 import { mountPlacementMove } from './placement-move.js';
 import { verifyBlobSha256 } from './file-integrity.js';
+import { matchesIssuedPlayerTicket } from './player-ticket.js';
 const replay = mountReplay();
 const $ = id => document.getElementById(id);
 const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
@@ -148,7 +149,7 @@ function canIssueTicket(session, room) {
 }
 function time(value) { return new Date(value).toLocaleTimeString('zh-TW', { hour12: false }); }
 
-async function readVenueTicketArchive(response, request, signal) {
+async function readTicketArchive(response, request, signal, room) {
   const limit = 256 * 1024;
   try {
     const digest = /^sha-256=:([A-Za-z0-9+/]{43}=):$/.exec(response.headers.get('Repr-Digest') ?? '')?.[1];
@@ -160,6 +161,7 @@ async function readVenueTicketArchive(response, request, signal) {
     await verifyBlobSha256(file, digest, signal);
     return file;
   } catch {
+    if (room) throw Object.assign(new Error('無法核對本房連線檔的原始內容，請重新配票。'), { code: 'room-archive-unverified' });
     throw Object.assign(new Error('無法核對五房連線檔的原始內容，請重新配票。'), { code: 'venue-archive-unverified' });
   }
 }
@@ -169,10 +171,11 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
   const timeout = setTimeout(() => controller.abort(), 8000);
   try {
     const binary = body instanceof Blob;
-    const archiveRequest = responseType === 'venue-ticket-archive' ? uuid() : null;
+    const roomArchive = responseType === 'room-ticket-archive';
+    const archiveRequest = roomArchive || responseType === 'venue-ticket-archive' ? uuid() : null;
     const response = await fetch('/api' + path, { method, headers: { Authorization: 'Bearer ' + state.key, 'Content-Type': binary ? 'application/octet-stream' : 'application/json', ...(requestId ? { 'Idempotency-Key': requestId } : {}), ...(admissionId ? { 'If-Match-Admission': admissionId } : {}), ...(archiveRequest ? { 'X-VrCommand-Archive-Request': archiveRequest } : {}) }, body: binary || body === undefined ? body : JSON.stringify(body), signal: controller.signal, cache: 'no-store' });
     if (epoch !== state.epoch) throw new Error('登入狀態已變更，已忽略舊回應。');
-    const content = archiveRequest && response.ok ? await readVenueTicketArchive(response, archiveRequest, controller.signal)
+    const content = archiveRequest && response.ok ? await readTicketArchive(response, archiveRequest, controller.signal, roomArchive)
       : responseType === 'blob' && response.ok ? await response.blob() : await response.text();
     if (epoch !== state.epoch) throw new Error('登入狀態已變更，已忽略舊回應。');
     if (!response.ok) {
@@ -244,7 +247,8 @@ async function run(action, independentRead = false) {
     if (refreshFailed && epoch === state.epoch && state.actor) notify('已讀取任務；背景列表更新失敗，請稍後重新整理。', true);
   }
   catch (error) {
-    const message = error.status || error instanceof MissionVersionMismatch ? error.message : '連線或操作結果未確認，請重新整理查看。';
+    const message = error.status || error instanceof MissionVersionMismatch || error.code === 'room-archive-unverified'
+      ? error.message : '連線或操作結果未確認，請重新整理查看。';
     notify(message + (state.pending && !error.status ? ' 可使用「重試確認結果」確認原命令。' : ''), true, error.beginReviews);
   }
   finally { state.busy = false; applyPermissions(); }
@@ -2237,6 +2241,7 @@ async function confirmTicketRoster(session, roomId, players, { wholeRoom = false
   if (!applies()) return false;
   const roster = current.players.filter(player => player.roomId === roomId);
   if (current.id !== session.id || current.state === 'Ended' || current.environment.mode !== session.environment.mode
+      || current.combatStream?.streamId !== session.combatStream?.streamId
       || current.roomAlignment?.[`room${roomId}`] !== session.roomAlignment?.[`room${roomId}`]
       || (wholeRoom && roster.length !== players.length)
       || !players.every(player => roster.some(row => row.id === player.id && row.admissionId === player.admissionId && row.seat === player.seat))) {
@@ -2256,6 +2261,10 @@ async function downloadTicket(player) {
   if (!managed && !fallback) return;
   const view = operationsViewEpoch;
   const ticket = await api(`/sessions/${session.id}/players/${player.id}/join-ticket`, 'POST', undefined, undefined, player.admissionId);
+  if (!matchesIssuedPlayerTicket(ticket, session.id, player)) {
+    notify('無法核對本席原入場或票券效期，未下載連線檔。請重新配票。', true);
+    return;
+  }
   const destination = ticket.endpoint ?? fallback;
   if (!validDestination(destination?.address, destination?.port)
       || (managed && (destination.address !== source.endpoint.address || destination.port !== source.endpoint.port)))
@@ -2267,6 +2276,7 @@ async function downloadTicket(player) {
     config.roomAlignmentSha256 = ticket.roomAlignmentSha256;
   }
   if (!await confirmTicketRoster(session, player.roomId, [player], { view })) return;
+  if (Date.parse(ticket.expiresAtUtc) <= Date.now()) { notify('票券已到期，請重新配票。', true); return; }
   download(`quest-player-${player.id}.json`, new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' }));
   notify(`玩家連線檔已產生，有效至 ${time(ticket.expiresAtUtc)}。請將各自檔案配置到對應玩家端。`);
 }
@@ -2283,8 +2293,7 @@ function downloadRoomTickets(roomId) {
   const view = operationsViewEpoch;
   void runSession(async () => {
     const bundle = await api(`/sessions/${session.id}/rooms/${roomId}/join-ticket-bundle`, 'POST',
-      { ...destination, players: admissions }, undefined, undefined, 'blob');
-    if (bundle.type !== 'application/zip') throw new Error('Expected a ZIP download.');
+      { ...destination, players: admissions }, undefined, undefined, 'room-ticket-archive');
     if (!await confirmTicketRoster(session, roomId, players, { wholeRoom: true, view })) return;
     download(`room-${String(roomId).padStart(2, '0')}-connections.zip`, bundle);
     notify(`房間 ${roomId} 的 ${players.length} 份連線檔已產生。請按檔名席位個別交付，票券有效五分鐘。`);

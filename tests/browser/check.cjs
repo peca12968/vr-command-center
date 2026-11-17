@@ -115,6 +115,7 @@ async function main() {
     }
     if (process.argv.includes('--ticket-download-fence-only')) {
       await require('./ticket-download-fence.cjs').checkTicketDownloadFence({ context, api, tokens, base, screenshots, check, captureErrors });
+      await require('./seat-ticket-scope-browser.cjs')({ context, api, tokens, base, check, captureErrors });
       check(browserErrors.length === 0, 'Ticket download fence has no uncaught browser or policy errors');
       await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed', scope: 'Ticket download roster checks with real API and Chromium' }, null, 2));
       console.log(`PASS: ${checks} focused ticket download checks. Screenshots: ${screenshots}`); return;
@@ -625,6 +626,7 @@ async function main() {
     await require('./full-tracking-begin-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     await require('./mission-template-browser.cjs')({ context, api, tokens, directory, root, base, screenshots, check, captureErrors, availablePort, dotnet });
     await require('./ticket-download-fence.cjs').checkTicketDownloadFence({ context, api, tokens, base, screenshots, check, captureErrors });
+    await require('./seat-ticket-scope-browser.cjs')({ context, api, tokens, base, check, captureErrors });
     await require('./saved-layout-identity-browser.cjs')({ context, api, tokens, base, check, captureErrors });
     await require('./venue-mr-alignment-browser.cjs')({ context, api, tokens, base, check, captureErrors });
     await require('./archived-independent-plan-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
