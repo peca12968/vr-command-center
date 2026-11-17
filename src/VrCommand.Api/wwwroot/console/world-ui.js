@@ -48,7 +48,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   let liveRooms = new Map(), roomSwitch;
   let venueReview = null, venueAnchor = null;
   let beginReview = null;
-  let closureReturn = null;
+  let scoresReturn = null;
   const returnToScores = $('world-return-closure-scores');
   const venueBasis = $('world-venue-basis');
   const frameNumber = $('world-frame-number'), frameGo = $('world-frame-go');
@@ -81,13 +81,14 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     scene?.weather.pause(); scene?.draw(); $('world-pause').textContent = '繼續回放';
   }
   function stopList() { listEpoch++; listController?.abort(); listController = null; }
-  function bindClosureReturn(action = null) {
-    closureReturn = action;
-    returnToScores.hidden = !action;
+  function bindScoresReturn(destination = null) {
+    scoresReturn = destination;
+    returnToScores.hidden = !destination;
+    if (destination) returnToScores.textContent = destination.label;
   }
-  returnToScores.addEventListener('click', () => { if (active && getKey()) closureReturn?.(); });
+  returnToScores.addEventListener('click', () => { if (active && getKey()) scoresReturn?.action(); });
   function reset() {
-    bindClosureReturn();
+    bindScoresReturn();
     frameNumber.value = '';
     observerRoom = null;
     liveBoundary = null;
@@ -219,7 +220,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
         }
         picker.value = target.sessionId;
         resetRecording();
-        bindClosureReturn(target.returnToScores);
+        bindScoresReturn(target.returnToScores);
         observerRoom = target.observerRoomId ?? null;
         if (target.venue) {
           const rooms = target.venue.rooms.flatMap(room => {
@@ -371,7 +372,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     $('world-older').disabled = !nextRecordingBefore || !!listController;
   }
   function resetRecording() {
-    bindClosureReturn();
+    bindScoresReturn();
     frameNumber.value = '';
     observerRoom = null;
     liveBoundary = null;
@@ -1131,7 +1132,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     const playerReview = Boolean(target?.playerId), witness = target?.witness;
     const witnessLabel = witnessLabels[witness?.kind];
     const signal = playerReview || witness ? AbortSignal.any([own.signal, AbortSignal.timeout(8000)]) : own.signal;
-    if (nextMode === 'live') { bindClosureReturn(); received = 0; savedLimit = null; savedFinished = false; reviewPlayer = null; clearClip(); }
+    if (nextMode === 'live') { bindScoresReturn(); received = 0; savedLimit = null; savedFinished = false; reviewPlayer = null; clearClip(); }
     const limit = nextMode === 'live' ? null : replayLimit;
     let hasHeader = false, streamGeometry = '', reachedSavedEnd = false, lastSequence = sequence === null ? null : sequence - 1;
     let recentJump = Boolean(target?.sourceKey || returnLiveSource || (clip && sequence < frame?.packet.sequence));
@@ -1318,7 +1319,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
       if (request === epoch && (!own.signal.aborted || idleExpired)) {
         if (playerReview || witness) {
           resetRecording();
-          bindClosureReturn(target.returnToScores);
+          bindScoresReturn(target.returnToScores);
         }
         if (clip) clipPlayback = '';
         connected = connecting = false; status();
@@ -1388,10 +1389,10 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
       if (target) {
         clearRecordingList();
         resetRecording();
-        bindClosureReturn(target.returnToScores);
+        bindScoresReturn(target.returnToScores);
         message('正在尋找原場次錄製…');
       }
       void refresh(target);
-    } else { bindClosureReturn(); returnLiveSource = null; clearClip(); bindVenueReview(null); stop(); stopList(); bindLiveRooms([], []); status(); }
+    } else { bindScoresReturn(); returnLiveSource = null; clearClip(); bindVenueReview(null); stop(); stopList(); bindLiveRooms([], []); status(); }
   } };
 }

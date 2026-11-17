@@ -54,7 +54,7 @@ const roomReadiness = mountRoomReadiness(() => state, logout, applyVenuePermissi
   if (!state.busy && !state.pending) tab('world', target);
 });
 const connections = mountConnections(() => state, logout, updateRoomTicketButtons);
-const closure = mountClosure(() => state, logout, target => tab('world', target), report);
+const closure = mountClosure(() => state, logout, openSessionReview, report);
 const alignment = mountAlignment(api, download);
 const seatDeployments = ['VR', 'MR'].map(mode => mountSeatDeployment(() => state, api, mode));
 const mrVenue = mountMrVenueBundle(() => state, api, download, roomReadiness.ticketDestination);
@@ -1498,9 +1498,40 @@ async function openReviewedVenueClosure(id, targets, stillCurrent) {
   }
 }
 
+function openSessionReview(target) {
+  const epoch = state.epoch, selection = selectionEpoch, roomId = report.roomId();
+  tab('world', target.playerId ? { ...target, returnToScores: { label: '返回任務統計',
+    action: () => returnToSessionScores(target, roomId, epoch, selection) } } : target);
+}
+
+async function returnToSessionScores(target, roomId, epoch, selection) {
+  if (!state.actor || state.epoch !== epoch || state.busy || state.pending) return;
+  tab('operations');
+  const view = operationsViewEpoch;
+  const current = () => state.epoch === epoch && operationsViewEpoch === view && selectionEpoch === selection
+    && state.selected === target.sessionId && report.roomId() === roomId && !state.busy && !state.pending;
+  try {
+    await refresh();
+    if (!current()) return;
+    const { session, statistics } = state, picker = $('player-review-select');
+    if (picker.value && picker.value !== target.playerId) return;
+    if (session?.state !== 'Ended' || session.id !== target.sessionId || session.combatStream?.streamId !== target.streamId
+      || session.combatStream.sealed !== true || session.combatStream.acceptedSequence !== target.throughCombatSequence
+      || statistics?.sessionId !== session.id || statistics.throughSequence !== session.sequence || statistics.pendingTelemetry !== false
+      || picker.disabled || ![...picker.options].some(option => option.value === target.playerId))
+      throw new Error('Original session statistics differ');
+    picker.value = target.playerId;
+    closure.update();
+    picker.focus();
+  } catch {
+    if (current()) notify('無法確認原玩家的任務統計。請重新核對場次。', true);
+  }
+}
+
 function openClosurePlayerReplay(target, origin) {
   const epoch = state.epoch;
-  tab('world', { ...target, returnToScores: () => returnToClosureScores(target, origin, epoch) });
+  tab('world', { ...target, returnToScores: { label: '返回原批次戰績',
+    action: () => returnToClosureScores(target, origin, epoch) } });
 }
 
 async function returnToClosureScores(target, origin, epoch) {
