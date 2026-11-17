@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 在 Windows 玩家視窗更新重連票券
+
+- 啟動器 1.19 在由視窗開啟的遊戲仍執行時提供「更新重連票券」（Alt+T）。比對開局核對的入場與端點後才更新原路徑，並把更新結果與原連線狀態分開顯示。玩家可回原遊戲操作重連。 [操作方式](WINDOWS_PLAYER_PACKAGE.md#更新原入場票券)
+- 正式解壓包通過 61 項離線檢查，含 15 項命令列更新及一組 7 項隱藏 WinForms 檢查。原路徑和更新檔若同時換成他席仍會拒絕，正確更新則保留程序與原狀態。另通過 36 項設定檢視和 46 項狀態回歸。相同包以本機 IPC 重新驗證兩種五房拓撲各 25 席的原入場簽發及戰績連續性，TCP 監聽、UDP 端點及活動場次均為零。 [解壓檢查](../artifacts/player-package-checks/20261117-114211-1eeff2a0/checks.json) · [簽發驗證](../artifacts/windows-ticket-renewal-ui-119/actual-issuer/checks.json)
+- `e529451` 玩家包 84,960,240 位元組，核對 331 檔，SHA-256 `feda42e844aabfb28fe663ca4e5c4a41a60f53fa8d77193c9c318d9af516daf4`。與 0.31.246 管理包及原 Windows／Quest 0.50.12 通過離線發行核對。選檔視窗、遊戲內實際重連、頭盔及跨機仍待驗。GitHub Actions 因帳務或支出上限未啟動。 [玩家包](../artifacts/windows-ticket-renewal-ui-119/VRCommand-Player-0.50.12-launcher-1.19-win-x64.zip) · [發行核對](../artifacts/windows-ticket-renewal-ui-119/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44012139686)
+
 ## 2026-11-17 Windows 原入場票券更新
 
 - 玩家啟動器 1.18 的 `--refresh-player-ticket` 核對新舊連線檔的場次、玩家、入場、房間、席位、端點及效期。確認後以完整檔案替換原路徑並讀回核對。重送同一份可確認已更新。報告只含結果，原遊戲的重連流程會讀取更新後的檔案。 [Windows 操作](WINDOWS_PLAYER_PACKAGE.md#更新原入場票券)
