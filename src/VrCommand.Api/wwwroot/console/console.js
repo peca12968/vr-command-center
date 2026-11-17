@@ -1433,10 +1433,10 @@ async function downloadVenueBeginChecklist() {
   });
 }
 async function venuePhase(action, { environment, enemyPolicy, beginView } = {}) {
-  const currentBegin = () => beginView === operationsViewEpoch && !$('operations-view').hidden
-    && document.visibilityState === 'visible';
-  if (!master() || state.pending || (action === 'Begin' && !currentBegin())) return;
   const epoch = state.epoch;
+  const currentBegin = () => epoch === state.epoch && master() && !state.pending && beginView === operationsViewEpoch
+    && !$('operations-view').hidden && document.visibilityState === 'visible';
+  if (!master() || state.pending || (action === 'Begin' && !currentBegin())) return;
   const allTargets = venueTargets(action);
   const { targets, roomIds } = action === 'SetEnvironment' ? venueClimateScope.selection(allTargets) : { targets: allTargets };
   const policy = action === 'Begin' ? venueBeginPolicy() : 'normal';
@@ -1453,14 +1453,23 @@ async function venuePhase(action, { environment, enemyPolicy, beginView } = {}) 
   if (!confirm(action === 'End' ? message + '\n包含尚未開始的準備場次。結束後無法繼續原場次。' : message)) return;
   if (action === 'Begin') {
     const updated = await roomReadiness.recheck();
-    if (epoch !== state.epoch || !master() || state.pending || !currentBegin()) return;
+    if (!currentBegin()) return;
     if (!updated) {
       notify('無法取得最新開場狀態。請重新整理後再確認。', true);
       return;
     }
     if (policy !== venueBeginPolicy() || playersPerRoom !== venueBeginSize(policy)
       || targets.some(target => !roomReadiness.venueReady(target, action, policy, playersPerRoom))) {
-      notify('開場條件已變更。請核對各房最新狀態後再確認。', true);
+      const rosterNeedsRefresh = targets.some(target => target.roomIds.some(roomId =>
+        roomReadiness.venueBegin(target, roomId, policy, playersPerRoom).state === 'Updating'));
+      if (rosterNeedsRefresh) {
+        try { await refresh(); }
+        catch {
+          if (currentBegin()) notify('開場條件已變更，無法讀取目前名冊。請重新整理後再確認。', true);
+          return;
+        }
+      }
+      if (currentBegin()) notify('開場條件已變更。請核對各房最新狀態後再確認。', true);
       return;
     }
   }
