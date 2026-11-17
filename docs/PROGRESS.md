@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-17 核對 Quest 單席啟動的伺服器位址
+
+- `fa3122e` 的單席 `-RequireOpenXR` 回條新增 `evidenceVersion: 2`，保存原伺服器位址的 SHA-256。ADB 擷取前核對原連線檔，戰後核對原公告與封存端點。模擬測試重現舊工具接受相同 UDP 埠但位址不同的連線檔，新工具在 ADB 前拒絕。舊回條可沿用原檢查。 [Quest 操作](QUEST3.md#收集-quest-場館驗收日誌) · [修正前](../artifacts/quest-launch-endpoint-20261117/prior-receipt.log) · [擷取測試](../artifacts/quest-launch-endpoint-20261117/capture-final.log)
+- 通過 33 項模擬裝置部署及 158 項擷取與戰後驗收測試。Windows 仍只列出 Quest 的檔案傳輸介面，實機測試待做。GitHub Actions 因帳務或支出上限未啟動。 [部署測試](../artifacts/quest-launch-endpoint-20261117/deploy-class.log) · [戰後驗收測試](../artifacts/quest-launch-endpoint-20261117/field-full.log) · [USB 檢查](../artifacts/quest-launch-endpoint-20261117/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44036632490)
+
 ## 2026-11-17 離開任務編輯頁時取消版本載入
 
 - 控制台 0.31.258 在版本回應延遲時仍可前往房間操作。離開編輯頁會取消最新或指定版本的讀取，保留原草稿、擺設與復原紀錄。0.31.257 的實際管理包重現切頁後草稿遭延遲回應覆蓋。 [操作說明](MISSION_VERSIONS.md) · [修正前](../artifacts/mission-draft-load-scope-031258/before/checks.json)
