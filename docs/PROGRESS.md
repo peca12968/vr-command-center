@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-17 依原場次版本重開歷史五房任務
+
+- 控制台 0.31.244 在套用全館收尾批次前，逐一比對原場次保存的任務版本 ID。五房獨立中任一房收到同名新版，或合併場次收到同名新版時，保留原準備選擇和任務草稿。原版仍可預覽條件並建立新場次。 [操作與 API](MISSION_VERSIONS.md#從全館收尾套用五房原版本)
+- 上一版解壓包接受同名替代版本的反例已保存。正式解壓包經本機 IPC 與 Chromium 通過 14 項，包含兩種模式的版本替換、原版重新建立、場地位置和環境。另以 0.31.243 的三筆測試封存批次複本重驗，兩筆完整批次的原版本一致，原始六檔 SHA-256 維持一致。Node 133 項通過，IPC API 的 TCP 監聽及 UDP 端點均為零。 [上一版反例](../artifacts/closure-mission-version-031244/previous-release/browser.log) · [正式包驗證](../artifacts/closure-mission-version-031244/release-browser/checks.json) · [舊封存驗證](../artifacts/closure-mission-version-031244/release-legacy/runtime.json)
+- 空席登記回歸在並行測試時完成 8 項斷言，收尾的 `networkidle` 等待逾時，保留原紀錄。同一正式包依序重跑通過 8 項與收尾檢查。 [並行記錄](../artifacts/venue-vacant-seat-link-031243/release-031244-vacancies/browser.log) · [依序重跑](../artifacts/venue-vacant-seat-link-031243/release-031244-vacancies-serial/checks.json)
+- `92d8974` 正式管理包核對 589 檔，與既有 Windows／Quest 0.50.12 通過離線發行核對。Quest 3 仍無 ADB 偵錯介面，頭盔和跨機待驗。GitHub Actions 因帳務或支出上限未啟動。 [Windows 管理包](../artifacts/closure-mission-version-031244/release/VRCommand-ControlServer-0.31.244.zip) · [發行核對](../artifacts/closure-mission-version-031244/release/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44007302866)
+
 ## 2026-11-17 無人值守防火牆啟動檢查
 
 - 五房預覽前與開場前各查核一次實際啟動器及 `VrCommand.exe`，兩次呼叫都會將無人值守模式傳給套件子程序。套件及 GUI 測試先查核 Python 再探測連接埠，並在管理與遊戲啟動前再次查核。瀏覽器測試同樣在玩家啟動及 Node 的 UDP 測試繫結前查核。 [Windows 測試流程](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
