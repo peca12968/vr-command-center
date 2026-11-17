@@ -5307,6 +5307,63 @@ class FieldResultsTests(unittest.TestCase):
             self.assertFalse(report['networkCapacityAccepted'])
 
     @unittest.skipUnless(HAS_POWERSHELL, 'UDP evidence requires PowerShell')
+    def test_venue_udp_reports_match_sealed_revision_without_the_network_plan(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, closure = venue_fixture(root, mode, with_journals=True, room_sizes=(1,) * 5)
+                manifest['expectedPlayersPerRoom'] = 1
+                groups, revisions = [], []
+                for index, entry in enumerate(manifest['sessions'], 1):
+                    archive = root / entry['evidenceZip']
+                    session, stats, endpoint = field.management_zip(archive)
+                    session['mission']['id'] = id_for(810 + index)
+                    with zipfile.ZipFile(archive, 'w') as bundle:
+                        for name, value in (('session', session), ('statistics', stats), ('endpoint', endpoint)):
+                            bundle.writestr(name + '.json', json.dumps(value))
+                    launcher_path = root / entry['launcherReport']
+                    launcher = json.loads(launcher_path.read_bytes())
+                    launcher['udpBinding']['observedAtUtc'] = '2026-11-08T23:59:59Z'
+                    launcher_path.write_text(json.dumps(launcher), encoding='utf-8')
+                    listener, probe = preflight_fixture(root, f'room-{index}', server=endpoint['address'],
+                                                        peer=entry['players'][0]['address'], port=endpoint['port'])
+                    groups.append({'roomIds': session['roomIds'], 'complete': True,
+                                   'udpSourcePreflights': [{'listener': listener.name, 'probe': probe.name}]})
+                    revisions.append({'roomIds': session['roomIds'], 'sessionId': session['id'],
+                                      'missionId': session['mission']['id'], 'sessionSequence': 5})
+                terminal, _, moved = self.terminal_venue_fixture(root, manifest, closure)
+                packed = self.pack_venue(root, manifest)
+                report = root / 'udp-batch.json'
+                path.write_text(json.dumps(dict(packed, udpPreflightBatch=report.name)), encoding='utf-8')
+                prepare = [sys.executable, str(SCRIPT.with_name('prepare-venue-field-manifest.py')),
+                           '--venue-bundle', str(root / packed['venueBundle']), '--launcher-report', str(terminal),
+                           '--server-work-root', str(moved), '--topology', 'same-host', '--server-ip', manifest['serverIps'][0],
+                           '--players-per-room', '1', '--udp-preflight-batch', str(report)]
+                for scope, digest in (('venue-udp-preflight-only', 'networkPlanSha256'), ('quest-udp-preflight-only', 'planSha256')):
+                    with self.subTest(scope=scope):
+                        batch = {'version': 1, 'scope': scope, 'mode': mode, 'complete': True, 'groups': groups,
+                                 'networkPlanSessions': revisions, digest: 'a' * 64}
+                        report.write_text(json.dumps(batch), encoding='utf-8')
+                        verified = field.verify_venue(path)
+                        self.assertEqual(len(groups), verified['udpSourcePreflightsVerified'])
+                        self.assertEqual(5, verified['serverAcknowledgements'])
+                        output = root / f'{scope}-accepted.json'
+                        result = subprocess.run([*prepare, '--output', str(output)], capture_output=True, timeout=30)
+                        self.assertEqual(0, result.returncode, result.stderr)
+
+                        for key, changed in (('missionId', id_for(990)), ('sessionSequence', 6)):
+                            edited = deepcopy(batch)
+                            edited['networkPlanSessions'][-1][key] = changed
+                            report.write_text(json.dumps(edited), encoding='utf-8')
+                            with self.assertRaisesRegex(field.EvidenceError, 'UDP report launch revision differs from the sealed session'):
+                                field.verify_venue(path)
+                            denied = root / f'{scope}-denied.json'
+                            result = subprocess.run([*prepare, '--output', str(denied)], capture_output=True, timeout=30)
+                            self.assertEqual(1, result.returncode, result.stdout)
+                            self.assertIn(b'UDP report launch revision differs from the sealed session', result.stderr)
+                            self.assertFalse(denied.exists())
+
+    @unittest.skipUnless(HAS_POWERSHELL, 'UDP evidence requires PowerShell')
     def test_venue_rechecks_original_pairs_relative_to_a_quest_batch_report(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

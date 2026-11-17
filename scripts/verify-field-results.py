@@ -2314,10 +2314,11 @@ def read_udp_launch_binding(batch, directory, mode, expected_sessions=None):
     return checked, plan[2]
 
 
-def read_udp_preflight_batch(path, mode, expected_rooms, *, expected_sessions=None, venue_network=None, original_pairs=None):
+def read_udp_preflight_batch(path, mode, expected_rooms, *, expected_sessions=None, venue_network=None, original_pairs=None,
+                             reported_sessions=None):
     batch = read_json(content(path))
     parsed = udp_preflight_batch(batch, path, mode, expected_rooms, expected_sessions=expected_sessions,
-                                 venue_network=venue_network)
+                                 venue_network=venue_network, reported_sessions=reported_sessions)
     if batch['scope'] == 'venue-udp-preflight-only':
         for group in batch['groups']:
             for pair, hashes in zip(group['udpSourcePreflights'], udp_pair_digests(group), strict=True):
@@ -2474,7 +2475,7 @@ def udp_preflight_distinct_roster(report):
     return distinct
 
 
-def udp_preflight_batch(batch, path, mode, expected_rooms, *, expected_sessions=None, venue_network=None):
+def udp_preflight_batch(batch, path, mode, expected_rooms, *, expected_sessions=None, venue_network=None, reported_sessions=None):
     require(integer(batch['version'], 1, 1) and batch.get('scope') in ('quest-udp-preflight-only', 'venue-udp-preflight-only')
             and batch.get('mode') == mode and batch.get('complete') is True,
             'Provide a complete UDP preflight batch for the original mode')
@@ -2494,7 +2495,22 @@ def udp_preflight_batch(batch, path, mode, expected_rooms, *, expected_sessions=
         pairs = group['udpSourcePreflights']
         require(type(pairs) is list and 1 <= len(pairs) <= len(room_ids) * 5, 'Invalid all-source UDP preflight list')
         sources[tuple(room_ids)] = [(pair, path.parent) for pair in pairs]
+    if sessions is not None:
+        require(sessions.keys() == sources.keys(), 'UDP report launch sessions must cover exactly the measured room groups')
+        if reported_sessions is not None:
+            for rooms, stamp in sessions.items():
+                require(reported_sessions.setdefault(rooms, stamp) == stamp, 'UDP reports disagree on the original session revision')
     return sources, launch
+
+
+def check_udp_report_sealed_session(reported_sessions, session, applied_end):
+    original = reported_sessions.get(tuple(session['roomIds']))
+    if original is None:
+        return
+    attached = (session.get('combatStream') or {}).get('expectedSequence')
+    require(original['sessionId'] == session['id'] and original['missionId'] == session['mission'].get('id')
+            and type(attached) is int and original['sessionSequence'] == attached < applied_end,
+            'UDP report launch revision differs from the sealed session for room(s) ' + ', '.join(map(str, session['roomIds'])))
 
 
 def read_quest_capture_report(path, mode):
@@ -3668,7 +3684,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
                                                   start_readiness_path, venue_launcher, venue_results, mode,
                                                   terminal_path=terminal_path)
         venue_launcher.pop('instanceId')
-    batch_pairs, udp_launch_bindings, original_pairs = {}, {}, {}
+    batch_pairs, udp_launch_bindings, original_pairs, udp_report_sessions = {}, {}, {}, {}
     if batch_supplied and not inspect_windows:
         batch_names = [manifest['udpPreflightBatch']] if single_batch else manifest['udpPreflightBatches']
         require(type(batch_names) is list and 1 <= len(batch_names) <= 25, 'Provide 1 to 25 Quest UDP batch reports')
@@ -3677,7 +3693,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
             batch, launch = read_udp_preflight_batch(path, mode, expected_rooms,
                                                      expected_sessions={tuple(row['roomIds']): sid for sid, row in expected.items()},
                                                      venue_network=venue_network,
-                                                     original_pairs=original_pairs)
+                                                     original_pairs=original_pairs, reported_sessions=udp_report_sessions)
             if launch is not None:
                 for group, planned in launch[1].items():
                     require(udp_launch_bindings.setdefault(group, planned) == planned, 'UDP launch plans disagree on the original room binding')
@@ -3841,6 +3857,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
             integer(frame['elapsedMilliseconds'])
             guarded_begin = begin_kind, begin
         binding = (ipv4(endpoint['address']), integer(endpoint['port'], 1024, 65535))
+        check_udp_report_sealed_session(udp_report_sessions, session, row['appliedAtSequence'])
         launch_binding = udp_launch_bindings.get(tuple(row['roomIds']))
         if launch_binding is not None:
             source = session['combatStream']

@@ -158,6 +158,7 @@ def prepare(args, output):
                          if reconnect_path is not None else None)
     entries, venue_seats = [], set()
     quest_sources = {}
+    sealed_udp_sessions = {}
     for session_id, row in sorted(expected.items(), key=lambda entry: entry[1]['roomIds']):
         rooms = row['roomIds']
         stem = 'linked' if mode == 'Linked' else f'room-{rooms[0]:02}'
@@ -183,6 +184,8 @@ def prepare(args, output):
                       f'Original endpoint or server IPv4 inventory differs for {stem}')
         if venue_network is not None:
             field.check_venue_network_session(venue_network, session, endpoint, binding)
+        if args.udp_preflight_batch:
+            sealed_udp_sessions[tuple(rooms)] = session, applied_end
         if alignment_bundle is not None:
             experience = field.verify_experience(session, world['header'])
             alignments = field.venue_session_alignments(
@@ -288,9 +291,12 @@ def prepare(args, output):
         paths = [path.resolve(strict=True) for path in args.udp_preflight_batch]
         field.require(len(paths) == len(set(paths)) <= 25, 'Provide up to 25 distinct original UDP preflight batches')
         sessions = {tuple(row['roomIds']): session_id for session_id, row in expected.items()}
+        udp_report_sessions = {}
         for path in paths:
             field.read_udp_preflight_batch(path, mode, groups, expected_sessions=sessions,
-                                           venue_network=venue_network)
+                                           venue_network=venue_network, reported_sessions=udp_report_sessions)
+        for session, applied_end in sealed_udp_sessions.values():
+            field.check_udp_report_sealed_session(udp_report_sessions, session, applied_end)
         seen_paths.update(paths)
         if len(paths) == 1:
             manifest['udpPreflightBatch'] = ref(paths[0])
