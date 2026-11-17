@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 MR 五房部署包與封存驗收對照
+
+- `prepare-venue-field-manifest.py` 與 `verify-field-results.py` 核對 MR／混合原部署 ZIP 的每房席數、分房連線檔名稱及封存名冊的原席位。準備清單保存整份 ZIP 的 SHA-256，六批收件會指出缺檔或換包的批次。離場稽核可用開場時較多席位的原包，並以原離場資料核對結束名冊。 [操作方式](EXTERNAL_CLIENTS.md#核對-mr-校正封存)
+- 離線讀回管理 API 簽發的九份部署 ZIP，共 120 席，九份皆拒絕錯誤的階段人數。封存回歸 152 項及最終校正專項 6 項通過，涵蓋 5、10、25 席、混合與全 MR、獨立與合併。六批收件另實測錯席、缺檔和改動 ZIP 雜湊。首輪六批夾具缺少自身的同時在線設定，補上原 2,000 毫秒門檻後通過。原 Windows 六批封存重驗逐位元相同，仍有 80 筆戰績確認。 [原部署包讀回](../artifacts/venue-alignment-seat-audit-20261117/signed-archive-readback.json) · [封存回歸](../artifacts/venue-alignment-seat-audit-20261117/field-tests.log) · [專項測試](../artifacts/venue-alignment-seat-audit-20261117/alignment-final.log) · [舊封存重驗](../artifacts/venue-alignment-seat-audit-20261117/archived-stage-regression.json)
+- 改動已推送。GitHub Actions 對 `1b07f68` 回報帳務或支出上限，工作未啟動。Quest USB 仍只有檔案傳輸介面，實體頭盔及跨機驗收待完成。 [USB 狀態](../artifacts/venue-alignment-seat-audit-20261117/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43991645280)
+
 ## 2026-11-17 五房 MR 與混合試場配票
 
 - 管理台 0.31.236 支援全 MR 獨立／合併及 VR／MR 混合獨立五房選每房 1、2 或 5 席。簽發及讀回逐房核對原場次、名冊、端點及 MR 鎖定校正檔。5／10 席包內記錄 `playersPerRoom`，25 席保留原格式。PowerShell 依原包席數核對驗票回條、部署及擷取規劃。 [MR 部署](QUEST3.md#五房-mr-部署預檢) · [混合部署](QUEST3.md#混合-vr-與-mr-五房部署包)
