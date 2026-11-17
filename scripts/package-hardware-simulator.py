@@ -3,10 +3,10 @@ import argparse,hashlib,json,shutil,uuid,zipfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 FILES=['VrCommand.HardwareSimulator.dll','VrCommand.HardwareSimulator.deps.json','VrCommand.HardwareSimulator.runtimeconfig.json','VrCommand.Core.dll','VrCommand.Simulation.dll']
-VERSION='0.2.23'
+VERSION='0.2.24'
 MOCK_FIREWALL_FILES=('windows_firewall.py','check-windows-firewall-notifications.ps1')
 MOCK_IPC_FILE='windows_ipc_api.py'
-LIVE_VERSIONS={*(f'0.2.{minor}' for minor in range(15)), *(f'0.2.{minor}' for minor in range(19, 23)), VERSION}
+LIVE_VERSIONS={*(f'0.2.{minor}' for minor in range(15)), *(f'0.2.{minor}' for minor in range(19, 24)), VERSION}
 README=f'''VR Command 硬體回饋模擬器 {VERSION}
 
 需要 .NET 10 runtime，本機使用10.0.14驗證。這不是Unity玩家程式或廠商SDK。
@@ -37,6 +37,7 @@ dotnet VrCommand.HardwareSimulator.dll --venue-status <包外venue-bindings.json
 dotnet VrCommand.HardwareSimulator.dll --live-venue <包外venue-bindings.json> --output <新的包外資料夾> --stop-file <尚不存在的本機標記檔>
 先核對五房憑證、入場與本機互斥資源。建立標記檔會停止本次所有仍運作的閘道，已取消的批次不計入模擬確認。
 在本次輸出資料夾建立 room-01.stop 到 room-05.stop，可單獨停止指定房間。該房報告終止原因為 operator-room-stop，其他房繼續排演。
+Windows 暫時無法移除舊狀態檔時，閘道保持原連線並重試發布；停止時先寫原報告再限時重試終止狀態。
 五房結果見輸出目錄的 venue-report.json 與各房報告。某房入場失效時，其他房可繼續排演，總結果會列出各房退出碼。
 原綁定清單與整個輸出目錄可搬到另一台電腦後離線核對：
 dotnet VrCommand.HardwareSimulator.dll --verify-venue-report <原venue-bindings.json> --report-directory <原五房輸出目錄>
@@ -79,8 +80,8 @@ def verify(folder):
     if manifest.get('schemaVersion')!=1 or not valid_version:raise ValueError('Unsupported simulator package')
     expected=set(FILES)|{'example.json','README.txt'}
     if mode=='OfflineAndLiveSimulation':expected.add('mock-device.py')
-    if version in {'0.2.20', '0.2.21', '0.2.22', VERSION}:expected.update(MOCK_FIREWALL_FILES)
-    if version==VERSION:expected.add(MOCK_IPC_FILE)
+    if version in {'0.2.20', '0.2.21', '0.2.22', '0.2.23', VERSION}:expected.update(MOCK_FIREWALL_FILES)
+    if version in {'0.2.23', VERSION}:expected.add(MOCK_IPC_FILE)
     if set(manifest['files'])!=expected:raise ValueError('Unexpected simulator package payload')
     actual={p.relative_to(folder).as_posix() for p in folder.rglob('*') if p.is_file()}
     if actual!=set(manifest['files'])|{'hardware-package.json'}:raise ValueError('Missing or additional package file')

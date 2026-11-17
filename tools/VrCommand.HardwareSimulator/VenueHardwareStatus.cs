@@ -18,6 +18,10 @@ internal static partial class LiveHardwareGateway
     private static bool WindowsSharingConflict(IOException error) => OperatingSystem.IsWindows()
         && error.HResult is unchecked((int)0x80070020) or unchecked((int)0x80070021);
 
+    // ERROR_UNABLE_TO_REMOVE_REPLACED leaves both names intact, so the staged update can be retried.
+    private static bool WindowsStatusReplacementConflict(IOException error) => WindowsSharingConflict(error)
+        || OperatingSystem.IsWindows() && error.HResult == unchecked((int)0x80070497);
+
     private sealed class GatewayHeartbeat : IDisposable
     {
         private readonly Configuration config;
@@ -95,7 +99,7 @@ internal static partial class LiveHardwareGateway
                     else File.Move(staging, path);
                     return true;
                 }
-                catch (IOException error) when (WindowsSharingConflict(error))
+                catch (IOException error) when (WindowsStatusReplacementConflict(error))
                 {
                     // Keep the network path moving. The stopped gateway can wait briefly after writing its report.
                     if (!terminal) return false;

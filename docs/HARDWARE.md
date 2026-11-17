@@ -171,12 +171,12 @@ dotnet .\VrCommand.HardwareSimulator.dll --verify-venue-report ..\venue\venue-bi
 
 ## Windows 無人值守的本機排演
 
-開發主機可用 0.2.23 的 AF_UNIX 模式排演。下列檢查會啟動隔離的管理服務、五房模擬閘道與模擬設備，使用既有的短路徑作為工作目錄。三者均使用本機 socket，可在防火牆仍啟用入站通知時執行。
+開發主機可用 0.2.23 起的 AF_UNIX 模式排演。下列檢查會啟動隔離的管理服務、五房模擬閘道與模擬設備，使用既有的短路徑作為工作目錄。三者均使用本機 socket，可在防火牆仍啟用入站通知時執行。搭配管理台 0.31.265 以上加入 `--verify-event-export`，會用主控匯出的原場次事件核對該輪實際產生的交接檔。
 
 ```powershell
 python scripts/check-live-hardware-gateway.py --ipc-work-root C:\VrRehearsal `
   --api-exe '<解壓後的管理包>\Runtime\VrCommand.Api.exe' `
-  --simulator-dll '<解壓後的模擬器>\VrCommand.HardwareSimulator.dll'
+  --simulator-dll '<解壓後的模擬器>\VrCommand.HardwareSimulator.dll' --verify-event-export
 ```
 
 若要自行啟動同機排演，在閘道及模擬設備的程序環境設定 `VR_COMMAND_HARDWARE_IPC_DIRECTORY` 為同一個短的私有絕對目錄。設定檔的管理 URL 為 `http://127.0.0.1:<數字>`，管理服務只繫結到目錄內的 `management-<數字>.sock`。每房用設定中的 `mockPort` 執行 `mock-device.py --port <數字> --room <房號>`，對應 `mock-<數字>.sock`。這些數字用來選 socket 檔和辨識模擬資源。程序依原設定驗證金鑰、名冊和回饋，報告沿用原格式。場館連線按原流程使用 TCP／HTTPS，請在該工作階段移除本機 IPC 環境變數。

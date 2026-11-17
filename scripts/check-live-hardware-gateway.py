@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import hashlib
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import BytesIO
 from itertools import count
 import json
 import os
@@ -21,6 +22,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlencode
 import uuid
 import zipfile
 
@@ -1120,6 +1122,17 @@ def run(args, api_command, api_cwd):
                 assert archive_files==expected
                 assert handoff('--verify-venue-zip',package).stdout==reviewed.stdout
                 check(True,f'{mode} handoff ZIP preserves exactly the original evidence and verifies without extraction')
+                if args.verify_event_export:
+                    handoff_session_ids = list(dict.fromkeys(row['sessionId'] for row in summary['rooms']))
+                    event_route = '/api/venue/hardware-events.zip?' + urlencode({'sessionId': handoff_session_ids}, doseq=True)
+                    event_request = urllib.request.Request(base + event_route, headers={'Authorization': 'Bearer ' + keys['Master']})
+                    try:
+                        with opener.open(event_request, timeout=8):
+                            raise AssertionError('The original fleet is still running')
+                    except urllib.error.HTTPError as unavailable:
+                        assert unavailable.code == 409
+                        unavailable.close()
+                    check(True, f'{mode} source archive is withheld until the original sessions are sealed')
                 if mode=='Independent':
                     copied = runtime/'copied-venue-review'
                     shutil.copytree(fleet_directory,copied)
@@ -1721,6 +1734,43 @@ def run(args, api_command, api_cwd):
                       f'{mode} all five terminal snapshots identify the mock run that ended')
                 save(f'{label}-venue-status-terminal.json', terminal)
                 check(request('/api/sessions')==[], f'{mode} launches all five generated settings and confirms 25 exact mock deliveries before ending')
+                if args.verify_event_export:
+                    with opener.open(event_request, timeout=8) as response:
+                        assert response.headers['Content-Type'] == 'application/zip' and response.headers['Cache-Control'] == 'no-store'
+                        exported = response.read(4 * 1024 * 1024 + 1)
+                    assert len(exported) <= 4 * 1024 * 1024
+                    events_path = out / f'{label}-original-events'
+                    events_path.mkdir()
+                    with zipfile.ZipFile(BytesIO(exported)) as archive:
+                        assert sorted(archive.namelist()) == sorted(session_id + '.json' for session_id in handoff_session_ids)
+                        for session_id in handoff_session_ids:
+                            data = archive.read(session_id + '.json')
+                            events = json.loads(data)
+                            assert events[-1]['kind'] == 'CombatStreamSealed'
+                            assert events == request('/api/sessions/' + session_id + '/events?limit=500')
+                            assert not any(secret in data.decode('utf-8') for secret in private)
+                            (events_path / (session_id + '.json')).write_bytes(data)
+                    verified = handoff('--verify-venue-zip', package, '--events-directory', events_path)
+                    assert verified.returncode == 0 and not verified.stderr, verified.stderr.decode('utf-8', errors='replace')
+                    agree = json.loads(verified.stdout)
+                    signals = sum(row['acknowledged'] + row['cancelled'] + row['mockFailed'] for row in summary['rooms'])
+                    assert agree == {**summary, 'sourceEventsVerified': True, 'sourceSignalsVerified': signals}
+                    check(True, f'{mode} live handoff verifies all {signals} attempts against the exported sealed original events')
+                    save(f'{label}-source-verified.json', agree)
+                    alternate = runtime / f'{label}-altered-events'
+                    shutil.copytree(events_path, alternate)
+                    altered_history = alternate / (handoff_session_ids[0] + '.json')
+                    altered = json.loads(altered_history.read_bytes())
+                    first_signal = json.loads(expected['reports/room-01-report.json'])['attempts'][0]['deliveries'][0]['signal']
+                    row = altered[first_signal['eventSequence'] - 1]
+                    assert row['eventId'] == first_signal['eventId']
+                    row['eventId'] = str(uuid.uuid4())
+                    altered_history.write_text(json.dumps(altered), encoding='utf-8')
+                    refused = handoff('--verify-venue-zip', package, '--events-directory', alternate)
+                    assert refused.returncode == 1 and not refused.stdout and b'InvalidDataException' in refused.stderr
+                    assert handoff('--verify-venue-zip', package, '--events-directory', events_path).stdout == verified.stdout
+                    check(True, f'{mode} rejects an altered event ID while the original handoff and export still verify')
+                    (out / f'{label}-original-events.zip').write_bytes(exported)
             if ipc:
                 check(has_no_ip_endpoints([os.getpid(), *(process.pid for process in processes if process.poll() is None)]),
                       'Owned IPC fixtures and mock processes have zero TCP listeners and UDP endpoints')
@@ -1758,6 +1808,7 @@ if __name__ == '__main__':
     parser.add_argument('--mock-peer-script',type=Path,default=ROOT/'scripts/hardware-mock-peer.py')
     parser.add_argument('--evidence-root',type=Path,default=ROOT/'artifacts/live-hardware-gateway')
     parser.add_argument('--ipc-work-root', type=Path, help='Short existing Windows folder for the AF_UNIX rehearsal')
+    parser.add_argument('--verify-event-export', action='store_true', help='Compare live handoffs with sealed events from management console 0.31.265 or later')
     args = parser.parse_args()
     try:
         if args.ipc_work_root:
