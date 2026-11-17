@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-18 無人值守的 Windows 啟動
+
+- 開發版玩家與 Unity 批次作業以目前權限直接啟動程序。遇到 Windows 需要提高權限的錯誤時，在終端機記錄原因並退出。防火牆查核維持唯讀。 [無人值守的 Windows 測試](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
+- 本機三種網路設定檔均開啟入站通知。兩個真實啟動入口在建立程序前退出，`VrCommand`、`Unity` 程序數前後均為零。本機啟動回歸 13 項通過。 [防火牆查核](../artifacts/windows-unattended-20261118/preflight.json)
+- 以管理服務原封裝透過 Windows AF_UNIX 執行五房合併及獨立模式各 25 席的模擬驗證。重啟後逐幀核對封存回放，TCP 監聽、UDP 端點與殘留場次均為零。 [本機 IPC 驗證](../artifacts/windows-unattended-20261118/five-room-ipc.json)
+
 ## 2026-11-18 配票前原地升級 Quest APK
 
 - `9fd28b9` 在 `-PrepareQuestApks` 新增 `-UpgradeFromReleaseReport`。兩版發行報告須對應同一簽章憑證，目標版號須較新，頭盔舊 APK 須符合原版號與 SHA-256。預檢區分首次安裝、可升級與已符合新版。逐席更新前核對原裝置與應用程式是否仍在執行，更新後讀回 APK 並再次核對裝置。 [配票前升級操作](QUEST3.md#配票前升級已安裝的-quest-apk)

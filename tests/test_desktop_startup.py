@@ -39,6 +39,51 @@ class StartupWitnessTests(unittest.TestCase):
 
 
 class NativeLaunchTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Windows player entry uses Windows process options')
+    def test_windows_player_checks_policy_before_starting_a_child_with_exact_arguments(self):
+        compiler = Path(os.environ['WINDIR']) / 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+        if not compiler.is_file():
+            self.skipTest('Windows .NET Framework compiler is unavailable')
+        powershell = shutil.which('pwsh') or 'powershell.exe'
+        with tempfile.TemporaryDirectory(prefix='player startup 測試 ') as directory:
+            root = Path(directory)
+            image, config, witness = (root / name for name in ('VrCommand.exe', '連線 設定.json', 'child.txt'))
+            config.touch()
+            for name in ('start-windows-vr.ps1', 'windows-process.ps1'):
+                shutil.copyfile(ROOT / 'scripts' / name, root / name)
+            (root / 'check-windows-firewall-notifications.ps1').write_text('''
+param([string]$Executable, [switch]$Unattended)
+if ($Executable -cne $env:FIXTURE_IMAGE -or -not $Unattended -or $env:VR_COMMAND_UNATTENDED -ne '1') { exit 9 }
+exit ([int]$env:FIXTURE_FIREWALL_EXIT)
+''', encoding='utf-8')
+            source = root / 'Fixture.cs'
+            source.write_text('''
+using System;
+using System.IO;
+class Fixture {
+    static int Main(string[] args) {
+        File.WriteAllLines("child.txt", new[] { Environment.GetEnvironmentVariable("VR_COMMAND_UNATTENDED") });
+        File.AppendAllLines("child.txt", args);
+        return 17;
+    }
+}
+''', encoding='utf-8')
+            subprocess.run([str(compiler), '/nologo', '/out:' + str(image), str(source)], check=True,
+                           capture_output=True, timeout=20, creationflags=subprocess.CREATE_NO_WINDOW)
+            metrics = str(root / '量測 資料.json')
+            command = [powershell, '-NoProfile', '-NonInteractive', '-File', str(root / 'start-windows-vr.ps1'),
+                       '-Executable', str(image), '-Config', str(config), '-LinkMetrics', metrics]
+            env = {**os.environ, 'VR_COMMAND_UNATTENDED': '0', 'FIXTURE_IMAGE': str(image)}
+            for policy_exit in (2, 0):
+                result = subprocess.run(command, cwd=root, env={**env, 'FIXTURE_FIREWALL_EXIT': str(policy_exit)},
+                                        capture_output=True, text=True, errors='replace', timeout=15,
+                                        creationflags=subprocess.CREATE_NO_WINDOW)
+                self.assertEqual(2 if policy_exit else 17, result.returncode, result.stderr)
+                if policy_exit:
+                    self.assertFalse(witness.exists())
+            self.assertEqual(['1', '--vr-config', str(config), '--vr-link-metrics', metrics],
+                             witness.read_text(encoding='utf-8').splitlines())
+
     def test_desktop_venue_rejects_python_before_creating_a_port_probe(self):
         refusal = windows_firewall.WindowsFirewallLaunchError('Python firewall preflight refused.')
         with patch.object(windows_firewall, 'require_silent_windows_launch', side_effect=refusal) as guard, \

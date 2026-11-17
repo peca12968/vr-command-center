@@ -440,6 +440,8 @@ python scripts/check-venue-world-ipc.py --api-exe '<解壓管理包>/Runtime/VrC
 
 Windows 玩家啟動器 1.17.2、伺服器啟動器 1.27.1 及更新的管理啟動器也內建同一項唯讀查核。無人值守請從套件啟動器進入，由它先查核實際遊戲或管理程式路徑。伺服器啟動器另外在自己試綁 UDP 埠前查核本身。遇到提示風險時，圖形介面在狀態欄顯示原因，命令列退出並保留拒絕原因，無需有人按「允許」。套件完整性核對可直接執行。Unity 建置在啟動 Editor 前也會查核 Unity Package Manager。
 
+開發版玩家與 Unity 批次建置都以目前權限直接建立程序。Windows 若回報執行檔需要提高權限，腳本會在終端機記錄原因後退出。 [Microsoft ProcessStartInfo](https://learn.microsoft.com/en-us/dotnet/fundamentals/runtime-libraries/system-diagnostics-processstartinfo-useshellexecute)
+
 若任何啟用中的防火牆設定檔會發出入站通知，或查核無法完成，工具會在終端機回報並停止啟動。這項檢查只讀取防火牆設定。可用同一支指令檢查其他執行檔的實際路徑。
 
 ```powershell
