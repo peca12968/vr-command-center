@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 五房擷取拒絕重複頭盔
+
+- `c568512` 在同批開始前以裝置序號比對所有選取席位。舊版接受兩個 ADB 連線指向同一副頭盔，新版在開啟日誌前將涉及席位標為未完成，其他席照常擷取。序號只留在記憶體。 [修正前測試](../artifacts/quest-capture-duplicate-devices-20261117/before.log) · [操作說明](QUEST3.md#一次擷取五房-quest-日誌)
+- 8 項場館流程及 21 項擷取測試通過。兩種模式各以 25 個模擬席位驗證，初次只完成 23 席，修正裝置配置後只補擷取另 2 席，原 23 份日誌和報告的位元組保持一致。 [場館流程](../artifacts/quest-capture-duplicate-devices-20261117/venue-capture.log) · [擷取測試](../artifacts/quest-capture-duplicate-devices-20261117/capture.log) · [兩種模式結果](../artifacts/quest-capture-duplicate-devices-20261117/full-venue.json)
+- 本機仍只列出 Quest 檔案傳輸介面，實機驗收待 USB 偵錯可用。GitHub Actions 因帳務或支出上限未啟動。 [USB 查核](../artifacts/quest-capture-duplicate-devices-20261117/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44046453423)
+
 ## 2026-11-17 無部署回條時也核對擷取中的 Quest 頭盔
 
 - `112d47e` 讓單席及五房擷取在沒有部署指紋時，以開始擷取時的頭盔序號核對後續就緒、定期檢查與日誌發布。序號只在記憶體保留。修正前，同一 ADB 連線位置及 PID 換機仍可通報就緒與交付；修正後會中止並保留 `.partial`。 [Quest 擷取操作](QUEST3.md#收集-quest-場館驗收日誌) · [修正前測試](../artifacts/quest-capture-unbound-20261117/before.log)
