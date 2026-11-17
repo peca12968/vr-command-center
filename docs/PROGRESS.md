@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 從名冊返回全館開場檢查
+
+- 控制台 0.31.262 在準備場次的房間名冊及批次登記表提供「返回全館開場檢查」，保留已選政策、試場席數與草稿。房間名冊捷徑會在讀取完成後核對原準備版本。舊版在讀取期間移除第 5 房第 5 席後，兩種模式仍把焦點移到已變更的名冊。新版提示重新核對，保留更新後的空席。 [操作說明](PLAYER_READINESS.md#五房追蹤驗收開場) · [舊版合併](../artifacts/venue-roster-return-031262/before-retry/linked/checks.json) · [舊版獨立](../artifacts/venue-roster-return-031262/before-retry/independent/checks.json)
+- `352d257` 正式解壓包核對 595 檔。合併與獨立各以 25 個模擬席位驗證，10 項 Chromium、133 項 Node 檢查通過。名冊返回保留每房 2 席的選項，批次登記返回保留未送出的草稿。瀏覽器未送出場次或名冊寫入，管理程序透過本機 IPC 執行，TCP 監聽與 UDP 端點均為零。 [合併](../artifacts/venue-roster-return-031262/final-browser/linked/checks.json) · [獨立](../artifacts/venue-roster-return-031262/final-browser/independent/checks.json) · [程序驗證](../artifacts/venue-roster-return-031262/final-browser/runtime.json)
+- 0.31.262 管理包通過與既有 Windows 遊戲包和 Quest APK 的離線發行核對。實機驗收仍待 Quest USB 偵錯，GitHub Actions 因帳務或支出上限未啟動。 [管理包](../artifacts/venue-roster-return-031262/final-package/VRCommand-ControlServer-0.31.262.zip) · [發行核對](../artifacts/venue-roster-return-031262/final-package/venue-release.json) · [USB 查核](../artifacts/venue-roster-return-031262/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44048584332)
+
 ## 2026-11-17 Quest 補擷取沿用已完成的頭盔指紋
 
 - `eb56dfd` 的補擷取報告沿用同一批先前各輪的成功席位指紋。舊版會讓只選一席的補擷取通過，即使該裝置已為另一席完成擷取。新版在開啟日誌前攔下，只查待補席位。舊版報告仍可讀取，指紋從新版記錄的成功席位開始累計。 [修正前結果](../artifacts/quest-capture-retry-devices-20261117/before.log) · [補擷取操作](QUEST3.md#重試未完成的-quest-擷取席位)
