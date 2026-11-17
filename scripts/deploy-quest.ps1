@@ -28,6 +28,7 @@ param(
     [Parameter(ParameterSetName='Bundle')][switch]$InstallMissing,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$SaveDeploymentReport,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$RetryIncomplete,
+    [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$OriginalVenueBundle,
     [Parameter(ParameterSetName='Bundle')][switch]$VerifyTrackedSeats,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$DeploymentReport,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$DeploymentReportsFile,
@@ -135,7 +136,7 @@ function Test-FloorPoint($Point, [double]$Limit) {
 
 function Test-JsonInteger($Value) { return $Value -is [int] -or $Value -is [long] }
 
-function Read-PlayerConfig($Config, [switch]$Installed) {
+function Read-PlayerConfig($Config, [switch]$Installed, [switch]$AllowExpired) {
     $fields = @('role','address','port','joinTicket','roomAlignmentSha256')
     if ($Installed) { $fields += 'questPassthrough','requestMixedReality','recordQuestLinkMetrics' }
     $unknown = @($Config.PSObject.Properties.Name | Where-Object { $_ -cnotin $fields })
@@ -144,7 +145,7 @@ function Read-PlayerConfig($Config, [switch]$Installed) {
         -not (Test-JsonInteger $Config.port) -or $Config.port -lt 1 -or $Config.port -gt 65535 -or $unknown.Count -gt 0) {
         throw 'Use a player-only connection file from the management console or prepare-vr-session.py.'
     }
-    $ticket = Get-PlayerTicketDetails $Config.joinTicket -AllowExpired:($ReadCapturePlan -or $Installed)
+    $ticket = Get-PlayerTicketDetails $Config.joinTicket -AllowExpired:($AllowExpired -or $Installed)
     if ($null -ne $Config.PSObject.Properties['roomAlignmentSha256']) {
         $hash = $Config.roomAlignmentSha256
         if ($hash -isnot [string] -or $hash -cnotmatch '\A[a-f0-9]{64}\z') { throw 'Use a valid locked MR alignment SHA-256 in the player connection file.' }
@@ -207,7 +208,7 @@ function Read-VenueRoomTickets([string]$Path, [int]$RoomId, [Guid]$SessionId, [i
     } finally { $file.Dispose() }
 }
 
-function Read-VenueTicketStream([IO.Stream]$InputStream, [int]$RoomId, [Guid]$SessionId, [switch]$ForBundle, [int]$PlayersPerRoom = 5) {
+function Read-VenueTicketStream([IO.Stream]$InputStream, [int]$RoomId, [Guid]$SessionId, [switch]$ForBundle, [int]$PlayersPerRoom = 5, [switch]$AllowExpired) {
     try { $archive = [IO.Compression.ZipArchive]::new($InputStream, [IO.Compression.ZipArchiveMode]::Read, $true) }
     catch { throw "Room $RoomId needs a valid room connection ZIP." }
     try {
@@ -224,7 +225,7 @@ function Read-VenueTicketStream([IO.Stream]$InputStream, [int]$RoomId, [Guid]$Se
                 finally { $stream.Dispose() }
             } catch { throw "Room $RoomId seat $seat contains an invalid connection JSON file." }
             $config = $fileContent.Document
-            try { $ticket = Read-PlayerConfig $config }
+            try { $ticket = Read-PlayerConfig $config -AllowExpired:$AllowExpired }
             catch { throw ('Room {0} seat {1}: {2}' -f $RoomId, $seat, $_.Exception.Message) }
             if ($ticket.SessionId -ne $SessionId -or $ticket.RoomId -ne $RoomId -or $ticket.Seat -ne ($seat - 1) -or
                 $ticket.PlayerId -eq [Guid]::Empty -or $ticket.AdmissionId -eq [Guid]::Empty) {
@@ -331,7 +332,7 @@ function Read-VenueJsonEntry($Entry, [string]$Description) {
     } catch { throw "Use a valid $Description JSON in the deployment ZIP." }
 }
 
-function Read-VenueBundle([string]$Path, [int]$SelectedRoom, [int]$SelectedSeat, [switch]$Fingerprint) {
+function Read-VenueBundle([string]$Path, [int]$SelectedRoom, [int]$SelectedSeat, [switch]$Fingerprint, [switch]$AllowExpired) {
     try { $file = [IO.File]::OpenRead((Resolve-Path -LiteralPath $Path).ProviderPath) }
     catch { throw 'Use a readable five-room deployment ZIP from the management console.' }
     try {
@@ -356,14 +357,14 @@ function Read-VenueBundle([string]$Path, [int]$SelectedRoom, [int]$SelectedSeat,
                 $mrCount = @($manifest.rooms | Where-Object mode -CEQ 'MR').Count
                 if ($mrCount -notin 1..4 -or $entries.Count -ne (6 + $mrCount)) { throw 'The mixed ZIP needs five room bundles and exactly one alignment file per MR room.' }
             } elseif ($entries.Count -ne 11) { throw 'The deployment ZIP must contain exactly one manifest and ten room files for MR.' }
-            $venue = Read-Venue $manifest '' $entries $SelectedRoom $SelectedSeat
+            $venue = Read-Venue $manifest '' $entries $SelectedRoom $SelectedSeat -AllowExpired:$AllowExpired
             if ($Fingerprint) { $venue.BundleSha256 = $bundleHash }
             return $venue
         } finally { $archive.Dispose() }
     } finally { $file.Dispose() }
 }
 
-function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$SelectedRoom, [int]$SelectedSeat) {
+function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$SelectedRoom, [int]$SelectedSeat, [switch]$AllowExpired) {
     $isVr = $BundleEntries -and $manifest.mode -ceq 'VR'
     $isMixed = $BundleEntries -and $manifest.mode -ceq 'Mixed'
     $manifestFields = @('version','topology','rooms')
@@ -443,7 +444,7 @@ function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$Selecte
             catch { throw "Room $id connection ZIP has an invalid size or length." }
             finally { $stream.Dispose() }
             $inner = [IO.MemoryStream]::new($bytes, $false)
-            try { $tickets = @(Read-VenueTicketStream $inner $id $session -ForBundle -PlayersPerRoom $playersPerRoom) }
+            try { $tickets = @(Read-VenueTicketStream $inner $id $session -ForBundle -PlayersPerRoom $playersPerRoom -AllowExpired:$AllowExpired) }
             finally { $inner.Dispose() }
         } else {
             $alignment = Read-RoomAlignment (Get-VenueInputPath $directory $room.alignmentFile) $id
@@ -1277,15 +1278,39 @@ function Read-QuestTrackedDeployments($Venue, [object[]]$Map, [string]$Path) {
     return $bindings
 }
 
+function Confirm-QuestReplacementBundle($Original, $Current) {
+    if ($Original.Report.topology -cne $Current.Report.topology -or $Original.Report.mode -cne $Current.Report.mode -or
+        $Original.Connections.Count -ne $Current.Connections.Count) {
+        throw 'Refreshed venue ZIP must use the original topology, room modes and seat count.'
+    }
+    foreach ($room in $Original.Report.rooms) {
+        $replacement = $Current.Report.rooms[$room.roomId - 1]
+        if ($room.mode -cne $replacement.mode -or $room.endpoint -cne $replacement.endpoint -or
+            $room.alignmentSha256 -cne $replacement.alignmentSha256) {
+            throw "Refreshed room $($room.roomId) must use the original mode, endpoint and alignment."
+        }
+    }
+    foreach ($key in $Original.Connections.Keys) {
+        $prior = $Original.Connections[$key].Ticket
+        $next = $Current.Connections[$key].Ticket
+        if (-not $next -or $prior.SessionId -ne $next.SessionId -or $prior.PlayerId -ne $next.PlayerId -or
+            $prior.AdmissionId -ne $next.AdmissionId -or $next.ExpiresAtUtc -lt $prior.ExpiresAtUtc) {
+            throw "Refreshed seat $key must use the original session, player and admission with current tickets."
+        }
+    }
+}
+
 function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, $Release) {
     $original = Read-DeploymentJson $RetryIncomplete 32768 'original deployment report'
     $previous = $original.Document
     $proof = $previous.retry
     $expectedHash = [string]$Release.sha256
+    $priorVenue = if ($OriginalVenueBundle) { Read-VenueBundle $OriginalVenueBundle 0 0 -Fingerprint -AllowExpired } else { $Venue }
     if ($previous.complete -isnot [bool] -or $previous.complete -or $previous.expectedVersionCode -ne $VersionCode -or
-        [string]$previous.expectedApkSha256 -cne $ExpectedHash -or -not (Test-QuestDeploymentMap $Venue $Map $previous)) {
+        [string]$previous.expectedApkSha256 -cne $ExpectedHash -or -not (Test-QuestDeploymentMap $priorVenue $Map $previous)) {
         throw 'Use an incomplete deployment report for this original ZIP, device map and APK requirement.'
     }
+    if ($OriginalVenueBundle) { Confirm-QuestReplacementBundle $priorVenue $Venue }
     $releaseReportHash = Get-QuestDeploymentReleaseHash $previous
     if ($releaseReportHash -and $releaseReportHash -cne $Release.reportSha256) {
         throw 'Retry with the exact original Quest venue release report.'
@@ -1344,8 +1369,10 @@ function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, $R
         }
     }
     if ($completed.Count -eq $Map.Count) { throw 'This deployment report has no seats left to retry.' }
+    $previousVenueSha256 = if ($proof.venueSha256 -cne $Venue.BundleSha256) { $proof.venueSha256 }
+    $proof.venueSha256 = $Venue.BundleSha256
     return @{ Proof = $proof; Completed = $completed.ToArray(); PreviousSha256 = Get-QuestSha256 $original.Bytes
-        ReleaseReportSha256 = $releaseReportHash }
+        PreviousVenueSha256 = $previousVenueSha256; ReleaseReportSha256 = $releaseReportHash }
 }
 
 function Read-MappedQuestPreflight([object[]]$Map, [int]$VersionCode, [string]$ExpectedHash, $Retry, [switch]$AllowMissingApk) {
@@ -1486,6 +1513,7 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
     if ($Retry) {
         $report.retry = $Retry.Proof
         $report.previousDeploymentSha256 = $Retry.PreviousSha256
+        if ($Retry.PreviousVenueSha256) { $report.previousVenueSha256 = $Retry.PreviousVenueSha256 }
         $report.devices = $Retry.Completed + $devices
         if ($AllowPartialMap) {
             $report.mappedSeats = $originalMap.Count
@@ -1921,7 +1949,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Venue') {
 
 if ($PSCmdlet.ParameterSetName -eq 'CapturePlan') {
     if (-not $ReadCapturePlan) { throw 'Specify -ReadCapturePlan for offline log capture planning.' }
-    $venue = Read-VenueBundle $VenueBundle 0 0 -Fingerprint
+    $venue = Read-VenueBundle $VenueBundle 0 0 -Fingerprint -AllowExpired
     $map = @(Read-QuestVenueMap $venue $DeviceMap -Partial:$AllowPartialMap)
     $seats = foreach ($row in $map) {
         $ticket = $venue.Connections["$($row.roomId)/$($row.seat)"].Ticket
@@ -2016,6 +2044,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
     if ($RetryIncomplete -and (-not $DeployMappedSeats -or -not $DeviceMap)) {
         throw 'Use -RetryIncomplete with -DeployMappedSeats and the original -DeviceMap.'
     }
+    if ($OriginalVenueBundle -and -not $RetryIncomplete) { throw 'Use -OriginalVenueBundle with -RetryIncomplete and a refreshed -VenueBundle.' }
     if ($SaveDeploymentReport -and (-not $DeployMappedSeats -or -not $DeviceMap -or $CheckOnly -or $VerifyTrackedSeats)) {
         throw 'Use -SaveDeploymentReport with -DeployMappedSeats and -DeviceMap.'
     }

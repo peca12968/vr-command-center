@@ -5022,11 +5022,20 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertEqual(5, latest['questDeployment']['seatsVerified'])
                 self.assertNotIn('retryReportsLinked', latest['questDeployment'])
 
+                reissued = dict(final, retry=dict(proof, venueSha256='ab'*32), previousVenueSha256=proof['venueSha256'])
+                save_report('final.json', reissued)
+                reports[:] = ['deployment.json', 'second.json', 'final.json']
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                rebound = field.verify_venue(path)['questDeployment']
+                self.assertEqual((3, 2, 5), tuple(rebound[key] for key in ('reportsVerified', 'retryReportsLinked', 'seatsVerified')))
+
                 cases = (
                     ('changed proof', 'changes its original proof', dict(final, retry=dict(proof, mapSha256='78'*32))),
                     ('changed completed seat', 'changes its original proof', dict(final, devices=[dict(rows[0], port=7999), *rows[1:]])),
                     ('different predecessor', 'history is disconnected', dict(final, previousDeploymentSha256='9a'*32)),
                     ('unlinked old cumulative', 'history is disconnected', dict(complete, retry=proof)),
+                    ('wrong predecessor ZIP', 'changes its original proof', dict(reissued, previousVenueSha256='bc'*32)),
+                    ('changed rebound device map', 'changes its original proof', dict(reissued, retry=dict(reissued['retry'], mapSha256='cd'*32))),
                 )
                 reports[:] = ['deployment.json', 'second.json', 'final.json']
                 path.write_text(json.dumps(manifest), encoding='utf-8')

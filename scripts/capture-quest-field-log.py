@@ -274,8 +274,10 @@ def bind_deployment(plan, path, *, completed_only=False, after=None):
         field.require(predecessor == hashlib.sha256(prior_raw).hexdigest(),
                       'Use the exact preceding Quest deployment report')
         prior_devices, prior_launched = field.quest_deployment_rows(prior)
+        prior_proof, _ = field.quest_deployment_retry_proof(prior, len(prior_devices))
         fields = ('phase', 'topology', 'managementVerified', 'apkVerificationVersion', 'expectedVersionCode', 'expectedApkSha256')
-        field.require(prior['complete'] is False and prior.get('retry') == proof and len(prior_devices) == len(seats)
+        field.require(prior['complete'] is False and len(prior_devices) == len(seats)
+                      and field.quest_deployment_proof_matches_parent(proof, prior_proof, report.get('previousVenueSha256'))
                       and prior.get('requireOpenXR', False) is require_openxr
                       and all(type(prior.get(key)) is type(report.get(key)) and prior[key] == report[key] for key in fields)
                       and launched[:len(prior_launched)] == prior_launched,

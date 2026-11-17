@@ -2736,7 +2736,8 @@ def quest_deployment_retry_proof(report, count):
 
     proof, previous = report.get('retry'), report.get('previousDeploymentSha256')
     if 'retry' not in report:
-        require('previousDeploymentSha256' not in report, 'Quest deployment predecessor lacks original retry proof')
+        require('previousDeploymentSha256' not in report and 'previousVenueSha256' not in report,
+                'Quest deployment predecessor lacks original retry proof')
         return None, None
     fields = {'version', 'venueSha256', 'mapSha256', 'salt', 'devices'}
     require(type(proof) is dict and fields <= proof.keys() <= fields | {'venueDevices'}
@@ -2752,7 +2753,17 @@ def quest_deployment_retry_proof(report, count):
                 and len(stamped['devices']) == count and all(hex_field(device, 64) for device in stamped['devices'])
                 and len(set(stamped['devices'])) == count, 'Invalid Quest venue device proof')
     require('previousDeploymentSha256' not in report or hex_field(previous, 64), 'Invalid Quest deployment predecessor digest')
+    if 'previousVenueSha256' in report:
+        prior_venue = report['previousVenueSha256']
+        require(hex_field(previous, 64) and hex_field(prior_venue, 64) and prior_venue != proof['venueSha256'],
+                'Invalid Quest deployment predecessor venue ZIP digest')
     return proof, previous
+
+
+def quest_deployment_proof_matches_parent(proof, parent_proof, previous_venue):
+    if previous_venue is None:
+        return proof == parent_proof
+    return parent_proof is not None and parent_proof == {**proof, 'venueSha256': previous_venue}
 
 
 def quest_deployment_rows(report):
@@ -2776,7 +2787,8 @@ def quest_deployment_leaves(attempts):
         has_successor.add(parent_digest)
         if parent_digest in attempts:
             parent = attempts[parent_digest]
-            require(not parent['complete'] and parent['proof'] == attempt['proof'] and parent['seats'] == attempt['seats']
+            require(not parent['complete'] and parent['seats'] == attempt['seats']
+                    and quest_deployment_proof_matches_parent(attempt['proof'], parent['proof'], attempt.get('previous_venue'))
                     and parent['require_openxr'] == attempt['require_openxr']
                     and parent['release_hash'] == attempt['release_hash']
                     and attempt['launched'][:len(parent['launched'])] == parent['launched'],
@@ -2974,7 +2986,7 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, expected_
                 openxr[room, seat] = proof_row
         attempts[report_hash] = dict(proof=proof, previous=previous, complete=report['complete'], seats=tuple(seats),
                                      launched=launched, confirmed=confirmed, openxr=openxr, require_openxr=require_openxr,
-                                     release_hash=deployment_release)
+                                     release_hash=deployment_release, previous_venue=report.get('previousVenueSha256'))
 
     matched_maps = set()
     for deployment_digest, seats, partial in capture_reports:

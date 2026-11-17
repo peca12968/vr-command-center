@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-17 重新配票後接續 Quest 部署
+
+- `-OriginalVenueBundle` 與 `-RetryIncomplete` 可把新配發的五房 ZIP 接回原部署。工具比較原 ZIP 雜湊、拓撲、端點、房間校正和每席原入場，驗證新票券後只寫入未啟動席位。累計報告保留前一份部署報告與 ZIP 的雜湊，供增量擷取和戰後驗收使用。 [重新配票操作](QUEST3.md#重新配票後接續原部署)
+- 12 項部署與 33 項 Quest 戰後驗收測試通過。三席模擬先完成第 1 席，等原測試票券過期後再用新 ZIP，只啟動第 2、3 席。第 5 房原入場被替換時，在讀取 ADB 前拒絕。擷取計畫從原報告選出第 1 席，從新報告選出第 2、3 席。合併及獨立驗收皆核對兩版 ZIP 的累計報告，並拒絕錯誤的前一版 ZIP 雜湊。Windows 仍只辨識 Quest 檔案傳輸介面。 [部署測試](../artifacts/quest-deployment-ticket-renewal/deployment-tests.log) · [戰後驗收測試](../artifacts/quest-deployment-ticket-renewal/field-results-tests.log)
+
 ## 2026-11-17 在部署途中保存 Quest 逐席報告
 
 - `-SaveDeploymentReport` 在第一席寫入前保存整批，逐席記錄待確認的 Android 啟動及已確認席位。報告以同目錄暫存檔發布。正常完成沿用原完整部署格式，重試輸出使用新檔名及前次報告 SHA-256。 [部署重試](QUEST3.md#從原部署報告重試未完成席位)

@@ -2897,6 +2897,85 @@ else:
             readback = json.loads((fleet / row['serial'] / 'vr-connection.json').read_bytes())
             self.assertEqual(configs[room][f'room-{room:02}-seat-{seat:02}.json'], readback)
 
+    def test_retry_mapped_quest_deployment_after_original_tickets_expire(self):
+        mapping, document = self.device_map()
+        document['seats'] = [row for row in document['seats'] if row['serial'] in ('fixture-01', 'fixture-02', 'fixture-03')]
+        mapping.write_text(json.dumps(document), encoding='utf-8')
+        release, _, release_env = self.release_report()
+        command = ['pwsh', '-NoProfile', '-NonInteractive', '-File', str(ROOT / 'tests/fixtures/mock-quest-management.ps1'),
+                   str(ROOT / 'scripts/deploy-quest.ps1'), '-DeviceMap', str(mapping), '-AllowPartialMap', '-ReleaseReport', str(release),
+                   '-AdbPath', str(ROOT / 'tests/fixtures/mock-quest-fleet.ps1'),
+                   '-DeployMappedSeats', '-ManagementApi', 'http://127.0.0.1:1']
+
+        def run(bundle, *options, faults=None):
+            return subprocess.run([*command, '-VenueBundle', str(bundle), *options], capture_output=True, encoding='utf-8', timeout=30,
+                env={**os.environ, **release_env, 'VR_COMMAND_MASTER_KEY': 'fixture-master', 'VR_QUEST_FLEET_FIXTURE': str(self.root),
+                     'VR_QUEST_FLEET_FRESH': '', 'VR_QUEST_TEST_SOURCE_STALE': '', 'VR_QUEST_FLEET_FAULTS': json.dumps(faults or {})})
+
+        self.expiry = int(time.time()) + 18
+        old_files, old_configs = self.vr_bundle('Independent')
+        original = self.write_bundle(old_files, 'original.zip')
+        first_report = self.root / 'interrupted-deployment.json'
+        initial = run(original, '-SaveDeploymentReport', str(first_report), faults={'fixture-02': 'config-stage-changed'})
+        self.assertEqual(1, initial.returncode, initial.stderr)
+        previous_bytes = first_report.read_bytes()
+        previous = json.loads(previous_bytes)
+        self.assertEqual(['launch-requested', 'file-verification-failed', 'not-attempted'], [row['status'] for row in previous['devices']])
+        transport_log = self.root / 'transport.log'
+        before = transport_log.read_bytes()
+        original_first_config = self.root / 'fixture-01/vr-connection.json'
+        self.assertEqual(old_configs[1]['room-01-seat-01.json'], json.loads(original_first_config.read_bytes()))
+
+        time.sleep(max(0, self.expiry + .1 - time.time()))
+        retry = ('-RetryIncomplete', str(first_report))
+        self.assert_rejected(run(original, *retry), 'Player ticket has expired')
+        self.expiry = int(time.time()) + 240
+        new_files, new_configs = self.vr_bundle('Independent')
+        fresh = self.write_bundle(new_files, 'fresh.zip')
+        self.assert_rejected(run(fresh, *retry), 'original ZIP, device map and APK requirement')
+
+        original_admission = self.admissions[-1]
+        self.admissions[-1] = uuid.uuid4()
+        altered_files, _ = self.vr_bundle('Independent')
+        altered = self.write_bundle(altered_files, 'changed-admission.zip')
+        self.admissions[-1] = original_admission
+        replace = (*retry, '-OriginalVenueBundle', str(original))
+        self.assert_rejected(run(altered, *replace), 'Refreshed seat 5/5 must use the original session, player and admission')
+        self.assertEqual(before, transport_log.read_bytes())
+
+        final_report = self.root / 'resumed-deployment.json'
+        resumed = run(fresh, *replace, '-SaveDeploymentReport', str(final_report))
+        self.assertEqual(0, resumed.returncode, resumed.stderr)
+        final = json.loads(final_report.read_bytes())
+        self.assertTrue(final['complete'])
+        self.assertEqual(previous_bytes, first_report.read_bytes())
+        previous_hash = previous['retry']['venueSha256']
+        self.assertEqual(hashlib.sha256(original.read_bytes()).hexdigest(), previous_hash)
+        self.assertEqual(previous_hash, final['previousVenueSha256'])
+        self.assertEqual(hashlib.sha256(previous_bytes).hexdigest(), final['previousDeploymentSha256'])
+        self.assertEqual(dict(previous['retry'], venueSha256=hashlib.sha256(fresh.read_bytes()).hexdigest()), final['retry'])
+        self.assertEqual(previous['devices'][0], final['devices'][0])
+        self.assertEqual(old_configs[1]['room-01-seat-01.json'], json.loads(original_first_config.read_bytes()))
+        for index in (2, 3):
+            active = self.root / f'fixture-{index:02}/vr-connection.json'
+            self.assertEqual(new_configs[1][f'room-01-seat-{index:02}.json'], json.loads(active.read_bytes()))
+        calls = transport_log.read_bytes()[len(before):].decode().splitlines()
+        self.assertNotIn('-t 101', '\n'.join(calls))
+        self.assertEqual(['102', '103'], [line.split()[1] for line in calls if ' shell am start ' in line])
+
+        spec = importlib.util.spec_from_file_location('quest_capture', ROOT / 'scripts/capture-quest-field-log.py')
+        capture = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(capture)
+        original_bound = capture.bind_deployment(capture.venue_plan(original, mapping, True), first_report, completed_only=True)
+        self.assertEqual([1], [row['seat'] for row in original_bound['seats']])
+        fresh_plan = capture.venue_plan(fresh, mapping, True)
+        incremental = capture.bind_deployment(fresh_plan, final_report, after=first_report)
+        self.assertEqual([2, 3], [row['seat'] for row in incremental['seats']])
+        broken_report = self.root / 'broken-lineage.json'
+        broken_report.write_text(json.dumps(dict(final, previousVenueSha256='e' * 64)), encoding='utf-8')
+        with self.assertRaisesRegex(capture.field.EvidenceError, 'changes its original proof'):
+            capture.bind_deployment(fresh_plan, broken_report, after=first_report)
+
     def test_save_mapped_quest_deployment_report_recovers_after_process_exit(self):
         files, _ = self.vr_bundle('Independent')
         bundle = self.write_bundle(files)
