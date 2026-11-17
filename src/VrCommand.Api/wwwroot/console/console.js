@@ -101,7 +101,7 @@ let timer;
 let selectionEpoch = 0, venueClosureEpoch = 0, operationsViewEpoch = 0;
 let venueSettingReview = 0;
 let archivedPlan = null;
-let confirmedVenueEnd = null;
+let confirmedVenueBegin = null, confirmedVenueEnd = null;
 let departureReview = null;
 let roomEnemyDraft = null, roomEnemyPolicySequences = null;
 
@@ -300,6 +300,8 @@ function logout() {
   $('roster-room').value = '';
   delete $('roster-room').dataset.preferred;
   renderVenueBegin([], false);
+  confirmedVenueBegin = null;
+  renderConfirmedVenueBegin(true);
   confirmedVenueEnd = null;
   venueHistory.reset(); renderVenueClosure(null);
   state.props = []; state.prop = -1; clearPropHistory(); propMove.reset();
@@ -1341,6 +1343,35 @@ function renderVenueBegin(targets, waiting, policy, playersPerRoom) {
     return tr;
   })));
 }
+function renderConfirmedVenueBegin(locked) {
+  const panel = $('venue-begin-observe'), list = $('venue-begin-observe-rooms');
+  const begin = master() ? confirmedVenueBegin : null;
+  panel.hidden = !begin;
+  const rows = begin?.sessions.flatMap(original => original.roomIds.map(roomId => {
+    const room = state.rooms.find(row => row.id === roomId);
+    const target = roomReadiness.begunRoomObservation(original, roomId);
+    const status = target ? '遊戲端已套用開場' : room && room.sessionId !== original.sessionId ? '原場次已離開此房'
+      : state.sessions.find(session => session.id === original.sessionId)?.state === 'Paused' ? '原場次已暫停' : '等待原遊戲畫面';
+    return { roomId, original, status, available: !!target };
+  })).sort((a, b) => a.roomId - b.roomId) ?? [];
+  const signature = JSON.stringify([begin?.requestId, locked, rows]);
+  if (list.dataset.rows === signature) return;
+  list.dataset.rows = signature;
+  list.replaceChildren(...rows.map(({ roomId, original, status, available }) => {
+    const item = element('li', `房間 ${roomId} · ${status}`);
+    const watch = element('button', '即時觀戰', 'quiet small');
+    watch.type = 'button';
+    watch.disabled = locked || !available;
+    watch.setAttribute('aria-label', `觀戰本次開場房間 ${roomId}`);
+    watch.addEventListener('click', () => {
+      if (!master() || begin !== confirmedVenueBegin || $('operations-view').hidden || state.busy || state.pending) return;
+      const target = roomReadiness.begunRoomObservation(original, roomId);
+      if (target) tab('world', target);
+    });
+    item.append(' ', watch);
+    return item;
+  }));
+}
 function applyVenuePermissions() {
   updateRoomTicketButtons();
   $('venue-phase').hidden = !master();
@@ -1391,6 +1422,7 @@ function applyVenuePermissions() {
   $('venue-end-targets').hidden = !end.length;
   $('venue-end-targets').textContent = end.length ? `可結束 ${describe(end)} · 包含準備、執行與暫停的場次。` : '';
   renderVenueBegin(begin, starting, policy, playersPerRoom);
+  renderConfirmedVenueBegin(locked);
   $('venue-phase-targets').textContent = state.venue ? `可暫停 ${describe(pause)} · 可繼續 ${describe(resume)}` : '等待房間狀態。';
   const evidence = $('venue-phase-evidence');
   evidence.hidden = !resume.length;
@@ -1449,6 +1481,8 @@ async function venuePhase(action, { environment, enemyPolicy, beginView } = {}) 
   const playersPerRoom = venueBeginSize(policy);
   if (!targets.length || (policy !== 'normal' && targets.flatMap(target => target.roomIds).length !== 5)
     || (['Begin', 'Resume'].includes(action) && targets.some(target => !roomReadiness.venueReady(target, action, policy, playersPerRoom)))) return;
+  const beginRooms = action === 'Begin' ? new Map(targets.map(target => [target.sessionId, { roomIds: target.roomIds,
+    streamId: state.sessions.find(session => session.id === target.sessionId && session.sequence === target.sessionSequence)?.combatStream?.streamId ?? null }])) : null;
   const verb = { Begin: '開始', Pause: '暫停', Resume: '繼續', End: '結束', SetEnvironment: '設定環境給', SetEnemies: '設定敵軍策略給' }[action];
   const details = environment ? venueClimateText(environment) : enemyPolicy ? venueEnemyText(enemyPolicy) : '';
   const overridden = enemyPolicy ? venueEnemyOverrides(targets) : '';
@@ -1480,6 +1514,7 @@ async function venuePhase(action, { environment, enemyPolicy, beginView } = {}) 
     }
   }
   state.pending = { kind: 'venue-phase', path: '/venue/phase', method: 'POST', requestId: uuid(),
+    ...(beginRooms ? { beginRooms } : {}),
     ...(action === 'End' ? { endRooms: new Map(targets.map(target => [target.sessionId, target.roomIds])) } : {}),
     body: { action, targets: targets.map(({ sessionId, phaseSinceSequence, sessionSequence, environmentSinceSequence, enemiesSinceSequence,
       roomEnemiesSinceSequence }) => ({ sessionId, phaseSinceSequence, sessionSequence, environmentSinceSequence, enemiesSinceSequence,
@@ -2303,6 +2338,9 @@ async function sendPending() {
     state.pending = null;
     if (pending.kind === 'create') { $('include-ended').checked = response.state === 'Ended'; resetSelection(response.id); }
     if (pending.kind === 'command' && pending.body.action === 'End' && response.session.state === 'Ended') $('include-ended').checked = true;
+    const venueBegun = pending.kind === 'venue-phase' && pending.body.action === 'Begin';
+    if (venueBegun) confirmedVenueBegin = { requestId: pending.requestId, sessions: response.sessions.map(({ sessionId, appliedAtSequence }) =>
+      ({ sessionId, appliedAtSequence, ...pending.beginRooms.get(sessionId) })) };
     const venueEnded = pending.kind === 'venue-phase' && pending.body.action === 'End';
     if (venueEnded) {
       $('include-ended').checked = true;
@@ -2312,8 +2350,9 @@ async function sendPending() {
     if (pending.kind === 'join') $('player-name').value = '';
     try { await refresh(); }
     catch (error) {
-      if (!venueEnded || state.epoch !== epoch) throw error;
-      notify('全館結束已記錄。場次清單暫未更新，可查看本次結束批次。', true);
+      if ((!venueEnded && !venueBegun) || state.epoch !== epoch) throw error;
+      notify(venueEnded ? '全館結束已記錄。場次清單暫未更新，可查看本次結束批次。'
+        : '全館管理命令已確認。場次清單暫未更新，本次開場觀戰會等待核對原場次。', true);
       return;
     }
     if (pending.kind === 'participation-pause') {

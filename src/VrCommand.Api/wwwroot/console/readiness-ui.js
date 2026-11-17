@@ -420,6 +420,15 @@ function venueTrackingObservation(view, room, session) {
       returnToTracking: true } : null;
 }
 
+export function venueBeginObservation(report, room, session, elapsed, original) {
+  if (!original.streamId || session?.id !== original.sessionId || session.combatStream?.streamId !== original.streamId) return null;
+  const phase = roomVenuePhaseView(report, room, session, elapsed);
+  if (phase?.action !== 'Begin' || !phase.applied || phase.sequence !== original.appliedAtSequence) return null;
+  const view = venueTrackingRow(report, room, session, elapsed);
+  const row = roomReadinessRow(report, room, session);
+  return view.worldSequence >= row.venuePhase.worldSequence ? venueTrackingObservation(view, room, session) : null;
+}
+
 export function mountRoomReadiness(getState, unauthorized, venueUpdated, describeClimate, describeEnemies, openObservation) {
   let active = false, controller, report, started = 0, attempted = -Infinity, failed = false;
   const trackingClock = new Intl.DateTimeFormat('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
@@ -563,6 +572,13 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     const elapsed = performance.now() - started;
     const venue = roomVenuePhaseView(report, room, session, elapsed);
     return venue?.action === 'Pause' && venue.sequence === target.phaseSinceSequence ? venue : waiting;
+  }
+  function begunRoomObservation(original, roomId) {
+    const { rooms, sessions, actor } = getState();
+    if (!active || failed || actor?.role !== 'Master' || document.visibilityState !== 'visible') return null;
+    const room = rooms.find(row => row.id === roomId && row.sessionId === original.sessionId);
+    if (!room) return null;
+    return venueBeginObservation(report, room, sessions.find(row => row.id === room.sessionId), performance.now() - started, original);
   }
   function renderVenueTracking(rooms, sessions, actor, elapsed) {
     const panel = document.getElementById('venue-live-tracking');
@@ -738,7 +754,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') update(); else reset(); });
   setInterval(update, 250);
-  return { update, recheck, venueReady, venueBegin, reviewedBegin, venueResume, settingFrame, settingStatus, trackingPause, vrResume, poseFrame, ticketSourceLive, ticketDestination,
+  return { update, recheck, venueReady, venueBegin, reviewedBegin, venueResume, begunRoomObservation, settingFrame, settingStatus, trackingPause, vrResume, poseFrame, ticketSourceLive, ticketDestination,
     active(value) { active = value; if (value) update(); else reset(); } };
 }
 

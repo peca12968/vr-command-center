@@ -7,7 +7,7 @@ const connection = await readFile(new URL('../../src/VrCommand.Api/wwwroot/conso
 const reportCsv = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/report-csv.js', import.meta.url), 'utf8');
 const dataModule = source => 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
 const { readinessView, roomReadinessView, roomEndpointText, roomTicketDestination, roomTicketSourceLive, mrReadinessView, roomMissionTimeView, roomVenuePhaseView,
-  roomMrTrackingPauseTarget, roomMrPauseView, venueTrackingRow, roomPoseFrameTarget, venueBeginRejection, encodeVenueBeginCsv } =
+  roomMrTrackingPauseTarget, roomMrPauseView, venueTrackingRow, venueBeginObservation, roomPoseFrameTarget, venueBeginRejection, encodeVenueBeginCsv } =
   await import(dataModule(code.replace('./mission-clock.js', dataModule(missionClock)).replace('./connection-ui.js', dataModule(connection))
     .replace('./report-csv.js', dataModule(reportCsv))));
 const player = { id: 'player', admissionId: 'first', roomId: 1, seat: 0 };
@@ -135,6 +135,24 @@ test('Live venue tracking counts only exact current seats and clears stale or ma
   for (const invalid of [{ eliminatedSeats: [2] }, { eliminatedSeats: [4] }, { trackedSeats: [], waitingSeats: [1] }])
     assert.equal(venueTrackingRow(live({ venueTracking: { ...venueTracking, ...invalid } }), room, current, 0).state, 'Unavailable');
   assert.equal(venueTrackingRow(live(), room, { ...current, state: 'Paused' }, 0).tracked, undefined);
+});
+test('Watching an accepted Begin requires the original running room, source and applied revision', () => {
+  const current = { ...session, state: 'Running', combatStream: { streamId: 'stream', origin: 'GameServer' },
+    players: [0, 1, 2].map(seat => ({ ...player, seat })) };
+  const original = { sessionId: 'session', streamId: 'stream', appliedAtSequence: 10 };
+  const venuePhase = { action: 'Begin', appliedAtSequence: 10, worldSequence: 8, readyToResume: false };
+  const view = change => ({ ...overview, trackingSampledAtUtc: '2026-11-10T01:00:00.1234567+00:00', rooms: [{ ...roomRow,
+    venueTracking: { trackedSeats: [1], simulatedSeats: [2], waitingSeats: [], eliminatedSeats: [3] },
+    venuePhase, trackingWorldSequence: 8, ...change }] });
+  assert.deepEqual(venueBeginObservation(view(), room, current, 1490, original),
+    { mode: 'live', roomId: 1, sessionId: 'session', streamId: 'stream', origin: 'GameServer', minimumSequence: 8, returnToTracking: true });
+  for (const change of [{ venuePhase: { ...venuePhase, worldSequence: null } }, { trackingWorldSequence: 7 },
+    { venuePhase: { ...venuePhase, action: 'Resume' } }, { venuePhase: { ...venuePhase, appliedAtSequence: 9 } }])
+    assert.equal(venueBeginObservation(view(change), room, current, 0, original), null);
+  assert.equal(venueBeginObservation(view(), room, current, 1491, original), null);
+  assert.equal(venueBeginObservation(view(), { ...room, sessionId: 'replacement' }, current, 0, original), null);
+  assert.equal(venueBeginObservation(view(), room, { ...current, state: 'Paused' }, 0, original), null);
+  assert.equal(venueBeginObservation(view(), room, { ...current, combatStream: { streamId: 'other' } }, 0, original), null);
 });
 test('Quick MR pause requires a fresh loss in the original room and the correct operator scope', () => {
   const mr = { ...session, mode: 'Independent', state: 'Running', roomIds: [1], environment: { mode: 'MR' },
