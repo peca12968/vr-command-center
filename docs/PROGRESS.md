@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 單場核對 Quest OpenXR 啟動回條
+
+- 單席 `-RequireOpenXR` 回條保存原場次、席位、入場及公告埠。單場驗收接受原回條與同一份發行報告，逐席比對封存名冊、原 PID 及日誌中早於最終戰績的 OpenXR 啟動標記。 [驗收操作](EXTERNAL_CLIENTS.md#核對單場-quest-openxr-啟動回條)
+- 6 項部署與 34 項 Quest 戰後驗收測試通過。使用現有 Quest 0.50.12／77 發行報告及模擬 ADB 產生單席回條，交給正式驗收指令，成功核對一席的 OpenXR 與伺服器確認。另驗證換入場、換埠、換 PID、重複識別及修改發行原檔均遭拒。 [單席流程](../artifacts/quest-single-launch-evidence/roundtrip.json) · [部署測試](../artifacts/quest-single-launch-evidence/deployment-tests.log) · [戰後驗收測試](../artifacts/quest-single-launch-evidence/field-tests.log)
+- Windows 仍只列出 Quest 檔案傳輸介面，實機驗收待做。GitHub Actions 對 `c16065e` 因帳務或支出上限未啟動。 [USB 檢查](../artifacts/quest-single-launch-evidence/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44031556198)
+
 ## 2026-11-17 使用已安裝 APK 部署 Quest 單席
 
 - `-UseInstalledApk` 可搭配單席連線檔或五房 ZIP 的指定席位。工具從原發行報告取得雜湊，核對指定 Quest 3 已安裝的 APK 後才寫入設定並啟動。預先準備好的頭盔可直接進入單房驗收，省去再次傳送 APK。 [操作方式](QUEST3.md#使用頭盔上已安裝的-apk-加入場次)
