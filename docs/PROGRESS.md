@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 使用已安裝 APK 部署 Quest 單席
+
+- `-UseInstalledApk` 可搭配單席連線檔或五房 ZIP 的指定席位。工具從原發行報告取得雜湊，核對指定 Quest 3 已安裝的 APK 後才寫入設定並啟動。預先準備好的頭盔可直接進入單房驗收，省去再次傳送 APK。 [操作方式](QUEST3.md#使用頭盔上已安裝的-apk-加入場次)
+- 13 項部署與 33 項 Quest 戰後驗收測試通過。模擬 ADB 驗證缺少 APK 或雜湊不符時不寫入設定，且正確 APK 可無本機副本啟動。另核對五房 ZIP 的第 4 房第 3 席保留原 MR 校正檔。Quest 0.50.12／77 原 APK 與發行報告的 SHA-256 相符。 [部署測試](../artifacts/quest-use-installed-apk/deployment-tests.log) · [戰後驗收測試](../artifacts/quest-use-installed-apk/field-tests.log)
+- Windows 只列出 Quest 的檔案傳輸介面，實機待驗。GitHub Actions 對 `e3d3d39` 因帳務或支出上限未啟動。 [USB 檢查](../artifacts/quest-use-installed-apk/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44030717821)
+
 ## 2026-11-17 從觀戰返回五房追蹤
 
 - 控制台 0.31.256 從五房總覽開啟即時觀戰或姿態中斷快照後，可按「返回五房追蹤」。控制台重新讀取追蹤資料，並將鍵盤焦點移到已核對的房間，包含在觀戰頁切換後的房間。若開啟的房間來源未通過核對，則回到原先選擇的房間。 [五房追蹤操作](PLAYER_READINESS.md#執行中五房追蹤總覽)
