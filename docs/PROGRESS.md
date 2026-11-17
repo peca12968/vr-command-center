@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 讀回 Quest 準備畫格後重新核對鮮度
+
+- 單席及使用部署回條的五房追蹤檢查，在完成原畫格讀回後將整次查詢時間加到原取樣年齡。超過既有 1.5 秒期限的席位改為 `source-expired-in-transit`，不產生成功回條。獨立模式依各房原快照判定，合併模式共用原場次的快照。 [追蹤操作](QUEST3.md#單房實機追蹤驗收)
+- 修正前的模擬讀回顯示，單席與獨立場都會把超時的畫格報為就緒。修正後，單席、獨立場和合併場的六種準時及逾時情境均通過，另通過本輪共 8 項部署及 2 項戰後追蹤測試。正式管理包 0.31.256 經本機 IPC 回歸，兩種拓撲各核對 25 個模擬席位，六份錄製重啟後逐格回放。 [修正前](../artifacts/quest-readback-freshness/before.log) · [部署測試](../artifacts/quest-readback-freshness/deployment-tests.log) · [戰後測試](../artifacts/quest-readback-freshness/field-tests.log) · [管理端回歸](../artifacts/quest-readback-freshness/venue-ipc.json)
+- Windows 仍只列出 Quest 檔案傳輸介面，實機驗收待做。GitHub Actions 對 `1674bf2` 因帳務或支出上限未啟動。 [USB 檢查](../artifacts/quest-readback-freshness/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44032734311)
+
 ## 2026-11-17 以原 OpenXR 啟動回條擷取 Quest 單席日誌
 
 - 單席擷取可提供 `--quest-launch-report` 與 `--quest-launch-release`。工具在呼叫 ADB 前核對原房間、席位、場次、入場、埠及發行摘要；原 PID 的 OpenXR 啟動標記與遊戲連線皆確認後才回報 `capture-ready`。完成時保存原日誌內容及回條摘要。 [擷取操作](QUEST3.md#收集-quest-場館驗收日誌)
