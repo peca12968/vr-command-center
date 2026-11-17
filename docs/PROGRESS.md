@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 離開任務編輯頁時取消版本載入
+
+- 控制台 0.31.258 在版本回應延遲時仍可前往房間操作。離開編輯頁會取消最新或指定版本的讀取，保留原草稿、擺設與復原紀錄。0.31.257 的實際管理包重現切頁後草稿遭延遲回應覆蓋。 [操作說明](MISSION_VERSIONS.md) · [修正前](../artifacts/mission-draft-load-scope-031258/before/checks.json)
+- `a2c5eaa` 的正式管理包逐檔核對 595 檔，通過 8 項 Chromium、125 項 Node 檢查，以及與既有 Windows 玩家、伺服器和 Quest APK 的離線發行核對。兩次來源檔驗證的管理程序啟動逾時，後續來源檔與正式包驗證均通過。正式包管理程序只使用本機 IPC，TCP 監聽與 UDP 端點皆為零。 [管理包](../artifacts/mission-draft-load-scope-031258/VRCommand-ControlServer-0.31.258.zip) · [正式包檢查](../artifacts/mission-draft-load-scope-031258/package/checks.json) · [發行核對](../artifacts/mission-draft-load-scope-031258/venue-release.json)
+- 本輪防火牆查核顯示通知仍啟用，未啟動 `VrCommand.exe`。Quest 的 USB 檢查仍只有檔案傳輸介面，實機測試待做。GitHub Actions 因帳務或支出上限未啟動。 [防火牆查核](../artifacts/mission-draft-load-scope-031258/firewall-preflight.json) · [USB 檢查](../artifacts/mission-draft-load-scope-031258/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44035571554)
+
 ## 2026-11-17 從個人回放返回任務統計
 
 - 控制台 0.31.257 從「開啟個人事件回放」或「跳到最近中彈」進入觀戰後，可按「返回任務統計」。控制台重讀原場次封存戰績，保留原分房範圍，並把鍵盤焦點帶回原先選取的玩家。 [戰績與回放操作](REPORTS.md#從戰績開啟個人回放)
