@@ -155,6 +155,8 @@ API：
 
 報告含 version／profile／rulesVersion／mode、applies／canStart、場地與出生位、每房候選容量／需求及問題。每個問題的 `propIndex`／`otherPropIndex`／`seat` 為零起算，沒有對象為 -1；UI 顯示時加一。最多 500 個物件，僅傳前 128 個問題，`totalIssueCount` 保留完整數量、`truncated` 明示，`invalidProps` 仍列出全部涉及索引。無效數值／越界物件不進一步參與容量推算，容量為 null，不能當作通過。
 
+管理包 0.31.245 在保存版本的場地報告及建立場次的場地拒絕回應中提供 `missionId`。準備區會比對選取的版本與回應，再顯示檢查結果。版本未核對時，該房等待重新檢查，建立按鈕保持停用。五房逐房指定時，仍可查看其他房間已核對的圖。草稿試算沿用原本的配置請求與報告。
+
 草稿與保存版本各有請求序號、登入 epoch 及精確內容／選擇核對。舊回應不得改寫新草稿、切換模式後的批准或登出後的畫面；快取僅本次登入、以不可變版本與模式索引。憑證仍限頁面記憶體。API 和控制台須一起更新至 v0.18，不能以舊 API 的無檢查建立當作相容解法。
 
 驗證命令沿用後端四項、`smoke_world.py`、完整 `tests/browser`、真正 Unity Prepare／EditMode／Desktop／Quest。新增測試包含旋轉與接觸邊界、五席出生阻擋、真正初始敵軍容量／舊重疊世界可讀、128 問題上限、舊事件恢復與已接受重試、HTTP 權限及 UI 延遲回應；本輪實際結果、binary 與 PC 運行證據見 [PROGRESS](PROGRESS.md)。

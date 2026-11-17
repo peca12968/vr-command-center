@@ -47,7 +47,7 @@ public sealed partial class SessionManager
             foreach (var group in distinct)
             {
                 var first = group.First();
-                MissionLayout.RequireNewStart(first.Mission.Definition, SessionMode.Independent, plan is null ? null : first.Index + 1);
+                MissionLayout.RequireNewStart(first.Mission, SessionMode.Independent, plan is null ? null : first.Index + 1);
             }
             if (eventStore is not IAtomicSessionEventStore store)
                 throw new InvalidOperationException("Five independent sessions require a transactional session store.");

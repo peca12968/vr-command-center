@@ -138,11 +138,11 @@ export function mountIndependentPlan({ available, catalog, pinned, common, clima
       if (!enabled() || !row?.current) return;
       const { mission } = row.current.revision;
       let report;
-      try { report = validateLayoutReport(layout, 'Independent', mission.definition.environment.mode); }
-      catch { /* Keep launch blocked if the rejection report cannot be drawn. */ }
+      try { report = validateLayoutReport(layout, 'Independent', mission.definition.environment.mode, mission.id); }
+      catch { invalidate(mission.id); }
       const id = mission.id;
       for (const assigned of rows) if (assigned.current?.revision.mission.id === id)
-        assigned.current = { revision: assigned.current.revision, report, state: 'invalid' };
+        assigned.current = { revision: assigned.current.revision, report, state: report ? 'invalid' : 'error' };
       preview.value = String(row.roomId);
       return id;
     },

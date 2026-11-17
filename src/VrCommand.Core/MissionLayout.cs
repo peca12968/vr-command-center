@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using VrCommand.Simulation;
 
 namespace VrCommand.Core;
@@ -6,7 +7,8 @@ public record MissionLayoutRequest(ExperienceMode ExperienceMode, SessionMode Mo
 public record LayoutSpawn(int Seat, float X, float Z);
 public record MissionLayoutReport(int Version, string Profile, string RulesVersion, SessionMode Mode, bool Applies, bool? CanStart,
     float RoomHalfSize, float PlayerRadius, LayoutSpawn[] Spawns, int? EnemyCapacityPerRoom, int RequestedEnemiesPerRoom,
-    int TotalIssueCount, bool Truncated, ArenaLayoutIssue[] Issues, int[] InvalidProps, LayoutRoutePreview? RoutePreview = null);
+    int TotalIssueCount, bool Truncated, ArenaLayoutIssue[] Issues, int[] InvalidProps, LayoutRoutePreview? RoutePreview = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? MissionId = null);
 
 public sealed class MissionLayoutRejectedException(MissionLayoutReport report, int? roomId = null) : ArgumentException("Arena layout is not startable; inspect the layout report and save a corrected mission revision.")
 {
@@ -22,6 +24,8 @@ public static class MissionLayout
     private static MissionLayoutRequest Request(MissionDraft definition, SessionMode mode) =>
         new(definition.Environment.Mode, mode, definition.Enemies.Count, definition.Props);
     public static MissionLayoutReport Inspect(MissionDraft definition, SessionMode mode) => Inspect(Request(definition, mode));
+    public static MissionLayoutReport Inspect(Mission mission, SessionMode mode) =>
+        Inspect(mission.Definition, mode) with { MissionId = mission.Id };
     public static MissionLayoutReport Inspect(MissionLayoutRequest request) => Inspect(request, includeRoutes: true);
     private static MissionLayoutReport Inspect(MissionLayoutRequest request, bool includeRoutes)
     {
@@ -37,10 +41,10 @@ public static class MissionLayout
             "0.8.0", request.Mode, true, result.Valid, ArenaLayout.RoomHalfSize, ArenaWalkSurface.Radius,
             spawns, result.EnemyCapacityPerRoom, result.RequestedEnemiesPerRoom, result.IssueCount, result.Truncated, result.Issues, result.InvalidProps, routes);
     }
-    internal static void RequireNewStart(MissionDraft definition, SessionMode mode, int? roomId = null)
+    internal static void RequireNewStart(Mission mission, SessionMode mode, int? roomId = null)
     {
-        var report = Inspect(Request(definition, mode), includeRoutes: false);
-        if (report.CanStart == false) throw new MissionLayoutRejectedException(report, roomId);
+        var report = Inspect(Request(mission.Definition, mode), includeRoutes: false);
+        if (report.CanStart == false) throw new MissionLayoutRejectedException(report with { MissionId = mission.Id }, roomId);
     }
 
     internal static void RequireEnemyCapacity(SessionView session, int count)

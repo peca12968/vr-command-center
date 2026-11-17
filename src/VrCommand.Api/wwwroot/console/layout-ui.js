@@ -61,10 +61,11 @@ function drawClearance(prefix, report, props) {
         class: 'layout-clearance-prop', 'data-clearance-index': index })];
     }));
 }
-export function validateLayoutReport(report, mode, experienceMode) {
+export function validateLayoutReport(report, mode, experienceMode, missionId) {
   const profile = experienceMode === 'MR' ? 'mr-room-v1' : 'vr-room-v1';
   if (report?.version !== 1 || !['vr-room-v1', 'mr-room-v1'].includes(report.profile) || report.rulesVersion !== '0.8.0' || report.mode !== mode
-    || (experienceMode && report.profile !== profile) || report.roomHalfSize !== 6 || report.playerRadius !== .3
+    || (experienceMode && report.profile !== profile) || (missionId !== undefined && report.missionId !== missionId)
+    || report.roomHalfSize !== 6 || report.playerRadius !== .3
     || !Array.isArray(report.issues) || !Array.isArray(report.invalidProps) || !Array.isArray(report.spawns)) throw new Error('不支援的場地檢查版本或模式。');
   return report;
 }
@@ -188,7 +189,7 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
     if (savedRequests.has(key)) return savedRequests.get(key);
     const request = api(`/missions/${selected.id}/layout?mode=${encodeURIComponent(selected.mode)}`)
       .then(value => {
-        const report = validateLayoutReport(value, selected.mode, selected.experienceMode);
+        const report = validateLayoutReport(value, selected.mode, selected.experienceMode, selected.id);
         if (savedRequests.get(key) === request) cache.set(key, report);
         return report;
       }).finally(() => { if (savedRequests.get(key) === request) savedRequests.delete(key); });
@@ -341,9 +342,11 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
   function rejected(id, mode, report) {
     const key = id + '/' + mode, current = selection();
     if (current.id + '/' + current.mode !== key) return;
-    try { validateLayoutReport(report, mode, current.experienceMode); } catch { launchKey = ''; launchReport = null; paint('launch', null, '場地檢查版本已變更，請更新控制台後再開場。'); changed(); return; }
-    savedRequests.delete(key); cache.set(key, report);
-    launchSerial++; clearTimeout(launchTimer); launchKey = key; launchReport = report; paint('launch', report); changed();
+    invalidateSaved(id, mode);
+    launchSerial++; clearTimeout(launchTimer); launchKey = key;
+    try { launchReport = validateLayoutReport(report, mode, current.experienceMode, id); }
+    catch { launchReport = null; paint('launch', null, '無法核對此任務版本的場地結果，請重新檢查。'); changed(); return; }
+    cache.set(key, launchReport); paint('launch', launchReport); changed();
   }
   function recheckDraft() { draftKey = ''; scheduleDraft(); }
   function recheckLaunch(invalidate = true) {

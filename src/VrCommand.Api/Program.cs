@@ -222,7 +222,7 @@ app.MapPost("/api/mission-templates/check-file", async (HttpContext context) =>
     return await MissionTemplate.Check(context.Request, context.RequestAborted);
 });
 app.MapGet("/api/missions/{id:guid}/layout", (Guid id, SessionMode? mode, SqliteMissionLibrary store, HttpContext context) =>
-    MissionLayout.Inspect(store.Get(id, Actor(context)).Definition, mode ?? SessionMode.Independent));
+    MissionLayout.Inspect(store.Get(id, Actor(context)), mode ?? SessionMode.Independent));
 app.MapPost("/api/mission-layout", (MissionLayoutRequest request, HttpContext context) =>
 {
     AccessPolicy.AuthorMission(Actor(context));

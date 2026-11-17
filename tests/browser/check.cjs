@@ -109,6 +109,7 @@ async function main() {
         environment: { mode: 'VR', weather: 'Clear', timeOfDay: 'Day', lightning: false },
         enemies: { count: 1, behavior: 'Hold', autoAttack: false }, props: [] }, 'Master', 201);
       await require('./layout-browser.cjs')({ context, api, tokens, base, mission, screenshots, check });
+      await require('./saved-layout-identity-browser.cjs')({ context, api, tokens, base, check, captureErrors });
       await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed', scope: 'Placement and walkthrough previews with real API and Chromium' }, null, 2));
       console.log(`PASS: ${checks} focused layout checks. Screenshots: ${screenshots}`); return;
     }
@@ -623,6 +624,7 @@ async function main() {
     await require('./full-tracking-begin-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     await require('./mission-template-browser.cjs')({ context, api, tokens, directory, root, base, screenshots, check, captureErrors, availablePort, dotnet });
     await require('./ticket-download-fence.cjs').checkTicketDownloadFence({ context, api, tokens, base, screenshots, check, captureErrors });
+    await require('./saved-layout-identity-browser.cjs')({ context, api, tokens, base, check, captureErrors });
     await require('./archived-independent-plan-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./venue-mission-file-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./session-reprepare-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
