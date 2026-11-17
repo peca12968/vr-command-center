@@ -592,7 +592,7 @@ pwsh -NoProfile -NonInteractive -File .\scripts\deploy-quest.ps1 `
 
 正式部署建議加上 `-SaveDeploymentReport .\quest-deploy-first.json`，選擇既有私人資料夾中的新檔名。工具進入部署階段後會先保存整批席位，並在每席確認啟動後更新完整 JSON。每次更新先寫入同資料夾的暫存檔，再以單次更名發布。部署程序中途關閉時，可讀取最後一次成功保存的報告。
 
-若報告寫到 `failedStep: "launch-game"` 或 `"observe-openxr"`，先到頭盔核對該席實際啟動情況，並用新票券及只列待部署席位的清單補做。部署工具會在送出 Android 啟動指令前先保存 `launch-game`，所以中斷時可辨別哪一席的啟動結果仍待確認。若程序突然關閉時該席仍為 `not-attempted`，該席可能已有暫存或已切換的設定，部署尚未送出啟動。
+若報告寫到 `failedStep: "launch-game"` 或 `"observe-openxr"`，先核對該席實際啟動情況。原報告有 OpenXR 啟動證據時，可使用下方的復核指令。部署工具會在送出 Android 啟動指令前先保存 `launch-game`，所以中斷時可辨別哪一席的啟動結果仍待確認。若程序突然關閉時該席仍為 `not-attempted`，該席可能已有暫存或已切換的設定，部署尚未送出啟動。 [復核啟動結果](#復核中斷時的-openxr-啟動)
 
 排除故障後，提供最近一次 `phase: "deployment"` 且 `complete: false` 的原始報告，搭配原部署 ZIP、原裝置清單與相同 APK 核對條件。部分清單沿用 `-AllowPartialMap`。下例使用原發行報告核對 APK。若首次使用 `-ExpectedVersionCode`，重試沿用相同版本代碼。
 
@@ -620,6 +620,20 @@ pwsh -NoProfile -NonInteractive -File .\scripts\deploy-quest.ps1 `
 ```
 
 工具先用上一份部署報告核對原 ZIP，再核對新舊 ZIP 的五房拓撲、端點、MR 校正，以及每席的場次、玩家和入場識別。新票券通過原場次的線上核對後，只部署尚未啟動的席位。累計報告保存上一份報告和原 ZIP 的雜湊。若前次部署在 Android 啟動結果未確認時中斷，仍須先核對該席狀態。增量擷取時，搭配新 ZIP、最新部署報告及 `--after-deployment-report` 指向直接前一份報告。 [批次擷取](#部署中斷時先擷取已啟動的席位)
+
+#### 復核中斷時的 OpenXR 啟動
+
+原部署同時使用 `-RequireOpenXR` 與 `-SaveDeploymentReport` 時，工具會在送出 Android 啟動前保存該次 OpenXR 識別碼及已啟用設定檔的 SHA-256。若部署在確認回覆前中斷，重試可加上 `-RecoverOpenXRLaunch` 復核該席。票券已過期時，可同時使用上方的重新配票流程。
+
+```powershell
+pwsh -NoProfile -NonInteractive -File .\scripts\deploy-quest.ps1 `
+    -VenueBundle .\vr-venue-connections.zip -DeviceMap .\device-map.json `
+    -ReleaseReport .\venue-release.json -DeployMappedSeats -RequireOpenXR `
+    -ManagementApi http://127.0.0.1:5081 -RetryIncomplete .\quest-deploy-first.json `
+    -RecoverOpenXRLaunch -SaveDeploymentReport .\quest-deploy-retry.json
+```
+
+工具讀取原頭盔上的 APK、連線檔、MR 校正及原 OpenXR 日誌，並重讀遊戲程序識別。核對通過後，原程序繼續運作，報告記下原 PID 及識別碼，再部署後續席位。若原程序已退出、設定改動、日誌缺失或 OpenXR 未就緒，工具會停在復核階段。缺少原啟動證據時，請在頭盔確認現況，再用新票券及只列待部署席位的清單補做。入場及追蹤仍以原場次的主控台驗收為準。 [追蹤核對](#核對頭盔追蹤席位)
 
 #### 部署指定的 Quest 席位
 

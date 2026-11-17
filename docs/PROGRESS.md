@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-17 復核中斷時的 Quest OpenXR 啟動
+
+- 使用 `-RequireOpenXR` 與 `-SaveDeploymentReport` 部署時，報告在送出啟動前保存該席的識別碼及正式連線檔 SHA-256。`-RecoverOpenXRLaunch` 核對原裝置、APK、設定和原 PID 的 OpenXR 日誌，再將該席記入已啟動並接續後面的席位。 [操作方式](QUEST3.md#復核中斷時的-openxr-啟動)
+- 12 項部署及 7 項戰後驗收測試通過。模擬中在第 2 席收到啟動請求後終止 PowerShell，重試讀回原 PID 4302 與識別碼，只替第 3 席寫入與啟動。舊報告缺少證據、正式設定檔變更及 OpenXR 未就緒均拒絕接續。Windows 仍只辨識 Quest 的檔案傳輸介面。 [部署測試](../artifacts/quest-openxr-launch-recovery/deployment-tests.log) · [戰後驗收測試](../artifacts/quest-openxr-launch-recovery/field-results-tests.log)
+
 ## 2026-11-17 重新配票後接續 Quest 部署
 
 - `-OriginalVenueBundle` 與 `-RetryIncomplete` 可把新配發的五房 ZIP 接回原部署。工具比較原 ZIP 雜湊、拓撲、端點、房間校正和每席原入場，驗證新票券後只寫入未啟動席位。累計報告保留前一份部署報告與 ZIP 的雜湊，供增量擷取和戰後驗收使用。 [重新配票操作](QUEST3.md#重新配票後接續原部署)

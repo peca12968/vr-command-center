@@ -29,6 +29,7 @@ param(
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$SaveDeploymentReport,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$RetryIncomplete,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$OriginalVenueBundle,
+    [Parameter(ParameterSetName='Bundle')][switch]$RecoverOpenXRLaunch,
     [Parameter(ParameterSetName='Bundle')][switch]$VerifyTrackedSeats,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$DeploymentReport,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$DeploymentReportsFile,
@@ -1324,6 +1325,7 @@ function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, $R
         throw 'Retry with the original APK installation option.'
     }
     $completed = [Collections.Generic.List[object]]::new()
+    $pendingLaunch = $null
     $statuses = @('not-attempted','device-identity-unavailable','device-identity-changed','apk-unverified',
         'apk-hash-mismatch','ticket-expired','venue-check-failed','seat-headset-mismatch','file-verification-failed','deployment-failed','adb-timeout')
     $fileSteps = @('resolve-launcher','prepare-device','stage-alignment','stage-connection','check-expiry-before-staging',
@@ -1365,14 +1367,31 @@ function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, $R
             throw 'Deployment report is missing the original failure step.'
         }
         if ($entry.failedStep -cin @('launch-game','observe-openxr')) {
-            throw 'Confirm the previous launch outcome on the affected headset before retrying that seat manually.'
+            if (-not $RecoverOpenXRLaunch) {
+                throw 'Confirm the previous launch outcome on the affected headset before retrying that seat manually.'
+            }
+            $pending = $entry.pendingOpenXR
+            $ticket = $Venue.Connections["$($row.roomId)/$($row.seat)"].Ticket
+            if ($pendingLaunch -or $completed.Count -ne $index -or $entry.status -cne 'deployment-failed' -or
+                $entry.filesVerified -isnot [bool] -or -not $entry.filesVerified -or
+                -not (Test-QuestDeployedAdmission $entry $ticket) -or
+                $pending.nonce -isnot [string] -or $pending.nonce -cnotmatch '\A[0-9a-f]{32}\z' -or $pending.nonce -ceq ('0' * 32) -or
+                $pending.configSha256 -isnot [string] -or $pending.configSha256 -cnotmatch '\A[0-9a-f]{64}\z') {
+                throw 'The original report lacks the saved OpenXR launch and configuration proof for this seat.'
+            }
+            if ($completed | Where-Object { $_.openXR.nonce -ceq $pending.nonce }) {
+                throw 'The saved OpenXR launch identifier is already associated with a completed seat.'
+            }
+            $pendingLaunch = @{ Nonce = $pending.nonce; ConfigSha256 = $pending.configSha256;
+                InstalledApk = ($entry.installedApk -is [bool] -and $entry.installedApk) }
         }
     }
+    if ($RecoverOpenXRLaunch -and -not $pendingLaunch) { throw 'The original deployment report has no pending OpenXR launch to verify.' }
     if ($completed.Count -eq $Map.Count) { throw 'This deployment report has no seats left to retry.' }
     $previousVenueSha256 = if ($proof.venueSha256 -cne $Venue.BundleSha256) { $proof.venueSha256 }
     $proof.venueSha256 = $Venue.BundleSha256
     return @{ Proof = $proof; Completed = $completed.ToArray(); PreviousSha256 = Get-QuestSha256 $original.Bytes
-        PreviousVenueSha256 = $previousVenueSha256; ReleaseReportSha256 = $releaseReportHash }
+        PreviousVenueSha256 = $previousVenueSha256; ReleaseReportSha256 = $releaseReportHash; PendingLaunch = $pendingLaunch }
 }
 
 function Read-MappedQuestPreflight([object[]]$Map, [int]$VersionCode, [string]$ExpectedHash, $Retry, [switch]$AllowMissingApk) {
@@ -1473,6 +1492,31 @@ function Write-QuestDeploymentReport($Output, $Report) {
     }
 }
 
+function Set-QuestDeploymentAdmission($Device, $Ticket) {
+    $Device.sessionId = $Ticket.SessionId.ToString('D')
+    $Device.playerId = $Ticket.PlayerId.ToString('D')
+    $Device.admissionId = $Ticket.AdmissionId.ToString('D')
+    $Device.port = $Ticket.Config.port
+}
+
+function Confirm-QuestPendingOpenXR([string[]]$Target, [string]$Serial, $Connection, $Pending, [string]$ApkHash) {
+    $directory = '/sdcard/Android/data/com.vrcommand.quest/files'
+    $files = [ordered]@{ "$directory/vr-connection.json" = $Pending.ConfigSha256 }
+    if ($Connection.Alignment) { $files["$directory/vr-room-alignment-$($Connection.Alignment.Hash).json"] = $Connection.Alignment.Hash }
+    if ((Read-QuestDeviceSerial $Target) -cne $Serial) { throw 'The original Quest identity changed before launch verification.' }
+    foreach ($file in $files.Keys) { Confirm-QuestFileHash $Target $file $files[$file] 'Saved Quest launch file' }
+    $observation = Read-QuestLaunchedProcess $Target $Pending.Nonce
+    foreach ($file in $files.Keys) { Confirm-QuestFileHash $Target $file $files[$file] 'Saved Quest launch file' }
+    if ((Get-QuestApkStatus $Target $ApkHash) -cne 'ready' -or (Read-QuestDeviceSerial $Target) -cne $Serial) {
+        throw 'Could not confirm the original Quest device and APK after launch verification.'
+    }
+    $pidAfterReadback = Invoke-QuestAdb ($Target + @('shell', 'pidof', 'com.vrcommand.quest')) 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]$pidAfterReadback -cne [string]$observation.processId) {
+        throw 'The Quest game process changed during launch verification.'
+    }
+    return [ordered]@{ processId = $observation.processId; nonce = $Pending.Nonce }
+}
+
 function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Release, $Retry, [string]$StagedApk, $ReportOutput) {
     $expectedHash = [string]$Release.sha256
     $originalMap = $Map
@@ -1506,6 +1550,27 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
     }
     if (-not $DeployMappedSeats) { $report.complete = $true; return $report }
 
+    if ($Retry.PendingLaunch) {
+        $row = $Map[0]
+        $pendingSeat = $devices[0]
+        $key = "$($row.roomId)/$($row.seat)"
+        if ($pendingSeat.status -cne 'ready') { throw 'The pending OpenXR launch needs the original installed Quest APK.' }
+        Confirm-VenueReadback $Venue -RequireLiveSource
+        if ($checksHeadset -and $Venue.SeatHeadsets[$key] -cne 'Quest3') {
+            throw 'The pending OpenXR launch needs the original Quest 3 seat.'
+        }
+        $target = @('-t', [string]$inventory[$row.serial].TransportId)
+        $pendingSeat.openXR = Confirm-QuestPendingOpenXR $target $reportedSerials[0] $Venue.Connections[$key] $Retry.PendingLaunch $ExpectedHash
+        $pendingSeat.status = 'launch-requested'
+        $pendingSeat.filesVerified = $true
+        if ($Retry.PendingLaunch.InstalledApk) { $pendingSeat.installedApk = $true }
+        Set-QuestDeploymentAdmission $pendingSeat $Venue.Connections[$key].Ticket
+        $Retry.Completed += @($pendingSeat)
+        $Map = @($Map | Select-Object -Skip 1)
+        $devices = @($devices | Select-Object -Skip 1)
+        $reportedSerials = @($reportedSerials | Select-Object -Skip 1)
+    }
+
     $report.phase = 'deployment'
     if ($ExpectedHash) { $report.apkVerificationVersion = 1 }
     if ($RequireOpenXR) { $report.requireOpenXR = $true }
@@ -1530,7 +1595,7 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
     }
     $WarningPreference = 'SilentlyContinue'
     foreach ($device in $devices) { $device.status = 'not-attempted'; $device.Remove('apkVerified') }
-    if ($ReportOutput) { Write-QuestDeploymentReport $ReportOutput $report }
+    if ($ReportOutput -and $Map.Count) { Write-QuestDeploymentReport $ReportOutput $report }
     for ($index = 0; $index -lt $Map.Count; $index++) {
         $row = $Map[$index]; $device = $devices[$index]
         $target = @('-t', [string]$inventory[$row.serial].TransportId)
@@ -1587,6 +1652,10 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
                     $device.filesVerified = $true
                     $device.status = 'deployment-failed'
                     $device.failedStep = 'launch-game'
+                    if ($RequireOpenXR) {
+                        Set-QuestDeploymentAdmission $device $connection.Ticket
+                        $device.pendingOpenXR = [ordered]@{ nonce = $deployment.OpenXRNonce; configSha256 = $deployment.ConfigSha256 }
+                    }
                     Write-QuestDeploymentReport $ReportOutput $report
                 }
             }
@@ -1595,12 +1664,10 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
             $device.filesVerified = $true
             $device.status = 'launch-requested'
             $device.Remove('failedStep')
+            $device.Remove('pendingOpenXR')
             if ($RequireOpenXR) { $device.openXR = $deployment.OpenXR }
             if ($ExpectedHash) {
-                $device.sessionId = $connection.Ticket.SessionId.ToString('D')
-                $device.playerId = $connection.Ticket.PlayerId.ToString('D')
-                $device.admissionId = $connection.Ticket.AdmissionId.ToString('D')
-                $device.port = $connection.Ticket.Config.port
+                Set-QuestDeploymentAdmission $device $connection.Ticket
             }
         } catch {
             $device.status = if ($deployment.Step -cin @('verify-live-venue-before-stop','verify-live-venue-after-install')) { 'venue-check-failed' }
@@ -1677,6 +1744,7 @@ function Publish-QuestFile([string[]]$Target, [string]$Local, [string]$Staging, 
         if ($null -ne $ConnectionDeployment) { $ConnectionDeployment.Step = 'verify-active-connection' }
         Confirm-QuestFileHash $Target $Destination $stagedHash $Description
         if ($RequiredAlignment) { Confirm-QuestFileHash $Target $RequiredAlignment.Path $RequiredAlignment.Hash 'Room alignment file' }
+        if ($null -ne $ConnectionDeployment) { $ConnectionDeployment.ConfigSha256 = $stagedHash }
     } catch {
         $publishError = $_
         try {
@@ -1815,6 +1883,7 @@ function Set-QuestConnection([string[]]$Target, $Config, $Ticket, $Alignment, [s
     if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired before launch. Download a fresh connection file.' }
     if ($BeforeLaunch) {
         $Deployment.Step = 'save-before-launch'
+        $Deployment.OpenXRNonce = $nonce
         & $BeforeLaunch
         $Deployment.Step = 'check-expiry-before-launch'
         if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired before launch. Download a fresh connection file.' }
@@ -2045,6 +2114,9 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
         throw 'Use -RetryIncomplete with -DeployMappedSeats and the original -DeviceMap.'
     }
     if ($OriginalVenueBundle -and -not $RetryIncomplete) { throw 'Use -OriginalVenueBundle with -RetryIncomplete and a refreshed -VenueBundle.' }
+    if ($RecoverOpenXRLaunch -and (-not $RetryIncomplete -or -not $RequireOpenXR -or -not $ReleaseReport)) {
+        throw 'Use -RecoverOpenXRLaunch with -RetryIncomplete, -RequireOpenXR and -ReleaseReport.'
+    }
     if ($SaveDeploymentReport -and (-not $DeployMappedSeats -or -not $DeviceMap -or $CheckOnly -or $VerifyTrackedSeats)) {
         throw 'Use -SaveDeploymentReport with -DeployMappedSeats and -DeviceMap.'
     }

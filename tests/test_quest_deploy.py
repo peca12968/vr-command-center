@@ -2982,16 +2982,16 @@ else:
         mapping, document = self.device_map()
         document['seats'] = [row for row in document['seats'] if row['serial'] in ('fixture-01', 'fixture-02', 'fixture-03')]
         mapping.write_text(json.dumps(document), encoding='utf-8')
-        release, _, release_env = self.release_report()
+        release, _, release_env = self.release_report(version_code=77)
         command = ['pwsh', '-NoProfile', '-NonInteractive', '-File', str(ROOT / 'tests/fixtures/mock-quest-management.ps1'),
                    str(ROOT / 'scripts/deploy-quest.ps1'), '-VenueBundle', str(bundle),
                    '-DeviceMap', str(mapping), '-AllowPartialMap', '-ReleaseReport', str(release),
                    '-AdbPath', str(ROOT / 'tests/fixtures/mock-quest-fleet.ps1'),
-                   '-DeployMappedSeats', '-ManagementApi', 'http://127.0.0.1:1']
+                   '-DeployMappedSeats', '-RequireOpenXR', '-ManagementApi', 'http://127.0.0.1:1']
 
-        def options(fleet, gate=None):
+        def options(fleet, gate=None, faults=None):
             return dict(cwd=fleet, encoding='utf-8', env={**os.environ, **release_env, 'VR_COMMAND_MASTER_KEY': 'fixture-master',
-                'VR_QUEST_FLEET_FIXTURE': str(fleet), 'VR_QUEST_FLEET_FAULTS': '{}', 'VR_QUEST_FLEET_FRESH': '',
+                'VR_QUEST_FLEET_FIXTURE': str(fleet), 'VR_QUEST_FLEET_FAULTS': json.dumps(faults or {}), 'VR_QUEST_FLEET_FRESH': '',
                 'VR_QUEST_TEST_SOURCE_STALE': '',
                 'VR_QUEST_FLEET_HOLD_AFTER_STAGE': 'fixture-02' if gate == 'stage' else '',
                 'VR_QUEST_FLEET_HOLD_AFTER_LAUNCH': 'fixture-02' if gate == 'launch' else ''})
@@ -3045,6 +3045,48 @@ else:
                     self.assert_rejected(result, 'Confirm the previous launch outcome')
                     self.assertEqual(old_calls, transport.read_bytes())
                     self.assertFalse((fleet / 'resumed.json').exists())
+                    original_config = fleet / 'fixture-02/vr-connection.json'
+                    config_bytes = original_config.read_bytes()
+                    nonce = (fleet / 'fixture-02/openxr-probe').read_text()
+                    self.assertEqual({'nonce': nonce, 'configSha256': hashlib.sha256(config_bytes).hexdigest()},
+                                     checkpoint['devices'][1]['pendingOpenXR'])
+                    retry = ('-RetryIncomplete', str(report), '-RecoverOpenXRLaunch', '-SaveDeploymentReport', 'resumed.json')
+
+                    legacy_report = fleet / 'legacy.json'
+                    legacy = json.loads(original)
+                    del legacy['devices'][1]['pendingOpenXR']
+                    legacy_report.write_text(json.dumps(legacy), encoding='utf-8')
+                    missing_proof = subprocess.run([*command, '-RetryIncomplete', str(legacy_report), '-RecoverOpenXRLaunch'],
+                                                   capture_output=True, timeout=20, **options(fleet))
+                    self.assert_rejected(missing_proof, 'lacks the saved OpenXR launch and configuration proof')
+                    self.assertEqual(old_calls, transport.read_bytes())
+
+                    original_config.write_bytes(config_bytes + b'\n')
+                    changed_config = subprocess.run([*command, *retry], capture_output=True, timeout=20, **options(fleet))
+                    self.assert_rejected(changed_config, 'Saved Quest launch file could not be verified')
+                    original_config.write_bytes(config_bytes)
+                    missing_xr = subprocess.run([*command, *retry], capture_output=True, timeout=20,
+                                                **options(fleet, faults={'fixture-02': 'xr-not-ready'}))
+                    self.assert_rejected(missing_xr, 'Quest OpenXR did not become ready')
+                    blocked_calls = transport.read_bytes()
+                    self.assertNotRegex(blocked_calls[len(old_calls):].decode(), r' (push|shell am) ')
+                    self.assertFalse((fleet / 'resumed.json').exists())
+
+                    recovered = subprocess.run([*command, *retry], capture_output=True, timeout=25, **options(fleet))
+                    self.assertEqual(0, recovered.returncode, recovered.stderr)
+                    latest = json.loads((fleet / 'resumed.json').read_bytes())
+                    self.assertEqual(json.loads(recovered.stdout), latest)
+                    self.assertTrue(latest['complete'])
+                    self.assertEqual(checkpoint['devices'][0], latest['devices'][0])
+                    self.assertEqual({'processId': 4302, 'nonce': nonce}, latest['devices'][1]['openXR'])
+                    self.assertNotIn('pendingOpenXR', latest['devices'][1])
+                    self.assertEqual(hashlib.sha256(original).hexdigest(), latest['previousDeploymentSha256'])
+                    self.assertEqual(original, report.read_bytes())
+                    self.assertEqual(config_bytes, original_config.read_bytes())
+                    recovery_calls = transport.read_bytes()[len(blocked_calls):].decode().splitlines()
+                    self.assertFalse(any(line.startswith('-t 102 ') and (' push ' in line or ' shell am ' in line)
+                                         for line in recovery_calls))
+                    self.assertEqual(['103'], [line.split()[1] for line in recovery_calls if ' shell am start ' in line])
                     continue
                 self.assertEqual(0, result.returncode, result.stderr)
                 resumed = json.loads((fleet / 'resumed.json').read_bytes())
