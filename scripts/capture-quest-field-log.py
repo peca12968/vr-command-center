@@ -58,7 +58,15 @@ def report_capture_status(pid, *, stage='capture-ready', **seat):
 
 
 async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready, openxr=None, *,
-                       on_final=None, on_disconnected=None):
+                       on_final=None, on_disconnected=None, device_identity=None, venue_device=None):
+    async def confirm_source(verify_device=True):
+        if verify_device and device_identity is not None:
+            await asyncio.to_thread(check_device_identity, adb, device_identity, deadline - time.monotonic(), venue_device)
+        remaining = deadline - time.monotonic()
+        field.require(remaining > 0, 'Capture timed out before the original process could be checked')
+        current = await asyncio.to_thread(quest_pid, adb, min(5, remaining))
+        field.require(current == pid, 'The original Quest process changed')
+
     startup_deadline = min(deadline, time.monotonic() + STARTUP_SECONDS)
     next_pid_check = time.monotonic() + PID_CHECK_SECONDS
     started = ready = final_seen = False
@@ -72,8 +80,7 @@ async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready
         field.require(started or now < startup_deadline, 'Original Quest startup is unavailable')
         field.require(xr_ready or now < startup_deadline, 'Original Quest OpenXR launch marker is unavailable')
         if now >= next_pid_check:
-            current = await asyncio.to_thread(quest_pid, adb, min(5, deadline - now))
-            field.require(current == pid, 'The original Quest process changed')
+            await confirm_source()
             next_pid_check = time.monotonic() + PID_CHECK_SECONDS
             continue
         read_deadline = min(deadline, next_pid_check, deadline if started and xr_ready else startup_deadline)
@@ -124,13 +131,13 @@ async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready
                               and type(result.get('roomId')) is int
                               and all(result.get(key) == value for key, value in admission.items()),
                               'Final result differs from the original player admission')
-                remaining = deadline - time.monotonic()
-                field.require(remaining > 0, 'Capture timed out before the original process could be checked')
-                current = await asyncio.to_thread(quest_pid, adb, min(5, remaining))
-                field.require(current == pid, 'The original Quest process changed')
+                await confirm_source(verify_device=False)
                 return {'version': 1, 'complete': True, 'logcatPid': pid, 'port': port, 'roomId': admission['roomId'], 'bytes': size,
                         'sha256': hashlib.sha256(captured).hexdigest(), 'scope': 'quest-logcat-only'}
         if started and xr_ready and connection is not None and not ready and not final_seen:
+            if device_identity is not None:
+                await confirm_source()
+                next_pid_check = time.monotonic() + PID_CHECK_SECONDS
             ready = True
             on_ready(pid)
 
@@ -183,7 +190,8 @@ async def capture(adb, port, admission, output, seconds, on_ready=report_capture
                                                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
         try:
             report = await read_capture(child, adb, pid, port, admission, log, deadline, on_ready, openxr,
-                                        on_final=on_final, on_disconnected=on_disconnected)
+                                        on_final=on_final, on_disconnected=on_disconnected,
+                                        device_identity=device_identity, venue_device=venue_device)
         finally:
             if child.returncode is None:
                 try:

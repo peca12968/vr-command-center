@@ -3674,6 +3674,7 @@ else:
                 self.assertEqual(active, active_path.read_bytes())
                 self.assertEqual(['shell getprop ro.serialno', 'shell pidof com.vrcommand.quest',
                                   'logcat -b main --pid=4301 -v threadtime -s Unity:I',
+                                  'shell getprop ro.serialno', 'shell pidof com.vrcommand.quest',
                                   'shell pidof com.vrcommand.quest', 'shell getprop ro.serialno'],
                                  (scripts / 'commands').read_text().splitlines())
             finally:

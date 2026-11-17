@@ -472,7 +472,7 @@ if settings.get('keepRunning', True):
         with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'differs from the original deployment'):
             asyncio.run(capture_tool.capture(self.adb, port, expected, self.output, 10, device_identity=proof))
         self.assertFalse((self.root / 'pid-count').exists())
-        self.prepare(raw, deviceSerials=['HEADSET-A', 'HEADSET-B'])
+        self.prepare(raw, deviceSerials=['HEADSET-A', 'HEADSET-A', 'HEADSET-B'])
         with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'differs from the original deployment'):
             asyncio.run(capture_tool.capture(self.adb, port, expected, self.output, 10, device_identity=proof))
         self.assertFalse(self.output.exists())
@@ -489,7 +489,56 @@ if settings.get('keepRunning', True):
                                                  venue_device=(scope, field.quest_deployment_fingerprint(scope, 'HEADSET-A'))))
         self.assertTrue(report['complete'])
         self.assertEqual(raw, self.output.read_bytes())
+        self.assertEqual('3', (self.root / 'serial-count').read_text())
+
+    def test_bound_capture_rechecks_the_device_before_reporting_a_reconnection_ready(self):
+        port, admission, _, _ = capture_tool.read_connection(self.original)
+        nonce = 'a1' * 16
+        proof = (nonce, hashlib.sha256(f'{nonce}\nHEADSET-A'.encode()).hexdigest())
+        startup = logcat_line(f'VR_QUEST_OPENXR nonce={nonce} loader=1 display=1 input=1')
+        raw = (startup + quest_logcat('VR_CLIENT_CONNECTED id=8\nVR_CLIENT_DISCONNECTED\n' + self.player_log)).encode()
+        stages = []
+
+        def ready(pid):
+            stages.append(('ready', pid))
+
+        def disconnected(pid):
+            stages.append(('disconnected', pid))
+            (self.root / 'settings.json').write_text(json.dumps({'deviceSerials': ['HEADSET-B']}), encoding='utf-8')
+
+        async def collect(on_disconnected):
+            return await capture_tool.capture(self.adb, port, admission, self.output, 10, ready,
+                                              device_identity=proof, openxr=(7342, nonce), on_disconnected=on_disconnected)
+
+        self.prepare(raw)
+        with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'device identity differs from the original deployment'):
+            asyncio.run(collect(disconnected))
+        self.assertEqual([('ready', 7342), ('disconnected', 7342)], stages)
+        self.assertFalse(self.output.exists())
+        self.assertEqual(b''.join(raw.splitlines(keepends=True)[:-2]), self.partial.read_bytes())
+        self.partial.unlink()
+
+        stages.clear()
+        self.prepare(raw)
+        report = asyncio.run(collect(lambda pid: stages.append(('disconnected', pid))))
+        self.assertTrue(report['complete'])
+        self.assertEqual([('ready', 7342), ('disconnected', 7342), ('ready', 7342)], stages)
+        self.assertEqual('4', (self.root / 'serial-count').read_text())
+        self.assertEqual(raw, self.output.read_bytes())
+
+    def test_bound_capture_rechecks_the_device_while_the_stream_is_idle(self):
+        port, admission, _, _ = capture_tool.read_connection(self.original)
+        raw = quest_logcat('').encode()
+        nonce = 'b1' * 16
+        proof = (nonce, hashlib.sha256(f'{nonce}\nHEADSET-A'.encode()).hexdigest())
+        self.prepare(raw, deviceSerials=['HEADSET-A', 'HEADSET-B'])
+        with patch.object(capture_tool, 'PID_CHECK_SECONDS', .15):
+            with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'device identity differs from the original deployment'):
+                asyncio.run(capture_tool.capture(self.adb, port, admission, self.output, 4, device_identity=proof))
         self.assertEqual('2', (self.root / 'serial-count').read_text())
+        self.assertEqual('1', (self.root / 'pid-count').read_text())
+        self.assertTrue(raw.startswith(self.partial.read_bytes()))
+        self.assertFalse(self.output.exists())
 
     def test_bound_capture_requires_original_openxr_process_and_marker_before_ready(self):
         port, expected, _, _ = capture_tool.read_connection(self.original)
@@ -773,7 +822,7 @@ if settings.get('keepRunning', True):
         self.assertFalse((self.root / 'logcat-child').exists())
         self.assertFalse(self.partial.exists())
 
-        self.prepare(raw, deviceSerials=['HEADSET-A', 'HEADSET-B'])
+        self.prepare(raw, deviceSerials=['HEADSET-A', 'HEADSET-A', 'HEADSET-B'])
         run(proof_args, 'device identity differs from the original deployment', calls_adb=True)
         self.assertFalse(self.output.exists())
         self.assertEqual(raw, self.partial.read_bytes())
@@ -783,7 +832,7 @@ if settings.get('keepRunning', True):
         stdout, _ = run(proof_args, calls_adb=True)
         report = json.loads(stdout)
         self.assertTrue(report['openXRVerified'] and report['deviceIdentityVerified'])
-        self.assertEqual('2', (self.root / 'serial-count').read_text())
+        self.assertEqual('3', (self.root / 'serial-count').read_text())
         self.assertEqual(raw, self.output.read_bytes())
         verified = field.verify(*self.records, quest_player_logs=[(self.address, field.content(self.output), report['logcatPid'])],
                                 quest_launch_reports=[current], quest_launch_release=release)
