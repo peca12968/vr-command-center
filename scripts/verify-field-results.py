@@ -1403,7 +1403,8 @@ def tracked_vr_start_boundary(evidence, session, world, through):
 def verify(topology, server_ips, launcher, session, statistics, endpoint, server_log, player_logs, *, quest_player_logs=(),
            world_journal=None, combat_journal=None, room_alignments=None, udp_preflight=None, udp_source_preflights=None,
            verify_player_sources=False, verify_reconnect_history=False, quest_readiness_reports=(), tracked_vr_start=None,
-           roster_departures=None, require_quest_link_metrics=False, quest_link_criteria=None):
+           roster_departures=None, require_quest_link_metrics=False, quest_link_criteria=None,
+           quest_launch_reports=(), quest_launch_release=None):
     quest_readiness = ()
     require(not (require_quest_link_metrics or quest_link_criteria is not None) or quest_player_logs,
             'Quest link verification requires an original Quest log')
@@ -1412,6 +1413,11 @@ def verify(topology, server_ips, launcher, session, statistics, endpoint, server
         require(world_journal is not None and len(quest_readiness_reports) == len(quest_player_logs),
                 'Provide the closed world journal and one Quest readiness report per original Quest log')
         quest_readiness = single_session_quest_readiness(quest_readiness_reports, session)
+    deployments, launches = None, None
+    if quest_launch_reports or quest_launch_release is not None:
+        require(quest_launch_release is not None and quest_player_logs and len(quest_launch_reports) == len(quest_player_logs),
+                'Provide the original Quest release and one launch report per original Quest log')
+        deployments, launches = single_session_quest_launches(quest_launch_reports, quest_launch_release)
     report, _ = verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log,
                                len(player_logs) + len(quest_player_logs), player_logs, quest_player_logs=quest_player_logs,
                                world_journal=world_journal, combat_journal=combat_journal, room_alignments=room_alignments, udp_preflight=udp_preflight,
@@ -1419,7 +1425,10 @@ def verify(topology, server_ips, launcher, session, statistics, endpoint, server
                                verify_reconnect_history=verify_reconnect_history, quest_readiness=quest_readiness,
                                tracked_vr_start=tracked_vr_start, roster_departures=roster_departures,
                                require_quest_link_metrics=require_quest_link_metrics, quest_link_criteria=quest_link_criteria,
-                               quest_link_issues=quest_link_issues)
+                               quest_link_issues=quest_link_issues, quest_deployments=deployments, quest_openxr_launches=launches)
+    require(not deployments, 'Quest launch reports include seats without original Quest logcat evidence')
+    if launches is not None:
+        report['questOpenXR'] = {'verifiedSeats': len(launches)}
     if quest_link_criteria is not None:
         report['questLinkCriteria'] = check_quest_link_criteria(report.get('questLinkMetrics', []), quest_link_issues, quest_link_criteria)
     return report
@@ -2924,14 +2933,7 @@ def read_quest_readiness_reports(paths, mode, attempts, deployed, evidence_path)
     return sessions, summary
 
 
-def read_quest_deployments(spec, mode, evidence_path, release=None, *, expected_sessions, release_hash=None, capture_reports=(), capture_device_map=None,
-                           readiness_reports=None, inspect_release_coverage=False):
-    expected = {'releaseReport', 'reports'} if release is None else {'reports'}
-    require(type(spec) is dict and set(spec) == expected,
-            'Provide the original Quest deployment reports and exactly one release report for the selected mode')
-    if release is None:
-        release, raw_release = read_quest_document(evidence_path(spec['releaseReport'], kind='questReleaseReport'))
-        release_hash = hashlib.sha256(raw_release).hexdigest()
+def quest_release_apk(release):
     quest = release.get('quest')
     require(release.get('verified') is True and release.get('scope') == 'offline-package-consistency'
             and type(quest) is dict and quest.get('applicationId') == 'com.vrcommand.quest'
@@ -2940,6 +2942,39 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, expected_
     version = integer(quest.get('versionCode'), 1, 2**31 - 1)
     apk_digest = quest.get('sha256')
     require(type(apk_digest) is str and re.fullmatch(r'[0-9a-f]{64}', apk_digest), 'Invalid Quest release APK digest')
+    return version, apk_digest
+
+
+def single_session_quest_launches(reports, release_path):
+    release, release_hash = read_venue_release(release_path)
+    version, _ = quest_release_apk(release)
+    require(version >= 74, 'Quest OpenXR launch verification requires APK version code 74 or later')
+    deployments, launches, nonces = {}, {}, set()
+    for report in reports:
+        require(type(report.get('evidenceVersion')) is int and report['evidenceVersion'] == 1
+                and report.get('status') == 'openxr-ready' and report.get('apkVerified') is True
+                and report.get('filesVerified') is True,
+                'Use an original single-seat Quest OpenXR launch report')
+        require(report.get('venueReleaseReportSha256') == release_hash, 'Quest launch report differs from the original release report')
+        location = (integer(report.get('roomId'), 1, 5), integer(report.get('seat'), 1, 5))
+        proof = quest_openxr_proof(report, True)
+        require(location not in deployments and proof[1] not in nonces, 'Quest launch reports repeat a seat or launch identifier')
+        deployments[location] = (identity(report.get('sessionId')), identity(report.get('playerId')),
+                                 identity(report.get('admissionId')), integer(report.get('port'), 1024, 65535))
+        launches[location] = proof
+        nonces.add(proof[1])
+    return deployments, launches
+
+
+def read_quest_deployments(spec, mode, evidence_path, release=None, *, expected_sessions, release_hash=None, capture_reports=(), capture_device_map=None,
+                           readiness_reports=None, inspect_release_coverage=False):
+    expected = {'releaseReport', 'reports'} if release is None else {'reports'}
+    require(type(spec) is dict and set(spec) == expected,
+            'Provide the original Quest deployment reports and exactly one release report for the selected mode')
+    if release is None:
+        release, raw_release = read_quest_document(evidence_path(spec['releaseReport'], kind='questReleaseReport'))
+        release_hash = hashlib.sha256(raw_release).hexdigest()
+    version, apk_digest = quest_release_apk(release)
     reports = spec['reports']
     require(type(reports) is list and 1 <= len(reports) <= 25, 'Provide 1 to 25 Quest deployment reports')
     attempts = {}
@@ -4480,13 +4515,17 @@ def main():
     parser.add_argument('--quest-maximum-p95-ms', type=int, help='Maximum p95 round trip in milliseconds per Quest seat (0 to 900)')
     parser.add_argument('--quest-readiness-report', action='append', type=Path,
                         help='Original single-player -VerifyPlayerTracking report; repeat once per Quest log')
+    parser.add_argument('--quest-launch-report', action='append', type=Path,
+                        help='Original single-seat -RequireOpenXR deployment report; repeat once per Quest log')
+    parser.add_argument('--quest-launch-release', type=Path, help='Exact original release report used to launch those Quest seats')
     args = parser.parse_args()
     record_paths = [args.session, args.statistics, args.endpoint]
     single_args = [args.topology, args.server_ip, args.launcher_report, args.server_log]
     batch = args.venue_manifest or args.venue_stages
     extra_single_args = [args.world_journal, args.combat_journal, args.room_alignment, args.udp_preflight,
                          args.udp_source_preflight, args.verify_player_sources, args.verify_reconnect_history,
-                         args.quest_readiness_report, args.evidence_zip, args.require_tracked_vr_start, args.player, args.quest_player,
+                         args.quest_readiness_report, args.quest_launch_report, args.quest_launch_release,
+                         args.evidence_zip, args.require_tracked_vr_start, args.player, args.quest_player,
                          args.require_quest_link_metrics, *record_paths]
     if (batch and (any(single_args + extra_single_args) or args.quest_minimum_replies is not None
                    or args.quest_maximum_p95_ms is not None)) or (not batch and not all(single_args)):
@@ -4527,6 +4566,10 @@ def main():
                 require(args.world_journal is not None and len(args.quest_readiness_report) == len(quest),
                         'Provide the closed world journal and one Quest readiness report per original Quest log')
                 inputs.extend(args.quest_readiness_report)
+            if args.quest_launch_report or args.quest_launch_release is not None:
+                require(args.quest_launch_release is not None and quest and len(args.quest_launch_report or ()) == len(quest),
+                        'Provide the original Quest release and one launch report per original Quest log')
+                inputs.extend([args.quest_launch_release, *args.quest_launch_report])
             if args.udp_preflight is not None:
                 inputs.extend(args.udp_preflight)
             if args.udp_source_preflight is not None:
@@ -4560,6 +4603,8 @@ def main():
                             udp_preflight=args.udp_preflight, udp_source_preflights=args.udp_source_preflight,
                             verify_player_sources=args.verify_player_sources, verify_reconnect_history=args.verify_reconnect_history,
                             quest_readiness_reports=[read_quest_json(path) for path in args.quest_readiness_report or ()],
+                            quest_launch_reports=[read_quest_json(path) for path in args.quest_launch_report or ()],
+                            quest_launch_release=args.quest_launch_release,
                             tracked_vr_start=evidence.get('tracked-vr-start.json'), roster_departures=evidence.get('roster-departures.json'),
                             require_quest_link_metrics=args.require_quest_link_metrics, quest_link_criteria=quest_link_criteria)
     except QuestOpenXRIncomplete as error:

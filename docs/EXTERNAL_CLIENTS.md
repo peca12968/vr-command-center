@@ -532,6 +532,10 @@ Quest 3 席位使用 `--quest-player 192.168.1.21 '.\quest logcat.txt' 7342`，�
 
 在單場命令加入 `--world-journal .\room-01.worldlog` 和 `--quest-readiness-report .\quest-player-readiness.json`。每份 `--quest-player` 日誌各提供一份開場前成功的 `-VerifyPlayerTracking` 回條，可用任意順序傳入。工具用原場次和入場雜湊配對席位，再確認回條的原管理序號、世界序號和擷取時間能對回封存中的 GameServer 準備畫格，以及畫格中的玩家已連線並有 `Tracked` 姿態。摘要在 `worldJournal.questReadinessFrames` 按畫格列出核對席數。 [保存開場回條](QUEST3.md#單房實機追蹤驗收)
 
+### 核對單場 Quest OpenXR 啟動回條
+
+在原單場驗收命令加上 `--quest-launch-release .\venue-release.json`，每份 `--quest-player` 日誌再各加一份 `--quest-launch-report .\quest-launch.json`。使用本場部署時 `-RequireOpenXR` 回傳、含 `evidenceVersion` 的原始 JSON，以及部署時指定的原發行報告。回條可用任意順序傳入。工具會比對場次、原入場、房間席位、伺服器埠和發行報告摘要，再從同一 PID 的原始日誌核對 OpenXR 啟動標記先於最終戰績。通過時，摘要的 `questOpenXR.verifiedSeats` 列出核對席數。 [單席部署](QUEST3.md#使用頭盔上已安裝的-apk-加入場次)
+
 ### 一次核對五房 25 席
 
 兩種模式各準備一份私人 `venue.json`。使用 `--peer-diagnostics on` 啟動參與驗收的每個遊戲伺服器，並由主控一次結束全館。等待各場雙封存、原伺服器終止及玩家寫完戰績，保留同場啟動器 `--report`、原始 `server.log` 及每位玩家的完整日誌。

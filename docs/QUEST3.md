@@ -111,7 +111,7 @@ pwsh -NoProfile -NonInteractive -File .\scripts\deploy-quest.ps1 -ClientConfig .
   -ManagementApi http://127.0.0.1:5080
 ```
 
-從五房 ZIP 部署單席時，也可搭配 `-VenueBundle`、`-RoomId` 和 `-Seat`。MR 仍使用該席原場次鎖定的校正檔。`-RequireOpenXR` 的成功回條只確認本次程序的 OpenXR 啟動，入場與追蹤依上方單房實機流程核對。
+從五房 ZIP 部署單席時，也可搭配 `-VenueBundle`、`-RoomId` 和 `-Seat`。MR 仍使用該席原場次鎖定的校正檔。請保存 `-RequireOpenXR` 成功輸出的原樣 JSON。它記錄本次程序、啟動識別、席位和發行報告摘要，戰後可與同一程序的日誌及原入場一起核對。入場與追蹤依上方單房實機流程確認。 [驗收啟動回條](EXTERNAL_CLIENTS.md#核對單場-quest-openxr-啟動回條)
 
 ## 開場前從頭盔執行 UDP 預檢
 

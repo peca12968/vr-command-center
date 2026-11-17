@@ -592,6 +592,9 @@ class QuestDeployTests(unittest.TestCase):
         self.assertEqual(expected, hashlib.sha256(apk.read_bytes()).hexdigest())
 
     def test_single_seat_can_launch_the_verified_installed_apk_without_a_local_copy(self):
+        session, player, admission = (uuid.uuid4() for _ in range(3))
+        self.player['joinTicket'] = make_ticket(5, 1, self.expiry, session, player, admission)
+        self.write(self.config, self.player)
         digest = hashlib.sha256(b'preinstalled APK').hexdigest()
         release = self.root / 'release.json'
         self.write(release, {'verified': True, 'scope': 'offline-package-consistency', 'quest': {
@@ -622,6 +625,10 @@ class QuestDeployTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         receipt = json.loads(result.stdout)
         self.assertEqual(('openxr-ready', True, True), tuple(receipt[key] for key in ('status', 'apkVerified', 'filesVerified')))
+        self.assertEqual((1, 5, 2, str(session), str(player), str(admission), self.player['port']), tuple(
+            receipt[key] for key in ('evidenceVersion', 'roomId', 'seat', 'sessionId', 'playerId', 'admissionId', 'port')))
+        self.assertEqual(hashlib.sha256(release.read_bytes()).hexdigest(), receipt['venueReleaseReportSha256'])
+        self.assertNotIn(self.player['joinTicket'], result.stdout)
         self.assertEqual(4242, receipt['openXR']['processId'])
         commands = self.commands.read_text(encoding='utf-8')
         self.assertNotIn(' install ', commands)

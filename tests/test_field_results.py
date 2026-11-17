@@ -5955,6 +5955,87 @@ class FieldResultsTests(unittest.TestCase):
             self.assertEqual(1, duplicate.returncode)
             self.assertNotIn(directory, duplicate.stderr)
 
+    def test_single_session_cli_matches_quest_launch_reports_to_sealed_admissions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, manifest, _ = venue_fixture(root, 'Independent', remote=True, quest_per_room=2,
+                                           room_sizes=(3,) * 5, game_server=True)
+            entry = manifest['sessions'][0]
+            evidence = root / entry['evidenceZip']
+            session, _, endpoint = field.management_zip(evidence)
+            release = root / 'release.json'
+            release.write_text(json.dumps({'verified': True, 'scope': 'offline-package-consistency', 'quest': {
+                'applicationId': 'com.vrcommand.quest', 'architecture': 'arm64-v8a', 'signatureV2': True,
+                'versionCode': 77, 'sha256': 'a' * 64}}), encoding='utf-8')
+            release_raw = release.read_bytes()
+            release_hash = hashlib.sha256(release_raw).hexdigest()
+            command = [sys.executable, str(SCRIPT), '--topology', 'direct-lan', '--server-ip', manifest['serverIps'][0],
+                       '--launcher-report', str(root / entry['launcherReport']), '--server-log', str(root / entry['serverLog']),
+                       '--evidence-zip', str(evidence)]
+            originals = []
+            for owner, player in zip(session['players'], entry['players']):
+                log = root / player['log']
+                if 'logcatPid' not in player:
+                    command += ['--player', player['address'], str(log)]
+                    continue
+                process = player['logcatPid']
+                command += ['--quest-player', player['address'], str(log), str(process)]
+                nonce = f"{owner['seat'] + 1:032x}"
+                marker = logcat_line(f'VR_QUEST_OPENXR nonce={nonce} loader=1 display=1 input=1', process).encode()
+                original = log.read_bytes()
+                log.write_bytes(marker + original)
+                receipt = {'evidenceVersion': 1, 'status': 'openxr-ready', 'roomId': owner['roomId'], 'seat': owner['seat'] + 1,
+                           'sessionId': session['id'], 'playerId': owner['id'], 'admissionId': owner['admissionId'],
+                           'port': endpoint['port'], 'apkVerified': True, 'filesVerified': True,
+                           'venueReleaseReportSha256': release_hash, 'openXR': {'processId': process, 'nonce': nonce}}
+                path = root / f"launch-{owner['seat']}.json"
+                path.write_text(json.dumps(receipt), encoding='utf-8')
+                originals.append((path, receipt, log, original, marker))
+
+            def run(*options):
+                return subprocess.run(command + list(options), capture_output=True, encoding='utf-8', timeout=10)
+
+            reports = []
+            for path, *_ in reversed(originals):
+                reports += ['--quest-launch-report', str(path)]
+            flags = ['--quest-launch-release', str(release), *reports]
+            accepted = run(*flags)
+            self.assertEqual(0, accepted.returncode, accepted.stderr)
+            self.assertEqual({'verifiedSeats': 2}, json.loads(accepted.stdout)['questOpenXR'])
+            self.assertNotIn('questOpenXR', json.loads(run().stdout))
+            for _, row, _, _, _ in originals:
+                self.assertNotIn(row['openXR']['nonce'], accepted.stdout)
+                self.assertNotIn(row['admissionId'], accepted.stdout)
+
+            for options in (reports, flags[:-2]):
+                rejected = run(*options)
+                self.assertEqual(1, rejected.returncode)
+                self.assertIn('one launch report per original Quest log', rejected.stderr)
+
+            release.write_bytes(release_raw + b'\n')
+            rejected = run(*flags)
+            self.assertEqual(1, rejected.returncode)
+            self.assertIn('differs from the original release report', rejected.stderr)
+            release.write_bytes(release_raw)
+
+            path, receipt, log, original, marker = originals[0]
+            for change, message in (
+                ({'admissionId': id_for(9999)}, 'original admission and endpoint'),
+                ({'port': endpoint['port'] + 1}, 'original admission and endpoint'),
+                ({'openXR': dict(receipt['openXR'], processId=receipt['openXR']['processId'] + 1)}, 'PID differs'),
+                ({'openXR': originals[1][1]['openXR']}, 'repeat a seat or launch identifier'),
+            ):
+                with self.subTest(change=change):
+                    path.write_text(json.dumps(dict(receipt, **change)), encoding='utf-8')
+                    rejected = run(*flags)
+                    self.assertEqual(1, rejected.returncode)
+                    self.assertIn(message, rejected.stderr)
+            path.write_text(json.dumps(receipt), encoding='utf-8')
+            log.write_bytes(original + marker)
+            rejected = run(*flags)
+            self.assertEqual(1, rejected.returncode)
+            self.assertIn('marker must precede the final result', rejected.stderr)
+
     def test_single_session_cli_matches_quest_readiness_to_original_admission(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
