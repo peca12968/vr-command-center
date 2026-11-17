@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 從全館戰績直接回看最近中彈
+
+- 管理台 0.31.240 在全館席位與離場戰績列提供「跳到最近中彈」。主控會進入原場次、原房間與該玩家的錄製，先核對原封存尾端及戰績，再搜尋保存的最近中彈畫格。沒有中彈的玩家仍能使用個人回放。 [操作方式](REPORTS.md#從戰績開啟個人回放)
+- 正式解壓包經本機 IPC 與 Chromium 通過 9 項。五房獨立與合併排演各有留場及離場玩家，兩人的最近中彈分別停在第 3 和第 4 格，原雙封存尾端為第 5 格。合併場另外以第 1 房已另建場次重驗。捷徑未送出管理寫入，管理程序 TCP、UDP 端點及清理後活動場次皆為零。測試夾具補齊事件敵軍識別與端點公告，請求記錄另依實際 API 區別唯讀任務配置試算。Node 133 項通過。 [瀏覽器驗證](../artifacts/closure-damage-review-031240/package-reused-room/checks.json) · [本機 IPC](../artifacts/closure-damage-review-031240/package-reused-room/runtime.json)
+- 管理包核對 589 檔，與既有 Windows／Quest 0.50.12 通過離線發行核對。Quest USB 仍無 ADB 偵錯介面，實機與跨機待驗。GitHub Actions 對 `fe80ecb` 回報帳務或支出上限，工作未啟動。 [Windows 管理包](../artifacts/closure-damage-review-031240/final/VRCommand-ControlServer-0.31.240.zip) · [發行核對](../artifacts/closure-damage-review-031240/final/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44003066813)
+
 ## 2026-11-17 戰後核對 Quest UDP 雙端原檔
 
 - 戰後驗收與全館預檢共用 Quest 逐席回條解析。驗收要求逐席檔案與原房組清單一致，並核對監聽端及探測端 SHA-256。已通過驗收的原始雙端檔在讀取場次證據後會再核對一次。 [封存核對方式](EXTERNAL_CLIENTS.md#核對每個玩家來源的-udp-預檢)
