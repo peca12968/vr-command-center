@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 五房網路清單核對原啟動修訂
+
+- 控制台 0.31.238 與離線準備工具會在 UDP 清單記錄各端點的原場次、任務版本和名冊修訂。全館及 Quest 預檢可對照原 Windows 啟動計畫與預覽。封存驗收會對照原場次及附掛來源時的修訂。版本 1 的舊清單沿用原端點及席位核對。 [場館網路清單](EXTERNAL_CLIENTS.md#從原啟動預覽產生網路清單)
+- 最終解壓包經本機 IPC 和 Chromium 通過 37 項。獨立與合併的實際下載保留原啟動欄位，10 席排演在第 5 房同一席更換玩家後拒絕舊版清單。用舊清單及同次預覽夾具可辨識 10 個來源，雙端 UDP 證據仍待補。首輪 10 席夾具的 JavaScript 路徑字串遺失反斜線，補正有效路徑後沿原斷言通過。管理程序 TCP／UDP 端點為零，活動場次為零。 [本機 IPC 結果](../artifacts/network-launch-identity-031238/package-verified/checks.json) · [10 席待補檢查](../artifacts/network-launch-identity-031238/package-verified/linked-ten-original-readiness.json)
+- 154 項封存回歸、10 項網路清單、133 項 Node 通過。Quest 預檢計畫共 8 項通過，1 項本機 UDP 在防火牆啟動前查核略過。前輪封存夾具的管理證據與終止報告修訂不一致，修正兩份同源夾具後複驗。原 Windows 六批封存重驗仍有 80 筆戰績確認，摘要逐位元相同。管理包核對 589 檔，與既有 Windows／Quest 0.50.12 通過離線發行核對。GitHub Actions 對 `9e223ae` 因帳務或支出上限未啟動。Quest USB 仍無 ADB 介面，實機及跨機待驗。 [Windows 管理包](../artifacts/network-launch-identity-031238/final/VRCommand-ControlServer-0.31.238.zip) · [完整封存測試](../artifacts/network-launch-identity-031238/field-tests.log) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43995442658)
+
 ## 2026-11-17 小規模五房試場的開場條件與回放
 
 - 控制台 0.31.237 的五房追蹤與有效姿態政策可選每房 1、2 或 5 席。伺服器核對五房原版本、第 1 席起的完整名冊及有效準備快照。額外登記、缺席或姿態失效均會阻止整批。5／10 席開場回條及封存保存每房席數，重試會比對原請求，回放和離線工具依原數字核對開場畫格。 [主控操作](PLAYER_READINESS.md#五房追蹤驗收開場) · [封存核對](EXTERNAL_CLIENTS.md#核對五房追蹤開場錄製)
