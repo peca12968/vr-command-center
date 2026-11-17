@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 無人值守啟動查核與 Quest 裝置表驗收
+
+- `f17c375` 補上管理服務 GUI 的 Python 連接埠探測查核。GUI 與 HTTPS 測試每次啟動管理程序前重查實際路徑，HTTPS 遊戲測試在準備場次及啟動伺服器前重查 `VrCommand.exe`。10 項啟動回歸通過。以這台 Windows 的設定執行三個入口，皆在啟動前退出 2。開發版遊戲程序數前後皆為零，兩個管理測試未建立執行目錄。 [遊戲啟動紀錄](../artifacts/windows-unattended-bdf099c6/startup-refusal.json) · [管理入口紀錄](../artifacts/windows-unattended-bdf099c6/control-refusal.json)
+- `4f68a75` 讓五房驗收使用原裝置表重算擷取指紋，並查驗報告所引用的部署與場館 ZIP。10 項相關回歸通過。合併與五房獨立模式各 25 個模擬席位通過，包含擷取中斷後分批重試。互換兩席的 ADB 標籤時，兩種模式都拒絕驗收，舊版則接受。 [修正前](../artifacts/quest-capture-map-audit-20261117/before.log) · [五房離線驗收](../artifacts/quest-capture-map-audit-20261117/venue-cli.json)
+- Quest 的 USB 查核仍只列出檔案傳輸介面，實機驗收待 ADB 可用。本次推送觸發的 GitHub Actions 因帳務或支出上限未開始。 [USB 查核](../artifacts/quest-capture-map-audit-20261117/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44044850945)
+
 ## 2026-11-17 擷取期間重查 Quest 頭盔與程序
 
 - `94c9711` 在有裝置指紋的單席或批次擷取中，會在每次通報連線就緒前查驗原頭盔與 PID，等待日誌時也會定期重查。舊版在模擬換機後會先發出第二次就緒，再於最後一次檢查中止。新版在重連時拒絕通報並保留已讀的 `.partial`。 [Quest 操作](QUEST3.md#收集-quest-場館驗收日誌) · [修正前](../artifacts/quest-live-capture-device-20261117/before.log)
