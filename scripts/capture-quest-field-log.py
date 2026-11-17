@@ -428,9 +428,10 @@ def main():
             field.require(re.fullmatch(r'[A-Za-z0-9\[][A-Za-z0-9._:%\[\]-]{0,127}', args.serial), 'Use a valid explicit ADB serial')
             port, admission, seat, address = read_connection(args.connection_file)
             openxr = None
+            device_identity = None
             if args.quest_launch_report is not None:
                 launch, raw = field.read_quest_document(args.quest_launch_report)
-                deployments, launches, server_addresses = field.single_session_quest_launches([launch], args.quest_launch_release)
+                deployments, launches, server_addresses, devices = field.single_session_quest_launches([launch], args.quest_launch_release)
                 location = (admission['roomId'], seat)
                 original = (admission['sessionId'], admission['playerId'], admission['admissionId'], port)
                 field.require(deployments.get(location) == original,
@@ -439,15 +440,18 @@ def main():
                     field.require(server_addresses[location] == field.quest_server_address_sha256(address),
                                   'Quest launch server address differs from the original connection')
                 openxr = launches[location]
+                device_identity = devices.get(location)
             check_adb_startup()
             deadline = time.monotonic() + args.seconds
             target = select_adb_transport(adb, read_adb_transports(adb, args.seconds), args.serial)
             remaining = deadline - time.monotonic()
             field.require(remaining > 0, 'Capture timed out before checking the Quest process')
-            report = asyncio.run(capture(target, port, admission, args.output, remaining, openxr=openxr,
+            report = asyncio.run(capture(target, port, admission, args.output, remaining, openxr=openxr, device_identity=device_identity,
                                          on_disconnected=lambda pid: report_capture_status(pid, stage='capture-disconnected')))
             if openxr is not None:
                 report.update(openXRVerified=True, questLaunchReportSha256=hashlib.sha256(raw).hexdigest())
+            if device_identity is not None:
+                report['deviceIdentityVerified'] = True
     except (field.EvidenceError, AdbTransportError) as error:
         parser.exit(1, f'Quest capture incomplete. {error}.\n')
     except (OSError, UnicodeError, ValueError, KeyError, TypeError, TimeoutError, RecursionError, KeyboardInterrupt):

@@ -725,7 +725,7 @@ if settings.get('keepRunning', True):
                 else:
                     capture_tool.main()
                 self.assertEqual([int(calls_adb)] * 3, [preflight.call_count, inventory.call_count, select.call_count])
-            for private in (self.ticket, nonce, str(self.root), 'fixture-device'):
+            for private in (self.ticket, nonce, str(self.root), 'fixture-device', 'HEADSET-A', 'HEADSET-B'):
                 self.assertNotIn(private, stdout.getvalue() + stderr.getvalue())
             return stdout.getvalue(), stderr.getvalue()
 
@@ -757,6 +757,36 @@ if settings.get('keepRunning', True):
         self.records[3]['players'][1]['seat'] = 1
         verified = field.verify(*self.records, quest_player_logs=[(self.address, field.content(self.output), report['logcatPid'])],
                                 quest_launch_reports=[receipt], quest_launch_release=release)
+        self.assertEqual({'verifiedSeats': 1}, verified['questOpenXR'])
+        self.assertNotIn('deviceIdentityVerified', report)
+
+        self.output.unlink()
+        (self.root / 'logcat-child').unlink()
+        self.prepare(raw)
+        launch.write_text(json.dumps(dict(receipt, evidenceVersion=3)), encoding='utf-8')
+        run(proof_args, 'Invalid Quest launch device fingerprint')
+        current = dict(receipt, evidenceVersion=3, deviceFingerprint=hashlib.sha256(f'{nonce}\nHEADSET-A'.encode()).hexdigest())
+        launch.write_text(json.dumps(current), encoding='utf-8')
+        self.prepare(raw, deviceSerials=['HEADSET-B'])
+        run(proof_args, 'device identity differs from the original deployment', calls_adb=True)
+        self.assertFalse((self.root / 'pid-count').exists())
+        self.assertFalse((self.root / 'logcat-child').exists())
+        self.assertFalse(self.partial.exists())
+
+        self.prepare(raw, deviceSerials=['HEADSET-A', 'HEADSET-B'])
+        run(proof_args, 'device identity differs from the original deployment', calls_adb=True)
+        self.assertFalse(self.output.exists())
+        self.assertEqual(raw, self.partial.read_bytes())
+        self.partial.unlink()
+
+        self.prepare(raw, deviceSerials=['headset-a', 'HEADSET-A'])
+        stdout, _ = run(proof_args, calls_adb=True)
+        report = json.loads(stdout)
+        self.assertTrue(report['openXRVerified'] and report['deviceIdentityVerified'])
+        self.assertEqual('2', (self.root / 'serial-count').read_text())
+        self.assertEqual(raw, self.output.read_bytes())
+        verified = field.verify(*self.records, quest_player_logs=[(self.address, field.content(self.output), report['logcatPid'])],
+                                quest_launch_reports=[current], quest_launch_release=release)
         self.assertEqual({'verifiedSeats': 1}, verified['questOpenXR'])
 
 

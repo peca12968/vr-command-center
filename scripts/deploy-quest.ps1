@@ -1128,6 +1128,12 @@ function Read-QuestDeviceSerial([string[]]$Target) {
     return [string]$lines[0]
 }
 
+function Confirm-QuestDeviceSerial([string[]]$Target, [string]$ExpectedSerial) {
+    if ($ExpectedSerial -and (Read-QuestDeviceSerial $Target) -ine $ExpectedSerial) {
+        throw 'Could not confirm the original Quest device identity. Deployment stopped.'
+    }
+}
+
 function Get-QuestSha256([byte[]]$Bytes) {
     $sha = [Security.Cryptography.SHA256]::Create()
     try { return [BitConverter]::ToString($sha.ComputeHash($Bytes)).Replace('-', '').ToLowerInvariant() }
@@ -1739,8 +1745,9 @@ function Confirm-QuestFileHash([string[]]$Target, [string]$Path, [string]$Expect
 
 function Publish-QuestFile([string[]]$Target, [string]$Local, [string]$Staging, [string]$Destination, [string]$Description,
     [string]$ExpectedHash, [string]$ContentHash, [scriptblock]$BeforeActivation, [hashtable]$ConnectionDeployment,
-    [hashtable]$RequiredAlignment) {
+    [hashtable]$RequiredAlignment, [string]$OriginalDeviceSerial) {
     $stagedHash = if ($ContentHash) { $ContentHash } else { (Get-FileHash -LiteralPath $Local -Algorithm SHA256).Hash.ToLowerInvariant() }
+    Confirm-QuestDeviceSerial $Target $OriginalDeviceSerial
     try {
         Invoke-QuestAdb ($Target + @('push', $Local, $Staging)) | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "$Description could not be copied." }
@@ -1758,6 +1765,7 @@ function Publish-QuestFile([string[]]$Target, [string]$Local, [string]$Staging, 
                 -f $RequiredAlignment.Path, $RequiredAlignment.Hash
         }
         $command += 'mv -f ''{0}'' ''{1}''' -f $Staging, $Destination
+        Confirm-QuestDeviceSerial $Target $OriginalDeviceSerial
         Invoke-QuestAdb ($Target + @('shell', $command)) *> $null
         if ($LASTEXITCODE -eq 43 -and $RequiredAlignment) {
             throw [IO.InvalidDataException]::new('Room alignment file could not be verified on the selected Quest.')
@@ -1776,6 +1784,7 @@ function Publish-QuestFile([string[]]$Target, [string]$Local, [string]$Staging, 
     } catch {
         $publishError = $_
         try {
+            Confirm-QuestDeviceSerial $Target $OriginalDeviceSerial
             Invoke-QuestAdb ($Target + @('shell', 'rm', '-f', $Staging)) *> $null
             if ($LASTEXITCODE -ne 0) { throw 'ADB cleanup failed.' }
         } catch {
@@ -1854,7 +1863,8 @@ function Update-QuestPlayerTicket($ConnectionFile, $Ticket, $Target) {
 }
 
 function Set-QuestConnection([string[]]$Target, $Config, $Ticket, $Alignment, [switch]$UsePassthrough, [switch]$RequestMixedReality,
-    [hashtable]$Deployment = @{}, $LiveVenue, $LiveSeat, [scriptblock]$BeforeLaunch) {
+    [hashtable]$Deployment = @{}, $LiveVenue, $LiveSeat, [scriptblock]$BeforeLaunch, [string]$OriginalDeviceSerial) {
+    Confirm-QuestDeviceSerial $Target $OriginalDeviceSerial
     $Deployment.Step = 'resolve-launcher'
     $activity = Get-QuestLauncherActivity $Target
     $nonce = if ($RequireOpenXR) { [Guid]::NewGuid().ToString('N') }
@@ -1872,7 +1882,7 @@ function Set-QuestConnection([string[]]$Target, $Config, $Ticket, $Alignment, [s
         try {
             [IO.File]::WriteAllBytes($stagedAlignment, $Alignment.Bytes)
             Publish-QuestFile $Target $stagedAlignment "$remoteDirectory/vr-room-alignment-$deploymentId.tmp" `
-                $requiredAlignment.Path 'Room alignment file' -ContentHash $alignmentHash
+                $requiredAlignment.Path 'Room alignment file' -ContentHash $alignmentHash -OriginalDeviceSerial $OriginalDeviceSerial
         } finally { Remove-Item -LiteralPath $stagedAlignment }
         if (-not $Ticket.AlignmentHash) { $Config | Add-Member -NotePropertyName 'roomAlignmentSha256' -NotePropertyValue $alignmentHash }
     }
@@ -1889,7 +1899,7 @@ function Set-QuestConnection([string[]]$Target, $Config, $Ticket, $Alignment, [s
         # The active config is the commit point. Its referenced alignment is already verified by hash.
         Publish-QuestFile $Target $stagedConfig "$remoteDirectory/vr-connection-$deploymentId.tmp" `
             "$remoteDirectory/vr-connection.json" 'Player connection file' -ConnectionDeployment $Deployment `
-            -RequiredAlignment $requiredAlignment -BeforeActivation {
+            -RequiredAlignment $requiredAlignment -OriginalDeviceSerial $OriginalDeviceSerial -BeforeActivation {
                 if ($LiveVenue) {
                     $Deployment.Step = 'verify-live-venue-before-stop'
                     Confirm-VenueReadback $LiveVenue -RequireLiveSource
@@ -1901,6 +1911,7 @@ function Set-QuestConnection([string[]]$Target, $Config, $Ticket, $Alignment, [s
                 if ($LiveSeat) { Confirm-QuestPlayerReadback $LiveSeat }
                 $Deployment.Step = 'check-expiry-before-stop'
                 if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired before activation. Download a fresh connection file.' }
+                Confirm-QuestDeviceSerial $Target $OriginalDeviceSerial
                 $Deployment.Step = 'stop-game'
                 Invoke-QuestAdb ($Target + @('shell', 'am', 'force-stop', 'com.vrcommand.quest')) | Out-Null
                 if ($LASTEXITCODE -ne 0) { throw 'Quest app could not be stopped before activating configuration.' }
@@ -1917,10 +1928,12 @@ function Set-QuestConnection([string[]]$Target, $Config, $Ticket, $Alignment, [s
         if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired before launch. Download a fresh connection file.' }
     }
     $Deployment.Step = 'launch-game'
+    Confirm-QuestDeviceSerial $Target $OriginalDeviceSerial
     Start-QuestCheckedActivity $Target $activity $nonce
     if ($RequireOpenXR) {
         $Deployment.Step = 'observe-openxr'
         $observation = Read-QuestLaunchedProcess $Target $nonce
+        Confirm-QuestDeviceSerial $Target $OriginalDeviceSerial
         $Deployment.OpenXR = [ordered]@{ processId = $observation.processId; nonce = $nonce }
     }
 }
@@ -2299,6 +2312,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Could not identify the selected Android device. On Windows, check USB and ADB with scripts/check-quest-usb.ps1.' }
     $model = ([string]$model).Trim()
     if ($model -ne 'Quest 3') { throw 'Selected device is not a Meta Quest 3. No app was installed.' }
+    $originalDeviceSerial = if ($RequireOpenXR) { Read-QuestDeviceSerial $deviceTarget }
+    if ($RequireOpenXR -and -not $originalDeviceSerial) { throw 'Could not read the original Quest device identity.' }
     if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') { Confirm-VenueReadback $venue -RequireLiveSource }
     if ($release -and -not $UseInstalledApk) {
         $stagedApk = New-VerifiedQuestApk $apk $release.sha256
@@ -2306,6 +2321,7 @@ try {
     }
     if ($liveSeat) { Confirm-QuestPlayerReadback $liveSeat }
     if (-not $UseInstalledApk) {
+        Confirm-QuestDeviceSerial $deviceTarget $originalDeviceSerial
         if ($RequireOpenXR) { Invoke-QuestAdb ($deviceTarget + @('install', '-r', $apk)) *> $null }
         else { Invoke-QuestAdb ($deviceTarget + @('install', '-r', $apk)) }
         if ($LASTEXITCODE -ne 0) { throw 'APK installation failed.' }
@@ -2315,16 +2331,18 @@ try {
     }
     if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') { Confirm-VenueReadback $venue -RequireLiveSource }
     Set-QuestConnection $deviceTarget $config $ticket $alignment -UsePassthrough:$Passthrough -RequestMixedReality:$isMixedReality `
-        -LiveVenue $(if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') { $venue }) -LiveSeat $liveSeat -Deployment $deployment
+        -LiveVenue $(if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') { $venue }) -LiveSeat $liveSeat -Deployment $deployment `
+        -OriginalDeviceSerial $originalDeviceSerial
 } finally {
     $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose()
     if ($stagedApk) { Remove-Item -LiteralPath $stagedApk -ErrorAction SilentlyContinue }
 }
 if ($RequireOpenXR) {
-    [ordered]@{ evidenceVersion = 2; status = 'openxr-ready'; roomId = $ticket.RoomId; seat = $ticket.Seat + 1;
+    [ordered]@{ evidenceVersion = 3; status = 'openxr-ready'; roomId = $ticket.RoomId; seat = $ticket.Seat + 1;
         sessionId = $ticket.SessionId.ToString('D'); playerId = $ticket.PlayerId.ToString('D');
         admissionId = $ticket.AdmissionId.ToString('D'); port = $config.port;
         serverAddressSha256 = Get-QuestSha256 ([Text.Encoding]::UTF8.GetBytes($config.address));
+        deviceFingerprint = Get-QuestDeploymentFingerprint $deployment.OpenXR.nonce ($originalDeviceSerial.ToUpperInvariant());
         apkVerified = $true; filesVerified = $true; openXR = $deployment.OpenXR
         venueReleaseReportSha256 = $release.reportSha256 } | ConvertTo-Json -Compress
 } elseif ($UseInstalledApk) {

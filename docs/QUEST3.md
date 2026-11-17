@@ -873,6 +873,8 @@ python .\scripts\capture-quest-field-log.py --adb $adb --serial $serial `
 
 單席啟動回條 `evidenceVersion: 2` 保存連線檔伺服器位址的 SHA-256。擷取程式在 ADB 前會比對原位址及 UDP 埠。要用原端點完成戰後驗收，請使用主控公告的 IPv4 連線檔。舊回條可沿用原來的入場、埠及啟動檢查。
 
+單席回條 `evidenceVersion: 3` 也帶有以該次啟動識別碼計算的裝置指紋。ADB 連線識別碼由服務程序依序分配，因此部署工具在安裝、切換設定及確認 OpenXR 時會重查原頭盔。擷取工具在開始讀取和發布日誌前各核對一次。成功時會輸出 `deviceIdentityVerified: true`。若最後一次比對失敗，已讀日誌保留為 `.partial`。回條省略原始序號。 [ADB 連線識別碼實作](https://android.googlesource.com/platform/packages/modules/adb/+/HEAD/transport.cpp#288)
+
 擷取預設最多 1,800 秒及 16 MiB，可用 `--seconds` 指定 1 至 7,200 秒。若原啟動記錄已被覆蓋、PID 更換、ADB 中斷或逾時，工具以退出碼 1 結束，保留該席已寫入的 `.partial`。ADB 連線重建後，即使序號與 PID 相同，仍須開始新一輪擷取。五房使用新資料夾補讀失敗席位。擷取只讀取 ADB 裝置清單、原遊戲程序與日誌。
 
 正式日誌在核對完成並關閉暫存檔後才一次出現。若這段期間同名正式檔已存在，擷取會保留原檔和本輪的 `.partial`，並回報該席未完成。

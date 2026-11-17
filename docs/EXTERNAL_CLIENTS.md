@@ -538,6 +538,8 @@ Quest 3 席位使用 `--quest-player 192.168.1.21 '.\quest logcat.txt' 7342`，�
 
 `evidenceVersion: 2` 回條也會以 SHA-256 核對原公告端點的 IPv4。若同一 UDP 埠的位址已更換，請提供與封存端點相符的原部署回條。仍可讀取舊版回條。
 
+`evidenceVersion: 3` 延續端點核對，並提供裝置指紋供擷取工具比對實際頭盔。使用原啟動回條擷取時，可在工具輸出核對 `deviceIdentityVerified`，再保存原日誌、啟動回條與發行報告供戰後查閱。 [擷取原日誌](QUEST3.md#收集-quest-場館驗收日誌)
+
 ### 一次核對五房 25 席
 
 兩種模式各準備一份私人 `venue.json`。使用 `--peer-diagnostics on` 啟動參與驗收的每個遊戲伺服器，並由主控一次結束全館。等待各場雙封存、原伺服器終止及玩家寫完戰績，保留同場啟動器 `--report`、原始 `server.log` 及每位玩家的完整日誌。

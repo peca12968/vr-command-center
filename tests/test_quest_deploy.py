@@ -24,7 +24,19 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
+from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
+
 CAPTURE_FIXTURE = ROOT / 'tests/fixtures/run-quest-capture.py'
+
+
+@contextmanager
+def quest_management_server(handler):
+    try:
+        require_silent_windows_launch(sys.executable)
+    except WindowsFirewallLaunchError as error:
+        raise unittest.SkipTest(str(error)) from error
+    with ThreadingHTTPServer(('127.0.0.1', 0), handler) as server:
+        yield server
 
 
 def tracked_world_player(readiness):
@@ -45,6 +57,7 @@ $remote = Join-Path $env:QUEST_TEST_ROOT 'remote'
 $installedApp = Join-Path $env:QUEST_TEST_ROOT 'installed-app'
 $probeNonce = Join-Path $env:QUEST_TEST_ROOT 'openxr-probe'
 $disconnected = Join-Path $env:QUEST_TEST_ROOT 'disconnected'
+$replacedDevice = Join-Path $env:QUEST_TEST_ROOT 'replaced-device'
 [IO.File]::AppendAllText((Join-Path $env:QUEST_TEST_ROOT 'adb.log'), (($args -join ' ') + "`n"))
 if ($args[0] -eq 'devices') {
     "List of devices attached"
@@ -89,6 +102,7 @@ switch ($args[2]) {
     'push' {
         $staging = Join-Path $remote ($args[4].Split('/')[-1])
         Copy-Item -LiteralPath $args[3] -Destination $staging
+        if ($env:QUEST_TEST_FAIL -eq 'different-device-after-copy') { [IO.File]::WriteAllText($replacedDevice, 'replacement') }
         if ($env:QUEST_TEST_FAIL -eq 'refresh-source-changed') {
             [IO.File]::AppendAllText((Join-Path $remote 'vr-connection.json'), "`n")
         }
@@ -136,6 +150,12 @@ switch ($args[2]) {
             }
             'getprop' {
                 if ($env:QUEST_TEST_FAIL -eq 'getprop') { exit 1 }
+                if ($args[4] -ceq 'ro.serialno') {
+                    if ($env:QUEST_TEST_FAIL -eq 'missing-device-identity') { 'unknown' }
+                    elseif ([IO.File]::Exists($replacedDevice)) { 'HEADSET-B' }
+                    else { 'headset-a' }
+                    exit 0
+                }
                 if ($env:QUEST_TEST_FAIL -eq 'model') { 'Quest 2' } else { 'Quest 3' }
                 if ($env:QUEST_TEST_FAIL -eq 'disconnect-after-model') { [IO.File]::WriteAllText($disconnected, 'original transport gone') }
                 exit 0
@@ -232,6 +252,7 @@ switch ($args[2]) {
         if ($env:QUEST_TEST_FAIL -eq 'adb-log-timeout') { throw [TimeoutException]::new('ADB logcat timed out.') }
         if ($env:QUEST_TEST_FAIL -eq 'log-unavailable') { exit 1 }
         if ($env:QUEST_TEST_FAIL -eq 'process-restarted') { [IO.File]::WriteAllText((Join-Path $remote 'observed-process'), '4242') }
+        if ($env:QUEST_TEST_FAIL -eq 'different-device-after-launch') { [IO.File]::WriteAllText($replacedDevice, 'replacement') }
         if ($env:QUEST_TEST_FAIL -eq 'process-crashed') { 'E/AndroidRuntime( 4242): FATAL EXCEPTION: main' }
         'I/Unity   ( 4242): startup fixture log'
         if (Test-Path -LiteralPath $probeNonce) {
@@ -474,7 +495,7 @@ class QuestDeployTests(unittest.TestCase):
             def log_message(self, *args):
                 pass
 
-        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+        with quest_management_server(Handler) as server:
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
@@ -614,7 +635,7 @@ class QuestDeployTests(unittest.TestCase):
                 result = self.run_script(*flags, '-RequireOpenXR', failure=fault, release_hash=digest)
                 self.assert_rejected(result, 'Installed Quest APK could not be verified')
                 commands = self.commands.read_text(encoding='utf-8').splitlines()
-                self.assertEqual(['devices -l', '-t 41 shell getprop ro.product.model',
+                self.assertEqual(['devices -l', '-t 41 shell getprop ro.product.model', '-t 41 shell getprop ro.serialno',
                                   '-t 41 shell pm path --user current com.vrcommand.quest'] +
                                  (['-t 41 shell sha256sum /data/app/fixture/base.apk'] if fault.endswith('mismatch') else []),
                                  commands)
@@ -625,17 +646,45 @@ class QuestDeployTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         receipt = json.loads(result.stdout)
         self.assertEqual(('openxr-ready', True, True), tuple(receipt[key] for key in ('status', 'apkVerified', 'filesVerified')))
-        self.assertEqual((2, 5, 2, str(session), str(player), str(admission), self.player['port']), tuple(
+        self.assertEqual((3, 5, 2, str(session), str(player), str(admission), self.player['port']), tuple(
             receipt[key] for key in ('evidenceVersion', 'roomId', 'seat', 'sessionId', 'playerId', 'admissionId', 'port')))
         self.assertEqual(hashlib.sha256(self.player['address'].encode()).hexdigest(), receipt['serverAddressSha256'])
         self.assertEqual(hashlib.sha256(release.read_bytes()).hexdigest(), receipt['venueReleaseReportSha256'])
         self.assertNotIn(self.player['joinTicket'], result.stdout)
         self.assertEqual(4242, receipt['openXR']['processId'])
+        self.assertEqual(hashlib.sha256(f"{receipt['openXR']['nonce']}\nHEADSET-A".encode()).hexdigest(), receipt['deviceFingerprint'])
+        self.assertNotIn('HEADSET-A', result.stdout.upper())
         commands = self.commands.read_text(encoding='utf-8')
         self.assertNotIn(' install ', commands)
         self.assertLess(commands.index('sha256sum /data/app/fixture/base.apk'), commands.index(' push '))
         self.assertLess(commands.index(' push '), commands.index(' am start -W '))
         self.assertEqual(self.player, json.loads(active.read_bytes()))
+
+    def test_single_seat_stops_when_original_device_identity_disappears_on_the_same_transport(self):
+        digest = hashlib.sha256(b'preinstalled APK').hexdigest()
+        release = self.root / 'release.json'
+        self.write(release, {'verified': True, 'scope': 'offline-package-consistency', 'quest': {
+            'applicationId': 'com.vrcommand.quest', 'architecture': 'arm64-v8a', 'signatureV2': True,
+            'versionCode': 77, 'sha256': digest}})
+        flags = ('-UseInstalledApk', '-ReleaseReport', str(release), '-Serial', 'fixture', '-RequireOpenXR')
+        active = self.remote / 'vr-connection.json'
+        for fault in ('missing-device-identity', 'different-device-after-copy', 'different-device-after-launch'):
+            with self.subTest(fault=fault):
+                self.commands.unlink(missing_ok=True)
+                (self.root / 'replaced-device').unlink(missing_ok=True)
+                active.write_bytes(b'previous connection')
+                result = self.run_script(*flags, failure=fault, release_hash=digest)
+                self.assert_rejected(result, 'original Quest device identity')
+                self.assertNotIn('openxr-ready', result.stdout)
+                self.assertNotIn('HEADSET-B', (result.stdout + result.stderr).upper())
+                commands = self.commands.read_text(encoding='utf-8').splitlines()
+                self.assertTrue(all(line.startswith('-t 41 ') for line in commands[1:]))
+                if fault == 'different-device-after-launch':
+                    self.assertTrue(any(' shell am start ' in line for line in commands))
+                else:
+                    self.assertFalse(any(' force-stop ' in line or ' am start ' in line or ' shell rm ' in line for line in commands))
+                    self.assertEqual(b'previous connection', active.read_bytes())
+                self.assertTrue(commands[-1].endswith(' shell getprop ro.serialno'))
 
     def test_single_seat_quest_link_measurement_requires_current_package_and_writes_opt_in(self):
         apk = self.root / 'link build.apk'
@@ -1272,7 +1321,7 @@ class QuestVenueTests(unittest.TestCase):
             def log_message(self, *args):
                 pass
 
-        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+        with quest_management_server(Handler) as server:
             worker = Thread(target=server.serve_forever, daemon=True)
             worker.start()
             command = ['pwsh', '-NoProfile', '-NonInteractive', '-File', str(ROOT / 'scripts/deploy-quest.ps1'),
@@ -1700,7 +1749,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Venue') {''', 1), encoding='utf-8')
             def log_message(self, *args):
                 pass
 
-        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+        with quest_management_server(Handler) as server:
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
@@ -2155,7 +2204,7 @@ else:
             def log_message(self, *args):
                 pass
 
-        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+        with quest_management_server(Handler) as server:
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             args = ('-VerifyTrackedSeats', '-ManagementApi', f'http://127.0.0.1:{server.server_port}',
@@ -2332,7 +2381,7 @@ else:
                 pass
 
         Handler.suite = self
-        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+        with quest_management_server(Handler) as server:
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             env = {**os.environ, 'VR_COMMAND_MASTER_KEY': key}
@@ -2506,7 +2555,7 @@ else:
             def log_message(self, *args):
                 pass
 
-        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+        with quest_management_server(Handler) as server:
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
@@ -2658,7 +2707,7 @@ else:
         later_path = self.root / 'later deployment.json'
         first_names = [early_path.name, later_path.name]
 
-        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+        with quest_management_server(Handler) as server:
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
@@ -2839,7 +2888,7 @@ else:
             def log_message(self, *args):
                 pass
 
-        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+        with quest_management_server(Handler) as server:
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
@@ -3505,7 +3554,7 @@ else:
             def log_message(self, *args):
                 pass
 
-        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+        with quest_management_server(Handler) as server:
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
@@ -3666,7 +3715,7 @@ else:
             def log_message(self, *args):
                 pass
 
-        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+        with quest_management_server(Handler) as server:
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
@@ -3879,7 +3928,7 @@ else:
         release, release_env = None, {}
         if check_release:
             release, _, release_env = self.release_report()
-        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+        with quest_management_server(Handler) as server:
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
@@ -4032,7 +4081,7 @@ else:
                 pass
 
         environment = {**os.environ, 'VR_COMMAND_MASTER_KEY': 'PRIVATE_MASTER_CANARY'}
-        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+        with quest_management_server(Handler) as server:
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
@@ -4102,7 +4151,7 @@ else:
             def log_message(self, *args):
                 pass
 
-        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+        with quest_management_server(Handler) as server:
             server.session = self.session_ids[0]
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
@@ -4259,7 +4308,7 @@ else:
                 pass
 
         environment = {**os.environ, 'VR_COMMAND_MASTER_KEY':'PRIVATE_MASTER_CANARY'}
-        with ThreadingHTTPServer(('127.0.0.1',0), Handler) as server:
+        with quest_management_server(Handler) as server:
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
