@@ -919,6 +919,8 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json --inspect-c
 
 驗收核對每個成功席位的原場次、玩家、入場名額、房號、席位、UDP 埠與 APK 版本。每席須有已核對 APK 及設定檔的啟動紀錄，並與原 Quest logcat、伺服器戰績確認及封存資料一致。提交重試歷史時，工具會核對前一份報告的 SHA-256、同一原部署及已完成席位，累計結果中的每席只計一次。歷史中斷、分岔或修改已完成席位都會拒絕。早期未記錄前一份雜湊的累計報告只需提交最新一份。摘要 `questDeployment` 列出版本代碼、APK 雜湊、報告數及核對席位數，成功核對報告承接時另列 `retryReportsLinked`。實體裝置與運行環境須現場驗收。
 
+新部署報告會針對同一組場次建立可跨分批比對的裝置指紋。重新取得同一組場次的部署 ZIP 時，指紋仍可比對。驗收會拒絕兩份報告把同一裝置算在兩個已啟動席位的情形，並只列出衝突的房號與席號。`questDeployment.venueDeviceSeatsVerified` 計入有此證據且通過比對的席位。仍可提交較早的原報告，沒有此欄位的席位不計入這個數字。 [合併取樣](QUEST3.md#核對頭盔追蹤席位)
+
 ### 核對 MR 校正封存
 
 五房驗收可在產生清單的指令加上 `--room-alignment-bundle .\deployment.zip`，直接引用原 MR 或混合部署 ZIP。手動建立清單時填 `"roomAlignmentBundle": "deployment.zip"`。產生清單與完整驗收都會核對 ZIP 的獨立或合併模式、各房原場次及校正檔 SHA-256。混合 ZIP 另核對各房 VR 或 MR 模式及封存 UDP 端點。工具只讀 ZIP 的房間清單與校正檔，連線票券留在原 ZIP 內，請依部署資料的原存放權限保管。

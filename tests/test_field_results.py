@@ -477,8 +477,15 @@ if settings.get('keepRunning', True):
         self.assertFalse(self.output.exists())
         self.assertEqual(raw, self.partial.read_bytes())
         self.partial.unlink()
+        scope = 'b' * 64
+        self.prepare(raw, deviceSerials=['headset-a'])
+        with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'differs from the original venue device proof'):
+            asyncio.run(capture_tool.capture(self.adb, port, expected, self.output, 10, device_identity=proof,
+                                             venue_device=(scope, field.quest_deployment_fingerprint(scope, 'HEADSET-B'))))
+        self.assertFalse((self.root / 'pid-count').exists())
         self.prepare(raw, deviceSerials=['headset-a', 'HEADSET-A'])
-        report = asyncio.run(capture_tool.capture(self.adb, port, expected, self.output, 10, device_identity=proof))
+        report = asyncio.run(capture_tool.capture(self.adb, port, expected, self.output, 10, device_identity=proof,
+                                                 venue_device=(scope, field.quest_deployment_fingerprint(scope, 'HEADSET-A'))))
         self.assertTrue(report['complete'])
         self.assertEqual(raw, self.output.read_bytes())
         self.assertEqual('2', (self.root / 'serial-count').read_text())
@@ -4670,6 +4677,59 @@ class FieldResultsTests(unittest.TestCase):
                 strict = field.verify_venue(path)
                 self.assertEqual({'expectedSeats': 25, 'verifiedSeats': 25, 'missingSeats': [], 'invalidReports': []},
                                  strict['questOpenXR'])
+
+    def test_quest_venue_device_proof_rejects_reuse_across_separate_deployments(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest = quest_capture_venue_fixture(root, mode, quest_per_room=2, batches=1)
+                deployment = self.quest_deployment_evidence(root, manifest, 2)
+                rows = deployment['devices']
+                self.assertEqual(10, len(rows))
+                scope = field.quest_venue_device_scope(mode, {row['sessionId'] for row in rows})
+                serials = [f'PRIVATE-FIXTURE-HEADSET-{index}' for index in range(len(rows))]
+
+                def proof(batch_number, source_serials, scope_digest=scope):
+                    salt = f'{batch_number:032x}'
+                    return {'version': 1, 'salt': salt, 'venueSha256': f'{batch_number:064x}', 'mapSha256': '1' * 64,
+                            'devices': [field.quest_deployment_fingerprint(salt, value) for value in source_serials],
+                            'venueDevices': {'scopeSha256': scope_digest,
+                                             'devices': [field.quest_deployment_fingerprint(scope_digest, value)
+                                                         for value in source_serials]}}
+
+                waiting = dict(roomId=rows[1]['roomId'], seat=rows[1]['seat'], status='not-attempted')
+                early = dict(deployment, complete=False, devices=[rows[0], waiting], retry=proof(1, serials[:2]))
+                later = dict(deployment, devices=rows[1:], retry=proof(2, serials[1:]))
+                (root / 'deployment.json').write_text(json.dumps(early), encoding='utf-8')
+                later_path = root / 'independent-retry.json'
+                later_path.write_text(json.dumps(later), encoding='utf-8')
+                manifest['questDeployments']['reports'].append(later_path.name)
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                accepted = field.verify_venue(path)
+                self.assertEqual(10, accepted['questDeployment']['venueDeviceSeatsVerified'])
+                self.assertFalse(accepted['physicalHostsVerified'])
+                self.assertNotIn('PRIVATE-FIXTURE-HEADSET', json.dumps(accepted))
+                self.assertNotIn(scope, json.dumps(accepted))
+
+                # A new mapping and a refreshed bundle still cannot reuse a launched headset.
+                later['retry'] = proof(2, serials[:1] + serials[2:])
+                later_path.write_text(json.dumps(later), encoding='utf-8')
+                message = (f"room {rows[0]['roomId']} seat {rows[0]['seat']} "
+                           f"and room {rows[1]['roomId']} seat {rows[1]['seat']}")
+                with self.assertRaisesRegex(field.EvidenceError, f'reused the same device for {message}'):
+                    field.verify_venue(path)
+
+                later['retry'] = proof(2, serials[1:], 'c' * 64)
+                later_path.write_text(json.dumps(later), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'different set of original sessions'):
+                    field.verify_venue(path)
+
+                later['retry'] = proof(2, serials[1:])
+                later['retry'].pop('venueDevices')
+                later_path.write_text(json.dumps(later), encoding='utf-8')
+                compatibility = field.verify_venue(path)
+                self.assertEqual(10, compatibility['questDeployment']['seatsVerified'])
+                self.assertEqual(1, compatibility['questDeployment']['venueDeviceSeatsVerified'])
 
     def test_quest_capture_matches_exact_referenced_deployment(self):
         for mode in ('Independent', 'Linked'):

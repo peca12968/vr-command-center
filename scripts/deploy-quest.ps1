@@ -482,7 +482,8 @@ function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$Selecte
     if ($usesPins -or $isMixed) { $report.alignmentPinsVerified = $true }
     if ($isVr -or $isMixed) { $report.mode = $manifest.mode }
     return @{ Report = $report; Selected = $connections["$SelectedRoom/$SelectedSeat"]; Connections = $connections;
-        EarliestExpiry = $earliest; LiveRooms = $liveRooms.ToArray(); PublishedEndpoints = $publishedEndpoints; SeatHeadsets = @{} }
+        EarliestExpiry = $earliest; LiveRooms = $liveRooms.ToArray(); PublishedEndpoints = $publishedEndpoints; SeatHeadsets = @{};
+        SessionIds = @($sessions | ForEach-Object { $_.ToString('D') } | Sort-Object) }
 }
 
 function Confirm-VenueReadback($Venue, [switch]$RequireLiveSource, [switch]$AllowLoopback) {
@@ -1071,6 +1072,21 @@ function Get-QuestMapFingerprint([object[]]$Map, [string]$Salt) {
     return Get-QuestDeploymentFingerprint $Salt ($assignments -join "`n")
 }
 
+function Get-QuestVenueDeviceScope($Venue) {
+    $sessionIds = $Venue.SessionIds -join "`n"
+    return Get-QuestDeploymentFingerprint 'vrcommand-quest-venue-devices-v1' "$($Venue.Report.topology)`n$sessionIds"
+}
+
+function Test-QuestVenueDeviceProof($Venue, [int]$Count, $Proof) {
+    if (-not $Proof.PSObject.Properties['venueDevices']) { return $true }
+    $stamped = $Proof.venueDevices
+    return ($stamped -is [pscustomobject] -and @($stamped.PSObject.Properties.Name).Count -eq 2 -and
+        $stamped.scopeSha256 -is [string] -and $stamped.scopeSha256 -ceq (Get-QuestVenueDeviceScope $Venue) -and
+        $stamped.devices -is [array] -and $stamped.devices.Count -eq $Count -and
+        @($stamped.devices | Where-Object { $_ -isnot [string] -or $_ -cnotmatch '\A[0-9a-f]{64}\z' }).Count -eq 0 -and
+        @($stamped.devices | Sort-Object -Unique).Count -eq $Count)
+}
+
 function Test-QuestDeploymentMap($Venue, [object[]]$Map, $Report) {
     $proof = $Report.retry
     return ('deployment' -ceq $Report.phase -and $Report.managementVerified -is [bool] -and $Report.managementVerified -and
@@ -1080,6 +1096,7 @@ function Test-QuestDeploymentMap($Venue, [object[]]$Map, $Report) {
         (Get-QuestMapFingerprint $Map $proof.salt) -ceq $proof.mapSha256 -and
         $proof.devices -is [array] -and $proof.devices.Count -eq $Map.Count -and
         @($proof.devices | Sort-Object -Unique).Count -eq $Map.Count -and
+        (Test-QuestVenueDeviceProof $Venue $Map.Count $proof) -and
         $Report.devices -is [array] -and $Report.devices.Count -eq $Map.Count)
 }
 
@@ -1143,6 +1160,7 @@ function Read-QuestTrackedDeployment($Venue, [object[]]$Map, [string]$Path, [swi
         throw 'Invalid OpenXR requirement in the original Quest deployment.'
     }
     $launched = [Collections.Generic.List[string]]::new()
+    $venueDevices = @{}
     $unlaunched = $false
     for ($index = 0; $index -lt $Map.Count; $index++) {
         $entry = $report.devices[$index]
@@ -1163,11 +1181,12 @@ function Read-QuestTrackedDeployment($Venue, [object[]]$Map, [string]$Path, [swi
             throw 'The deployment report does not match the original completed seat admissions.'
         }
         $launched.Add($seatKey)
+        if ($report.retry.venueDevices) { $venueDevices[$seatKey] = $report.retry.venueDevices.devices[$index] }
     }
     if (-not $launched.Count -or $report.complete -ne ($launched.Count -eq $Map.Count)) {
         throw 'The deployment report has no valid successful launch prefix.'
     }
-    return @{ Sha256 = Get-QuestSha256 $original.Bytes; Seats = $launched
+    return @{ Sha256 = Get-QuestSha256 $original.Bytes; Seats = $launched; VenueDevices = $venueDevices
         ApkSha256 = $report.expectedApkSha256; VersionCode = $report.expectedVersionCode
         ReleaseReportSha256 = Get-QuestDeploymentReleaseHash $report }
 }
@@ -1181,6 +1200,7 @@ function Read-QuestTrackedDeployments($Venue, [object[]]$Map, [string]$Path) {
     }
     $directory = Split-Path -Parent (Resolve-Path -LiteralPath $Path).ProviderPath
     $bindings = @{}
+    $seenDevices = @{}
     $digests = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $release = $null
     $releaseReportHash = $null
@@ -1201,6 +1221,13 @@ function Read-QuestTrackedDeployments($Venue, [object[]]$Map, [string]$Path) {
         $release = $deployment
         foreach ($seat in $deployment.Seats) {
             if ($bindings.ContainsKey($seat)) { throw 'Quest deployment reports repeat a successfully launched seat.' }
+            $device = $deployment.VenueDevices[$seat]
+            if ($device) {
+                if ($seenDevices.ContainsKey($device)) {
+                    throw "Quest deployment reports reused the same device for room/seat $($seenDevices[$device]) and $seat."
+                }
+                $seenDevices.Add($device, $seat)
+            }
             $bindings.Add($seat, $deployment.Sha256)
         }
     }
@@ -1289,10 +1316,14 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
         try { $reportedSerial = Read-QuestDeviceSerial $target }
         catch [TimeoutException] { $devices[$index].status = 'adb-timeout'; continue }
         if (-not $reportedSerial) { $devices[$index].status = 'device-identity-unavailable'; continue }
-        if ($Retry -and (Get-QuestDeploymentFingerprint $Retry.Proof.salt $reportedSerial.ToUpperInvariant()) -cne
-            $Retry.Proof.devices[($Retry.Completed.Count + $index)]) {
-            $devices[$index].status = 'device-identity-changed'
-            continue
+        if ($Retry) {
+            $originalIndex = $Retry.Completed.Count + $index
+            $scoped = $Retry.Proof.venueDevices
+            if ((Get-QuestDeploymentFingerprint $Retry.Proof.salt $reportedSerial.ToUpperInvariant()) -cne $Retry.Proof.devices[$originalIndex] -or
+                ($scoped -and (Get-QuestDeploymentFingerprint $scoped.scopeSha256 $reportedSerial.ToUpperInvariant()) -cne $scoped.devices[$originalIndex])) {
+                $devices[$index].status = 'device-identity-changed'
+                continue
+            }
         }
         $reportedSerials[$index] = $reportedSerial
         if ($firstSeatBySerial.ContainsKey($reportedSerial)) {
@@ -1340,9 +1371,12 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
         }
     } else {
         $salt = [Guid]::NewGuid().ToString('N')
+        $scope = Get-QuestVenueDeviceScope $Venue
         $report.retry = [ordered]@{ version = 1; venueSha256 = $Venue.BundleSha256; salt = $salt;
             mapSha256 = Get-QuestMapFingerprint $originalMap $salt;
-            devices = @($reportedSerials | ForEach-Object { Get-QuestDeploymentFingerprint $salt $_.ToUpperInvariant() }) }
+            devices = @($reportedSerials | ForEach-Object { Get-QuestDeploymentFingerprint $salt $_.ToUpperInvariant() });
+            venueDevices = [ordered]@{ scopeSha256 = $scope;
+                devices = @($reportedSerials | ForEach-Object { Get-QuestDeploymentFingerprint $scope $_.ToUpperInvariant() }) } }
     }
     $WarningPreference = 'SilentlyContinue'
     foreach ($device in $devices) { $device.status = 'not-attempted'; $device.Remove('apkVerified') }

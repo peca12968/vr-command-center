@@ -615,6 +615,8 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 
 若原部署中斷後改用獨立的部分對照表補部署，可用 `-DeploymentReportsFile` 讀取兩批原報告。使用同一份原部署 ZIP，與一份包含所有要核對席位的裝置對照表。各原報告的已啟動席位須互不重複，合起來須涵蓋指定席位，且使用同一 APK。沿用累計重試而已取得一份完整報告的場館，可繼續使用單一 `-DeploymentReport`。
 
+新部署報告另保存限於本組場次的裝置指紋。分批讀取時，若同一裝置出現在兩個已啟動席位，會先列出衝突的房號及席號，停止合併取樣。裝置序號不寫入報告。以 `--deployment-report` 擷取原日誌時，工具會在開始讀取及發布完整日誌前核對此指紋。 [戰後核對](EXTERNAL_CLIENTS.md#核對封存席位的-quest-發行-apk)
+
 在私人資料夾保存 `deployment-reports.json`，路徑相對於清單所在位置。
 
 ```json

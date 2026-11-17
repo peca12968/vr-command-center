@@ -2552,6 +2552,11 @@ def quest_deployment_fingerprint(salt, value):
     return hashlib.sha256(f'{salt}\n{value}'.encode('utf-8')).hexdigest()
 
 
+def quest_venue_device_scope(mode, session_ids):
+    venue = '\n'.join([mode, *sorted(session_ids)])
+    return quest_deployment_fingerprint('vrcommand-quest-venue-devices-v1', venue)
+
+
 def quest_deployment_map_fingerprint(salt, device_map):
     assignments = '\n'.join(f'{room}/{seat}={device_map[room, seat]}' for room, seat in sorted(device_map))
     return quest_deployment_fingerprint(salt, assignments)
@@ -2565,12 +2570,19 @@ def quest_deployment_retry_proof(report, count):
     if 'retry' not in report:
         require('previousDeploymentSha256' not in report, 'Quest deployment predecessor lacks original retry proof')
         return None, None
-    require(type(proof) is dict and set(proof) == {'version', 'venueSha256', 'mapSha256', 'salt', 'devices'}
+    fields = {'version', 'venueSha256', 'mapSha256', 'salt', 'devices'}
+    require(type(proof) is dict and fields <= proof.keys() <= fields | {'venueDevices'}
             and integer(proof['version'], 1, 1) and hex_field(proof['salt'], 32)
             and all(hex_field(proof[key], 64) for key in ('venueSha256', 'mapSha256'))
             and type(proof['devices']) is list and len(proof['devices']) == count
             and all(hex_field(device, 64) for device in proof['devices']) and len(set(proof['devices'])) == count,
             'Invalid Quest deployment retry proof')
+    if 'venueDevices' in proof:
+        stamped = proof['venueDevices']
+        require(type(stamped) is dict and set(stamped) == {'scopeSha256', 'devices'}
+                and hex_field(stamped['scopeSha256'], 64) and type(stamped['devices']) is list
+                and len(stamped['devices']) == count and all(hex_field(device, 64) for device in stamped['devices'])
+                and len(set(stamped['devices'])) == count, 'Invalid Quest venue device proof')
     require('previousDeploymentSha256' not in report or hex_field(previous, 64), 'Invalid Quest deployment predecessor digest')
     return proof, previous
 
@@ -2732,7 +2744,7 @@ def read_quest_readiness_reports(paths, mode, attempts, deployed, evidence_path)
     return sessions, summary
 
 
-def read_quest_deployments(spec, mode, evidence_path, release=None, *, release_hash=None, capture_reports=(), capture_device_map=None,
+def read_quest_deployments(spec, mode, evidence_path, release=None, *, expected_sessions, release_hash=None, capture_reports=(), capture_device_map=None,
                            readiness_reports=None, inspect_release_coverage=False):
     expected = {'releaseReport', 'reports'} if release is None else {'reports'}
     require(type(spec) is dict and set(spec) == expected,
@@ -2751,6 +2763,7 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, release_h
     reports = spec['reports']
     require(type(reports) is list and 1 <= len(reports) <= 25, 'Provide 1 to 25 Quest deployment reports')
     attempts = {}
+    device_scope = quest_venue_device_scope(mode, expected_sessions)
     for name in reports:
         report_path = evidence_path(name, kind='questDeploymentReport')
         report, raw = read_quest_document(report_path)
@@ -2773,6 +2786,9 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, release_h
                 'Invalid Quest OpenXR deployment option for the original release')
         devices, launched = quest_deployment_rows(report)
         proof, previous = quest_deployment_retry_proof(report, len(devices))
+        venue_devices = proof.get('venueDevices') if proof is not None else None
+        require(venue_devices is None or venue_devices['scopeSha256'] == device_scope,
+                'Quest venue device proof refers to a different set of original sessions')
         seats, confirmed, openxr = {}, {}, {}
         for row in devices:
             room, seat = integer(row.get('roomId'), 1, 5), integer(row.get('seat'), 1, 5)
@@ -2814,14 +2830,27 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, release_h
                     'Quest capture PID differs from the referenced OpenXR launch')
     leaves, linked = quest_deployment_leaves(attempts)
     deployed, openxr = {}, {}
+    seen_devices = {}
     for attempt in leaves:
         confirmed = attempt['confirmed']
         require(confirmed, 'Quest deployment report lacks a consistent successful prefix')
         require(deployed.keys().isdisjoint(confirmed), 'Quest deployment repeats a successful seat')
+        stamped = (attempt['proof'] or {}).get('venueDevices')
+        if stamped is not None:
+            for seat, device in zip(attempt['seats'], stamped['devices'], strict=True):
+                if seat not in confirmed:
+                    continue
+                if device in seen_devices:
+                    room, seat_number = seen_devices[device]
+                    raise EvidenceError(f'Quest deployment reports reused the same device for room {room} seat {seat_number} '
+                                        f'and room {seat[0]} seat {seat[1]}')
+                seen_devices[device] = seat
         deployed.update(confirmed)
         openxr.update(attempt['openxr'])
     require(len({nonce for _, nonce in openxr.values()}) == len(openxr), 'Quest OpenXR launch nonce was reused between seats')
     summary = {'versionCode': version, 'apkSha256': apk_digest, 'reportsVerified': len(reports), 'seatsVerified': len(deployed)}
+    if seen_devices:
+        summary['venueDeviceSeatsVerified'] = len(seen_devices)
     bound_seats = sum(len(attempt['confirmed']) for attempt in leaves if attempt['release_hash'] is not None)
     if bound_seats:
         summary.update(venueReleaseReportSha256=release_hash, releaseReportSeatsVerified=bound_seats)
@@ -2857,7 +2886,8 @@ def read_venue_quest_evidence(manifest, mode, expected, evidence_path, release, 
     if 'questDeployments' in manifest:
         require(manifest['topology'] == 'direct-lan', 'Quest deployment evidence requires direct LAN evidence')
         deployments, deployment_summary, readiness, openxr = read_quest_deployments(
-            manifest['questDeployments'], mode, evidence_path, release, release_hash=release_hash, capture_reports=references,
+            manifest['questDeployments'], mode, evidence_path, release, expected_sessions=expected,
+            release_hash=release_hash, capture_reports=references,
             capture_device_map=device_map, readiness_reports=manifest.get('questReadinessReports'),
             inspect_release_coverage=inspect_release_coverage)
         if references:

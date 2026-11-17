@@ -2423,6 +2423,21 @@ else:
                                                for session, snapshot in snapshots.items()], calls[2:])
                         self.assertEqual(datetime.fromisoformat(sample_time), datetime.fromisoformat(report['sampledAtUtc']))
 
+                        ids = '\n'.join(sorted(snapshots))
+                        scope = hashlib.sha256(f'vrcommand-quest-venue-devices-v1\n{topology}\n{ids}'.encode()).hexdigest()
+                        fingerprints = [hashlib.sha256(f'{scope}\nHEADSET-{index}'.encode()).hexdigest() for index in range(25)]
+                        early['retry']['venueDevices'] = {'scopeSha256': scope, 'devices': fingerprints}
+                        later['retry']['venueDevices'] = {'scopeSha256': scope, 'devices': fingerprints[12:]}
+                        early_path.write_text(json.dumps(early), encoding='utf-8')
+                        later_path.write_text(json.dumps(later), encoding='utf-8')
+                        self.assertEqual(0, sample().returncode)
+                        later['retry']['venueDevices']['devices'][0] = fingerprints[0]
+                        later_path.write_text(json.dumps(later), encoding='utf-8')
+                        self.assert_rejected(sample(), 'same device for room/seat 1/1 and 3/3')
+                        self.assertEqual([], calls)
+                        later['retry']['venueDevices']['devices'][0] = fingerprints[12]
+                        later_path.write_text(json.dumps(later), encoding='utf-8')
+
                         if topology == 'Independent':
                             running_frame = devices[12]['sessionId']
                             late = sample()

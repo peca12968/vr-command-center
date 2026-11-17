@@ -135,7 +135,7 @@ async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready
             on_ready(pid)
 
 
-def check_device_identity(adb, expected, timeout):
+def check_device_identity(adb, expected, timeout, venue_device=None):
     field.require(timeout > 0, 'Capture timed out before the Quest device identity could be checked')
     try:
         result = subprocess.run([*adb, 'shell', 'getprop', 'ro.serialno'], capture_output=True, timeout=min(5, timeout))
@@ -145,8 +145,13 @@ def check_device_identity(adb, expected, timeout):
     field.require(result.returncode == 0 and serial is not None and not re.fullmatch(rb'unknown|0+', serial[1], re.I),
                   'Quest device identity could not be read')
     salt, digest = expected
-    field.require(field.quest_deployment_fingerprint(salt, serial[1].decode('ascii').upper()) == digest,
+    reported = serial[1].decode('ascii').upper()
+    field.require(field.quest_deployment_fingerprint(salt, reported) == digest,
                   'Quest device identity differs from the original deployment')
+    if venue_device is not None:
+        scope, digest = venue_device
+        field.require(field.quest_deployment_fingerprint(scope, reported) == digest,
+                      'Quest device identity differs from the original venue device proof')
 
 
 def publish_capture_file(staged, output):
@@ -162,12 +167,12 @@ def publish_capture_file(staged, output):
 
 
 async def capture(adb, port, admission, output, seconds, on_ready=report_capture_status, *,
-                  device_identity=None, openxr=None, on_final=None, on_disconnected=None):
+                  device_identity=None, venue_device=None, openxr=None, on_final=None, on_disconnected=None):
     partial = output.with_name(output.name + '.partial')
     field.require(not os.path.lexists(output) and not os.path.lexists(partial), 'Choose a new capture output path')
     deadline = time.monotonic() + seconds
     if device_identity is not None:
-        await asyncio.to_thread(check_device_identity, adb, device_identity, deadline - time.monotonic())
+        await asyncio.to_thread(check_device_identity, adb, device_identity, deadline - time.monotonic(), venue_device)
     remaining = deadline - time.monotonic()
     field.require(remaining > 0, 'Capture timed out before checking the Quest process')
     pid = await asyncio.to_thread(quest_pid, adb, min(5, remaining))
@@ -187,7 +192,7 @@ async def capture(adb, port, admission, output, seconds, on_ready=report_capture
                     pass
             await asyncio.wait_for(child.communicate(), 5)
         if device_identity is not None:
-            await asyncio.to_thread(check_device_identity, adb, device_identity, deadline - time.monotonic())
+            await asyncio.to_thread(check_device_identity, adb, device_identity, deadline - time.monotonic(), venue_device)
     publish_capture_file(partial, output)
     return report
 
@@ -278,7 +283,8 @@ def bind_deployment(plan, path, *, completed_only=False, after=None):
         skip = len(prior_launched)
         field.require(len(launched) > skip, 'No seats have launched since the preceding Quest deployment report')
     bound_seats = []
-    for seat, device, fingerprint in zip(seats, devices, proof['devices'], strict=True):
+    scoped = proof.get('venueDevices')
+    for index, (seat, device, fingerprint) in enumerate(zip(seats, devices, proof['devices'], strict=True)):
         field.require(all(type(device.get(key)) is int and device[key] == seat[key] for key in ('roomId', 'seat')),
                       'Quest deployment report does not match the original mapped seat order')
         if device['status'] != 'launch-requested':
@@ -289,7 +295,8 @@ def bind_deployment(plan, path, *, completed_only=False, after=None):
                               for key in ('port', 'sessionId', 'playerId', 'admissionId')),
                       'Quest deployment report differs from an original admitted seat')
         opening = field.quest_openxr_proof(device, require_openxr)
-        bound_seats.append({**seat, 'deviceIdentity': (proof['salt'], fingerprint), 'openXR': opening})
+        venue_device = (scoped['scopeSha256'], scoped['devices'][index]) if scoped is not None else None
+        bound_seats.append({**seat, 'deviceIdentity': (proof['salt'], fingerprint), 'venueDevice': venue_device, 'openXR': opening})
     field.require(not require_openxr or len({row['openXR'][1] for row in bound_seats}) == len(bound_seats),
                   'Quest OpenXR launch nonce was reused between seats')
     return {**plan, 'deploymentSha256': hashlib.sha256(raw).hexdigest(),
@@ -336,7 +343,7 @@ async def capture_venue(adb, plan, directory, seconds):
             remaining = deadline - time.monotonic()
             field.require(remaining > 0, 'Capture timed out before checking the Quest process')
             report = await capture(target, source['port'], admission, log, remaining, on_ready,
-                                   device_identity=row.get('deviceIdentity'), openxr=row.get('openXR'),
+                                   device_identity=row.get('deviceIdentity'), venue_device=row.get('venueDevice'), openxr=row.get('openXR'),
                                    on_final=close_readiness, on_disconnected=on_disconnected)
         except (field.EvidenceError, OSError, UnicodeError, ValueError, TimeoutError, RecursionError) as error:
             close_readiness()
