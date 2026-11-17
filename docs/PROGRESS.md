@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 從主控下載硬體排演原場次的封存事件
+
+- `1330978` 的控制台 0.31.265 在「五房硬體模擬排演報告」提供「下載原場次封存事件」。主控匯入版本 4 核對摘要後，管理服務依原場次識別匯出合併一份或獨立五份 JSON。原場次都結束並封存戰鬥串流才可匯出。 [操作方式](HARDWARE.md#離線核對五房排演結果)
+- 正式解壓包通過 12 項 Chromium 檢查。房間已有新場次時，合併與獨立原摘要仍分別取回原本的 35 及 55 筆事件，模擬器各核對 5 筆回饋。管理 API 拒絕房控、伺服器角色、錯誤房間順序與尚未封存的場次。另核對一場 505 筆事件跨頁完整匯出。本機管理程序使用 AF_UNIX，零 TCP 監聽和 UDP 端點。135 項 Node、1173 項 .NET 及 7 項管理套件檢查通過。 [整合驗收](../artifacts/venue-hardware-events-031265/final/checks.json)
+- 管理包 53,505,871 bytes，解壓核對 595 檔。已完成與現有 Windows 遊戲包及 Quest APK 的離線發行核對。Quest USB 目前只有檔案傳輸介面，廠商設備與跨機頭盔仍待現場驗收。GitHub Actions 因帳務或支出上限未啟動。 [管理包](../artifacts/venue-hardware-events-031265/final-package/VRCommand-ControlServer-0.31.265.zip) · [發行核對](../artifacts/venue-hardware-events-031265/final-package/venue-release.json) · [Quest USB](../artifacts/venue-hardware-events-031265/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44056378613)
+
 ## 2026-11-17 逐筆核對五房交接與原場次封存
 
 - `3306835` 的 0.2.23 開發版在兩種版本 4 交接驗證指令提供 `--events-directory`。從原事件檔重建已結束且戰鬥封存的場次，核對座位綁定及每筆模擬回饋的原串流、執行階段、入場與事件。事件檔保存在交接 ZIP 外。 [匯出與核對指令](HARDWARE.md#離線核對五房排演結果)
