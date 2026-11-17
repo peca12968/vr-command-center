@@ -27,6 +27,15 @@ function validRoom(row, index, configurationsVerified) {
     && counts.every(key => row.seats.reduce((sum, seat) => sum + seat[key], 0) === row[key]);
 }
 
+function validSources(report) {
+  const { attemptIdentitiesVerified: identified, sourceEventsVerified: verified, sourceSignalsVerified: signals } = report;
+  if (identified !== undefined && (typeof identified !== 'boolean' || (identified && !report.configurationsVerified))) return false;
+  if (verified === undefined && signals === undefined) return true;
+  if (verified === false) return signals === 0;
+  return verified === true && identified === true
+    && signals === report.rooms.reduce((total, room) => total + counts.reduce((sum, field) => sum + (room[field] ?? 0), 0), 0);
+}
+
 export function isVenueHardwareReview(report) {
   return report?.version === 1 && report.verified === true && report.simulatedHardwareOnly === true
     && report.physicalDeliveryConfirmed === false && typeof report.rehearsalComplete === 'boolean'
@@ -35,5 +44,6 @@ export function isVenueHardwareReview(report) {
     && Array.isArray(report.rooms) && report.rooms.length === 5
     && report.rooms.every((room, index) => validRoom(room, index, report.configurationsVerified))
     && report.rehearsalComplete === report.rooms.every(room => room.exitCode === 0)
-    && new Set(report.rooms.map(room => room.sessionId)).size === (report.mode === 'Linked' ? 1 : 5);
+    && new Set(report.rooms.map(room => room.sessionId)).size === (report.mode === 'Linked' ? 1 : 5)
+    && validSources(report);
 }

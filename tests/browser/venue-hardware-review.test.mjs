@@ -56,3 +56,15 @@ test('rejects physical claims, mixed linked sessions, duplicate seats and incons
     assert.equal(isVenueHardwareReview(report), false);
   }
 });
+
+test('source evidence accounts for all attempted signals and accepts older summaries', () => {
+  const report = review();
+  Object.assign(report, { attemptIdentitiesVerified: true, sourceEventsVerified: true, sourceSignalsVerified: 15 });
+  assert(isVenueHardwareReview(report));
+  for (const invalid of [
+    { sourceSignalsVerified: 10 }, { sourceSignalsVerified: undefined }, { sourceEventsVerified: false },
+    { sourceEventsVerified: undefined }, { attemptIdentitiesVerified: undefined }
+  ]) assert.equal(isVenueHardwareReview({ ...report, ...invalid }), false);
+  assert(isVenueHardwareReview({ ...report, sourceEventsVerified: false, sourceSignalsVerified: 0 }));
+  assert(isVenueHardwareReview({ ...report, sourceEventsVerified: undefined, sourceSignalsVerified: undefined }));
+});

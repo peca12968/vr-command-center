@@ -313,6 +313,13 @@ app.MapGet("/api/venue/hardware-bindings", (SessionManager manager, HttpContext 
     context.Response.Headers.CacheControl = "no-store";
     return manager.ReadVenueHardwareBindings(Actor(context));
 });
+app.MapGet("/api/venue/hardware-events.zip", (SessionManager manager, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var archive = VenueHardwareEvents.Export(manager, Actor(context),
+        context.Request.Query["sessionId"].ToArray(), context.RequestAborted);
+    return Results.File(archive, "application/zip", "vr-command-hardware-events-v1.zip");
+});
 app.MapGet("/api/venue/server-plan", (SessionManager manager, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";

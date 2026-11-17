@@ -5,7 +5,7 @@ from pathlib import Path,PurePosixPath
 ROOT=Path(__file__).resolve().parents[1];TOP='VRCommand-ControlServer'
 SECRET_KEYS={'operatorkeys','operatorkeyfile','gameserverkey','jointicket','playerticketsigningkey','controlpipetoken','vr_command_control_pfx_password'}
 FORBIDDEN_PARTS={'data','missions','sessions','telemetry','journals'}
-README='''VR Command Windows 管理服務包 API 0.31.0／控制台 0.31.264
+README='''VR Command Windows 管理服務包 API 0.31.0／控制台 0.31.265
 
 完整解壓後開啟 Start-Control.exe。
 1. 首次選擇監聽IPv4與埠號（預設127.0.0.1:5081），按「新增資料實例」。
@@ -27,6 +27,7 @@ GameServer角色供遊戲伺服器使用，不能拿到玩家端；玩家使用�
 戰鬥及世界雙封存後，可從任務統計選擇玩家並開啟個人事件回放。
 回放暫停後，可依房間及戰鬥事件種類搜尋已保存快照，並直接停在結果所在格。
 房控可讀取本房的即時戰鬥回饋介面，作為廠商轉接器的遊戲事件來源。
+主控可從五房硬體模擬排演摘要下載原場次封存事件，供模擬器核對交接。事件檔請另行保管。
 五房空閒時，主控可用同一版本或逐房指定保存版本，一次建立五個獨立準備場次。
 五房備妥 Quest 3 名冊、校正檔與伺服器端點後，可下載完整 MR 部署包供預檢。
 房間總覽以最近接受的有效快照顯示活動時間或自動結束倒數。
@@ -81,7 +82,7 @@ def payload(name,content=None):
 def publication(build):
     build=plain(build);receipt=read(build/'publish-receipt.json');folder=plain(build/'publication')
     if receipt.get('schemaVersion')!=1 or receipt.get('target')!='win-x64' or receipt.get('apiVersion')!='0.31.0':raise ValueError('Use an actual supported Windows publication')
-    if receipt.get('consoleVersion')!='0.31.264':raise ValueError('Publish the current console 0.31.264 before packaging')
+    if receipt.get('consoleVersion')!='0.31.265':raise ValueError('Publish the current console 0.31.265 before packaging')
     expected=receipt['files'];actual={p.relative_to(folder).as_posix() for p in folder.rglob('*') if p.is_file()}
     if actual!=set(expected):raise ValueError('Publication contains missing or additional files')
     for name,value in expected.items():

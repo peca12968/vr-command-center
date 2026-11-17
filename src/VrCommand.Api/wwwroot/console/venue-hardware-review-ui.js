@@ -3,10 +3,18 @@ import { isVenueHardwareReview, terminationLabels } from './venue-hardware-revie
 const maxReviewBytes = 16 * 1024;
 const $ = id => document.getElementById('venue-hardware-review-' + id);
 
-export function mountVenueHardwareReview(getState, master) {
+export function mountVenueHardwareReview(getState, master, api, download) {
   const panel = $('panel'), file = $('file'), message = $('message');
   const results = $('results'), rooms = $('rooms'), picker = $('room'), seats = $('seats');
-  let active = false, review = null, readEpoch = 0;
+  const exportButton = $('export-events'), exportStatus = $('export-status');
+  let active = false, review = null, readEpoch = 0, pendingExport;
+
+  function clearExport() {
+    pendingExport?.abort();
+    pendingExport = null;
+    exportButton.disabled = false;
+    exportStatus.textContent = '';
+  }
 
   function showSeats() {
     const selected = review?.rooms.find(room => room.roomId === Number(picker.value));
@@ -34,6 +42,7 @@ export function mountVenueHardwareReview(getState, master) {
 
   function showReview() {
     results.hidden = !review;
+    exportButton.hidden = review?.attemptIdentitiesVerified !== true;
     rooms.replaceChildren();
     picker.replaceChildren();
     seats.replaceChildren();
@@ -43,7 +52,8 @@ export function mountVenueHardwareReview(getState, master) {
       return;
     }
     const mode = review.mode === 'Linked' ? '五房合併' : '五房獨立';
-    $('summary').textContent = `${mode} · 排演${review.rehearsalComplete ? '完成' : '未完成'} · ${review.configurationsVerified ? '含設定核對' : '僅房間總數'}`;
+    const evidence = review.sourceEventsVerified ? ` · 摘要記錄已核對 ${review.sourceSignalsVerified} 筆原事件` : '';
+    $('summary').textContent = `${mode} · 排演${review.rehearsalComplete ? '完成' : '未完成'} · ${review.configurationsVerified ? '含設定核對' : '僅房間總數'}${evidence}`;
     for (const item of review.rooms) {
       const line = rooms.insertRow();
       line.dataset.reviewRoom = item.roomId;
@@ -62,6 +72,7 @@ export function mountVenueHardwareReview(getState, master) {
 
   file.addEventListener('change', async () => {
     const input = file.files[0], own = ++readEpoch;
+    clearExport();
     review = null;
     showReview();
     message.textContent = '';
@@ -78,6 +89,31 @@ export function mountVenueHardwareReview(getState, master) {
       if (current()) message.textContent = '請選擇模擬器核對工具輸出的五房 JSON 摘要（16 KiB 以內）。';
     }
   });
+  exportButton.addEventListener('click', async () => {
+    if (!active || !master() || review?.attemptIdentitiesVerified !== true || pendingExport) return;
+    const request = new AbortController();
+    pendingExport = request;
+    exportButton.disabled = true;
+    exportStatus.textContent = '正在讀取原場次封存事件…';
+    const query = new URLSearchParams();
+    for (const id of new Set(review.rooms.map(room => room.sessionId))) query.append('sessionId', id);
+    try {
+      const archive = await api('/venue/hardware-events.zip?' + query, 'GET', undefined, undefined, undefined, 'blob', request.signal);
+      if (pendingExport !== request) return;
+      if (!archive.size || archive.type !== 'application/zip') throw new Error();
+      download('vr-command-hardware-events-v1.zip', archive);
+      exportStatus.textContent = '已下載原場次封存事件。請解壓到單獨目錄供核對工具讀取。';
+    } catch (error) {
+      if (pendingExport === request) exportStatus.textContent = error.status === 409
+        ? '原場次的封存事件尚無法匯出。請確認原場次已結束且戰鬥紀錄已封存。'
+        : '無法下載原場次封存事件。請確認目前連線的管理服務保存這些場次。';
+    } finally {
+      if (pendingExport === request) {
+        pendingExport = null;
+        exportButton.disabled = false;
+      }
+    }
+  });
   picker.addEventListener('change', showSeats);
 
   return {
@@ -86,6 +122,7 @@ export function mountVenueHardwareReview(getState, master) {
       panel.hidden = !active || !master();
       if (!active || !master()) {
         readEpoch++;
+        clearExport();
         panel.open = false;
         review = null;
         file.value = message.textContent = '';

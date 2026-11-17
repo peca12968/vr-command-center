@@ -146,7 +146,9 @@ dotnet .\VrCommand.HardwareSimulator.dll --verify-venue-zip ..\rehearsal-01.zip
 
 打包時須指定新 ZIP 路徑。原檔核對失敗時不會發布 ZIP。版本 3 及 4 收錄五房設定，版本 2 收錄可核對的原清單及報告。兩個指令均可離線執行。
 
-版本 4 也可逐筆對照場次的原始事件。原場次結束且戰鬥串流封存後，用主控身分讀取 `GET /api/sessions/{id}/events?after=0&limit=500`。每頁以最後一筆的 `sequence` 作為下一頁的 `after`，讀到空頁為止。依序合併為一個 JSON 陣列並以 `<場次 UUID>.json` 儲存，從序號 1 開始，每場上限 32 MiB。合併模式提供一份，獨立模式在同一目錄提供原五場的五份事件檔。事件檔含場次與玩家資料，請保存在交接 ZIP 之外。
+版本 4 也可逐筆對照場次的原始事件。管理台 0.31.265 起，原場次結束且戰鬥串流封存後，主控可在「五房硬體模擬排演報告」匯入核對工具輸出的版本 4 排演摘要並按「下載原場次封存事件」。將下載的 ZIP 解壓到單獨目錄。管理服務依摘要列出的原場次匯出，所以可以核對先前已結束的排演。
+
+也可用主控身分讀取 `GET /api/sessions/{id}/events?after=0&limit=500`。每頁以最後一筆的 `sequence` 作為下一頁的 `after`，讀到空頁為止。依序合併為一個 JSON 陣列並以 `<場次 UUID>.json` 儲存，從序號 1 開始，每場上限 32 MiB。合併模式提供一份，獨立模式在同一目錄提供原五場的五份事件檔。事件檔含場次與玩家資料，請保存在交接 ZIP 之外。
 
 ```powershell
 dotnet .\VrCommand.HardwareSimulator.dll --verify-venue-zip ..\rehearsal-01.zip --events-directory ..\original-events
