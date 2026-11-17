@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 從開場清單填寫必需空席
+
+- 管理台 0.31.243 以原準備場次及名冊修訂顯示五房追蹤／有效姿態開場的必需空席。遊戲錄製尚未出現時，空席仍可定位到批次名冊的名稱欄。既有草稿保留，按下登記並確認才送出。若讀取時有人先登記該席，提示重新核對。 [操作方式](PLAYER_READINESS.md#五房追蹤驗收開場)
+- 正式解壓包以本機 IPC 和 Chromium 通過 8 項空席測試與 5 項既有 25 席定位回歸。獨立／合併各保留另一房草稿，經單一確認送出兩個原席位；定位請求唯讀，競爭登記不開啟新草稿。原測試夾具的分層路由曾重複交付，改以同一 IPC 路由插入競爭登記後通過。API TCP 監聽、UDP 端點及清理後活動場次均為零。Node 133 項通過。 [空席驗證](../artifacts/venue-vacant-seat-link-031243/package-guarded/checks.json) · [25 席回歸](../artifacts/venue-begin-seat-link-031242/package-031243-occupied-regression/checks.json)
+- 管理包核對 589 檔，與既有 Windows／Quest 0.50.12 通過離線發行核對。Quest 3 仍無 ADB 偵錯介面，頭盔與跨機待驗。GitHub Actions 對 `7ac70f0` 回報帳務或支出上限，工作未啟動。 [Windows 管理包](../artifacts/venue-vacant-seat-link-031243/final/VRCommand-ControlServer-0.31.243.zip) · [發行核對](../artifacts/venue-vacant-seat-link-031243/final/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44005432227)
+
 ## 2026-11-17 從五房開場清單定位名冊席位
 
 - 管理台 0.31.242 的全館開場逐席清單可點選已登記的待處理席位，直接打開原房名冊並定位該列。讀取後再核對準備場次及原名冊修訂。重新整理時依原入場識別保留焦點，換人時顯示重新核對提示。 [席位定位操作](PLAYER_READINESS.md#五房追蹤驗收開場)
