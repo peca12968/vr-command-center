@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 Windows 本機 socket 五房硬體排演
+
+- `da05212` 的模擬器 0.2.23 可用 AF_UNIX 連接本機管理 API 和各房模擬設備。合併與獨立模式各核對 25 個綁定的模擬回饋，測試暫停、重連、逐房停止、撤銷入場和管理連線中斷。正式建置及 ZIP 解壓後各通過 100 項即時排演檢查，結束時所有測試程序均已退出，查核為零 TCP 監聽及零 UDP 端點。 [解壓驗收](../artifacts/hardware-ipc-0223/extracted-verified/checks.json) · [本機操作](HARDWARE.md#windows-無人值守的本機排演)
+- 同一版 DLL 另通過 39 項離線回饋、36 項交接及 1173 項 .NET 檢查。第一次將排演輸出寫到 F 槽時，一房發生 `InvalidOperationException` 且缺少終止報告，原因待查。另一次試跑發現 IPC 測試轉送的 HTTP Host 與原判定不一致，改為保留原 Host。正式驗收在 C 槽暫存，套件與驗收紀錄保存在 F 槽。 [首次紀錄](../artifacts/hardware-ipc-0223/live.log) · [離線檢查](../artifacts/hardware-ipc-0223/offline-final.log) · [交接檢查](../artifacts/hardware-ipc-0223/handoff-packaged.log)
+- ZIP 為 274,194 bytes，解壓核對 11 檔，內附範例的離線結果與原驗收檔位元組相符。本版的場館 TCP／HTTPS、實體設備和跨機頭盔仍待驗收。GitHub Actions 回報帳務或支出上限，運算工作未啟動。 [模擬器套件](../artifacts/hardware-packages/hardware-simulator-0.2.23-ipc-net10.zip) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44058728739)
+
 ## 2026-11-17 從主控下載硬體排演原場次的封存事件
 
 - `1330978` 的控制台 0.31.265 在「五房硬體模擬排演報告」提供「下載原場次封存事件」。主控匯入版本 4 核對摘要後，管理服務依原場次識別匯出合併一份或獨立五份 JSON。原場次都結束並封存戰鬥串流才可匯出。 [操作方式](HARDWARE.md#離線核對五房排演結果)
