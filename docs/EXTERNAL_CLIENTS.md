@@ -402,6 +402,8 @@ python .\scripts\prepare-venue-network-plan.py `
 
 `check-venue-udp-preflight.py` 會將新版清單的場次欄位保存為 `networkPlanSessions`。用原回條補測時會比對這些欄位與原清單。主控可在控制台 0.31.239 匯入回條，以唯讀方式比對本次取樣的準備狀態及原席位。啟動前仍用 `start-verified-venue.py` 重驗原清單、啟動預覽、雙端 UDP 報告及有效期限。 [啟動前檢查](WINDOWS_SERVER_PACKAGE.md#以-udp-預檢報告啟動五房)
 
+以 `--batch` 收件時，含 `networkPlanSessions` 的全館回條必須配合產出它的同一份網路清單。即使位址、連接埠和席位都相同，場次修訂不同也會拒絕收件。封存驗收可用 `venueNetworkPlan` 比對同一份清單及逐房修訂；有 Windows 啟動預覽的回條也會比對其原啟動計畫。
+
 Windows 啟動器 1.21 的 `--venue-check` 預覽也會記錄各場已登記的房號與席號。產生全館網路清單或驗證 UDP 報告時，若提供這份預覽，工具會逐席比對。準備 Quest 專用清單時會先核對完整席位表，再選出指定的 Quest 席位。正式啟動會以同一份啟動計畫重新向管理服務預覽，確認原場次版本、席位及端點。名冊改動後請重新下載計畫、產生預覽並核對 UDP 報告。舊版預覽仍可用於歷史報告的查核。
 
 #### 用原網路清單核對封存席位

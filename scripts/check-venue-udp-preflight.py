@@ -146,7 +146,7 @@ def quest_batch_pairs(report, path, mode, endpoints, sources):
     return pairs
 
 
-def load_pairs(pairs_path, batch_paths, mode, endpoints, sources, binding, plan_hash):
+def load_pairs(pairs_path, batch_paths, mode, endpoints, sources, binding, venue_network):
     pairs = []
     distinct = False
     if pairs_path:
@@ -158,7 +158,7 @@ def load_pairs(pairs_path, batch_paths, mode, endpoints, sources, binding, plan_
         report = field.read_json(field.content(path))
         batch_distinct = field.udp_preflight_distinct_roster(report)
         if batch_distinct:
-            field.require(report.get('networkPlanSha256') == plan_hash,
+            field.require(report.get('networkPlanSha256') == venue_network['sha256'],
                           'Reuse the original venue network plan when including a distinct-roster UDP report')
         distinct |= batch_distinct
         groups = report.get('groups')
@@ -167,7 +167,8 @@ def load_pairs(pairs_path, batch_paths, mode, endpoints, sources, binding, plan_
             pairs.extend(quest_batch_pairs(report, path, mode, endpoints, sources))
             launch = field.read_udp_launch_binding(report, path.parent, mode)
         else:
-            batch_pairs, launch = field.udp_preflight_batch(report, path, mode, [list(group) for group in sorted(endpoints)])
+            batch_pairs, launch = field.udp_preflight_batch(report, path, mode, [list(group) for group in sorted(endpoints)],
+                venue_network=venue_network if 'networkPlanSessions' in report else None)
             digests = {tuple(group['roomIds']): field.udp_pair_digests(group) for group in report['groups']} if (
                 report['scope'] == 'venue-udp-preflight-only') else {}
             for group, rows in batch_pairs.items():
@@ -268,6 +269,7 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
     inventory_checked = 'serverIps' in document
     require_distinct_remote_roster |= inventory_checked
     plan_hash = hashlib.sha256(raw).hexdigest()
+    venue_network = {'sha256': plan_hash, 'launchSessions': launch_sessions}
     field.require({room for room, _ in sources} == set(field.QUEST_ROOMS), 'Plan a source for every room')
     field.require(launch_plan is None or launcher_preview is not None, 'A launch plan requires its original launcher preview')
     preview = field.read_udp_launcher_document(launcher_preview, preview=True) if launcher_preview else None
@@ -297,12 +299,11 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
     if retry_report is not None:
         field.require(launch_matches, 'Retry requires the original matching Windows plan and preview')
         prior, prior_hash = read_retry(retry_report, mode, plan_hash)
-        field.require('networkPlanSessions' not in prior or prior['networkPlanSessions'] == report_sessions,
-                      'Retry report launch sessions differ from the original network plan')
+        field.udp_report_network_sessions(prior, mode, venue_network)
         require_distinct_remote_roster |= field.udp_preflight_distinct_roster(prior)
     if require_distinct_remote_roster and not inventory_checked:
         field.require_distinct_remote_sources(sources, endpoints.values())
-    pairs, batch_distinct = load_pairs(pairs_path, batch_paths, mode, endpoints, sources, binding, plan_hash)
+    pairs, batch_distinct = load_pairs(pairs_path, batch_paths, mode, endpoints, sources, binding, venue_network)
     if batch_distinct and not require_distinct_remote_roster:
         field.require_distinct_remote_sources(sources, endpoints.values())
         require_distinct_remote_roster = True

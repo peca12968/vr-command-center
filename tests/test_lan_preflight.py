@@ -323,7 +323,7 @@ class NetworkPlanPreparationTests(unittest.TestCase):
             {**sessions[0], 'sessionSequence': sessions[0]['sessionSequence'] + 1}]))
         refused = self.root / 'refused.json'
         checked = preflight(refused, '--retry-report', altered)
-        self.assertIn('Retry report launch sessions differ', checked.stderr)
+        self.assertIn('UDP report launch sessions differ', checked.stderr)
         self.assertFalse(refused.exists())
         bad = self.store('bad-partial.json', dict(first, requireDistinctRemoteRoster='true'))
         checked = preflight(refused, '--retry-report', bad)
@@ -344,6 +344,91 @@ class NetworkPlanPreparationTests(unittest.TestCase):
         checked = preflight(refused, '--batch', batch)
         self.assertIn('Reuse the original venue network plan', checked.stderr)
         self.assertFalse(refused.exists())
+
+    def test_completed_venue_report_cannot_follow_replacement_revision(self):
+        cli = [sys.executable, str(ROOT / 'scripts/check-venue-udp-preflight.py')]
+        spec = importlib.util.spec_from_file_location('venue_preflight_for_batch', Path(cli[1]))
+        field_check = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(field_check)
+        field = field_check.field
+        for mode, ports in (('Independent', range(7777, 7782)), ('Linked', [7777])):
+            with self.subTest(mode=mode):
+                launch, preview = guarded_documents(mode, ports, '192.168.5.10')
+                launch_path = self.store(mode + '-launch.json', launch)
+                preview_path = self.store(mode + '-preview.json', preview)
+                sources = [{'roomId': room, 'seat': 1, 'address': f'192.168.5.{20 + room}'} for room in range(1, 6)]
+                inventory = self.store(mode + '-seats.json', {'version': 1, 'seats': sources})
+                original = self.root / (mode + '-original.json')
+                generated = prepare_network(launch_path, preview_path, inventory, original, '--players-per-room', 1)
+                self.assertEqual(0, generated.returncode, generated.stderr)
+
+                pairs = []
+                for source in sources:
+                    room, peer = source['roomId'], source['address']
+                    server = next(row for row in preview['servers'] if room in row['roomIds'])
+                    completed = (datetime.now(timezone.utc) - timedelta(seconds=2)).isoformat()
+                    label = f'{mode}-{room}'
+                    common = {'version': 1, 'stage': 'finished', 'port': server['port'], 'requested': 1, 'matched': 1,
+                              'complete': True, 'scope': 'authenticated-udp-only', 'completedAtUtc': completed,
+                              'exchangeSha256': hashlib.sha256(label.encode()).hexdigest()}
+                    listener = self.store(label + '-listener.json', dict(common, mode='listen', localAddress=server['address'],
+                                                                        peerAddress=peer, samples=[]))
+                    probe = self.store(label + '-probe.json', dict(common, mode='probe', localAddress=peer,
+                        peerAddress=server['address'], samples=[{'sample': 1, 'roundTripMs': 2}]))
+                    pairs.append({'listener': listener.name, 'probe': probe.name})
+                pair_path = self.store(mode + '-pairs.json', {'version': 1, 'pairs': pairs})
+
+                def run(network, output, *options):
+                    return subprocess.run([*cli, '--network-plan', str(network), '--output', str(output), *map(str, options)],
+                                          capture_output=True, text=True, timeout=15)
+
+                report = self.root / (mode + '-report.json')
+                issued = run(original, report, '--pairs', pair_path)
+                self.assertEqual(0, issued.returncode, issued.stderr)
+                accepted = self.root / (mode + '-accepted.json')
+                reused = run(original, accepted, '--batch', report)
+                self.assertEqual(0, reused.returncode, reused.stderr)
+                self.assertEqual(5, json.loads(accepted.read_bytes())['verifiedSources'])
+
+                changed = json.loads(original.read_bytes())
+                changed['endpoints'][-1]['sessionSequence'] += 1
+                replacement = self.store(mode + '-replacement.json', changed)
+                refused = self.root / (mode + '-refused.json')
+                stale = run(replacement, refused, '--batch', report)
+                self.assertEqual(1, stale.returncode, stale.stdout)
+                self.assertIn('original venue network plan', stale.stderr)
+                self.assertFalse(refused.exists())
+
+                altered = json.loads(report.read_bytes())
+                altered['networkPlanSessions'][-1]['sessionSequence'] += 1
+                altered_report = self.store(mode + '-altered-report.json', altered)
+                rejected = run(original, refused, '--batch', altered_report)
+                self.assertIn('launch sessions differ from the original network plan', rejected.stderr)
+                self.assertFalse(refused.exists())
+
+                original_network = field.read_venue_network_plan(original, mode, 1)
+                rooms = [row['roomIds'] for row in launch['servers']]
+                sessions = {tuple(row['roomIds']): row['sessionId'] for row in launch['servers']}
+                accepted_pairs, binding = field.read_udp_preflight_batch(report, mode, rooms, expected_sessions=sessions,
+                                                                         venue_network=original_network)
+                self.assertEqual(5, sum(map(len, accepted_pairs.values())))
+                self.assertIsNone(binding)
+                with self.assertRaisesRegex(field.EvidenceError, 'launch sessions differ from the original network plan'):
+                    field.read_udp_preflight_batch(altered_report, mode, rooms, expected_sessions=sessions, venue_network=original_network)
+
+                bound = self.root / (mode + '-bound.json')
+                issued = run(original, bound, '--pairs', pair_path, '--launch-plan', launch_path, '--launcher-preview', preview_path)
+                self.assertEqual(0, issued.returncode, issued.stderr)
+                verify = [sys.executable, str(ROOT / 'scripts/start-verified-venue.py'), '--verify-only',
+                          '--network-plan', str(original), '--launch-plan', str(launch_path)]
+                verified = subprocess.run([*verify, '--readiness', str(bound)], capture_output=True, text=True, timeout=15)
+                self.assertEqual(0, verified.returncode, verified.stderr)
+                tampered = json.loads(bound.read_bytes())
+                tampered['networkPlanSessions'][-1]['sessionSequence'] += 1
+                tampered_path = self.store(mode + '-tampered-start.json', tampered)
+                denied = subprocess.run([*verify, '--readiness', str(tampered_path)], capture_output=True, text=True, timeout=15)
+                self.assertEqual(1, denied.returncode, denied.stdout)
+                self.assertIn('launch sessions differ from the original Windows launch plan', denied.stderr)
 
     def test_server_inventory_rejects_a_player_on_an_unadvertised_server_address(self):
         launch_value, preview_value = guarded_documents('Linked', [7777], '192.168.5.10')

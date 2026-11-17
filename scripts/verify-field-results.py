@@ -2247,6 +2247,34 @@ def check_udp_launcher_endpoints(preview, mode, endpoints):
             'topologyMatches': topology == mode, 'groups': groups}
 
 
+def udp_report_network_sessions(batch, mode, venue_network=None):
+    if batch['scope'] != 'venue-udp-preflight-only':
+        return None
+    if venue_network is not None and 'networkPlanSha256' in batch:
+        require(batch['networkPlanSha256'] == venue_network['sha256'],
+                'UDP preflight references a different original venue network plan')
+    if 'networkPlanSessions' not in batch:
+        return None
+    digest, rows = batch.get('networkPlanSha256'), batch['networkPlanSessions']
+    groups = {QUEST_ROOMS} if mode == 'Linked' else {(room,) for room in QUEST_ROOMS}
+    require(type(digest) is str and re.fullmatch('[0-9a-f]{64}', digest)
+            and type(rows) is list and len(rows) == len(groups), 'Invalid UDP report launch sessions')
+    sessions = {}
+    for row in rows:
+        require(type(row) is dict and set(row) == {'roomIds', 'sessionId', 'missionId', 'sessionSequence'},
+                'Invalid UDP report launch session')
+        rooms = row['roomIds']
+        require(type(rooms) is list and all(type(room) is int for room in rooms)
+                and tuple(rooms) in groups and tuple(rooms) not in sessions, 'Invalid or repeated UDP report launch rooms')
+        sessions[tuple(rooms)] = {'sessionId': identity(row['sessionId']), 'missionId': identity(row['missionId']),
+                                  'sessionSequence': integer(row['sessionSequence'], 1)}
+    require(len({row['sessionId'] for row in sessions.values()}) == len(groups), 'UDP report repeats an original launch session')
+    if venue_network is not None:
+        require(sessions == venue_network.get('launchSessions', {}),
+                'UDP report launch sessions differ from the original network plan')
+    return sessions
+
+
 def read_udp_launch_binding(batch, directory, mode, expected_sessions=None):
     if 'launchBinding' not in batch:
         return None
@@ -2261,6 +2289,10 @@ def read_udp_launch_binding(batch, directory, mode, expected_sessions=None):
     require(proof == {**paths, **checked} and checked['complete'] and checked['mode'] == mode
             and type(summary) is dict and summary.get('sha256') == checked['previewSha256'] and summary.get('complete') is True,
             'Original Windows launch plan or preview differs from the UDP readiness proof')
+    network_sessions = udp_report_network_sessions(batch, mode)
+    if network_sessions is not None:
+        require(all(all(row[key] == plan[2][rooms][key] for key in row) for rooms, row in network_sessions.items()),
+                'UDP report launch sessions differ from the original Windows launch plan')
     if batch['scope'] == 'quest-udp-preflight-only':
         endpoints = {rooms: (row['address'], row['port']) for rooms, row in plan[2].items()}
         require(summary == check_udp_launcher_endpoints(preview, mode, endpoints),
@@ -2271,10 +2303,10 @@ def read_udp_launch_binding(batch, directory, mode, expected_sessions=None):
     return checked, plan[2]
 
 
-def read_udp_preflight_batch(path, mode, expected_rooms, *, expected_sessions=None, venue_plan_hash=None, original_pairs=None):
+def read_udp_preflight_batch(path, mode, expected_rooms, *, expected_sessions=None, venue_network=None, original_pairs=None):
     batch = read_json(content(path))
     parsed = udp_preflight_batch(batch, path, mode, expected_rooms, expected_sessions=expected_sessions,
-                                 venue_plan_hash=venue_plan_hash)
+                                 venue_network=venue_network)
     if batch['scope'] == 'venue-udp-preflight-only':
         for group in batch['groups']:
             for pair, hashes in zip(group['udpSourcePreflights'], udp_pair_digests(group), strict=True):
@@ -2319,8 +2351,10 @@ def inspect_incomplete_udp_preflight(path, mode, expected_rooms, players_per_roo
     require(integer(report.get('version'), 1, 1) and scope in ('venue-udp-preflight-only', 'quest-udp-preflight-only')
             and report.get('mode') == mode, 'Incomplete UDP preflight must match the original mode and report type')
     venue = scope == 'venue-udp-preflight-only'
-    if venue and venue_network is not None:
-        require(report.get('networkPlanSha256') == venue_network['sha256'], 'UDP preflight references a different original venue network plan')
+    if venue:
+        if venue_network is not None:
+            require(report.get('networkPlanSha256') == venue_network['sha256'], 'UDP preflight references a different original venue network plan')
+        udp_report_network_sessions(report, mode, venue_network)
     groups = report.get('groups')
     require(type(groups) is list and 1 <= len(groups) <= len(expected_rooms), 'Invalid UDP endpoint groups')
     venue_statuses = {'missing', 'invalid-or-expired', 'duplicate-pair', 'duplicate-exchange', 'verified'}
@@ -2430,12 +2464,14 @@ def udp_preflight_distinct_roster(report):
     return distinct
 
 
-def udp_preflight_batch(batch, path, mode, expected_rooms, *, expected_sessions=None, venue_plan_hash=None):
+def udp_preflight_batch(batch, path, mode, expected_rooms, *, expected_sessions=None, venue_network=None):
     require(integer(batch['version'], 1, 1) and batch.get('scope') in ('quest-udp-preflight-only', 'venue-udp-preflight-only')
             and batch.get('mode') == mode and batch.get('complete') is True,
             'Provide a complete UDP preflight batch for the original mode')
-    if venue_plan_hash is not None and batch['scope'] == 'venue-udp-preflight-only' and 'networkPlanSha256' in batch:
-        require(batch['networkPlanSha256'] == venue_plan_hash, 'UDP preflight references a different original venue network plan')
+    sessions = udp_report_network_sessions(batch, mode, venue_network)
+    if sessions is not None and expected_sessions is not None:
+        require({rooms: row['sessionId'] for rooms, row in sessions.items()} == expected_sessions,
+                'UDP report sessions differ from the original sealed batch')
     launch = read_udp_launch_binding(batch, path.parent, mode, expected_sessions)
     groups = batch['groups']
     require(type(groups) is list and 1 <= len(groups) <= len(expected_rooms), 'Invalid UDP endpoint groups')
@@ -3630,7 +3666,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
             path = start_readiness_path or (udp_batch_paths[index] if udp_batch_paths is not None else evidence_path(name, kind='udpPreflightBatch'))
             batch, launch = read_udp_preflight_batch(path, mode, expected_rooms,
                                                      expected_sessions={tuple(row['roomIds']): sid for sid, row in expected.items()},
-                                                     venue_plan_hash=venue_network['sha256'] if venue_network else None,
+                                                     venue_network=venue_network,
                                                      original_pairs=original_pairs)
             if launch is not None:
                 for group, planned in launch[1].items():

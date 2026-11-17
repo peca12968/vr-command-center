@@ -290,7 +290,7 @@ def prepare(args, output):
         sessions = {tuple(row['roomIds']): session_id for session_id, row in expected.items()}
         for path in paths:
             field.read_udp_preflight_batch(path, mode, groups, expected_sessions=sessions,
-                                           venue_plan_hash=venue_network['sha256'] if venue_network else None)
+                                           venue_network=venue_network)
         seen_paths.update(paths)
         if len(paths) == 1:
             manifest['udpPreflightBatch'] = ref(paths[0])
