@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 從全館結束回條開啟本次批次
+
+- 0.31.261 在主控確認全館結束後提供「查看本次結束批次」。場次清單讀取失敗時仍可從成功回條重新讀取原批次。控制台比對各場次、房間、結束序號與批次識別後才切換，然後持續追蹤同批封存。 [操作說明](SESSION_CLOSURE.md#歷史批次)
+- `fbb0ab9` 管理包核對 595 檔，通過 15 項 Chromium 與 125 項 Node 檢查。兩種五房模式各用 25 個模擬席位，重現結束成功、清單讀取失敗和歷史選擇。獨立場另驗證初次回覆中斷，同一請求重試後讀回原回條。兩種模式均拒絕結束序號不符的批次，最後 6 個場次完成雙封存並核對原開場批次。管理程序無 TCP 監聽或 UDP 端點。 [合併場](../artifacts/venue-end-receipt-031261/package/linked/checks.json) · [獨立場](../artifacts/venue-end-receipt-031261/package/independent/checks.json) · [程序驗證](../artifacts/venue-end-receipt-031261/package/runtime.json)
+- 管理包通過與既有 Windows 遊戲及 Quest APK 的離線發行核對。Windows 目前只列出 Quest 檔案傳輸介面，頭盔與跨機 25 人驗收待做。GitHub Actions 因帳務或支出上限未啟動。 [管理包](../artifacts/venue-end-receipt-031261/VRCommand-ControlServer-0.31.261.zip) · [離線發行核對](../artifacts/venue-end-receipt-031261/venue-release.json) · [Quest USB 查核](../artifacts/venue-end-receipt-031261/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44039937665)
+
 ## 2026-11-17 開場確認後重讀已變更的五房名冊
 
 - 0.31.260 在確認後發現名冊版本對不上時，會重讀場次，再顯示開場條件已變更。修正前，房控移除第 5 房第 5 席後，五房獨立與合併均擋下舊開場，但通知出現時仍看不到空席。新版可從更新後的空席直達名冊，完成補登，等新入場具有效追蹤後再以新的確認開場。 [操作說明](PLAYER_READINESS.md#五房追蹤驗收開場) · [合併場](../artifacts/venue-begin-roster-031260/package/linked/checks.json) · [獨立場](../artifacts/venue-begin-roster-031260/package/independent/checks.json)
