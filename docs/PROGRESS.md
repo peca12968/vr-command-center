@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-17 在全館開場清單核對 MR 房間校正
+
+- 控制台 0.31.246 顯示各準備房的 VR／MR 模式，MR 房可直接定位原校正檔欄或鎖定結果。合併場在不同房間間切換保留已核對的原檔。瀏覽器核對原檔 SHA-256 後才允許鎖定，回條不符時保留原命令供重試。 [開場清單](PLAYER_READINESS.md#五房追蹤驗收開場) · [Quest 部署](QUEST3.md#quest-3-場地對位部署)
+- 上一版接受同房另一份有效校正檔的雜湊，原反例已保存。正式包以原內容安全政策和本機 IPC 通過 8 項，涵蓋 BOM／CRLF、混合房切換、合併房草稿、錯誤回條及單次鎖定。原始碼首跑曾在舊場次清單尚未讀回時點選，等待新合併批次後通過。Node 133 項通過。測試場次均已清理，API 無 TCP 監聽或 UDP 端點。 [上一版反例](../artifacts/venue-mr-pin-031246/previous-release/browser.log) · [正式包驗證](../artifacts/venue-mr-pin-031246/package-final/checks.json)
+- 同一正式包通過 21 項配票回歸。全 MR 合併、全 MR 獨立與 VR／MR 混合獨立各驗 5、10、25 席，九份部署包共 120 張實際管理 API 所簽發的票券。PowerShell 讀回各席與鎖定校正，未呼叫 ADB。 [配票回歸](../artifacts/mr-venue-pilot-031236/package-031246-deployment/checks.json)
+- `8daeb68` 管理包核對 592 檔，與原 Windows／Quest 0.50.12 通過離線發行核對。Quest 3 仍無 ADB 偵錯介面，實機定位與跨機待驗。GitHub Actions 因帳務或支出上限未啟動。 [Windows 管理包](../artifacts/venue-mr-pin-031246/final/VRCommand-ControlServer-0.31.246.zip) · [發行核對](../artifacts/venue-mr-pin-031246/final/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44010005743)
+
 ## 2026-11-17 核對每房場地報告的原任務版本
 
 - 控制台 0.31.245 在準備場次時核對場地報告與保存版本的 `missionId`。合併場次及五房獨立都會拒絕其他版本的報告。同一批只有一房不符時，建立仍停用，其他房已核對的圖仍可查看。服務拒絕建立時也會指明版本，以原報告標示衝突物件。 [場地檢查](LAYOUT.md)
