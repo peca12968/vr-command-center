@@ -28,7 +28,7 @@ internal static partial class VrVenueTickets
     {
         const string message = "Provide five rooms with 1, 2 or 5 original VR connection files each.";
         var files = await DeploymentJson.Read<CheckRequest>(request, 72 * 1024, message, cancellation);
-        if (files.Topology is not ("Linked" or "Independent") || !SupportedSeatCount(files.PlayersPerRoom)
+        if (files.Topology is not ("Linked" or "Independent") || !RoomTicketBundles.SupportedVenueSeatCount(files.PlayersPerRoom)
             || files.Rooms is not { Length: SessionManager.RoomCount }
             || files.Rooms.Any(room => room is not { RoomId: >= 1 and <= SessionManager.RoomCount }
                 || room.ConnectionFiles?.Length != files.PlayersPerRoom

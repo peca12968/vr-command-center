@@ -1386,6 +1386,44 @@ class QuestVenueTests(unittest.TestCase):
         manifest['topology'] = 'Linked'
         self.assert_rejected(self.run_bundle(dict(files, **{'venue.json': json.dumps(manifest)})), 'original topology')
 
+    def test_mr_and_mixed_bundle_pilot_requires_exact_seats_and_preserves_alignment(self):
+        for mode, count in [('MR', 1), ('Mixed', 2)]:
+            with self.subTest(mode=mode, count=count):
+                files, _ = self.bundle('Linked') if mode == 'MR' else self.mixed_bundle()
+                manifest = json.loads(files['venue.json'])
+                manifest['playersPerRoom'] = count
+                files['venue.json'] = json.dumps(manifest)
+                self.assertNotEqual(0, self.run_bundle(files).returncode)
+                for room in manifest['rooms']:
+                    name = room['ticketsZip']
+                    reduced = io.BytesIO()
+                    with zipfile.ZipFile(io.BytesIO(files[name])) as original, zipfile.ZipFile(reduced, 'w') as pilot:
+                        for seat in range(1, count + 1):
+                            config = f"room-{room['roomId']:02}-seat-{seat:02}.json"
+                            pilot.writestr(config, original.read(config))
+                    files[name] = reduced.getvalue()
+
+                result = self.run_bundle(files)
+                self.assertEqual(0, result.returncode, result.stderr)
+                report = json.loads(result.stdout)
+                self.assertEqual((manifest['topology'], 5 * count, True),
+                                 (report['topology'], report['seats'], report['alignmentPinsVerified']))
+                if mode == 'Mixed':
+                    self.assertEqual(mode, report['mode'])
+                changed = dict(files)
+                changed['room-02-alignment.json'] += b'\r\n'
+                self.assert_rejected(self.run_bundle(changed), 'alignment')
+
+                if mode == 'MR':
+                    for name, data in files.items():
+                        content = data.encode() if isinstance(data, str) else data
+                        (self.root / name).write_bytes(content)
+                    extracted = subprocess.run(['pwsh', '-NoProfile', '-NonInteractive', '-File',
+                                                str(ROOT / 'scripts/deploy-quest.ps1'), '-VenueManifest',
+                                                str(self.root / 'venue.json')], capture_output=True, encoding='utf-8', timeout=20)
+                    self.assertEqual(0, extracted.returncode, extracted.stderr)
+                    self.assertEqual(5 * count, json.loads(extracted.stdout)['seats'])
+
     def device_map(self):
         path = self.root / 'device-map.json'
         document = {'version': 1, 'seats': [{'roomId': room, 'seat': seat, 'serial': f'fixture-{(room-1)*5+seat:02}'}

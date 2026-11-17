@@ -15,7 +15,7 @@ const guidance = {
   'venue-endpoint-loopback': '端點僅能同機使用',
   'venue-endpoint-reused': '獨立房間使用了相同端點',
   'venue-source-changed': '遊戲來源已變更',
-  'venue-roster-changed': '等待本房五席並核對最新名冊',
+  'venue-roster-changed': '本房名冊與選取席數不符',
   'venue-roster-reused': '玩家或入場資料與另一房重複',
   'venue-alignment-unlocked': '等待鎖定本房校正檔',
   'venue-alignment-mismatch': '請選擇本房鎖定的原始校正檔'
@@ -65,9 +65,8 @@ export function mountVrVenueTickets(state, api, download, ticketSourceLive) {
     if (version && rosterVersion() !== version) clear('房間或名冊已變更，請重新讀取五房名冊。');
     const mixed = mixedVenue();
     $('title').textContent = mixed ? 'VR／MR 混合五房配票' : 'VR 五房配票';
-    $('size-field').hidden = mixed;
     read.disabled = panel.hidden || busy || !!command || pending;
-    size.disabled = mixed || read.disabled;
+    size.disabled = read.disabled;
     const inputs = [...files.querySelectorAll('input')];
     for (const input of inputs) input.disabled = read.disabled;
     const problems = preview?.rooms.map(roomProblem) ?? [];
@@ -99,7 +98,7 @@ export function mountVrVenueTickets(state, api, download, ticketSourceLive) {
 
   read.addEventListener('click', async () => {
     if (read.disabled) return;
-    const mixed = mixedVenue(), playersPerRoom = mixed ? 5 : Number(size.value);
+    const mixed = mixedVenue(), playersPerRoom = Number(size.value);
     const route = mixed ? '/mixed-deployment/venue' : '/vr-deployment/venue';
     const query = playersPerRoom === 5 ? '' : `?playersPerRoom=${playersPerRoom}`;
     clear();

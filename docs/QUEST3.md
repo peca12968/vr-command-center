@@ -411,7 +411,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 
 ### 混合 VR 與 MR 五房部署包
 
-管理包 0.31.47 可從五個獨立場次一次下載混合部署包。各房先登記五席並啟動自己的遊戲伺服器，五房使用不同的場館 IPv4／UDP 端點。MR 房的五席皆登記為 Quest 3，並在啟動伺服器前鎖定該房校正檔。
+管理包 0.31.47 可從五個獨立場次一次下載混合部署包。管理包 0.31.236 起可選五房各 1、2 或 5 席。各房先按指定席數登記玩家並啟動自己的遊戲伺服器，五房使用不同的場館 IPv4／UDP 端點。所有 MR 席皆登記為 Quest 3，並在啟動伺服器前鎖定各 MR 房的校正檔。
 
 以主控登入「房間與場次」，在「VR／MR 混合五房配票」按「讀取五房名冊」。核對各房的模式、名冊及端點，只為 MR 房選擇已鎖定的原始校正 JSON，然後下載 `vr-mr-venue-deployment.zip`。包內有 `venue.json`（版本 2、`Mixed`、`Independent`）、五個房間的連線 ZIP，以及各 MR 房的原始校正檔。票券自簽發起有效五分鐘，整包由主控保管。
 
@@ -424,25 +424,27 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-mr-venue-depl
     -ManagementApi http://127.0.0.1:5081 -CheckOnly
 ```
 
-完成預檢後可改用 `-DeployMappedSeats` 套用，或指定 `-RoomId`、`-Seat` 及 `-Serial` 部署一席。正式部署須提供主控金鑰與管理服務網址，先核對 25 席的簽章、名冊、端點及 MR 校正檔。VR 席使用原始四欄連線設定。MR 席另寫入原校正檔並啟用透視。Quest 裝置清單只列當次要部署的 Quest 3 席位。 [指定席位操作](#部署指定的-quest-席位)
+完成預檢後可改用 `-DeployMappedSeats` 套用，或指定 `-RoomId`、`-Seat` 及 `-Serial` 部署一席。正式部署須提供主控金鑰與管理服務網址，先核對原包每席的簽章、名冊、端點及 MR 校正檔。VR 席使用原始四欄連線設定。MR 席另寫入原校正檔並啟用透視。用 `-AllowPartialMap` 時，Quest 裝置清單只列當次要部署的 Quest 3 席位。 [指定席位操作](#部署指定的-quest-席位)
 
-主控 API 使用 `GET /api/mixed-deployment/venue` 預覽、`POST /api/mixed-deployment/venue-bundle` 配票、`POST /api/mixed-deployment/venue-check` 驗票。各次請求使用當時同一次讀取的場次與端點。全 VR 或全 MR 場館仍使用各自的部署入口。
+主控 API 使用 `GET /api/mixed-deployment/venue` 預覽、`POST /api/mixed-deployment/venue-bundle` 配票、`POST /api/mixed-deployment/venue-check` 驗票。5／10 席試場在預覽查詢、配票 JSON 和驗票 JSON 使用相同的 `playersPerRoom`，也記錄在原包的 `venue.json`。省略時使用原 25 席格式。各次請求使用當時同一次讀取的場次與端點。全 VR 或全 MR 場館仍使用各自的部署入口。
 
-### 五房 25 席部署預檢
+<a id="五房-25-席部署預檢"></a>
+
+### 五房 MR 部署預檢
 
 #### 從主控台下載五房部署包
 
-1. 使用管理包 0.31.29 或更新版。在五房各登記五個 Quest 3 席位、鎖定各房校正檔，並啟動遊戲伺服器，等它公布場館 IPv4 與 UDP 埠。合併模式用一個端點，五房獨立各用不同端點。
-2. 以主控登入「房間與場次」，選取合併 MR 場次或任一獨立 MR 場次。在「Quest 3 MR 五房部署包」依房號選取五份鎖定的原始校正 JSON，按「下載五房部署包 ZIP」。畫面會提示場次、端點、名冊或校正檔有問題的房間。
+1. 在五房各登記同樣數量的 Quest 3 席位。管理包 0.31.29 支援每房 5 席，0.31.236 起也可每房登記 1 或 2 席。鎖定各房校正檔，並啟動遊戲伺服器，等它公布場館 IPv4 與 UDP 埠。合併模式用一個端點，五房獨立各用不同端點。
+2. 以主控登入「房間與場次」，選取合併 MR 場次或任一獨立 MR 場次。在「Quest 3 MR 五房部署包」選每房席數，依房號選取五份鎖定的原始校正 JSON，再按「下載五房部署包 ZIP」。畫面會提示場次、端點、名冊或校正檔有問題的房間。
 3. 保留 `quest-mr-venue.zip`，可直接預檢或為指定席位部署。外層 ZIP 包含五個房間連線 ZIP、五份校正原檔及 `venue.json`。由主控保管整包，入場票券自簽發起有效五分鐘。
 
 控制台 0.31.103 會在五房部署區顯示各房公布的 UDP 端點。批次公告的遊戲來源暫停更新時，下載按鈕會停用，已選的校正檔會保留。原來源恢復後可再次點選下載。若等待 ZIP 回應期間原端點失效，控制台會擋下該次下載，並指出需要確認的房間。
 
-管理 API `POST /api/mr-deployment/venue-bundle` 限主控。請求包含 `topology`，以及五筆 `rooms`，各有 `roomId`、`sessionId`、五個 `players`（`playerId`、`admissionId`）及 Base64 的 `alignmentFile`。服務按同一次讀取的場次和端點驗證五房，完整通過後以 `Cache-Control: no-store` 回傳 ZIP。場次、校正原檔、端點或當前名冊不符時回傳 `409` 及房號，無法取得部分部署包。裝置安裝和場館 UDP 可達性仍需實測。
+管理 API `POST /api/mr-deployment/venue-bundle` 限主控。請求包含 `topology`，以及五筆 `rooms`，各有 `roomId`、`sessionId`、按席位排序的完整 `players`（`playerId`、`admissionId`）及 Base64 的 `alignmentFile`。5／10 席試場在配票和 `POST /api/mr-deployment/venue-check` 的 JSON 使用相同的 `playersPerRoom`。服務按同一次讀取的場次和端點驗證五房，完整通過後以 `Cache-Control: no-store` 回傳 ZIP。場次、校正原檔、端點或當前名冊不符時回傳 `409` 及房號，無法取得部分部署包。裝置安裝和場館 UDP 可達性仍需實測。
 
 #### 直接用 ZIP 預檢或部署單席
 
-直接使用管理台下載的原始 ZIP。省略房號與席位會讀取全部 25 席並輸出預檢結果。指定房號與席位並加上 `-CheckOnly`，會輸出該席的到期時間與校正雜湊。兩種預檢皆只讀檔，不呼叫 ADB。
+直接使用管理台下載的原始 ZIP。省略房號與席位會讀取包內全部席位並輸出預檢結果。指定房號與席位並加上 `-CheckOnly`，會輸出該席的到期時間與校正雜湊。兩種預檢皆只讀檔，不呼叫 ADB。
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.zip

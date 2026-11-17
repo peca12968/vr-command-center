@@ -634,10 +634,10 @@ app.MapPost("/api/vr-deployment/venue-check", async (WorldRecordings worlds, Htt
     var request = await VrVenueTickets.ReadCheck(context.Request, context.RequestAborted);
     return VrVenueTickets.Check(request, worlds, actor, ticketSigner);
 });
-app.MapGet("/api/mixed-deployment/venue", (WorldRecordings worlds, HttpContext context) =>
+app.MapGet("/api/mixed-deployment/venue", (int? playersPerRoom, WorldRecordings worlds, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";
-    return MixedVenueDeployment.Read(worlds, Actor(context));
+    return MixedVenueDeployment.Read(worlds, Actor(context), playersPerRoom ?? SessionManager.PlayersPerRoom);
 });
 app.MapPost("/api/mixed-deployment/venue-bundle", async (WorldRecordings worlds, HttpContext context) =>
 {

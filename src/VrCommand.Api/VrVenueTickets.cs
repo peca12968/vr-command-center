@@ -23,11 +23,9 @@ internal static partial class VrVenueTickets
         public bool Ready => Topology is not null && Rooms.All(room => room.Problem is null);
     }
 
-    private static bool SupportedSeatCount(int count) => count is 1 or 2 or SessionManager.PlayersPerRoom;
-
     internal static Preview Read(WorldRecordings worlds, OperatorIdentity actor, int playersPerRoom)
     {
-        if (!SupportedSeatCount(playersPerRoom)) throw new ArgumentException("Use 1, 2 or 5 players per room.");
+        if (!RoomTicketBundles.SupportedVenueSeatCount(playersPerRoom)) throw new ArgumentException("Use 1, 2 or 5 players per room.");
         return Plan(worlds.ReadVenueSources(null, actor), playersPerRoom);
     }
 
@@ -45,12 +43,12 @@ internal static partial class VrVenueTickets
             var (session, endpoint, ticketSourceLive) = sources.Values.SingleOrDefault(source => source.Session.RoomIds.Contains(roomId));
             if (session is null || session.Environment.Mode != ExperienceMode.VR)
                 return new Room(roomId, null, null, null, [], "vr-venue-session-missing");
-            var seats = session.Players.Where(player => player.RoomId == roomId).OrderBy(player => player.Seat)
-                .Select(player => new Seat(player.Seat + 1, player.Id, player.AdmissionId, player.Name)).ToArray();
+            var roster = session.Players.Where(player => player.RoomId == roomId).OrderBy(player => player.Seat).ToArray();
+            var seats = roster.Select(player => new Seat(player.Seat + 1, player.Id, player.AdmissionId, player.Name)).ToArray();
             var problem = topology is null ? "vr-venue-topology-changed"
                 : endpoint is null ? "vr-venue-endpoint-missing"
                 : topology == SessionMode.Independent && !endpoints.Add((endpoint.Address, endpoint.Port)) ? "vr-venue-endpoint-reused"
-                : seats.Length != playersPerRoom || seats.Where((seat, index) => seat.Number != index + 1).Any() ? "vr-venue-roster-incomplete"
+                : !RoomTicketBundles.HasFirstSeats(roster, playersPerRoom) ? "vr-venue-roster-incomplete"
                 : seats.Any(seat => !players.Add(seat.PlayerId) || !admissions.Add(seat.AdmissionId)) ? "vr-venue-roster-reused"
                 : ticketSourceLive == false ? "vr-venue-endpoint-stale"
                 : null;
@@ -64,7 +62,7 @@ internal static partial class VrVenueTickets
         const string error = "Provide each original VR session and source with 1, 2 or 5 current admissions per room.";
         var input = await DeploymentJson.Read<Request>(request, 8192, error, cancellation);
         if (input.Topology is not (SessionMode.Independent or SessionMode.Linked)
-            || !SupportedSeatCount(input.PlayersPerRoom)
+            || !RoomTicketBundles.SupportedVenueSeatCount(input.PlayersPerRoom)
             || input.Rooms is not { Length: SessionManager.RoomCount }
             || input.Rooms.Any(room => room is not { RoomId: >= 1 and <= SessionManager.RoomCount }
                 || room.Players?.Length != input.PlayersPerRoom

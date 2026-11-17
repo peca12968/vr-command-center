@@ -195,12 +195,12 @@ function Get-VenueInputPath([string]$Directory, [string]$Path) {
     return [IO.Path]::Combine($Directory, $Path)
 }
 
-function Read-VenueRoomTickets([string]$Path, [int]$RoomId, [Guid]$SessionId) {
+function Read-VenueRoomTickets([string]$Path, [int]$RoomId, [Guid]$SessionId, [int]$PlayersPerRoom = 5) {
     try { $file = [IO.File]::OpenRead((Resolve-Path -LiteralPath $Path).ProviderPath) }
     catch { throw "Room $RoomId needs a readable room connection ZIP." }
     try {
         if ($file.Length -lt 1 -or $file.Length -gt 65536) { throw "Room $RoomId connection ZIP has an invalid size." }
-        Read-VenueTicketStream $file $RoomId $SessionId
+        Read-VenueTicketStream $file $RoomId $SessionId -PlayersPerRoom $PlayersPerRoom
     } finally { $file.Dispose() }
 }
 
@@ -263,7 +263,7 @@ function Confirm-VenueWithManagement([string]$Address, [string]$Topology, [objec
     $endpoint = [Uri]::new($target.Origin, "/api/$($Mode.ToLowerInvariant())-deployment/venue-check")
     $checksHeadset = $Mode -cin @('VR','Mixed')
     $requestBody = @{ topology = $Topology; rooms = $Rooms }
-    $playersPerRoom = if ($Mode -ceq 'VR') { $Rooms[0].connectionFiles.Count } else { 5 }
+    $playersPerRoom = $Rooms[0].connectionFiles.Count
     if ($playersPerRoom -ne 5) { $requestBody.playersPerRoom = $playersPerRoom }
     $expectedSeats = 5 * $playersPerRoom
     if ($RequireLiveSource) { $requestBody.requireLiveSource = $true }
@@ -366,9 +366,9 @@ function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$Selecte
     $manifestFields = @('version','topology','rooms')
     if ($isVr -or $isMixed) { $manifestFields += 'mode' }
     $playersPerRoom = 5
-    if ($isVr -and $manifest.PSObject.Properties['playersPerRoom']) {
+    if ($manifest.PSObject.Properties['playersPerRoom']) {
         if (-not (Test-JsonInteger $manifest.playersPerRoom) -or $manifest.playersPerRoom -notin 1,2,5) {
-            throw 'VR venue bundles require 1, 2 or 5 seats per room.'
+            throw 'Venue bundles require 1, 2 or 5 seats per room.'
         }
         $playersPerRoom = [int]$manifest.playersPerRoom
         $manifestFields += 'playersPerRoom'
@@ -444,7 +444,7 @@ function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$Selecte
             finally { $inner.Dispose() }
         } else {
             $alignment = Read-RoomAlignment (Get-VenueInputPath $directory $room.alignmentFile) $id
-            $tickets = @(Read-VenueRoomTickets (Get-VenueInputPath $directory $room.ticketsZip) $id $session)
+            $tickets = @(Read-VenueRoomTickets (Get-VenueInputPath $directory $room.ticketsZip) $id $session $playersPerRoom)
         }
         $endpoint = $tickets[0].Endpoint
         if (($isVr -or $isMixed) -and ($room.address + ':' + $room.port) -cne $endpoint) {

@@ -11,7 +11,8 @@ internal static class MrDeploymentCheck
 
     internal sealed record Files(byte[] ConnectionFile, byte[] AlignmentFile);
     internal sealed record Result(string Status, int RoomId, int Seat, DateTimeOffset? ExpiresAtUtc = null);
-    internal sealed record VenueFiles(string Topology, VenueRoom[] Rooms, bool RequireLiveSource = false);
+    internal sealed record VenueFiles(string Topology, VenueRoom[] Rooms, bool RequireLiveSource = false,
+        int PlayersPerRoom = SessionManager.PlayersPerRoom);
     internal sealed record VenueRoom(int RoomId, Guid SessionId, byte[][] ConnectionFiles, byte[] AlignmentFile);
     internal sealed record VenueResult(string Topology, bool AllMatched, Result[] Seats,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? LiveSourceVerified);
@@ -27,10 +28,12 @@ internal static class MrDeploymentCheck
 
     internal static async Task<VenueFiles> ReadVenue(HttpRequest request, CancellationToken cancellation)
     {
-        const string message = "Provide five rooms with five original connection files and one alignment file each, in a Linked or Independent venue.";
+        const string message = "Provide five rooms with 1, 2 or 5 original connection files and one alignment each, in a Linked or Independent venue.";
         var files = await DeploymentJson.Read<VenueFiles>(request, 180 * 1024, message, cancellation);
-        if (files.Topology is not ("Linked" or "Independent") || files.Rooms is not { Length: SessionManager.RoomCount }
-            || files.Rooms.Any(room => room is not { RoomId: >= 1 and <= SessionManager.RoomCount, ConnectionFiles.Length: SessionManager.PlayersPerRoom }
+        if (files.Topology is not ("Linked" or "Independent") || !RoomTicketBundles.SupportedVenueSeatCount(files.PlayersPerRoom)
+            || files.Rooms is not { Length: SessionManager.RoomCount }
+            || files.Rooms.Any(room => room is not { RoomId: >= 1 and <= SessionManager.RoomCount }
+                || room.ConnectionFiles?.Length != files.PlayersPerRoom
                 || room.SessionId == Guid.Empty || !ValidAlignment(room.AlignmentFile) || room.ConnectionFiles.Any(file => !ValidConnection(file)))
             || files.Rooms.Select(room => room.RoomId).Distinct().Count() != SessionManager.RoomCount
             || files.Rooms.Select(room => room.SessionId).Distinct().Count() != (files.Topology == "Linked" ? 1 : SessionManager.RoomCount))
@@ -69,13 +72,16 @@ internal static class MrDeploymentCheck
                 : sources[session.Id].TicketSourceLive != true ? "source-stale" : null;
             var hash = session?.RoomAlignment?.ForRoom(room.RoomId);
             var alignment = hash is null ? null : ReadAlignment(room.AlignmentFile);
-            for (var seat = 0; seat < SessionManager.PlayersPerRoom; seat++)
+            var roster = session?.Players.Where(player => player.RoomId == room.RoomId).OrderBy(player => player.Seat).ToArray() ?? [];
+            var pilotRosterChanged = files.PlayersPerRoom != SessionManager.PlayersPerRoom
+                && (!RoomTicketBundles.HasFirstSeats(roster, files.PlayersPerRoom) || roster.Any(player => player.Headset != HeadsetKind.Quest3));
+            for (var seat = 0; seat < files.PlayersPerRoom; seat++)
             {
-                var player = session?.Players.SingleOrDefault(player => player.RoomId == room.RoomId && player.Seat == seat && player.Headset == HeadsetKind.Quest3);
+                var player = roster.SingleOrDefault(player => player.Seat == seat && player.Headset == HeadsetKind.Quest3);
                 if (session is null) results.Add(new("session-unavailable", room.RoomId, seat));
                 else if (sourceProblem is not null) results.Add(new(sourceProblem, room.RoomId, seat));
                 else if (hash is null) results.Add(new("alignment-not-locked", room.RoomId, seat));
-                else if (player is null) results.Add(new("seat-unavailable", room.RoomId, seat));
+                else if (pilotRosterChanged || player is null) results.Add(new("seat-unavailable", room.RoomId, seat));
                 else results.Add(CheckFiles(session.Id, player, room.ConnectionFiles[seat], alignment, hash, signer, endpoint));
             }
         }

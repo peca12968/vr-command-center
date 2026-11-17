@@ -13,18 +13,19 @@ internal sealed class MrVenueBundleConflict(int roomId, string code, string mess
 
 internal static class MrVenueBundle
 {
-    internal sealed record Request(string Topology, Room[] Rooms);
+    internal sealed record Request(string Topology, Room[] Rooms, int PlayersPerRoom = SessionManager.PlayersPerRoom);
     internal sealed record Room(int RoomId, Guid SessionId, TicketAdmission?[] Players, byte[] AlignmentFile);
     private sealed record ReadyRoom(Room Input, SessionView Session, ConnectionEndpoint Endpoint, Player[] Players);
 
     internal static async Task<Request> Read(HttpRequest request, CancellationToken cancellation)
     {
-        const string message = "Provide five MR rooms with their current admissions and original alignment files.";
+        const string message = "Provide five MR rooms with 1, 2 or 5 current admissions and their original alignment files.";
         var input = await DeploymentJson.Read<Request>(request, 128 * 1024, message, cancellation);
-        if (input.Topology is not ("Linked" or "Independent") || input.Rooms is not { Length: SessionManager.RoomCount }
+        if (input.Topology is not ("Linked" or "Independent") || !RoomTicketBundles.SupportedVenueSeatCount(input.PlayersPerRoom)
+            || input.Rooms is not { Length: SessionManager.RoomCount }
             || input.Rooms.Any(room => room is not { RoomId: >= 1 and <= SessionManager.RoomCount,
-                Players.Length: SessionManager.PlayersPerRoom, AlignmentFile.Length: > 0 and <= RoomAlignment.MaxFileBytes }
-                || room.SessionId == Guid.Empty)
+                AlignmentFile.Length: > 0 and <= RoomAlignment.MaxFileBytes }
+                || room.SessionId == Guid.Empty || room.Players?.Length != input.PlayersPerRoom)
             || input.Rooms.Select(room => room.RoomId).Distinct().Count() != SessionManager.RoomCount
             || input.Rooms.Select(room => room.SessionId).Distinct().Count() != (input.Topology == "Linked" ? 1 : SessionManager.RoomCount))
             throw new ArgumentException(message);
@@ -35,7 +36,7 @@ internal static class MrVenueBundle
     {
         var mode = request.Topology == "Linked" ? SessionMode.Linked : SessionMode.Independent;
         var sources = worlds.ReadVenueSources(request.Rooms.Select(room => room.SessionId).Distinct().ToArray(), actor);
-        var rooms = request.Rooms.OrderBy(room => room.RoomId).Select(room => Validate(room, mode, sources)).ToArray();
+        var rooms = request.Rooms.OrderBy(room => room.RoomId).Select(room => Validate(room, mode, sources, request.PlayersPerRoom)).ToArray();
         var endpoints = new HashSet<(string, int)>();
         var players = new HashSet<Guid>();
         var admissions = new HashSet<Guid>();
@@ -44,7 +45,7 @@ internal static class MrVenueBundle
             if (mode == SessionMode.Independent && !endpoints.Add((room.Endpoint.Address, room.Endpoint.Port)))
                 throw new MrVenueBundleConflict(room.Input.RoomId, "venue-endpoint-reused", "Independent rooms must publish distinct endpoints.");
             if (room.Players.Any(player => !players.Add(player.Id) || !admissions.Add(player.AdmissionId)))
-                throw new MrVenueBundleConflict(room.Input.RoomId, "venue-roster-reused", "The venue requires 25 distinct players and admissions.");
+                throw new MrVenueBundleConflict(room.Input.RoomId, "venue-roster-reused", "The venue requires distinct players and admissions.");
         }
 
         using var output = new MemoryStream();
@@ -57,7 +58,13 @@ internal static class MrVenueBundle
                 alignmentFile = FormattableString.Invariant($"room-{room.Input.RoomId:00}-alignment.json")
             }).ToArray();
             using (var entry = archive.CreateEntry("venue.json").Open())
-                JsonSerializer.Serialize(entry, new { version = 1, topology = request.Topology, rooms = manifest });
+            {
+                if (request.PlayersPerRoom == SessionManager.PlayersPerRoom)
+                    JsonSerializer.Serialize(entry, new { version = 1, topology = request.Topology, rooms = manifest });
+                else
+                    JsonSerializer.Serialize(entry, new { version = 1, topology = request.Topology,
+                        playersPerRoom = request.PlayersPerRoom, rooms = manifest });
+            }
             for (var index = 0; index < rooms.Length; index++)
             {
                 var room = rooms[index];
@@ -71,7 +78,7 @@ internal static class MrVenueBundle
     }
 
     private static ReadyRoom Validate(Room room, SessionMode mode,
-        Dictionary<Guid, (SessionView Session, ConnectionEndpoint? Endpoint, bool? TicketSourceLive)> sources)
+        Dictionary<Guid, (SessionView Session, ConnectionEndpoint? Endpoint, bool? TicketSourceLive)> sources, int playersPerRoom)
     {
         MrVenueBundleConflict Conflict(string code, string message) => new(room.RoomId, code, message);
         if (!sources.TryGetValue(room.SessionId, out var source) || source.Session.Mode != mode
@@ -91,8 +98,8 @@ internal static class MrVenueBundle
         Player[] players;
         try { players = RoomTicketBundles.ValidateAdmissions(source.Session, room.RoomId, room.Players); }
         catch (InvalidOperationException) { throw Conflict("venue-roster-changed", "Reload the current room roster before exporting."); }
-        if (players.Any(player => player.Headset != HeadsetKind.Quest3))
-            throw Conflict("venue-roster-changed", "All five seats must be current Quest 3 admissions.");
+        if (!RoomTicketBundles.HasFirstSeats(players, playersPerRoom) || players.Any(player => player.Headset != HeadsetKind.Quest3))
+            throw Conflict("venue-roster-changed", "The selected seats must be current Quest 3 admissions.");
         return new(room, source.Session, source.Endpoint, players);
     }
 }

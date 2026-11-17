@@ -642,6 +642,8 @@ python scripts/prepare-venue-field-manifest.py `
 
 5 人階段在五房各登記 1 席，10 人階段各登記 2 席。使用一般全館開始及全館結束，按每個階段與模式保留一份原場館驗收 ZIP、原封存和完整日誌。將 `expectedPlayersPerRoom` 分別填成 `1` 或 `2`，沿用 `verify-field-results.py --venue-manifest`。驗收會逐房確認宣告的席數、原席位、UDP 來源及伺服器戰績確認，結果同時列出每房預期席數與實際人數。合併場的總人數相符時，仍須核對每房的席數。
 
+管理包 0.31.236 可為全 MR 或獨立的 VR／MR 混合五房配發 5 人及 10 人試場票券。每房當前名冊須符合選取席數，MR 房仍使用各自鎖定的校正原檔。 [MR 五房部署](QUEST3.md#五房-mr-部署預檢) · [混合部署](QUEST3.md#混合-vr-與-mr-五房部署包)
+
 需要核對同時在線時，加上 `minimumConcurrentMilliseconds` 並提供每場原 `.worldlog`。現場每席有各自的 IPv4 時，也可加上 `requireDistinctRemoteRoster`，用同一個欄位核對該階段每位玩家的原 UDP 來源。25 人階段可省略 `expectedPlayersPerRoom`。
 
 #### 一次驗收兩種模式的三個階段

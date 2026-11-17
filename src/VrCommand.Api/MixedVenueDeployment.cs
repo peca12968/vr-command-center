@@ -7,9 +7,10 @@ namespace VrCommand.Api;
 
 internal static class MixedVenueDeployment
 {
-    internal sealed record BundleRequest(BundleRoom[] Rooms);
+    internal sealed record BundleRequest(BundleRoom[] Rooms, int PlayersPerRoom = SessionManager.PlayersPerRoom);
     internal sealed record BundleRoom(int RoomId, Guid SessionId, ExperienceMode Mode, Guid StreamId, TicketAdmission?[] Players, byte[]? AlignmentFile);
-    internal sealed record CheckRequest(string Topology, CheckRoom[] Rooms, bool RequireLiveSource = false);
+    internal sealed record CheckRequest(string Topology, CheckRoom[] Rooms, bool RequireLiveSource = false,
+        int PlayersPerRoom = SessionManager.PlayersPerRoom);
     internal sealed record CheckRoom(int RoomId, Guid SessionId, ExperienceMode Mode, byte[][] ConnectionFiles, byte[]? AlignmentFile);
     internal sealed record Preview(Room[] Rooms)
     {
@@ -35,8 +36,8 @@ internal static class MixedVenueDeployment
     {
         const string error = "Provide five independent rooms with both VR and MR, current admissions and the original MR alignment files.";
         var input = await DeploymentJson.Read<BundleRequest>(request, 128 * 1024, error, cancellation);
-        if (input.Rooms is not { Length: SessionManager.RoomCount }
-            || input.Rooms.Any(room => room is not { Players.Length: SessionManager.PlayersPerRoom } || room.StreamId == Guid.Empty)
+        if (!RoomTicketBundles.SupportedVenueSeatCount(input.PlayersPerRoom) || input.Rooms is not { Length: SessionManager.RoomCount }
+            || input.Rooms.Any(room => room?.Players?.Length != input.PlayersPerRoom || room.StreamId == Guid.Empty)
             || !HasFiveRooms(input.Rooms.Select(room => (room.RoomId, room.SessionId, room.Mode, room.AlignmentFile))))
             throw new ArgumentException(error);
         return input;
@@ -46,17 +47,23 @@ internal static class MixedVenueDeployment
     {
         const string error = "Provide the five independent rooms and original connection files for the mixed venue.";
         var input = await DeploymentJson.Read<CheckRequest>(request, 180 * 1024, error, cancellation);
-        if (input.Topology != "Independent" || input.Rooms is not { Length: SessionManager.RoomCount }
-            || input.Rooms.Any(room => room is not { ConnectionFiles.Length: SessionManager.PlayersPerRoom }
+        if (input.Topology != "Independent" || !RoomTicketBundles.SupportedVenueSeatCount(input.PlayersPerRoom)
+            || input.Rooms is not { Length: SessionManager.RoomCount }
+            || input.Rooms.Any(room => room?.ConnectionFiles?.Length != input.PlayersPerRoom
                 || room.ConnectionFiles.Any(file => file is not { Length: > 0 and <= 2048 }))
             || !HasFiveRooms(input.Rooms.Select(room => (room.RoomId, room.SessionId, room.Mode, room.AlignmentFile))))
             throw new ArgumentException(error);
         return input;
     }
 
-    internal static Preview Read(WorldRecordings worlds, OperatorIdentity actor) => Plan(worlds.ReadVenueSources(null, actor));
+    internal static Preview Read(WorldRecordings worlds, OperatorIdentity actor, int playersPerRoom)
+    {
+        if (!RoomTicketBundles.SupportedVenueSeatCount(playersPerRoom)) throw new ArgumentException("Use 1, 2 or 5 players per room.");
+        return Plan(worlds.ReadVenueSources(null, actor), playersPerRoom);
+    }
 
-    private static Preview Plan(Dictionary<Guid, (SessionView Session, ConnectionEndpoint? Endpoint, bool? TicketSourceLive)> sources)
+    private static Preview Plan(Dictionary<Guid, (SessionView Session, ConnectionEndpoint? Endpoint, bool? TicketSourceLive)> sources,
+        int playersPerRoom)
     {
         var endpoints = new HashSet<(string, int)>();
         var players = new HashSet<Guid>();
@@ -73,7 +80,8 @@ internal static class MixedVenueDeployment
                 : IPAddress.IsLoopback(IPAddress.Parse(endpoint.Address)) ? "venue-endpoint-loopback"
                 : !endpoints.Add((endpoint.Address, endpoint.Port)) ? "venue-endpoint-reused"
                 : mode == ExperienceMode.MR && alignment is null ? "venue-alignment-unlocked"
-                : seats.Length != SessionManager.PlayersPerRoom || (mode == ExperienceMode.MR && roster.Any(player => player.Headset != HeadsetKind.Quest3)) ? "venue-roster-changed"
+                : !RoomTicketBundles.HasFirstSeats(roster, playersPerRoom)
+                    || (mode == ExperienceMode.MR && roster.Any(player => player.Headset != HeadsetKind.Quest3)) ? "venue-roster-changed"
                 : seats.Any(seat => !players.Add(seat.PlayerId) || !admissions.Add(seat.AdmissionId)) ? "venue-roster-reused"
                 : ticketSourceLive == false ? "venue-endpoint-stale" : null;
             return new Room(roomId, session.Id, mode, session.Mission.Definition.Name, endpoint, seats, alignment, problem, ticketSourceLive);
@@ -83,7 +91,7 @@ internal static class MixedVenueDeployment
     internal static byte[] Create(BundleRequest input, WorldRecordings worlds, OperatorIdentity actor, PlayerJoinTicketSigner signer)
     {
         var sources = worlds.ReadVenueSources(null, actor);
-        var plan = Plan(sources);
+        var plan = Plan(sources, input.PlayersPerRoom);
         var ready = input.Rooms.OrderBy(room => room.RoomId).Select(wanted =>
         {
             MrVenueBundleConflict Conflict(string code) => new(wanted.RoomId, code, "Reload the current mixed venue before issuing tickets.");
@@ -108,7 +116,13 @@ internal static class MixedVenueDeployment
                 FormattableString.Invariant($"room-{row.Room.RoomId:00}-connections.zip"),
                 row.AlignmentFile is null ? null : FormattableString.Invariant($"room-{row.Room.RoomId:00}-alignment.json"))).ToArray();
             using (var entry = archive.CreateEntry("venue.json").Open())
-                JsonSerializer.Serialize(entry, new { version = 2, mode = "Mixed", topology = "Independent", rooms = manifest }, JsonFormat.Options);
+            {
+                if (input.PlayersPerRoom == SessionManager.PlayersPerRoom)
+                    JsonSerializer.Serialize(entry, new { version = 2, mode = "Mixed", topology = "Independent", rooms = manifest }, JsonFormat.Options);
+                else
+                    JsonSerializer.Serialize(entry, new { version = 2, mode = "Mixed", topology = "Independent",
+                        playersPerRoom = input.PlayersPerRoom, rooms = manifest }, JsonFormat.Options);
+            }
             for (var index = 0; index < ready.Length; index++)
             {
                 var row = ready[index];
@@ -130,19 +144,20 @@ internal static class MixedVenueDeployment
     internal static VrVenueTickets.CheckResult Check(CheckRequest input, WorldRecordings worlds, OperatorIdentity actor, PlayerJoinTicketSigner signer)
     {
         var sources = worlds.ReadVenueSources(null, actor, requireLiveCapture: input.RequireLiveSource);
-        var plan = Plan(sources);
+        var plan = Plan(sources, input.PlayersPerRoom);
         var results = new List<VrVenueTickets.SeatResult>(SessionManager.MaxPlayers);
         foreach (var wanted in input.Rooms.OrderBy(room => room.RoomId))
         {
             var room = plan.Rooms[wanted.RoomId - 1];
             var alignment = wanted.AlignmentFile is { } bytes ? MrDeploymentCheck.ReadAlignment(bytes) : null;
-            for (var seat = 0; seat < SessionManager.PlayersPerRoom; seat++)
+            for (var seat = 0; seat < input.PlayersPerRoom; seat++)
             {
                 VrVenueTickets.SeatResult Status(string status) => new(wanted.RoomId, seat, status);
                 var result = room.SessionId != wanted.SessionId || room.Mode != wanted.Mode ? Status("session-unavailable")
                     : room.Endpoint is null || room.Problem is "venue-endpoint-loopback" or "venue-endpoint-reused" ? Status("endpoint-mismatch")
                     : room.Problem == "venue-alignment-unlocked" ? Status("alignment-not-locked")
-                    : room.Problem == "venue-roster-reused" ? Status("venue-unavailable")
+                    : room.Problem == "venue-roster-reused" || (input.PlayersPerRoom != SessionManager.PlayersPerRoom
+                        && room.Problem == "venue-roster-changed") ? Status("venue-unavailable")
                     : input.RequireLiveSource && room.TicketSourceLive != true ? Status("source-stale")
                     : VerifySeat(sources[wanted.SessionId].Session, room, wanted.ConnectionFiles[seat], seat, alignment, signer);
                 results.Add(result);
