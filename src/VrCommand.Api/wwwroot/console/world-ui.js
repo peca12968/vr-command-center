@@ -989,7 +989,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
       });
     }
     if (kind === 'blocked-begin') {
-      const { observedSequence, roster, seats } = target.witness;
+      const { observedSequence, roster, seats, playersPerRoom = 5 } = target.witness;
       const frame = packet.frame;
       if (packet.observedSequence !== observedSequence || packet.elapsedMilliseconds !== elapsedMilliseconds
         || packet.suspended !== false || frame?.phase !== 'Preparing' || frame.tick !== 0 || !Array.isArray(frame.players)) return false;
@@ -998,6 +998,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
       if (players.size !== frame.players.length || frame.players.some(player => player.roomId !== target.roomId || !roomRoster.has(player.id))) return false;
       return seats.every(({ seat, state }) => {
         const id = roster.get(seat), body = players.get(id);
+        if (state === 'OutsideStage') return seat > playersPerRoom && id !== undefined;
         if (state === 'Vacant') return id === undefined;
         if (state === 'AwaitingAdmission' || state === 'AwaitingPose') return !body;
         if (!body) return false;
@@ -1021,9 +1022,10 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
       const mr = header.calibration === 'quest-room-mr-v1';
       if (kind === 'participation-begin' && (mr ? header.origin !== 'GameServer' : header.calibration !== 'uncalibrated-vr')) return false;
       const allowSimulated = kind === 'participation-begin' && !mr;
+      const playersPerRoom = target.witness.playersPerRoom ?? 5;
       if (packet.observedSequence !== appliedAtSequence - 1 || packet.elapsedMilliseconds !== elapsedMilliseconds
         || packet.suspended !== false || frame?.phase !== 'Preparing' || frame.tick !== 0
-        || !Array.isArray(frame.players) || frame.players.length !== roomIds.length * 5) return false;
+        || !Array.isArray(frame.players) || frame.players.length !== roomIds.length * playersPerRoom) return false;
       const players = new Set(), counts = new Map(roomIds.map(room => [room, 0]));
       for (const player of frame.players) {
         const id = typeof player?.id === 'string' ? player.id.toLowerCase() : '';
@@ -1034,7 +1036,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
         players.add(id);
         counts.set(player.roomId, counts.get(player.roomId) + 1);
       }
-      return roomIds.every(room => counts.get(room) === 5);
+      return roomIds.every(room => counts.get(room) === playersPerRoom);
     }
     if (!Number.isSafeInteger(packet.observedSequence) || packet.observedSequence < setting.appliedAtSequence) return false;
     if (exactObserved && (packet.observedSequence !== setting.appliedAtSequence || packet.suspended !== false

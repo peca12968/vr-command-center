@@ -10,7 +10,8 @@ const labels = { NoRecording: '等待遊戲來源', WaitingFrame: '等待第一�
 const beginSeatStates = new Set(['AwaitingAdmission', 'AwaitingPose', 'PoseUnavailable', 'Eliminated', 'Tracked', 'Simulated']);
 export const beginSeatLabels = { Vacant: '未編列', AwaitingAdmission: '等待入場同步', WaitingRevision: '等待場次同步',
   AwaitingPose: '等待姿態', PoseUnavailable: '姿態未就緒', Eliminated: '已淘汰', Tracked: '追蹤就緒',
-  Simulated: '合成姿態就緒', NeedsTracking: '合成姿態 · 需追蹤', Unknown: '待確認', NotPreparing: '尚無準備場次' };
+  Simulated: '合成姿態就緒', NeedsTracking: '合成姿態 · 需追蹤', OutsideStage: '已登記於試場席位外',
+  NotInStage: '本階段未使用', Unknown: '待確認', NotPreparing: '尚無準備場次' };
 
 export function venueBeginSeatState(row, index) {
   return row.seats?.[index] ?? (row.state === 'NotPreparing' ? 'NotPreparing' : 'Unknown');
@@ -35,13 +36,15 @@ export function venueBeginRejection(roomIds, blockedRooms, fences = [], rooms = 
     return { message: '名冊或遊戲快照尚未就緒，本批場次維持準備中。', reviews: [] };
   }
   const message = `房間 ${roomIds.join('、')} 的名冊或遊戲快照尚未就緒，本批場次維持準備中。`;
-  const states = ['Vacant', 'AwaitingAdmission', 'AwaitingPose', 'PoseUnavailable', 'Eliminated', 'NeedsTracking'];
+  const states = ['Vacant', 'AwaitingAdmission', 'AwaitingPose', 'PoseUnavailable', 'Eliminated', 'NeedsTracking', 'OutsideStage'];
   if (!Array.isArray(blockedRooms) || blockedRooms.length > roomIds.length || !blockedRooms.every((room, index) =>
     roomIds.includes(room?.roomId) && (!index || blockedRooms[index - 1].roomId < room.roomId)
       && Number.isSafeInteger(room.worldSequence) && room.worldSequence > 0
+      && (room.playersPerRoom === undefined || [1, 2].includes(room.playersPerRoom))
       && Array.isArray(room.seats) && room.seats.length > 0 && room.seats.length <= 5
       && room.seats.every((seat, position) => Number.isInteger(seat?.seat) && seat.seat >= 1 && seat.seat <= 5
-        && (!position || room.seats[position - 1].seat < seat.seat) && states.includes(seat.state)))) return { message, reviews: [] };
+        && (!position || room.seats[position - 1].seat < seat.seat) && states.includes(seat.state)
+        && (seat.state === 'OutsideStage') === (seat.seat > (room.playersPerRoom ?? 5))))) return { message, reviews: [] };
   const details = blockedRooms.map(room => {
     const seatsByState = new Map();
     for (const { seat, state } of room.seats) {
@@ -53,7 +56,7 @@ export function venueBeginRejection(roomIds, blockedRooms, fences = [], rooms = 
   });
   const id = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
   const reviews = [];
-  for (const { roomId, worldSequence, seats, frame } of blockedRooms) {
+  for (const { roomId, worldSequence, seats, frame, playersPerRoom } of blockedRooms) {
     if (!frame || !id.test(frame.sessionId) || !id.test(frame.streamId) || !['GameServer', 'Simulation'].includes(frame.origin)
       || !Number.isSafeInteger(frame.observedSequence) || frame.observedSequence < 1
       || !fences.some(fence => fence.sessionId === frame.sessionId && fence.sessionSequence === frame.observedSequence)
@@ -68,7 +71,7 @@ export function venueBeginRejection(roomIds, blockedRooms, fences = [], rooms = 
     reviews.push({ mode: 'replay', sessionId: frame.sessionId, streamId: frame.streamId, origin: frame.origin,
       roomId, observerRoomId: roomId, complete: false, throughSequence: worldSequence,
       witness: { kind: 'blocked-begin', observedSequence: frame.observedSequence, elapsedMilliseconds: frame.elapsedMilliseconds,
-        roster, seats } });
+        roster, seats, playersPerRoom } });
   }
   return { message: message + details.join(''), reviews };
 }
@@ -476,7 +479,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     return recovery?.ready && recovery.triggerRoomId === roomId && mayManageRoom(room, session, actor)
       ? { sessionId: session.id, sequence: recovery.sequence, linked: session.mode === 'Linked' } : null;
   }
-  function venueBegin(target, roomId, policy = 'normal') {
+  function venueBegin(target, roomId, policy = 'normal', playersPerRoom = 5) {
     let seats = null, origin = null;
     const waiting = (state, text) => ({ state, text, ready: false, seats, origin });
     if (failed) return waiting('Unavailable', '無法確認，正在重試');
@@ -486,8 +489,14 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     const row = active && room && session?.state === 'Preparing' ? roomReadinessRow(report, room, session) : null;
     if (!row || row.sessionSequence !== target.sessionSequence) return waiting('Updating', '等待核對目前場次與名冊');
     const details = row.venueBegin;
+    const pilot = policy !== 'normal' && playersPerRoom < room.capacity;
+    const readSeats = tracked => {
+      const observed = venueBeginSeats(details, row.registered, room.capacity, tracked);
+      return pilot && observed ? observed.map((seat, index) => index < playersPerRoom ? seat
+        : seat === 'Vacant' ? 'NotInStage' : 'OutsideStage') : observed;
+    };
     if (details?.state === 'EmptyRoster') {
-      if (row.registered === 0) seats = venueBeginSeats(details, 0, room.capacity, false);
+      if (row.registered === 0) seats = readSeats(false);
       return waiting('EmptyRoster', session.mode === 'Linked' ? '五房共用場次尚無玩家' : '名冊尚無玩家');
     }
     const source = sourceAt(row, performance.now() - started);
@@ -498,12 +507,12 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     const empty = '本房未編列席位';
     const requireTracking = policy === 'tracking';
     if (['Ready', 'WaitingPlayers', 'WaitingRevision'].includes(details?.state))
-      seats = venueBeginSeats(details, row.registered, room.capacity, mr || requireTracking);
+      seats = readSeats(mr || requireTracking);
     if (policy !== 'normal' && details?.state !== 'WaitingRevision' && details?.state !== 'WaitingProfile') {
       const ready = mr || requireTracking ? row.trackedReady : row.trackedReady + row.simulatedReady;
-      if (row.registered !== room.capacity || ready !== room.capacity)
+      if (row.registered !== playersPerRoom || ready !== playersPerRoom || (pilot && (!seats || seats.includes('OutsideStage'))))
         return waiting(requireTracking ? 'WaitingFullTracking' : 'WaitingFullParticipation',
-          `名冊 ${row.registered}/${room.capacity} 席 · ${requireTracking ? '追蹤' : '有效姿態'} ${ready}/${room.capacity} 席`);
+          `名冊 ${row.registered}/${playersPerRoom} 席 · ${mr || requireTracking ? '追蹤' : '有效姿態'} ${ready}/${playersPerRoom} 席`);
     }
     if (row.venueBeginReady === true)
       return { state: 'Ready', text: row.registered ? `${row.registered} 席${mr || requireTracking ? '追蹤' : '姿態'}就緒` : empty, ready: true, seats, origin };
@@ -518,9 +527,9 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     }
     return waiting('Unavailable', '開場條件尚未確認');
   }
-  function venueReady(target, action, policy = 'normal') {
+  function venueReady(target, action, policy = 'normal', playersPerRoom = 5) {
     if (action === 'Begin') return policy !== 'normal'
-      ? target.roomIds.every(room => venueBegin(target, room, policy).ready)
+      ? target.roomIds.every(room => venueBegin(target, room, policy, playersPerRoom).ready)
       : venueBegin(target, target.roomIds[0]).ready;
     return venueResume(target, target.roomIds[0]).ready;
   }

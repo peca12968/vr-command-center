@@ -56,7 +56,8 @@ public record RoomVenueBeginSeat(int Seat, string State);
 internal sealed record VenueBeginFramePlayer(int Seat, Guid PlayerId);
 internal sealed record VenueBeginBlockedFrame(Guid SessionId, Guid StreamId, string Origin, long ObservedSequence,
     long ElapsedMilliseconds, VenueBeginFramePlayer[] Players);
-internal sealed record VenueBeginBlockedRoom(int RoomId, long WorldSequence, RoomVenueBeginSeat[] Seats, VenueBeginBlockedFrame Frame);
+internal sealed record VenueBeginBlockedRoom(int RoomId, long WorldSequence, RoomVenueBeginSeat[] Seats, VenueBeginBlockedFrame Frame,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? PlayersPerRoom = null);
 internal sealed class VenueBeginSeatDetailsException(VenueBeginNotReadyException rejection, VenueBeginBlockedRoom[] blockedRooms)
     : InvalidOperationException(rejection.Message, rejection)
 {
@@ -125,8 +126,12 @@ public sealed partial class WorldRecordings
 
     public VenuePhaseReceipt ExecuteVenuePhase(ControlAction action, VenuePhaseFence?[]? fences, Guid requestId, OperatorIdentity actor,
         VenueClimate? climate = null, VenueEnemyPolicy? enemyPolicy = null, bool requireFullTracking = false, bool requireFullParticipation = false,
-        int[]? roomIds = null)
+        int[]? roomIds = null, int? playersPerRoom = null)
     {
+        var begin = action == ControlAction.Begin;
+        var requireFullRoster = requireFullTracking || requireFullParticipation;
+        var pilotSeats = SessionManager.NormalizeVenueBeginSeats(playersPerRoom, begin && requireFullRoster);
+        var seatsPerRoom = pilotSeats ?? SessionManager.PlayersPerRoom;
         if (action is not (ControlAction.Begin or ControlAction.Resume or ControlAction.End))
             return manager.ExecuteVenuePhase(action, fences, requestId, actor, climate: climate, enemyPolicy: enemyPolicy,
                 requireFullTracking: requireFullTracking, requireFullParticipation: requireFullParticipation, roomIds: roomIds);
@@ -136,8 +141,6 @@ public sealed partial class WorldRecordings
                 return manager.ExecuteVenuePhase(action, fences, requestId, actor, climate: climate, enemyPolicy: enemyPolicy,
                     requireFullTracking: requireFullTracking, requireFullParticipation: requireFullParticipation, roomIds: roomIds);
             var plan = manager.ReadVenuePhase(actor);
-            var begin = action == ControlAction.Begin;
-            var requireFullRoster = requireFullTracking || requireFullParticipation;
             var expected = (fences ?? []).OfType<VenuePhaseFence>().ToHashSet();
             var reports = new List<(VenuePhaseTarget Target, SessionReadiness Report, VenuePhaseWitness Witness)>();
             foreach (var target in (begin ? plan.Begin : plan.Resume)
@@ -151,7 +154,8 @@ public sealed partial class WorldRecordings
                 {
                     var trackedRequired = requireFullTracking || report.MrStartState is not null;
                     var fullRooms = requireFullRoster ? report.Players.GroupBy(player => player.RoomId)
-                        .Where(room => room.Count() == SessionManager.PlayersPerRoom && room.All(player => ReadyToBegin(player, trackedRequired)))
+                        .Where(room => SessionManager.MatchesVenueSeats(room.Select(player => player.Seat), seatsPerRoom)
+                            && room.All(player => ReadyToBegin(player, trackedRequired)))
                         .Select(room => room.Key).ToArray() : null;
                     reports.Add((target, report, new(target.PhaseSinceSequence, report.SessionSequence, begin || report.MrResumeState == "Ready",
                         fullRooms, beginFrame)));
@@ -163,7 +167,8 @@ public sealed partial class WorldRecordings
                 .ToDictionary(row => row.Report.SessionId, row => row.Witness);
             try
             {
-                return manager.ExecuteVenuePhase(action, fences, requestId, actor, ready, climate, enemyPolicy, requireFullTracking, requireFullParticipation, roomIds);
+                return manager.ExecuteVenuePhase(action, fences, requestId, actor, ready, climate, enemyPolicy, requireFullTracking,
+                    requireFullParticipation, roomIds, pilotSeats);
             }
             catch (VenueBeginNotReadyException rejection) when (requireFullRoster)
             {
@@ -175,13 +180,15 @@ public sealed partial class WorldRecordings
                     foreach (var room in target.RoomIds.Where(rejection.RoomIds.Contains))
                     {
                         var roster = report.Players.Where(player => player.RoomId == room).ToDictionary(player => player.Seat + 1);
-                        var blockedSeats = Enumerable.Range(1, SessionManager.PlayersPerRoom)
+                        var blockedSeats = Enumerable.Range(1, seatsPerRoom)
                             .Select(seat => BlockedBeginSeat(seat, roster.GetValueOrDefault(seat), trackedRequired))
-                            .OfType<RoomVenueBeginSeat>().ToArray();
+                            .OfType<RoomVenueBeginSeat>()
+                            .Concat(roster.Keys.Where(seat => seat > seatsPerRoom).Order().Select(seat => new RoomVenueBeginSeat(seat, "OutsideStage")))
+                            .ToArray();
                         if (blockedSeats.Length == 0) continue;
                         var players = roster.OrderBy(row => row.Key).Select(row => new VenueBeginFramePlayer(row.Key, row.Value.PlayerId)).ToArray();
                         blockedRooms.Add(new(room, frame.WorldSequence, blockedSeats, new(target.SessionId, frame.StreamId,
-                            origin, report.ObservedSequence, frame.ElapsedMilliseconds, players)));
+                            origin, report.ObservedSequence, frame.ElapsedMilliseconds, players), pilotSeats));
                     }
                 }
                 if (blockedRooms.Count == 0) throw;

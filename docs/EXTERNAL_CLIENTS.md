@@ -794,7 +794,9 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json --inspect-c
 
 ### 核對五房追蹤開場錄製
 
-使用管理包 0.31.66 以「五房開場須各有 5 席追蹤就緒」開始，再由主控批次結束並下載原場館驗收 ZIP。在 `venue.json` 設定 `"verifyTrackingBegin": true`，並逐場提供原生 `worldJournal`。工具會核對 `closure.json` 中每場的 `trackingBegin` 指向同一開始批次，逐場查驗原來源、開始前管理序號、該格擷取時間偏移及 25 席的原始追蹤姿態。每場也要有觀察到開始序號的後續有效執行格。
+使用五房追蹤政策開場，再由主控批次結束並下載原場館驗收 ZIP。在 `venue.json` 設定 `"verifyTrackingBegin": true`，並逐場提供原生 `worldJournal`。工具會核對 `closure.json` 中每場的 `trackingBegin` 指向同一開始批次，逐場查驗原來源、開始前管理序號、擷取時間偏移及所有原席位的追蹤姿態。每場也要有觀察到開始序號的後續有效執行格。
+
+0.31.237 的 5／10 席試場須在 `venue.json` 設定 `expectedPlayersPerRoom` 為 `1` 或 `2`。兩種開場政策都會比對封存中的 `playersPerRoom`、五房每個原席位及當時的錄製畫格。25 席可沿用原清單格式。
 
 結果中的 `trackingBegin` 列出原開始批次、場次數及通過核對的追蹤席位數。逐場 `worldJournal.trackingBegin` 列出原準備畫格、開始序號和第一格符合條件的執行畫格。管理包 0.31.65 或更早的開場仍可走一般封存核對。追蹤姿態、裝置來源與實體容量分別驗收。 [開場操作](PLAYER_READINESS.md#五房追蹤驗收開場)
 
@@ -802,7 +804,7 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json --inspect-c
 
 若場次使用「五房開場須各有 5 席已連線且姿態有效」，用管理包 0.31.79 下載原全館收尾的場館驗收 ZIP。在 `venue.json` 設定 `"verifyParticipationBegin": true`，每場提供原 `worldJournal`。此選項與 `verifyTrackingBegin` 擇一。
 
-工具從 `closure.json` 讀取 `participationBegin`，依原錄製核對同一次開場、管理序號、準備中畫格、25 位原名冊玩家及其房間，再找出各場在結束前套用開場的第一個有效執行格。VR 開場可核對合成或追蹤姿態，MR 須為追蹤。結果的 `participationBegin` 列出全館及逐場的確認席數，並分列合成與追蹤。 [開場操作](PLAYER_READINESS.md#五房各-5-席有效姿態開場)
+工具從 `closure.json` 讀取 `participationBegin`，依原錄製核對同一次開場、管理序號、準備中畫格及原名冊玩家及房間，再找出各場在結束前套用開場的第一個有效執行格。VR 開場可核對合成或追蹤姿態，MR 須為追蹤。結果的 `participationBegin` 列出全館及逐場的確認席數，並分列合成與追蹤。 [開場操作](PLAYER_READINESS.md#五房各-5-席有效姿態開場)
 
 ### 核對五房環境與敵軍指令的執行畫格
 

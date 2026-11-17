@@ -16,7 +16,8 @@ public record VenueTransition(long PhaseSinceSequence, int TargetCount,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTrackingFrame? TrackingFrame = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool RequireFullParticipation = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTrackingFrame? ParticipationFrame = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? RoomEnemiesSinceSequence = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? RoomEnemiesSinceSequence = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? PlayersPerRoom = null);
 public record SessionEvent(int SchemaVersion, Guid EventId, Guid SessionId, long Sequence,
     DateTimeOffset RecordedAtUtc, SessionEventKind Kind, JsonElement Payload, OperatorIdentity? Actor = null,
     Guid? RequestId = null, [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTransition? Venue = null,
@@ -209,6 +210,8 @@ internal static class SessionProjection
         if (command.Action != ControlAction.SetEnvironment && venue.EnvironmentSinceSequence is not null
             || command.Action != ControlAction.SetEnemies && (venue.EnemiesSinceSequence is not null || venue.RoomEnemiesSinceSequence is not null)
             || fullRoster && command.Action != ControlAction.Begin
+            || venue.PlayersPerRoom is { } seats && (!fullRoster || seats is not (1 or 2)
+                || (venue.TrackingFrame ?? venue.ParticipationFrame) is null)
             || venue.RequireFullTracking && venue.RequireFullParticipation
             || venue.TrackingFrame is not null && !venue.RequireFullTracking
             || venue.RequireFullParticipation != (venue.ParticipationFrame is not null)
@@ -217,7 +220,8 @@ internal static class SessionProjection
         return command.Action switch
         {
             ControlAction.Begin => command.ExpectedSequence == sequence - 1 && (!fullRoster || session is not null
-                && session.RoomIds.All(room => session.Players.Count(player => player.RoomId == room) == SessionManager.PlayersPerRoom)),
+                && session.RoomIds.All(room => SessionManager.MatchesVenueSeats(session.Players.Where(player => player.RoomId == room)
+                    .Select(player => player.Seat), venue.PlayersPerRoom ?? SessionManager.PlayersPerRoom))),
             ControlAction.Pause or ControlAction.Resume or ControlAction.End => command.ExpectedSequence is null && command.ClockExpiration is null,
             ControlAction.SetEnvironment => command.ExpectedSequence is null && venue.EnvironmentSinceSequence is > 0
                 && venue.EnvironmentSinceSequence < sequence && session?.State == SessionState.Running && command.Environment?.Mode == session.Environment.Mode,

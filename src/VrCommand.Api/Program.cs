@@ -448,7 +448,7 @@ app.MapPost("/api/venue/phase", (VenuePhaseRequest request, WorldRecordings worl
     if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue phase operations require the master operator.");
     var key = RequestId(context) ?? throw new ArgumentException("Idempotency-Key is required for venue phase changes.");
     return worlds.ExecuteVenuePhase(request.Action, request.Targets, key, actor, request.Environment, request.EnemyPolicy,
-        request.RequireFullTracking, request.RequireFullParticipation, request.RoomIds);
+        request.RequireFullTracking, request.RequireFullParticipation, request.RoomIds, request.PlayersPerRoom);
 });
 app.MapGet("/api/sessions/{id:guid}/statistics", (Guid id, SessionManager manager, HttpContext context) =>
     manager.Statistics(id, Actor(context)));
@@ -691,7 +691,7 @@ record CreateSession(Guid MissionId, SessionMode Mode, int[] RoomIds);
 record IndependentRoomMission(int RoomId, Guid MissionId);
 record CreateIndependentSet(Guid? MissionId, IndependentRoomMission[]? Rooms);
 record VenuePhaseRequest(ControlAction Action, VenuePhaseFence?[]? Targets, VenueClimate? Environment, VenueEnemyPolicy? EnemyPolicy,
-    bool RequireFullTracking = false, bool RequireFullParticipation = false, int[]? RoomIds = null);
+    bool RequireFullTracking = false, bool RequireFullParticipation = false, int[]? RoomIds = null, int? PlayersPerRoom = null);
 record JoinPlayer(Guid PlayerId, string Name, int RoomId, HeadsetKind Headset);
 record VenueRosterRequest(VenueRosterSeat[] Seats);
 record SeatTicketResponse(string Ticket, DateTimeOffset ExpiresAtUtc,

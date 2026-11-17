@@ -41,10 +41,10 @@ internal static class RoomTicketBundles
         return players;
     }
 
-    internal static bool SupportedVenueSeatCount(int count) => count is 1 or 2 or SessionManager.PlayersPerRoom;
+    internal static bool SupportedVenueSeatCount(int count) => SessionManager.SupportsVenueSeatCount(count);
 
     internal static bool HasFirstSeats(Player[] ordered, int count) =>
-        ordered.Length == count && !ordered.Where((player, index) => player.Seat != index).Any();
+        SessionManager.MatchesVenueSeats(ordered.Select(player => player.Seat), count);
 
     internal static byte[] Encode(SessionView session, int roomId, Player[] players, string address, int port, PlayerJoinTicketSigner signer)
     {

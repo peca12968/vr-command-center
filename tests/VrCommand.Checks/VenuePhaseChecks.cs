@@ -173,6 +173,46 @@ internal static class VenuePhaseChecks
             check(legacy.Duplicate && legacy.RequireFullTracking && manager.ReadVenueTrackingBegin(legacy.Sessions.Single().SessionId, master) is null,
                 "Existing guarded Begin events retain their policy without inventing a witness frame");
         }
+        var pilotData = Path.Combine(directory, "venue-pilot-tracking");
+        var pilotKey = Guid.NewGuid();
+        VenuePhaseFence[] pilotTargets;
+        using (var store = new SqliteSessionEventStore(pilotData))
+        {
+            var manager = new SessionManager(store);
+            var rooms = Enumerable.Range(1, SessionManager.RoomCount).ToArray();
+            var session = manager.Create(SessionMode.Linked, rooms, mission, master);
+            manager.OpenStream(session.Id, new(trackingFrame.StreamId, CombatOrigin.Simulation),
+                new OperatorIdentity("pilot-source", OperatorRole.GameServer));
+            foreach (var room in rooms)
+                manager.Join(session.Id, Guid.NewGuid(), $"Pilot {room}", room, HeadsetKind.Quest3, master);
+            var room5 = manager.Get(session.Id).Players.Single(player => player.RoomId == 5);
+            manager.Join(session.Id, Guid.NewGuid(), "Extra seat", 5, HeadsetKind.Quest3, master);
+            manager.Leave(session.Id, room5.Id, master);
+            Dictionary<Guid, VenuePhaseWitness> Sample(VenuePhaseFence target) => new()
+                { [session.Id] = new(target.PhaseSinceSequence, target.SessionSequence!.Value, true, rooms, trackingFrame) };
+            var gapTargets = Fences(manager.ReadVenuePhase(master).Begin);
+            Reject<VenueBeginNotReadyException>(() => manager.ExecuteVenuePhase(ControlAction.Begin, gapTargets, pilotKey, master,
+                Sample(gapTargets.Single()), requireFullTracking: true, playersPerRoom: 1),
+                "A pilot with the correct total and a gap in the original seats cannot start");
+            manager.Leave(session.Id, manager.Get(session.Id).Players.Single(player => player.RoomId == 5).Id, master);
+            manager.Join(session.Id, Guid.NewGuid(), "First seat", 5, HeadsetKind.Quest3, master);
+            pilotTargets = Fences(manager.ReadVenuePhase(master).Begin);
+            var receipt = manager.ExecuteVenuePhase(ControlAction.Begin, pilotTargets, pilotKey, master, Sample(pilotTargets.Single()),
+                requireFullTracking: true, playersPerRoom: 1);
+            check(!receipt.Duplicate && receipt.PlayersPerRoom == 1 && manager.Get(session.Id).State == SessionState.Running,
+                "The exact first seat in every room satisfies an explicit guarded pilot");
+        }
+        using (var store = new SqliteSessionEventStore(pilotData))
+        {
+            var manager = new SessionManager(store);
+            var retry = manager.ExecuteVenuePhase(ControlAction.Begin, pilotTargets, pilotKey, master, requireFullTracking: true, playersPerRoom: 1);
+            var session = retry.Sessions.Single();
+            check(retry.Duplicate && retry.PlayersPerRoom == 1 && manager.ReadVenueTrackingBegin(session.SessionId, master)
+                == new VenueTrackingBegin(pilotKey, session.AppliedAtSequence, trackingFrame, 1),
+                "SQLite restores the pilot count, original frame and matching duplicate receipt");
+            Reject<InvalidOperationException>(() => manager.ExecuteVenuePhase(ControlAction.Begin, pilotTargets, pilotKey, master,
+                requireFullTracking: true, playersPerRoom: 2), "An idempotent pilot retry cannot change the required seats");
+        }
         var trackedVrData = Path.Combine(directory, "tracked-vr-start");
         var vrFrame = new VenueTrackingFrame(Guid.NewGuid(), 4, 300);
         Guid vrSession;

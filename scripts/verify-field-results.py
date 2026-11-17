@@ -3742,8 +3742,15 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
             verify_experience(session, launcher['finalWorld']['header'])
             require(not ('trackingBegin' in row and 'participationBegin' in row), 'Closure has conflicting guarded Begin witnesses')
             begin = row.get(begin_kind)
-            require(type(begin) is dict and set(begin) == {'requestId', 'appliedAtSequence', 'frame'},
+            fields = {'requestId', 'appliedAtSequence', 'frame'}
+            require(type(begin) is dict and set(begin) in (fields, fields | {'playersPerRoom'}),
                     'Closure is missing an original guarded Begin witness')
+            seats = begin.get('playersPerRoom', 5)
+            require(type(seats) is int and seats in (1, 2, 5) and seats == players_per_room,
+                    'Guarded Begin seats per room differ from the declared stage')
+            require(sorted((integer(player['roomId'], 1, 5), integer(player['seat'], 0, 4)) for player in session['players'])
+                    == [(room, seat) for room in row['roomIds'] for seat in range(seats)],
+                    'Guarded Begin seats differ from the original sealed roster')
             request = identity(begin['requestId'])
             require(request != closure['requestId'] and begin_request in (None, request),
                     'Venue sessions do not share one original guarded Begin request')
@@ -3966,6 +3973,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     if begin_kind is not None:
         counts = ('trackedPlayers', 'simulatedPlayers', 'participants') if verify_participation_begin else ('trackedPlayers',)
         begin_summary[begin_kind] = {'requestId': begin_request, 'sessions': len(summaries),
+                                    **({'playersPerRoom': players_per_room} if players_per_room != 5 else {}),
                                     **{name: sum(item['worldJournal'][begin_kind][name] for item in summaries) for name in counts}}
     reconnect_summary = {}
     if verify_reconnect_history:

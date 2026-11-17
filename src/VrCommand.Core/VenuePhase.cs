@@ -27,13 +27,16 @@ public record VenueEnemyPolicy(EnemyBehavior? Behavior, bool? AutoAttack);
 public record VenuePhaseApplied(Guid SessionId, long AppliedAtSequence);
 public record VenuePhaseReceipt(Guid RequestId, ControlAction Action, VenuePhaseApplied[] Sessions, bool Duplicate,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool RequireFullTracking = false,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool RequireFullParticipation = false);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool RequireFullParticipation = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? PlayersPerRoom = null);
 public record VenueEndBatch(Guid RequestId, DateTimeOffset RecordedAtUtc, VenuePhaseApplied[] Sessions);
 public record VenueEndSummary(Guid RequestId, DateTimeOffset RecordedAtUtc, int[] RoomIds, string[] MissionNames, int SessionCount);
 public record VenueEndHistory(VenueEndSummary[] Batches, Guid? NextBefore);
 public record VenueTrackingFrame(Guid StreamId, long WorldSequence, long ElapsedMilliseconds);
-public record VenueTrackingBegin(Guid RequestId, long AppliedAtSequence, VenueTrackingFrame Frame);
-public record VenueParticipationBegin(Guid RequestId, long AppliedAtSequence, VenueTrackingFrame Frame);
+public record VenueTrackingBegin(Guid RequestId, long AppliedAtSequence, VenueTrackingFrame Frame,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? PlayersPerRoom = null);
+public record VenueParticipationBegin(Guid RequestId, long AppliedAtSequence, VenueTrackingFrame Frame,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? PlayersPerRoom = null);
 public record VenuePhaseWitness(long PhaseSinceSequence, long SessionSequence, bool Ready, int[]? FullRooms = null,
     VenueTrackingFrame? BeginFrame = null);
 public sealed class VenuePhaseChangedException(int[] roomIds) : InvalidOperationException("The venue phase targets changed; review the current rooms.")
@@ -55,6 +58,19 @@ public sealed class VenueBeginNotReadyException(int[] roomIds) : InvalidOperatio
 
 public sealed partial class SessionManager
 {
+    public static bool SupportsVenueSeatCount(int count) => count is 1 or 2 or PlayersPerRoom;
+
+    public static bool MatchesVenueSeats(IEnumerable<int> seats, int count) =>
+        seats.Order().SequenceEqual(Enumerable.Range(0, count));
+
+    public static int? NormalizeVenueBeginSeats(int? count, bool guardedBegin)
+    {
+        if (count is null) return null;
+        if (!guardedBegin || !SupportsVenueSeatCount(count.Value))
+            throw new ArgumentException("Use 1, 2 or 5 players per room only for a guarded Begin.");
+        return count == PlayersPerRoom ? null : count;
+    }
+
     private readonly Dictionary<Guid, List<SessionEvent>> venueTransitions = [];
     private readonly SortedSet<(DateTimeOffset RecordedAtUtc, Guid Id)> venueEnds = [];
     private (DateTimeOffset RecordedAtUtc, Guid Id)? latestVenueEnemies;
@@ -162,8 +178,8 @@ public sealed partial class SessionManager
             var entry = FindBeginEvent(Find(id));
             if (entry?.Venue is not { } venue) return (null, null);
             var requestId = entry.Read<ControlCommand>().CommandId;
-            return (venue.TrackingFrame is { } tracking ? new(requestId, entry.Sequence, tracking) : null,
-                venue.ParticipationFrame is { } participation ? new(requestId, entry.Sequence, participation) : null);
+            return (venue.TrackingFrame is { } tracking ? new(requestId, entry.Sequence, tracking, venue.PlayersPerRoom) : null,
+                venue.ParticipationFrame is { } participation ? new(requestId, entry.Sequence, participation, venue.PlayersPerRoom) : null);
         }
     }
 
@@ -202,7 +218,8 @@ public sealed partial class SessionManager
 
     public VenuePhaseReceipt ExecuteVenuePhase(ControlAction action, VenuePhaseFence?[]? fences, Guid requestId,
         OperatorIdentity actor, IReadOnlyDictionary<Guid, VenuePhaseWitness>? witnesses = null, VenueClimate? climate = null,
-        VenueEnemyPolicy? enemyPolicy = null, bool requireFullTracking = false, bool requireFullParticipation = false, int[]? roomIds = null)
+        VenueEnemyPolicy? enemyPolicy = null, bool requireFullTracking = false, bool requireFullParticipation = false, int[]? roomIds = null,
+        int? playersPerRoom = null)
     {
         RequireVenueMaster(actor);
         ValidateRequestId(requestId);
@@ -210,6 +227,7 @@ public sealed partial class SessionManager
         var requireFullRoster = requireFullTracking || requireFullParticipation;
         if ((requireFullRoster && !begin) || (requireFullTracking && requireFullParticipation))
             throw new ArgumentException("Use at most one full venue readiness policy, only for Begin.");
+        var pilotSeats = NormalizeVenueBeginSeats(playersPerRoom, begin && requireFullRoster);
         var environment = action == ControlAction.SetEnvironment;
         var enemies = action == ControlAction.SetEnemies;
         if (roomIds is not null && (!environment || roomIds.Length is < 1 or > RoomCount
@@ -239,6 +257,7 @@ public sealed partial class SessionManager
                 var original = existing[0].Read<ControlCommand>();
                 if (existing[0].Actor != actor || original.Action != action || existing[0].Venue!.RequireFullTracking != requireFullTracking
                     || existing[0].Venue!.RequireFullParticipation != requireFullParticipation
+                    || existing[0].Venue!.PlayersPerRoom != pilotSeats
                     || (selectedRooms is not null && !selectedRooms.SetEquals(existing.SelectMany(entry => Find(entry.SessionId).View.RoomIds)))
                     || ClimateOf(original) != climate || EnemyPolicyOf(original) != enemyPolicy
                     || !existing.Select(entry => new VenuePhaseFence(entry.SessionId, entry.Venue!.PhaseSinceSequence,
@@ -264,7 +283,7 @@ public sealed partial class SessionManager
                     .Distinct().Order().ToArray();
                 throw new VenuePhaseChangedException(changedRooms);
             }
-            if (begin) VerifyVenueBegin(targets, witnesses, requireFullRoster);
+            if (begin) VerifyVenueBegin(targets, witnesses, requireFullRoster ? pilotSeats ?? PlayersPerRoom : null);
             if (action == ControlAction.Resume) VerifyVenueResume(targets, witnesses);
             if (targets.Any(history => history.Commands.ContainsKey(requestId)))
                 throw new InvalidOperationException("A target already used this command ID.");
@@ -283,7 +302,7 @@ public sealed partial class SessionManager
                         enemies ? history.EnemiesSinceSequence : null, requireFullTracking,
                         requireFullTracking ? witnesses![history.View.Id].BeginFrame : null, requireFullParticipation,
                         requireFullParticipation ? witnesses![history.View.Id].BeginFrame : null,
-                        enemies ? history.RoomEnemiesSinceSequence : null));
+                        enemies ? history.RoomEnemiesSinceSequence : null, pilotSeats));
             }).ToArray();
             var views = entries.Select((entry, index) => SessionProjection.Apply(targets[index].View, entry)).ToArray();
             store.AppendBatch(entries);
@@ -304,21 +323,21 @@ public sealed partial class SessionManager
         if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue phase operations require the master operator.");
     }
 
-    private static void VerifyVenueBegin(History[] targets, IReadOnlyDictionary<Guid, VenuePhaseWitness>? witnesses, bool requireFullRoster)
+    private static void VerifyVenueBegin(History[] targets, IReadOnlyDictionary<Guid, VenuePhaseWitness>? witnesses, int? seatsPerRoom)
     {
         var waiting = targets.Where(history => history.View.Players.Length == 0
             || witnesses?.GetValueOrDefault(history.View.Id) is not { Ready: true } witness
             || witness.PhaseSinceSequence != history.PhaseSinceSequence || witness.SessionSequence != history.View.Sequence
             || (RequiresMrReadiness(history.View, ControlAction.Begin) && !HasMrSource(history.View)))
             .SelectMany(history => history.View.RoomIds).ToHashSet();
-        if (requireFullRoster)
+        if (seatsPerRoom is { } seats)
         {
             var readyRooms = targets.SelectMany(history =>
             {
                 var witness = witnesses?.GetValueOrDefault(history.View.Id);
                 return witness?.BeginFrame is { WorldSequence: > 0, ElapsedMilliseconds: >= 0 } frame
                     && history.View.CombatStream?.StreamId == frame.StreamId
-                    ? history.View.RoomIds.Where(room => history.View.Players.Count(player => player.RoomId == room) == PlayersPerRoom
+                    ? history.View.RoomIds.Where(room => MatchesVenueSeats(history.View.Players.Where(player => player.RoomId == room).Select(player => player.Seat), seats)
                         && witness.FullRooms?.Contains(room) == true)
                     : Enumerable.Empty<int>();
             });
@@ -365,7 +384,8 @@ public sealed partial class SessionManager
         ? new(settings.Behavior, settings.AutoAttack) : null;
 
     private static VenuePhaseReceipt Receipt(Guid requestId, ControlAction action, IReadOnlyList<SessionEvent> entries, bool duplicate) =>
-        new(requestId, action, Applied(entries), duplicate, entries[0].Venue!.RequireFullTracking, entries[0].Venue!.RequireFullParticipation);
+        new(requestId, action, Applied(entries), duplicate, entries[0].Venue!.RequireFullTracking, entries[0].Venue!.RequireFullParticipation,
+            entries[0].Venue!.PlayersPerRoom);
 
     private static VenuePhaseApplied[] Applied(IEnumerable<SessionEvent> entries) =>
         entries.Select(entry => new VenuePhaseApplied(entry.SessionId, entry.Sequence)).ToArray();
@@ -412,6 +432,7 @@ public sealed partial class SessionManager
                     return entry.Actor != first.Actor || entry.Venue!.TargetCount != entries.Count || other.Action != action
                         || entry.Venue.RequireFullTracking != first.Venue.RequireFullTracking
                         || entry.Venue.RequireFullParticipation != first.Venue.RequireFullParticipation
+                        || entry.Venue.PlayersPerRoom != first.Venue.PlayersPerRoom
                         || (entry.Venue.TrackingFrame is null) != (first.Venue.TrackingFrame is null)
                         || ClimateOf(other) != climate || EnemyPolicyOf(other) != enemyPolicy;
                 }))

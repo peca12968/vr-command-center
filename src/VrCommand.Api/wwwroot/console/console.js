@@ -288,6 +288,7 @@ function logout() {
   state.rooms = []; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
   $('venue-full-tracking').checked = false;
   $('venue-full-participation').checked = false;
+  $('venue-begin-size').value = '5';
   $('roster-room').value = '';
   delete $('roster-room').dataset.preferred;
   renderVenueBegin([], false);
@@ -1132,9 +1133,12 @@ function venueBeginPolicy() {
   if ($('venue-full-tracking').checked) return 'tracking';
   return $('venue-full-participation').checked ? 'participation' : 'normal';
 }
-function venueBeginRows(targets, policy) {
+function venueBeginSize(policy) {
+  return policy === 'normal' ? 5 : Number($('venue-begin-size').value);
+}
+function venueBeginRows(targets, policy, playersPerRoom) {
   const rows = targets.flatMap(target => target.roomIds.map(roomId => ({
-    roomId, sessionId: target.sessionId, sessionSequence: target.sessionSequence, ...roomReadiness.venueBegin(target, roomId, policy)
+    roomId, sessionId: target.sessionId, sessionSequence: target.sessionSequence, ...roomReadiness.venueBegin(target, roomId, policy, playersPerRoom)
   })));
   if (policy !== 'normal' && rows.length) {
     for (const roomId of [1, 2, 3, 4, 5])
@@ -1143,9 +1147,9 @@ function venueBeginRows(targets, policy) {
   return rows.sort((a, b) => a.roomId - b.roomId);
 }
 
-function renderVenueBegin(targets, waiting, policy) {
+function renderVenueBegin(targets, waiting, policy, playersPerRoom) {
   const summary = $('venue-begin-evidence'), list = $('venue-begin-rooms');
-  const rows = venueBeginRows(targets, policy);
+  const rows = venueBeginRows(targets, policy, playersPerRoom);
   summary.hidden = list.hidden = !rows.length;
   const message = !rows.length ? '' : `準備開始房間 ${venueRoomText(targets)} · `
     + (waiting ? '仍有開場條件待確認，請查看各房狀態。' : '目標場次已就緒。');
@@ -1203,11 +1207,14 @@ function applyVenuePermissions() {
   venueServerPlan.update();
   venueLaunchReview.update();
   const policy = venueBeginPolicy();
+  const playersPerRoom = venueBeginSize(policy);
   const starting = (policy !== 'normal' && begin.flatMap(target => target.roomIds).length !== 5)
-    || begin.some(target => !roomReadiness.venueReady(target, 'Begin', policy));
+    || begin.some(target => !roomReadiness.venueReady(target, 'Begin', policy, playersPerRoom));
   const waiting = resume.filter(target => !roomReadiness.venueReady(target));
   $('venue-full-tracking').disabled = locked || !begin.length;
   $('venue-full-participation').disabled = locked || !begin.length;
+  $('venue-begin-size-field').hidden = policy === 'normal';
+  $('venue-begin-size').disabled = locked || !begin.length || policy === 'normal';
   $('venue-begin').disabled = locked || !begin.length || starting;
   $('venue-begin-export').hidden = !begin.length;
   $('venue-begin-export').disabled = locked || !begin.length;
@@ -1229,7 +1236,7 @@ function applyVenuePermissions() {
   const describe = targets => targets.length ? '房間 ' + venueRoomText(targets) : '無';
   $('venue-end-targets').hidden = !end.length;
   $('venue-end-targets').textContent = end.length ? `可結束 ${describe(end)} · 包含準備、執行與暫停的場次。` : '';
-  renderVenueBegin(begin, starting, policy);
+  renderVenueBegin(begin, starting, policy, playersPerRoom);
   $('venue-phase-targets').textContent = state.venue ? `可暫停 ${describe(pause)} · 可繼續 ${describe(resume)}` : '等待房間狀態。';
   const evidence = $('venue-phase-evidence');
   evidence.hidden = !resume.length;
@@ -1254,18 +1261,20 @@ function applyVenuePermissions() {
 async function downloadVenueBeginChecklist() {
   if (!master() || $('venue-begin-export').disabled || $('operations-view').hidden) return;
   const epoch = state.epoch, view = operationsViewEpoch, policy = venueBeginPolicy();
+  const playersPerRoom = venueBeginSize(policy);
   const targets = venueTargets('Begin');
   const signature = JSON.stringify(targets);
   const current = () => master() && state.epoch === epoch && operationsViewEpoch === view && !state.pending
     && !$('operations-view').hidden && document.visibilityState === 'visible';
-  const sameScope = () => policy === venueBeginPolicy() && signature === JSON.stringify(venueTargets('Begin'));
+  const sameScope = () => policy === venueBeginPolicy() && playersPerRoom === venueBeginSize(policy)
+    && signature === JSON.stringify(venueTargets('Begin'));
   await run(async () => {
     if (!current()) return;
     await refresh();
     if (!current()) return;
     const read = sameScope() && await roomReadiness.recheck();
     if (!current()) return;
-    const rows = read && sameScope() ? venueBeginRows(targets, policy) : [];
+    const rows = read && sameScope() ? venueBeginRows(targets, policy, playersPerRoom) : [];
     if (!rows.length || rows.length > 5 || new Set(rows.map(row => row.roomId)).size !== rows.length
       || rows.some(row => row.state === 'Updating')) {
       notify('開場狀態無法確認或已變更。請核對目前房間，再下載清單。', true);
@@ -1281,12 +1290,14 @@ async function venuePhase(action, { environment, enemyPolicy } = {}) {
   const allTargets = venueTargets(action);
   const { targets, roomIds } = action === 'SetEnvironment' ? venueClimateScope.selection(allTargets) : { targets: allTargets };
   const policy = action === 'Begin' ? venueBeginPolicy() : 'normal';
+  const playersPerRoom = venueBeginSize(policy);
   if (!targets.length || (policy !== 'normal' && targets.flatMap(target => target.roomIds).length !== 5)
-    || (['Begin', 'Resume'].includes(action) && targets.some(target => !roomReadiness.venueReady(target, action, policy)))) return;
+    || (['Begin', 'Resume'].includes(action) && targets.some(target => !roomReadiness.venueReady(target, action, policy, playersPerRoom)))) return;
   const verb = { Begin: '開始', Pause: '暫停', Resume: '繼續', End: '結束', SetEnvironment: '設定環境給', SetEnemies: '設定敵軍策略給' }[action];
   const details = environment ? venueClimateText(environment) : enemyPolicy ? venueEnemyText(enemyPolicy) : '';
   const overridden = enemyPolicy ? venueEnemyOverrides(targets) : '';
-  const opening = { normal: '', tracking: '\n須全館 25 席追蹤就緒。', participation: '\n須全館 25 席已連線且姿態有效。' }[policy];
+  const opening = { normal: '', tracking: `\n須全館 ${playersPerRoom * 5} 席追蹤就緒。`,
+    participation: `\n須全館 ${playersPerRoom * 5} 席已連線且姿態有效。` }[policy];
   const message = `${verb}房間 ${venueRoomText(targets)} 的 ${targets.length} 個場次？`
     + opening + (details ? '\n' + details : '') + (overridden ? `\n套用時會清除房間 ${overridden} 的分房策略。` : '');
   if (!confirm(action === 'End' ? message + '\n包含尚未開始的準備場次。結束後無法繼續原場次。' : message)) return;
@@ -1297,7 +1308,8 @@ async function venuePhase(action, { environment, enemyPolicy } = {}) {
       notify('無法取得最新開場狀態。請重新整理後再確認。', true);
       return;
     }
-    if (targets.some(target => !roomReadiness.venueReady(target, action, policy))) {
+    if (policy !== venueBeginPolicy() || playersPerRoom !== venueBeginSize(policy)
+      || targets.some(target => !roomReadiness.venueReady(target, action, policy, playersPerRoom))) {
       notify('開場條件已變更。請核對各房最新狀態後再確認。', true);
       return;
     }
@@ -1307,6 +1319,7 @@ async function venuePhase(action, { environment, enemyPolicy } = {}) {
       roomEnemiesSinceSequence }) => ({ sessionId, phaseSinceSequence, sessionSequence, environmentSinceSequence, enemiesSinceSequence,
       roomEnemiesSinceSequence })), environment, enemyPolicy,
       ...(roomIds ? { roomIds } : {}),
+      ...(playersPerRoom !== 5 ? { playersPerRoom } : {}),
       ...(policy === 'tracking' ? { requireFullTracking: true } : {}),
       ...(policy === 'participation' ? { requireFullParticipation: true } : {}) } };
   await sendPending();
@@ -1567,6 +1580,7 @@ function renderVenueClosure(report, loading = false) {
       const participation = begin === participationBegin;
       const anchor = begin?.frame;
       if (typeof begin?.requestId === 'string' && begin.requestId !== batch.requestId
+        && (begin.playersPerRoom === undefined || [1, 2].includes(begin.playersPerRoom))
         && Number.isSafeInteger(begin.appliedAtSequence) && begin.appliedAtSequence > 1 && begin.appliedAtSequence < session.appliedAtSequence
         && anchor?.streamId === replay.streamId && Number.isSafeInteger(anchor.worldSequence)
         && anchor.worldSequence > 0 && anchor.worldSequence <= replay.throughSequence
@@ -1582,7 +1596,7 @@ function renderVenueClosure(report, loading = false) {
             venue: complete && session.roomIds.length === 1 ? venue : null,
             witness: { kind: participation ? 'participation-begin' : 'tracking-begin',
               requestId: begin.requestId, appliedAtSequence: begin.appliedAtSequence, elapsedMilliseconds: anchor.elapsedMilliseconds,
-              roomIds: session.roomIds, archiveComplete: complete, archiveThroughSequence: replay.throughSequence } });
+              roomIds: session.roomIds, playersPerRoom: begin.playersPerRoom, archiveComplete: complete, archiveThroughSequence: replay.throughSequence } });
         });
         actions.append(witness);
       }
@@ -1979,6 +1993,7 @@ async function sendPending() {
       if (response?.requestId !== pending.requestId || response.action !== pending.body.action || typeof response.duplicate !== 'boolean'
           || ['requireFullTracking', 'requireFullParticipation'].some(policy =>
             (response[policy] === undefined ? false : response[policy]) !== (pending.body[policy] ?? false))
+          || response.playersPerRoom !== pending.body.playersPerRoom
           || !Array.isArray(response.sessions) || response.sessions.length !== targets.length
           || targets.some(target => !response.sessions.some(row => row?.sessionId === target.sessionId
             && Number.isSafeInteger(row.appliedAtSequence) && (pending.body.action === 'Begin'
@@ -2523,6 +2538,7 @@ for (const kind of ['environment', 'enemies']) {
 $('retry-command').addEventListener('click', () => run(sendPending));
 $('venue-begin').addEventListener('click', () => run(() => venuePhase('Begin')));
 $('venue-begin-export').addEventListener('click', downloadVenueBeginChecklist);
+$('venue-begin-size').addEventListener('change', applyVenuePermissions);
 for (const [id, other] of [['venue-full-tracking', 'venue-full-participation'], ['venue-full-participation', 'venue-full-tracking']]) {
   $(id).addEventListener('change', () => {
     if ($(id).checked) $(other).checked = false;

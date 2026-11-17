@@ -6569,6 +6569,40 @@ class FieldResultsTests(unittest.TestCase):
                 path.write_text(json.dumps(manifest), encoding='utf-8')
                 self.assertNotIn('trackingBegin', field.verify_venue(path))
 
+    def test_venue_guarded_pilot_requires_the_original_count_and_frame(self):
+        for mode, count, kind, policy in (('Linked', 1, 'trackingBegin', 'verifyTrackingBegin'),
+                                         ('Independent', 2, 'participationBegin', 'verifyParticipationBegin')):
+            with self.subTest(mode=mode, count=count), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, batch = venue_fixture(root, mode, remote=True, with_journals=True, room_sizes=(count,) * 5,
+                                                      mr_rooms=(2, 4) if mode == 'Independent' else ())
+                manifest.update(expectedPlayersPerRoom=count, **{policy: True})
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                closure = root / manifest['closure']
+                for entry, row in zip(manifest['sessions'], batch['sessions'], strict=True):
+                    session, _, _ = field.management_zip(root / entry['evidenceZip'])
+                    world = json.loads((root / entry['launcherReport']).read_bytes())['finalWorld']
+                    rig = 'Tracked' if kind == 'trackingBegin' or session['environment']['mode'] == 'MR' else 'Simulated'
+                    players = [{'id': p['id'], 'roomId': p['roomId'], 'connected': True, 'health': 100,
+                                'rig': {'kind': rig}} for p in session['players']]
+                    world_journal(root / entry['worldJournal'], world,
+                                  players=lambda _, phase: players if phase == 'Preparing' else [], preparing_sequence=6)
+                    row[kind] = {'requestId': id_for(999), 'appliedAtSequence': 7, 'playersPerRoom': count, 'frame': {
+                        'streamId': world['header']['streamId'], 'worldSequence': 1, 'elapsedMilliseconds': 100}}
+                closure.write_text(json.dumps({'batch': batch}), encoding='utf-8')
+                result = field.verify_venue(path)[kind]
+                self.assertEqual(count, result['playersPerRoom'])
+                self.assertEqual(5 * count, result.get('participants', result['trackedPlayers']))
+                witness = batch['sessions'][-1][kind]
+                for changed in (None, 2 if count == 1 else 1):
+                    if changed is None:
+                        del witness['playersPerRoom']
+                    else:
+                        witness['playersPerRoom'] = changed
+                    closure.write_text(json.dumps({'batch': batch}), encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, 'Guarded Begin seats per room differ'):
+                        field.verify_venue(path)
+
     def test_venue_full_participation_requires_original_witness(self):
         for mode in ('Linked', 'Independent'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
