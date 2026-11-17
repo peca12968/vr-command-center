@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 F 槽排演狀態檔重試及原事件核對
+
+- F 槽 exFAT 的檔案替換測試在讀取競爭下觀察到 Windows 錯誤 1175，兩檔名保留。`a7a1ed2` 只將此替換錯誤納入既有限時重試。兩版各另跑 768 次產品狀態寫入，大量並行讀取下皆完成且都沒再遇到致命寫入例外。首輪漏終止報告的原紀錄未保留原生錯誤碼，其成因仍待確認。 [檔案系統測試](../artifacts/hardware-status-exfat-0224/filesystem-probe.json) · [新版產品寫入檢查](../artifacts/hardware-status-exfat-0224/heartbeat-new.json) · [Microsoft ReplaceFileW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew)
+- 正式 0.2.24 在 F 槽跑完 106 項 AF_UNIX 排演檢查。實際閘道輸出的合併與獨立交接檔分別完整核對 28、29 筆原回饋嘗試。分別驗證封存前拒絕匯出，以及拒絕原事件 ID 被改寫的副本。獨立排演刻意撤銷第 3 房的一筆入場，其原報告仍標示排演未完成，已保存的嘗試可逐筆核對。首次匯出試跑重用了測試變數名稱，後續已修正並重跑產品流程。 [F 槽整合結果](../artifacts/hardware-status-exfat-0224/final-live/run-4625f329b42f4ac583fd96157e627aca/checks.json) · [合併核對](../artifacts/hardware-status-exfat-0224/packaged-linked-review.json) · [獨立核對](../artifacts/hardware-status-exfat-0224/packaged-independent-review.json)
+- 套件與排演輸出保存在 F 槽。正式 ZIP 解壓核對 11 檔，實際交接檔重驗、39 項離線回饋及 36 項交接檢查通過。主控與模擬設備驗證使用本機 socket，程序查核為零 TCP 監聽及零 UDP 端點。場館連線與廠商設備仍待實機驗收。GitHub Actions 對產品提交回報帳務或支出上限，工作未啟動。 [模擬器 ZIP](../artifacts/hardware-packages/hardware-simulator-0.2.24-ipc-net10.zip) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44060128628)
+
 ## 2026-11-17 Windows 本機 socket 五房硬體排演
 
 - `da05212` 的模擬器 0.2.23 可用 AF_UNIX 連接本機管理 API 和各房模擬設備。合併與獨立模式各核對 25 個綁定的模擬回饋，測試暫停、重連、逐房停止、撤銷入場和管理連線中斷。正式建置及 ZIP 解壓後各通過 100 項即時排演檢查，結束時所有測試程序均已退出，查核為零 TCP 監聽及零 UDP 端點。 [解壓驗收](../artifacts/hardware-ipc-0223/extracted-verified/checks.json) · [本機操作](HARDWARE.md#windows-無人值守的本機排演)

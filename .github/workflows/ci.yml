@@ -20,7 +20,7 @@ jobs:
       - run: python scripts/smoke_world.py
       - run: python scripts/smoke_control_pipe.py
       - run: python scripts/check-hardware-simulator.py
-      - run: python scripts/check-live-hardware-gateway.py
+      - run: python scripts/check-live-hardware-gateway.py --verify-event-export
       - run: python scripts/check-hardware-handoff.py
       - run: python -m py_compile scripts/package-hardware-simulator.py
       - run: python -m py_compile scripts/package-windows-recording-recovery.py
