@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 切離操作頁時結束待送出的五房開場
+
+- 0.31.259 的「全館場次控制」把待送出的開場流程綁定在原操作頁。0.31.258 在兩種模式都重現背景更新後延遲跳出確認。新版在待更新或確認後重讀時切頁，均未送開場命令。留在原頁重新確認後，各模式只送一筆開場，切頁後仍可取得已送命令的回條。 [操作說明](PLAYER_READINESS.md#五房追蹤驗收開場) · [合併場](../artifacts/venue-begin-view-031259/package/linked/checks.json) · [獨立場](../artifacts/venue-begin-view-031259/package/independent/checks.json)
+- `cc043c5` 管理包核對 595 檔，通過 8 項 Chromium 與 125 項 Node 檢查。正式包的本機 IPC 另用兩種模式各 25 個模擬席位完成開場、雙封存及重啟後回放，合計核對 6 份錄製及 24 個世界畫格。管理程序的 TCP 監聽與 UDP 端點皆為零。 [管理包](../artifacts/venue-begin-view-031259/VRCommand-ControlServer-0.31.259.zip) · [IPC 驗證](../artifacts/venue-begin-view-031259/world-ipc.json) · [離線發行核對](../artifacts/venue-begin-view-031259/venue-release.json)
+- Windows 目前只列出 Quest 的檔案傳輸介面，頭盔與跨機 25 人驗收待做。GitHub Actions 因帳務或支出上限未啟動。 [Quest USB 查核](../artifacts/venue-begin-view-031259/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44037733034)
+
 ## 2026-11-17 核對 Quest 單席啟動的伺服器位址
 
 - `fa3122e` 的單席 `-RequireOpenXR` 回條新增 `evidenceVersion: 2`，保存原伺服器位址的 SHA-256。ADB 擷取前核對原連線檔，戰後核對原公告與封存端點。模擬測試重現舊工具接受相同 UDP 埠但位址不同的連線檔，新工具在 ADB 前拒絕。舊回條可沿用原檢查。 [Quest 操作](QUEST3.md#收集-quest-場館驗收日誌) · [修正前](../artifacts/quest-launch-endpoint-20261117/prior-receipt.log) · [擷取測試](../artifacts/quest-launch-endpoint-20261117/capture-final.log)
