@@ -1432,8 +1432,10 @@ async function downloadVenueBeginChecklist() {
     download('vr-command-venue-begin-v1.csv', new Blob([encodeVenueBeginCsv(rows, policy, timestamp)], { type: 'text/csv;charset=utf-8' }));
   });
 }
-async function venuePhase(action, { environment, enemyPolicy } = {}) {
-  if (!master() || state.pending) return;
+async function venuePhase(action, { environment, enemyPolicy, beginView } = {}) {
+  const currentBegin = () => beginView === operationsViewEpoch && !$('operations-view').hidden
+    && document.visibilityState === 'visible';
+  if (!master() || state.pending || (action === 'Begin' && !currentBegin())) return;
   const epoch = state.epoch;
   const allTargets = venueTargets(action);
   const { targets, roomIds } = action === 'SetEnvironment' ? venueClimateScope.selection(allTargets) : { targets: allTargets };
@@ -1451,7 +1453,7 @@ async function venuePhase(action, { environment, enemyPolicy } = {}) {
   if (!confirm(action === 'End' ? message + '\n包含尚未開始的準備場次。結束後無法繼續原場次。' : message)) return;
   if (action === 'Begin') {
     const updated = await roomReadiness.recheck();
-    if (epoch !== state.epoch || !master() || state.pending) return;
+    if (epoch !== state.epoch || !master() || state.pending || !currentBegin()) return;
     if (!updated) {
       notify('無法取得最新開場狀態。請重新整理後再確認。', true);
       return;
@@ -2824,7 +2826,10 @@ for (const kind of ['environment', 'enemies']) {
   });
 }
 $('retry-command').addEventListener('click', () => run(sendPending));
-$('venue-begin').addEventListener('click', () => run(() => venuePhase('Begin')));
+$('venue-begin').addEventListener('click', () => {
+  const beginView = operationsViewEpoch;
+  run(() => venuePhase('Begin', { beginView }));
+});
 $('venue-begin-export').addEventListener('click', downloadVenueBeginChecklist);
 $('venue-begin-size').addEventListener('change', applyVenuePermissions);
 for (const [id, other] of [['venue-full-tracking', 'venue-full-participation'], ['venue-full-participation', 'venue-full-tracking']]) {
