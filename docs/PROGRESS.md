@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 五房 VR 的 5 人與 10 人試場配票
+
+- 管理台 0.31.235 可按每房 1、2 或 5 席讀取完整名冊並下載原配票 ZIP。獨立與合併都逐房核對現行場次、來源、端點及入場識別。新版 PowerShell 部署、追蹤及擷取規劃按原 ZIP 的席數讀取裝置表，拒絕原包以外的席位。25 席沿用原配票格式。 [管理台配票](EXTERNAL_CLIENTS.md#vr-五房配票) · [Quest 部署](QUEST3.md#直接使用-vr-五房連線-zip)
+- 最終解壓包通過 12 項 Chromium／API 專項，兩種模式各核對 5、10、25 席，共 80 張原票券。管理 API 透過本機 IPC，部署前核對來源時效，驗證回條與 PowerShell 擷取規劃逐席相符。PowerShell 專項用實際 API 回條替代 HTTP 傳輸。增補一席後，四輪試場皆拒絕用舊範圍再配票。Node 133 項、Quest ZIP 3 項通過。隔離場次已結束，管理程序沒有 TCP 或 UDP 監聽。 [最終驗證](../artifacts/vr-venue-pilot-031235/package-live-receipt/checks.json)
+- Windows 管理包核對 589 檔，與既有 Windows 及 Quest 0.50.12 通過離線發行核對。GitHub Actions 對 `575ad22` 回報帳務或支出上限，工作未啟動。Quest USB 仍無 ADB 介面，實機與跨機仍待驗收。 [下載管理包](../artifacts/vr-venue-pilot-031235/VRCommand-ControlServer-0.31.235.zip) · [發行核對](../artifacts/vr-venue-pilot-031235/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43987631654)
+
 ## 2026-11-17 核對分批部署的 Quest 裝置重複使用
 
 - 新 Quest 部署報告保存依同一組場次計算的裝置指紋。原日誌擷取在讀取前與發布前核對指紋。分批合併追蹤與戰後驗收會拒絕同一裝置被計入兩個已有成功啟動紀錄的席位，錯誤只列房號與席號。既有報告仍可提交，新摘要會列出可比對的席數。 [合併取樣](QUEST3.md#核對頭盔追蹤席位) · [封存驗收](EXTERNAL_CLIENTS.md#核對封存席位的-quest-發行-apk)
