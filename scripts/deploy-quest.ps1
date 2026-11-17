@@ -26,6 +26,7 @@ param(
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][switch]$UseInstalledApk,
     [Parameter(Mandatory, ParameterSetName='PrepareApks')][switch]$PrepareQuestApks,
     [Parameter(ParameterSetName='PrepareApks')][ValidateNotNullOrEmpty()][string]$UpgradeFromReleaseReport,
+    [Parameter(ParameterSetName='PrepareApks')][ValidateNotNullOrEmpty()][string]$ApkPreparationPlan,
     [Parameter(ParameterSetName='Bundle')][switch]$DeployMappedSeats,
     [Parameter(ParameterSetName='Bundle')][switch]$InstallMissing,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$SaveDeploymentReport,
@@ -1507,7 +1508,43 @@ function Install-MappedQuestApk($Row, $Inventory, $Release, [string]$StagedApk, 
     return Get-MappedQuestStatus $Row $Inventory $Release.versionCode $Release.sha256
 }
 
-function Invoke-QuestApkPreparation([object[]]$Map, $Release, [string]$StagedApk, $UpgradeFrom) {
+function Read-QuestApkPreparationPlan([object[]]$Map, $Release, $UpgradeFrom) {
+    $original = Read-DeploymentJson $ApkPreparationPlan 32768 'Quest APK preflight plan'
+    $plan = $original.Document
+    $proof = $plan.preparationProof
+    if ($plan.phase -isnot [string] -or $plan.phase -cne 'apk-preflight' -or
+        $plan.complete -isnot [bool] -or -not $plan.complete -or
+        -not (Test-JsonInteger $plan.expectedVersionCode) -or $plan.expectedVersionCode -ne $Release.versionCode -or
+        $plan.expectedApkSha256 -isnot [string] -or $plan.expectedApkSha256 -cne $Release.sha256 -or
+        $plan.venueReleaseReportSha256 -isnot [string] -or $plan.venueReleaseReportSha256 -cne $Release.reportSha256 -or
+        ($UpgradeFrom -and ($plan.previousVenueReleaseReportSha256 -isnot [string] -or
+            $plan.previousVenueReleaseReportSha256 -cne $UpgradeFrom.reportSha256 -or
+            -not (Test-JsonInteger $plan.previousVersionCode) -or $plan.previousVersionCode -ne $UpgradeFrom.versionCode)) -or
+        (-not $UpgradeFrom -and ($null -ne $plan.previousVenueReleaseReportSha256 -or $null -ne $plan.previousVersionCode))) {
+        throw 'Use a complete Quest APK preflight plan for the same target and previous releases.'
+    }
+    if (-not (Test-JsonInteger $proof.version) -or $proof.version -ne 1 -or
+        $proof.salt -isnot [string] -or $proof.salt -cnotmatch '\A[0-9a-f]{32}\z' -or
+        $proof.mapSha256 -isnot [string] -or $proof.mapSha256 -cne (Get-QuestMapFingerprint $Map $proof.salt) -or
+        $proof.deviceFingerprints -isnot [array] -or $proof.deviceFingerprints.Count -ne $Map.Count -or
+        $plan.devices -isnot [array] -or $plan.devices.Count -ne $Map.Count) {
+        throw 'Quest APK preflight plan does not match the original device map.'
+    }
+    for ($index = 0; $index -lt $Map.Count; $index++) {
+        $seat = $plan.devices[$index]
+        $fingerprint = $proof.deviceFingerprints[$index]
+        if (-not (Test-JsonInteger $seat.roomId) -or $seat.roomId -ne $Map[$index].roomId -or
+            -not (Test-JsonInteger $seat.seat) -or $seat.seat -ne $Map[$index].seat -or
+            $seat.status -isnot [string] -or $seat.status -cnotin @('ready','install-required','upgrade-required') -or
+            ($seat.status -ceq 'upgrade-required' -and -not $UpgradeFrom) -or
+            $fingerprint -isnot [string] -or $fingerprint -cnotmatch '\A[0-9a-f]{64}\z') {
+            throw 'Quest APK preflight plan has invalid original seat results.'
+        }
+    }
+    return @{ Document = $plan; Sha256 = Get-QuestSha256 $original.Bytes }
+}
+
+function Invoke-QuestApkPreparation([object[]]$Map, $Release, [string]$StagedApk, $UpgradeFrom, $PreparationPlan) {
     $preflight = Read-MappedQuestPreflight $Map $Release.versionCode $Release.sha256 -AllowMissingApk -UpgradeFrom $UpgradeFrom
     $devices = $preflight.Devices
     $report = [ordered]@{ phase = 'apk-preflight'; expectedVersionCode = $Release.versionCode;
@@ -1517,8 +1554,29 @@ function Invoke-QuestApkPreparation([object[]]$Map, $Release, [string]$StagedApk
         $report.previousVersionCode = $UpgradeFrom.versionCode
         $report.previousVenueReleaseReportSha256 = $UpgradeFrom.reportSha256
     }
+    if ($PreparationPlan) {
+        $report.apkPreparationPlanSha256 = $PreparationPlan.Sha256
+        $original = $PreparationPlan.Document
+        for ($index = 0; $index -lt $Map.Count; $index++) {
+            $device = $devices[$index]
+            if ($device.status -cnotin @('ready','install-required','upgrade-required')) { continue }
+            $fingerprint = Get-QuestDeploymentFingerprint $original.preparationProof.salt $preflight.Serials[$index].ToUpperInvariant()
+            if ($fingerprint -cne $original.preparationProof.deviceFingerprints[$index]) {
+                $device.status = 'device-identity-changed'
+            } elseif ($device.status -cne 'ready' -and $device.status -cne $original.devices[$index].status) {
+                $device.status = 'apk-state-changed'
+            }
+            if ($device.status -cne 'ready') { $device.Remove('apkVerified') }
+        }
+    }
     if ($devices | Where-Object { $_.status -cnotin @('ready','install-required','upgrade-required') }) { return $report }
-    if ($CheckOnly) { $report.complete = $true; return $report }
+    if ($CheckOnly) {
+        $salt = [Guid]::NewGuid().ToString('N')
+        $report.preparationProof = [ordered]@{ version = 1; salt = $salt; mapSha256 = Get-QuestMapFingerprint $Map $salt;
+            deviceFingerprints = @($preflight.Serials | ForEach-Object { Get-QuestDeploymentFingerprint $salt $_.ToUpperInvariant() }) }
+        $report.complete = $true
+        return $report
+    }
 
     $report.phase = 'apk-preparation'
     $planned = @($devices | ForEach-Object { $_.status })
@@ -1534,11 +1592,11 @@ function Invoke-QuestApkPreparation([object[]]$Map, $Release, [string]$StagedApk
             $operation.Step = 'check-apk-before-install'
             $current = Get-MappedQuestStatus $row $preflight.Inventory $Release.versionCode $Release.sha256 -AllowMissingApk -UpgradeFrom $UpgradeFrom
             if ($current.status -cin @('install-required','upgrade-required')) {
-                if ($UpgradeFrom -and $current.status -cne $planned[$index]) {
+                if (($UpgradeFrom -or $PreparationPlan) -and $current.status -cne $planned[$index]) {
                     $device.status = 'apk-state-changed'; $device.failedStep = $operation.Step; return $report
                 }
-                if ($current.status -ceq 'upgrade-required') {
-                    $operation.Step = 'verify-device-before-upgrade'
+                if ($current.status -ceq 'upgrade-required' -or $PreparationPlan) {
+                    $operation.Step = if ($current.status -ceq 'upgrade-required') { 'verify-device-before-upgrade' } else { 'verify-device-before-install' }
                     $confirmedSerial = Read-QuestDeviceSerial $target
                     if (-not $confirmedSerial -or $confirmedSerial -cne $serial) {
                         $device.status = if ($confirmedSerial) { 'device-identity-changed' } else { 'device-identity-unavailable' }
@@ -1551,7 +1609,7 @@ function Invoke-QuestApkPreparation([object[]]$Map, $Release, [string]$StagedApk
             }
             $device.status = $current.status
             if ($current.status -cne 'ready') { $device.failedStep = $operation.Step; return $report }
-            if ($UpgradeFrom) {
+            if ($UpgradeFrom -or $PreparationPlan) {
                 $operation.Step = 'verify-device-after-apk'
                 $confirmedSerial = Read-QuestDeviceSerial $target
                 if (-not $confirmedSerial -or $confirmedSerial -cne $serial) {
@@ -2170,9 +2228,11 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $apk = if ($ApkPath) { $ApkPath } else { Join-Path $projectRoot 'artifacts/quest/VrCommand.apk' }
 if ($PSCmdlet.ParameterSetName -eq 'PrepareApks') {
     if (-not $PrepareQuestApks) { throw 'Specify -PrepareQuestApks to prepare the mapped Quest APKs.' }
+    if ($CheckOnly -and $ApkPreparationPlan) { throw 'Use -ApkPreparationPlan when applying an APK preflight plan.' }
     $map = @(Read-QuestVenueMap $null $DeviceMap -Partial)
     $release = Read-QuestRelease $ReleaseReport
     $upgradeFrom = Read-QuestUpgradeSource $release
+    $preparationPlan = if ($ApkPreparationPlan) { Read-QuestApkPreparationPlan $map $release $upgradeFrom }
     if ($CheckOnly) {
         Confirm-LocalQuestApk $apk $release.sha256
         $result = Invoke-QuestApkPreparation $map $release -UpgradeFrom $upgradeFrom
@@ -2181,7 +2241,7 @@ if ($PSCmdlet.ParameterSetName -eq 'PrepareApks') {
         $stagedApk = $null
         try {
             $stagedApk = New-VerifiedQuestApk $apk $release.sha256
-            $result = Invoke-QuestApkPreparation $map $release $stagedApk -UpgradeFrom $upgradeFrom
+            $result = Invoke-QuestApkPreparation $map $release $stagedApk -UpgradeFrom $upgradeFrom -PreparationPlan $preparationPlan
         } finally {
             if ($stagedApk) { Remove-Item -LiteralPath $stagedApk -ErrorAction SilentlyContinue }
             $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose()

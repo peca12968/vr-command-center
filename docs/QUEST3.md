@@ -561,6 +561,31 @@ pwsh -NoProfile -NonInteractive -File .\scripts\deploy-quest.ps1 `
 
 先退出要升級的頭盔上的遊戲。預檢顯示 `upgrade-required` 後，可移除 `-CheckOnly` 進行安裝。工具會在更新前逐席重查原裝置、舊版與遊戲程序。若遊戲仍在執行，會回報 `app-running` 並在該席更新前停止。原地升級使用 ADB `install -r` 保留應用程式資料。讀回新版 APK 後，報告顯示 `upgradedApk` 與 `apkVerified`。中途停止後可重跑同一命令，已核對的新版 APK 會略過。 [ADB 安裝選項](https://developer.android.com/tools/adb)
 
+#### 依原預檢準備或續跑
+
+先用 `-CheckOnly` 將成功的預檢輸出保存成 JSON。正式安裝時移除 `-CheckOnly`，加上 `-ApkPreparationPlan .\apk-preflight.json`，並沿用相同裝置表及發行報告。首次安裝與原地升級都適用。
+
+```powershell
+$quest = @(
+    '-PrepareQuestApks', '-DeviceMap', '.\device-map.json',
+    '-ReleaseReport', '.\venue-release-new.json', '-ApkPath', '.\VrCommand.apk',
+    '-UpgradeFromReleaseReport', '.\venue-release-old.json'
+)
+$preview = pwsh -NoProfile -NonInteractive -File .\scripts\deploy-quest.ps1 @quest -CheckOnly
+if ($LASTEXITCODE -eq 0) {
+    $preview | Set-Content -LiteralPath .\apk-preflight.json -Encoding utf8
+}
+```
+
+保存預檢後，可執行下列命令正式準備。中途發生錯誤時，使用同一份預檢重跑。
+
+```powershell
+pwsh -NoProfile -NonInteractive -File .\scripts\deploy-quest.ps1 @quest `
+    -ApkPreparationPlan .\apk-preflight.json
+```
+
+開始安裝前會重新核對全部指定席位。USB 重新連線後可使用新的 ADB transport ID，頭盔本身必須與原預檢相符。換機會回報 `device-identity-changed`。原本要升級的席位若變成待首次安裝，或原本就緒的席位變成待升級或首次安裝，會回報 `apk-state-changed`。如確實需要更換設備或改變安裝方式，重新產生預檢即可。中途失敗用同一份預檢重跑，已讀回完整新版的席位會略過。報告以裝置指紋核對頭盔，正式報告中的 `apkPreparationPlanSha256` 可對照當次保存的原預檢。
+
 #### 同批安裝尚未安裝遊戲的 Quest 3
 
 部署 5、10 或 25 席時，可在 `-DeployMappedSeats` 加上 `-InstallMissing`。工具先核對原 APK 的 SHA-256、整批裝置與席位，再對未裝遊戲的 Quest 3 執行首次安裝。只有已安裝且符合原版的遊戲會直接進入設定部署。若 Android 列出停用或保留的套件、版本不符，或 APK 雜湊不同，預檢會報出該席並停止整批。APK 安裝使用 Android 的 `-R` 選項，防止覆寫已存在的套件。 [Android 套件查詢](https://developer.android.com/tools/adb#pm) · [Android 套件管理程式](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/pm/PackageManagerShellCommand.java)

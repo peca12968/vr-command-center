@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-18 依原預檢續跑 Quest APK 準備
+
+- `-ApkPreparationPlan` 將正式準備及續跑綁定已保存的預檢。安裝前核對適用的原發行報告、裝置表、全部指定頭盔的指紋與 APK 狀態。同一頭盔可重新連線，已核對的新版會略過。正式結果保存原預檢 SHA-256。 [操作方式](QUEST3.md#依原預檢準備或續跑)
+- 以已簽章的 0.50.10／75 與 0.50.12／77 APK 排演五房 25 席。正式安裝前及中斷後各替換一台模擬頭盔，兩次均在寫入前拒絕。原頭盔換用新的 ADB transport ID 後，續跑只安裝未完成的四席，最終 25 席逐一讀回驗證。兩項批次部署回歸及 12 項發行檢查通過。 [整合結果](../artifacts/quest-apk-plan-20261118/checks.json) · [正式續跑](../artifacts/quest-apk-plan-20261118/resumed.json) · [部署測試](../artifacts/quest-apk-plan-20261118/prepare-tests.log)
+- 本機 USB 仍只列舉 Quest 的檔案傳輸介面。這輪排演使用模擬 ADB，頭盔實際更新仍待驗收。 [USB 查核](../artifacts/quest-apk-plan-20261118/usb-status.json)
+
 ## 2026-11-18 無人值守的 Windows 啟動
 
 - 開發版玩家與 Unity 批次作業以目前權限直接啟動程序。遇到 Windows 需要提高權限的錯誤時，在終端機記錄原因並退出。防火牆查核維持唯讀。 [無人值守的 Windows 測試](WINDOWS_SERVER_PACKAGE.md#無人值守的-windows-測試)
