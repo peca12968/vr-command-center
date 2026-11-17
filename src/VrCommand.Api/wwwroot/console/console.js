@@ -1231,10 +1231,11 @@ function isOriginalBeginRoom({ sessionId, sessionSequence, roomId }) {
     && target.sessionSequence === sessionSequence && target.roomIds.includes(roomId));
 }
 
-async function openVenueRosterSeat(row, seat) {
+async function openVenueRoster(row, seat = null) {
   const { sessionId, sessionSequence, roomId } = row;
   if (!master() || state.busy || state.pending || $('operations-view').hidden) return;
-  const changed = () => notify('原席位的準備名冊已變更。請重新核對全館開場清單。', true);
+  const changed = () => notify(seat === null ? '原房間的準備名冊已變更。請重新核對全館開場清單。'
+    : '原席位的準備名冊已變更。請重新核對全館開場清單。', true);
   if (!isOriginalBeginRoom(row)) { changed(); return; }
   const epoch = state.epoch, view = operationsViewEpoch, selection = selectionEpoch + 1;
   await selectSession(sessionId, String(roomId));
@@ -1300,12 +1301,7 @@ function renderVenueBegin(targets, waiting, policy, playersPerRoom) {
       const button = element('button', '查看名冊', 'quiet small');
       button.type = 'button'; button.disabled = locked;
       button.setAttribute('aria-label', `查看房間 ${roomId} 名冊`);
-      button.addEventListener('click', async () => {
-        if (!master() || state.busy || state.pending
-            || !venueTargets('Begin').some(target => target.sessionId === sessionId && target.roomIds.includes(roomId))) return;
-        await selectSession(sessionId, String(roomId));
-        focusRoster(sessionId, roomId);
-      });
+      button.addEventListener('click', () => void openVenueRoster(row));
       item.append(' ', button);
     }
     if (mode === 'MR') {
@@ -1337,7 +1333,7 @@ function renderVenueBegin(targets, waiting, policy, playersPerRoom) {
         button.type = 'button'; button.disabled = locked;
         button.setAttribute('aria-label', vacant ? `填寫房間 ${row.roomId} 第 ${index + 1} 席名冊`
           : `查看房間 ${row.roomId} 第 ${index + 1} 席名冊：${beginSeatLabels[status]}`);
-        button.addEventListener('click', () => vacant ? void openVacantBeginSeat(row, index + 1) : void openVenueRosterSeat(row, index + 1));
+        button.addEventListener('click', () => vacant ? void openVacantBeginSeat(row, index + 1) : void openVenueRoster(row, index + 1));
         cell.replaceChildren(button);
       }
       tr.append(cell);
@@ -1350,6 +1346,12 @@ function applyVenuePermissions() {
   $('venue-phase').hidden = !master();
   const begin = master() ? venueTargets('Begin') : [], pause = venueTargets('Pause'), resume = venueTargets('Resume'), end = venueTargets('End');
   const locked = state.busy || !!state.pending || !master();
+  const originalRoster = begin.some(target => state.session?.state === 'Preparing' && state.session.id === target.sessionId
+    && state.session.sequence === target.sessionSequence);
+  $('roster-return-begin').hidden = !originalRoster;
+  $('roster-return-begin').disabled = locked;
+  $('venue-roster-return-begin').hidden = !begin.length;
+  $('venue-roster-return-begin').disabled = locked;
   venueHistory.update(!locked);
   $('venue-closure-open-end').hidden = !master() || !confirmedVenueEnd;
   $('venue-closure-open-end').disabled = locked || !confirmedVenueEnd;
@@ -2799,6 +2801,12 @@ $('world-return-venue-begin').addEventListener('click', () => {
   tab('operations');
   $('venue-phase-title').focus();
 });
+for (const id of ['roster-return-begin', 'venue-roster-return-begin']) {
+  $(id).addEventListener('click', () => {
+    if (!master() || $('operations-view').hidden || $(id).hidden || $(id).disabled) return;
+    $('venue-phase-title').focus();
+  });
+}
 $('world-return-tracking').addEventListener('click', () => {
   const button = $('world-return-tracking');
   if (!master() || $('world-view').hidden || button.hidden) return;

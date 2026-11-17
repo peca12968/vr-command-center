@@ -129,7 +129,7 @@
             <table><caption class="sr-only">場館名冊登記</caption><thead><tr><th scope="col">房間與席位</th><th scope="col">玩家名稱</th><th scope="col">頭盔</th><th scope="col">狀態</th></tr></thead>
               <tbody id="venue-roster-seats"></tbody></table>
           </div>
-          <div class="button-row"><button id="venue-roster-register" type="button" class="secondary" disabled>登記已填寫的席位</button><span id="venue-roster-status" class="hint" role="status"></span></div>
+          <div class="button-row"><button id="venue-roster-register" type="button" class="secondary" disabled>登記已填寫的席位</button><button id="venue-roster-return-begin" type="button" class="quiet" hidden>返回全館開場檢查</button><span id="venue-roster-status" class="hint" role="status"></span></div>
         </details>
         <section id="venue-phase" class="panel" aria-labelledby="venue-phase-title" hidden>
           <h3 id="venue-phase-title" tabindex="-1">全館場次控制</h3>
@@ -397,6 +397,7 @@
           <div class="form-row">
             <label id="roster-room-filter" hidden>名冊房間<select id="roster-room"><option value="">全部房間</option></select></label>
             <button id="download-roster-room-tickets" type="button" class="secondary" hidden disabled>下載本房連線檔 ZIP</button>
+            <button id="roster-return-begin" type="button" class="quiet" hidden>返回全館開場檢查</button>
             <span id="roster-ticket-destination" class="hint" role="status" hidden></span>
           </div>
           <form id="join-form"><fieldset id="join-fields" class="join-fields"><label>玩家名稱<input id="player-name" required maxlength="80" placeholder="例如 Alpha 01"></label><label>房間<select id="player-room"></select></label><label>頭盔<select id="player-headset"><option value="Quest3">Meta Quest 3</option><option value="ViveXr">VIVE XR（後續整合）</option></select></label><button type="submit">加入名冊</button></fieldset></form>
@@ -639,7 +640,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.261 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.262 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

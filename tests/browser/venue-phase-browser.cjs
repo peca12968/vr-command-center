@@ -426,6 +426,12 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     check(await beginRoomText(1) === '房間 1 · 1 席姿態就緒 · 錄製來源 Simulation'
       && await beginRoomText(2) === '房間 2 · 名冊尚無玩家' && await page.locator('[data-begin-room]').count() === 2,
       'The master sees only the target rooms and can distinguish a ready VR room from an empty independent roster');
+    await beginRoom(1).getByRole('button', { name: '查看房間 1 名冊' }).click();
+    await page.waitForFunction(() => document.activeElement.id === 'roster-title');
+    await page.locator('#roster-return-begin').click();
+    check(await page.locator('#session-select').inputValue() === preparing[0]
+      && await page.evaluate(() => document.activeElement.id === 'venue-phase-title')
+      && await beginButton.isDisabled(), 'Returning from the original room roster focuses the opening check without issuing Begin');
     await beginRoom(1).filter({ hasText: '快照已過期' }).waitFor();
     check(await beginButton.isDisabled() && await beginRoom(2).getAttribute('data-begin-state') === 'EmptyRoster',
       'Expired VR evidence clears the ready label while the independent empty-room reason remains');
@@ -468,6 +474,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       'The browser submits one Begin batch and both durable sessions advance exactly one revision');
     await beginEvidence.waitFor({ state: 'hidden' });
     check(await page.locator('[data-begin-room]').count() === 0, 'Accepted Begin removes the preparing room rows');
+    check(!await page.locator('#roster-return-begin').isVisible() && !await page.locator('#venue-roster-return-begin').isVisible(),
+      'Roster shortcuts to the opening check clear when the original rooms are running');
     await roomPhase(1).filter({ hasText: '全館開始待確認' }).waitFor();
     await publishUntil(first, running[0], () => {
       second(running[1]);
