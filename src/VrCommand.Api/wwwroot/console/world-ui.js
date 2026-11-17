@@ -1382,7 +1382,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   $('world-room').addEventListener('change', () => selectRoom($('world-room').value));
   $('world-camera').addEventListener('change', () => setCamera($('world-camera').value));
   setInterval(() => { if (active) status(); }, 500);
-  return { reset, active(value, target = null) {
+  return { reset, verifiedRoom() { return info?.observerRoomId; }, active(value, target = null) {
     active = value;
     if (value) {
       if (target) {

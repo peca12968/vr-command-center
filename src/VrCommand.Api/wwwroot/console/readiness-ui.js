@@ -416,7 +416,8 @@ export function venueTrackingRow(report, room, session, elapsed) {
 function venueTrackingObservation(view, room, session) {
   const { streamId, origin } = session?.combatStream ?? {};
   return view.worldSequence && typeof streamId === 'string' && ['GameServer', 'Simulation'].includes(origin)
-    ? { mode: 'live', roomId: room.id, sessionId: session.id, streamId, origin, minimumSequence: view.worldSequence } : null;
+    ? { mode: 'live', roomId: room.id, sessionId: session.id, streamId, origin, minimumSequence: view.worldSequence,
+      returnToTracking: true } : null;
 }
 
 export function mountRoomReadiness(getState, unauthorized, venueUpdated, describeClimate, describeEnemies, openObservation) {
@@ -594,6 +595,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     if (list.children.length !== rows.length) list.replaceChildren(...rows.map(() => {
       const item = document.createElement('li'), detail = document.createElement('span');
       const actions = document.createElement('span'), watch = document.createElement('button'), button = document.createElement('button');
+      item.tabIndex = -1;
       actions.className = 'button-row';
       watch.type = 'button'; watch.className = 'quiet small'; watch.textContent = '即時觀戰';
       watch.addEventListener('click', () => {
@@ -608,7 +610,9 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
       button.type = 'button'; button.className = 'quiet small'; button.textContent = '檢視姿態中斷快照';
       button.addEventListener('click', () => {
         const target = poseFrame(Number(item.dataset.liveTrackingRoom));
-        if (target && String(target.throughSequence) === item.dataset.worldSequence) openObservation(target);
+        if (target && String(target.throughSequence) === item.dataset.worldSequence) {
+          openObservation({ ...target, returnToTracking: true });
+        }
       });
       actions.append(watch, button); item.append(detail, actions); return item;
     }));

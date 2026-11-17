@@ -111,7 +111,7 @@
           </div>
         </details>
         <section id="venue-live-tracking" class="panel" aria-labelledby="venue-live-tracking-title" hidden>
-          <h3 id="venue-live-tracking-title">執行中五房追蹤</h3>
+          <h3 id="venue-live-tracking-title" tabindex="-1">執行中五房追蹤</h3>
           <p id="venue-live-tracking-summary" class="hint" role="status"></p>
           <p id="venue-live-tracking-sample" class="hint" hidden>共同取樣時間 <time></time></p>
           <ul id="venue-live-tracking-rooms" class="event-list" aria-label="各房最新追蹤狀態"></ul>
@@ -519,7 +519,7 @@
         </form>
       </section>
       <section id="world-view" hidden>
-        <div class="section-heading"><div><p class="eyebrow">WORLD RECORDINGS</p><h2>觀戰與任務回放</h2></div><div class="button-row"><button id="world-return-venue-begin" type="button" class="quiet" hidden>返回全館開場檢查</button><button id="world-return-closure-scores" type="button" class="quiet" hidden>返回原批次戰績</button><span class="badge">觀察不占玩家席位</span></div></div>
+        <div class="section-heading"><div><p class="eyebrow">WORLD RECORDINGS</p><h2>觀戰與任務回放</h2></div><div class="button-row"><button id="world-return-venue-begin" type="button" class="quiet" hidden>返回全館開場檢查</button><button id="world-return-tracking" type="button" class="quiet" hidden>返回五房追蹤</button><button id="world-return-closure-scores" type="button" class="quiet" hidden>返回原批次戰績</button><span class="badge">觀察不占玩家席位</span></div></div>
         <section class="panel"><div id="world-live-rooms" class="world-room-quick" role="group" aria-label="目前場次的即時觀戰房間" hidden></div><label>可讀取的錄製場次<select id="world-recording"></select></label><div class="button-row"><button id="world-refresh" class="quiet">更新錄製列表</button><button id="world-older" type="button" class="quiet" hidden disabled>載入較早錄製</button><button id="world-live" disabled>即時觀戰</button><button id="world-replay" class="secondary" disabled>從頭回放</button></div><p id="world-list-status" class="hint" role="status"></p><p id="world-message" class="hint" role="status" aria-live="polite">選取已錄製的場次，開始觀戰或回放。</p></section>
         <section id="world-player" class="panel" hidden>
           <div class="section-heading"><h3 id="world-name"></h3><span id="world-status" class="badge"></span></div>
@@ -638,7 +638,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.255 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.256 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>
