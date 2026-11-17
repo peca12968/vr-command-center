@@ -6,6 +6,7 @@
 - 正式建置與 ZIP 解壓後各通過 10 項 Chromium 操作檢查，涵蓋同名任務、簡報及英文大小寫、沒有結果、原草稿與復原紀錄、歷史開場版本，以及選定結果的實際載入。管理服務透過 Windows AF_UNIX，查核為零 TCP 監聽、零 UDP 端點及零殘留場次。126 項既有 Node 模型檢查、7 項封裝檢查通過。 [解壓後瀏覽器驗收](../artifacts/mission-search-031266/extracted-browser/browser-checks.json) · [程序查核](../artifacts/mission-search-031266/extracted-browser/checks.json) · [畫面](../artifacts/mission-search-031266/extracted-browser/search.png)
 - ZIP 為 53,507,680 位元組，解壓核對 595 檔，已與既有 Windows 玩家、伺服器及 Quest 0.50.12／77 APK 完成離線發行核對。實體頭盔、場館跨機及廠商硬體仍待驗收。 [管理包](../artifacts/mission-search-031266/VRCommand-ControlServer-0.31.266.zip) · [發行核對](../artifacts/mission-search-031266/venue-release.json)
 - 首次排演在建立修訂時缺少請求識別而回傳 400；後續請求轉送錯誤造成瀏覽器失敗，另一輪管理服務在 25 秒內未就緒。原輸出保留，修正排演工具並補足程序期限後完成上述驗收。 [首輪](../artifacts/mission-search-031266/publication-browser/browser.log) · [轉送失敗](../artifacts/mission-search-031266/checked-browser/browser.log)
+- GitHub Actions 對產品提交 `7014dee` 回報帳務或支出上限，工作未啟動。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44137010220)
 
 ## 2026-11-18 Quest 首次啟動核對原裝置及玩家設定
 
