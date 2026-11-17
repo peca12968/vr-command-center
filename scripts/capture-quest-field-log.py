@@ -38,7 +38,7 @@ def read_connection(path):
     field.require(payload[0] == 2 and 1 <= payload[49] <= 5 and payload[50] <= 4, 'Invalid player ticket claims')
     expected = {key: field.identity(str(uuid.UUID(bytes_le=payload[offset:offset + 16])))
                 for key, offset in (('sessionId', 1), ('playerId', 17), ('admissionId', 33))}
-    return port, dict(expected, roomId=payload[49])
+    return port, dict(expected, roomId=payload[49]), payload[50] + 1
 
 
 def quest_pid(adb, timeout):
@@ -380,6 +380,8 @@ def main():
     parser.add_argument('--serial', help='ADB serial of the already launched Quest')
     parser.add_argument('--connection-file', type=Path, help='Original player connection JSON for this admission')
     parser.add_argument('--output', type=Path, help='New output log path in a private directory')
+    parser.add_argument('--quest-launch-report', type=Path, help='Original single-seat -RequireOpenXR deployment report')
+    parser.add_argument('--quest-launch-release', type=Path, help='Exact original release report used to launch that seat')
     parser.add_argument('--venue-bundle', type=Path, help='Original five-room deployment ZIP for concurrent capture')
     parser.add_argument('--device-map', type=Path, help='Version 1 Quest device map used for deployment')
     parser.add_argument('--deployment-report', type=Path, help='Original deployment report for these exact mapped seats')
@@ -408,8 +410,11 @@ def main():
                       'Use --capture-deployed-seats with the original incomplete --deployment-report')
         field.require(not args.after_deployment_report or args.deployment_report,
                       'Use --after-deployment-report with --deployment-report')
+        field.require(bool(args.quest_launch_report) == bool(args.quest_launch_release),
+                      'Provide both --quest-launch-report and --quest-launch-release for single-seat capture')
         if any(venue) or args.allow_partial_map or args.retry_incomplete or args.deployment_report:
-            field.require(all(venue) and not any(single), 'Use a venue ZIP, device map and output directory together')
+            field.require(all(venue) and not any(single) and args.quest_launch_report is None,
+                          'Use a venue ZIP, device map and output directory together without single-seat options')
             plan = venue_plan(args.venue_bundle, args.device_map, args.allow_partial_map)
             if args.deployment_report:
                 plan = bind_deployment(plan, args.deployment_report, completed_only=args.capture_deployed_seats,
@@ -421,14 +426,25 @@ def main():
         else:
             field.require(all(single), 'Use a serial, connection file and output log together')
             field.require(re.fullmatch(r'[A-Za-z0-9\[][A-Za-z0-9._:%\[\]-]{0,127}', args.serial), 'Use a valid explicit ADB serial')
-            port, admission = read_connection(args.connection_file)
+            port, admission, seat = read_connection(args.connection_file)
+            openxr = None
+            if args.quest_launch_report is not None:
+                launch, raw = field.read_quest_document(args.quest_launch_report)
+                deployments, launches = field.single_session_quest_launches([launch], args.quest_launch_release)
+                location = (admission['roomId'], seat)
+                original = (admission['sessionId'], admission['playerId'], admission['admissionId'], port)
+                field.require(deployments.get(location) == original,
+                              'Quest launch report differs from the original connection seat, admission or endpoint')
+                openxr = launches[location]
             check_adb_startup()
             deadline = time.monotonic() + args.seconds
             target = select_adb_transport(adb, read_adb_transports(adb, args.seconds), args.serial)
             remaining = deadline - time.monotonic()
             field.require(remaining > 0, 'Capture timed out before checking the Quest process')
-            report = asyncio.run(capture(target, port, admission, args.output, remaining,
+            report = asyncio.run(capture(target, port, admission, args.output, remaining, openxr=openxr,
                                          on_disconnected=lambda pid: report_capture_status(pid, stage='capture-disconnected')))
+            if openxr is not None:
+                report.update(openXRVerified=True, questLaunchReportSha256=hashlib.sha256(raw).hexdigest())
     except (field.EvidenceError, AdbTransportError) as error:
         parser.exit(1, f'Quest capture incomplete. {error}.\n')
     except (OSError, UnicodeError, ValueError, KeyError, TypeError, TimeoutError, RecursionError, KeyboardInterrupt):

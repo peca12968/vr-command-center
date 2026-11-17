@@ -1,6 +1,6 @@
 import asyncio
 import base64
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from copy import deepcopy
 from datetime import datetime, timedelta
 import hashlib
@@ -413,7 +413,7 @@ from pathlib import Path
 root = Path(__file__).parent
 args = sys.argv[1:]
 settings = json.loads((root/'settings.json').read_text())
-assert args[:2] == ['-s', 'fixture-device']
+assert args[:2] in (['-s', 'fixture-device'], ['-t', '41'])
 if args[2:] == ['shell', 'getprop', 'ro.serialno']:
     count = root/'serial-count'
     calls = int(count.read_text()) if count.exists() else 0
@@ -455,11 +455,11 @@ if settings.get('keepRunning', True):
         (self.root/'serial-count').unlink(missing_ok=True)
 
     def capture(self, seconds=4):
-        port, expected = capture_tool.read_connection(self.original)
+        port, expected, _ = capture_tool.read_connection(self.original)
         return asyncio.run(capture_tool.capture(self.adb, port, expected, self.output, seconds))
 
     def test_bound_capture_checks_original_device_before_read_and_publish(self):
-        port, expected = capture_tool.read_connection(self.original)
+        port, expected, _ = capture_tool.read_connection(self.original)
         raw = quest_logcat(self.player_log, port).encode()
         proof = ('a' * 32, hashlib.sha256(('a' * 32 + '\nHEADSET-A').encode()).hexdigest())
         self.prepare(raw, deviceSerials=['unknown'])
@@ -491,7 +491,7 @@ if settings.get('keepRunning', True):
         self.assertEqual('2', (self.root / 'serial-count').read_text())
 
     def test_bound_capture_requires_original_openxr_process_and_marker_before_ready(self):
-        port, expected = capture_tool.read_connection(self.original)
+        port, expected, _ = capture_tool.read_connection(self.original)
         nonce = 'a1' * 16
         marker = f'VR_QUEST_OPENXR nonce={nonce} loader=1 display=1 input=1'
         original = quest_logcat(self.player_log)
@@ -536,7 +536,7 @@ if settings.get('keepRunning', True):
         self.assertEqual(2, readback['serverAcknowledgements'])
 
     def test_capture_waits_for_the_first_original_connection_before_reporting_ready(self):
-        port, admission = capture_tool.read_connection(self.original)
+        port, admission, _ = capture_tool.read_connection(self.original)
         ready = []
 
         async def lines():
@@ -646,7 +646,7 @@ if settings.get('keepRunning', True):
     def test_capture_preserves_competing_final_filename_and_complete_partial(self):
         raw = quest_logcat(self.player_log).encode('utf-8')
         self.prepare(raw)
-        port, admission = capture_tool.read_connection(self.original)
+        port, admission, _ = capture_tool.read_connection(self.original)
 
         def already_published(_pid):
             with self.output.open('xb') as existing:
@@ -660,7 +660,7 @@ if settings.get('keepRunning', True):
     def test_capture_venue_never_opens_final_report_for_incremental_writing(self):
         raw = quest_logcat(self.player_log).encode('utf-8')
         self.prepare(raw)
-        port, admission = capture_tool.read_connection(self.original)
+        port, admission, _ = capture_tool.read_connection(self.original)
         directory = self.root / 'venue'
         report_path = directory / 'capture-report.json'
         plan = {'topology': 'Linked', 'venueSha256': 'a' * 64,
@@ -691,6 +691,67 @@ if settings.get('keepRunning', True):
         for secret in ('fixture-device', 'private-test-ticket', str(self.root)):
             self.assertNotIn(secret, run.stderr + run.stdout)
         self.assertFalse(self.partial.exists())
+
+    def test_single_capture_cli_uses_the_original_launch_report_before_adb(self):
+        release = self.root / 'release.json'
+        release.write_text(json.dumps({'verified': True, 'scope': 'offline-package-consistency', 'quest': {
+            'applicationId': 'com.vrcommand.quest', 'architecture': 'arm64-v8a', 'signatureV2': True,
+            'versionCode': 77, 'sha256': 'a' * 64}}), encoding='utf-8')
+        launch = self.root / 'launch.json'
+        nonce = 'ab' * 16
+        receipt = dict(self.expected, evidenceVersion=1, status='openxr-ready', seat=2, port=7777,
+                       apkVerified=True, filesVerified=True, openXR={'processId': 7342, 'nonce': nonce},
+                       venueReleaseReportSha256=hashlib.sha256(release.read_bytes()).hexdigest())
+        command = [str(capture_spec.origin), '--adb', sys.executable, '--serial', 'fixture-device',
+                   '--connection-file', str(self.original), '--output', str(self.output), '--seconds', '4']
+        proof_args = ['--quest-launch-report', str(launch), '--quest-launch-release', str(release)]
+        raw = (logcat_line(f'VR_QUEST_OPENXR nonce={nonce} loader=1 display=1 input=1') + quest_logcat(self.player_log)).encode()
+
+        def run(options, error=None, *, calls_adb=False):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with (patch.object(sys, 'argv', command + options), redirect_stdout(stdout), redirect_stderr(stderr),
+                  patch('windows_firewall.require_silent_windows_launch') as preflight,
+                  patch.object(capture_tool, 'read_adb_transports', return_value={'fixture-device': '41'}) as inventory,
+                  patch.object(capture_tool, 'select_adb_transport', return_value=[*self.adb[:2], '-t', '41']) as select):
+                if error:
+                    with self.assertRaises(SystemExit) as stopped:
+                        capture_tool.main()
+                    self.assertEqual(1, stopped.exception.code)
+                    self.assertIn(error, stderr.getvalue())
+                    self.assertEqual('', stdout.getvalue())
+                else:
+                    capture_tool.main()
+                self.assertEqual([int(calls_adb)] * 3, [preflight.call_count, inventory.call_count, select.call_count])
+            for private in (self.ticket, nonce, str(self.root), 'fixture-device'):
+                self.assertNotIn(private, stdout.getvalue() + stderr.getvalue())
+            return stdout.getvalue(), stderr.getvalue()
+
+        self.prepare(raw)
+        run(proof_args[:2], 'Provide both --quest-launch-report and --quest-launch-release')
+        for changes in ({'seat': 1}, {'admissionId': id_for(99)}, {'port': 7778}):
+            launch.write_text(json.dumps(dict(receipt, **changes)), encoding='utf-8')
+            run(proof_args, 'differs from the original connection seat, admission or endpoint')
+        launch.write_text(json.dumps(dict(receipt, venueReleaseReportSha256='b' * 64)), encoding='utf-8')
+        run(proof_args, 'differs from the original release report')
+        self.assertFalse((self.root / 'pid-count').exists())
+
+        launch.write_text(json.dumps(receipt), encoding='utf-8')
+        self.prepare(raw, initialPid='7450')
+        run(proof_args, 'process differs from the original OpenXR launch', calls_adb=True)
+        self.assertFalse(self.partial.exists())
+        self.assertFalse((self.root / 'logcat-child').exists())
+
+        self.prepare(raw)
+        stdout, stderr = run(proof_args, calls_adb=True)
+        report = json.loads(stdout)
+        self.assertIs(report['openXRVerified'], True)
+        self.assertEqual(hashlib.sha256(launch.read_bytes()).hexdigest(), report['questLaunchReportSha256'])
+        self.assertIn({'stage': 'capture-ready', 'logcatPid': 7342}, [json.loads(line) for line in stderr.splitlines()])
+        self.assertEqual(raw, self.output.read_bytes())
+        self.records[3]['players'][1]['seat'] = 1
+        verified = field.verify(*self.records, quest_player_logs=[(self.address, field.content(self.output), report['logcatPid'])],
+                                quest_launch_reports=[receipt], quest_launch_release=release)
+        self.assertEqual({'verifiedSeats': 1}, verified['questOpenXR'])
 
 
 def preflight_fixture(root, label, *, server, peer, port, exchange=None):
