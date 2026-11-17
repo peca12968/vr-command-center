@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-17 將 Quest 單席啟動及日誌綁定到原頭盔
+
+- `f7a4372` 的 `-RequireOpenXR` 單席回條升為 `evidenceVersion: 3`，使用本次啟動識別碼計算裝置指紋。驗證設定切換、啟動和擷取時會重查裝置。模擬環境在相同 ADB 連線識別碼換成另一台頭盔時，舊版仍繼續啟動。新版能在設定啟用前拒絕，若換機發生在擷取中則保留 `.partial`。成功回條省略原始序號。 [Quest 操作](QUEST3.md#收集-quest-場館驗收日誌) · [修正前](../artifacts/quest-device-bound-launch-20261117/before.log)
+- 部署回歸通過 32 項，另有 2 項管理 HTTP 測試因 Windows 防火牆查核略過。MR 的獨立與合併 ZIP 均完成模擬單席部署，核對原校正檔與裝置指紋。MR 測試首次因另一輪測試持有部署鎖而停止，待該輪結束後重跑通過。現行 APK 通過兩種拓撲的 VR／MR 四項離線預檢。 [部署回歸](../artifacts/quest-device-bound-launch-20261117/deploy-class.log) · [MR 部署](../artifacts/quest-device-bound-launch-20261117/mr-bundles-retry.log) · [APK 預檢](../artifacts/quest-device-bound-launch-20261117/deployment-check-only.json)
+- 日誌擷取與戰後驗收共 158 項通過，包含新版回條在擷取前、發布前的比對，以及舊版回條讀取。 [驗收回歸](../artifacts/quest-device-bound-launch-20261117/field-full.log)
+- Windows 目前只列出 Quest 檔案傳輸介面，實機驗收待做。GitHub Actions 因帳務或支出上限未啟動。 [USB 查核](../artifacts/quest-device-bound-launch-20261117/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44041300390)
+
 ## 2026-11-17 從全館結束回條開啟本次批次
 
 - 0.31.261 在主控確認全館結束後提供「查看本次結束批次」。場次清單讀取失敗時仍可從成功回條重新讀取原批次。控制台比對各場次、房間、結束序號與批次識別後才切換，然後持續追蹤同批封存。 [操作說明](SESSION_CLOSURE.md#歷史批次)
