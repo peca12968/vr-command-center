@@ -52,7 +52,8 @@ class Venue:
     @contextmanager
     def start(self):
         self.socket_path.unlink(missing_ok=True)
-        with tempfile.TemporaryFile() as log:
+        log_path = self.socket_path.with_suffix('.log')
+        with log_path.open('wb') as log:
             command = [*self.command, '--urls', 'http://unix:/' + str(self.socket_path), '--preferHostingUrls', 'true']
             child = subprocess.Popen(command, cwd=self.cwd, env=self.env, stdout=log, stderr=subprocess.STDOUT,
                                      creationflags=subprocess.CREATE_NO_WINDOW)
@@ -65,9 +66,10 @@ class Venue:
                     except OSError:
                         pass
                     else:
-                        log.seek(0)
-                        bindings = [line.split('Now listening on: ', 1)[1] for line in log.read().decode().splitlines()
-                                    if 'Now listening on: ' in line]
+                        # Read with a separate handle so startup checks cannot move the child's output cursor.
+                        lines = log_path.read_text(encoding='utf-8', errors='replace').splitlines(keepends=True)
+                        bindings = [line.split('Now listening on: ', 1)[1].rstrip('\r\n') for line in lines
+                                    if line.endswith('\n') and 'Now listening on: ' in line]
                         if bindings:
                             assert bindings == ['http://unix:' + str(self.socket_path)], bindings
                             break

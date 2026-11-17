@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-18 從搜尋結果直接選用任務開場
+
+- 管理台 0.31.267 在任務庫提供「選用此任務開場」。使用搜尋結果的保存版本帶到場次準備區，逐房指定時只套用目前預覽房間。預覽會顯示原時間、天候、敵軍及擺設，確認後再建立準備場次。 [操作方式](MISSION_VERSIONS.md#控制台操作)
+- 正式建置與解壓包各通過 10 項 Chromium 檢查，每輪建立五房獨立、合併及逐房選版三批，共 11 個準備場次。逐一比對原任務完整定義，再結束並釋放房間。任務庫新增版本後仍使用原選定版，第 2 房單獨換版及未保存草稿均已核對。 [解壓驗收](../artifacts/mission-select-launch-031267/final-browser/browser-checks.json) · [畫面](../artifacts/mission-select-launch-031267/final-browser/library-shortcut.png)
+- 解壓版首輪在啟動判定逾時，但健康檢查已回傳 200，保存日誌的啟動文字遭覆寫。Windows 子程序排演確認，共用日誌位置的讀取會改變子程序的寫入位置。IPC 工具改用獨立檔案控制代碼讀取已完成的行。修正後同一解壓包完成上述瀏覽器檢查，另通過合併與獨立各 25 席、重啟後回放的既有 IPC 驗證，TCP 監聽、UDP 端點及殘留場次均為零。 [原日誌](../artifacts/mission-select-launch-031267/extracted-browser/server.log) · [位置排演](../artifacts/mission-select-launch-031267/log-cursor.json) · [五房 IPC](../artifacts/mission-select-launch-031267/venue-ipc.json)
+- ZIP 為 53,507,645 位元組，解壓核對 595 檔，並與既有 Windows 玩家、伺服器及 Quest 0.50.12／77 APK 完成離線發行核對。第一個建置快照與最後調整的來源不同，另建目前來源後才封裝。實體頭盔、跨機 25 人與廠商硬體仍待驗收。 [管理包](../artifacts/mission-select-launch-031267/VRCommand-ControlServer-0.31.267.zip) · [發行核對](../artifacts/mission-select-launch-031267/venue-release.json)
+
 ## 2026-11-18 搜尋已保存的任務
 
 - 管理台 0.31.266 可依名稱或簡報搜尋最新版任務，顯示符合筆數，沒有結果時停用載入。更新任務庫時保留查詢及仍符合的原選取識別，登出時清除查詢。 [任務操作](MISSION_VERSIONS.md#控制台操作)

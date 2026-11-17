@@ -964,6 +964,7 @@ function applyPermissions() {
   $('mission-fields').disabled = locked || !master();
   renderPropHistory();
   $('load-mission').disabled = locked || !$('edit-mission').value; $('new-mission').disabled = locked || !master();
+  $('launch-selected-mission').disabled = locked || !$('edit-mission').value;
   $('edit-mission').disabled = locked;
   $('mission-search').disabled = locked;
   $('mission-version').disabled = locked || !state.history;
@@ -3006,6 +3007,9 @@ submit('mission-form', saveMission);
 $('mission-search').addEventListener('input', () => {
   editMissionOptions();
   applyPermissions();
+});
+$('launch-selected-mission').addEventListener('click', () => {
+  pinLaunchVersion(state.catalog.find(row => row.mission.id === $('edit-mission').value));
 });
 $('load-mission').addEventListener('click', () => {
   const id = $('edit-mission').value;

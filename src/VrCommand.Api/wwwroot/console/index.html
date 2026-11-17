@@ -465,7 +465,7 @@
       </section>
       <section id="missions-view" hidden>
         <div class="section-heading"><div><p class="eyebrow">MISSION PLANNER</p><h2>任務庫與編輯</h2></div><span id="mission-permission" class="hint"></span></div>
-        <section class="panel"><label>搜尋任務<input id="mission-search" type="search" placeholder="名稱或簡報內容" aria-controls="edit-mission" aria-describedby="mission-search-status"></label><p id="mission-search-status" class="hint" role="status" hidden></p><div class="form-row"><label>已儲存任務（最新版）<select id="edit-mission"></select></label><button id="load-mission" class="secondary">載入最新版</button><button id="new-mission" class="quiet">新任務</button></div><p class="hint">修訂會保留原版本與既有場次；另存新任務則建立獨立任務。</p>
+        <section class="panel"><label>搜尋任務<input id="mission-search" type="search" placeholder="名稱或簡報內容" aria-controls="edit-mission" aria-describedby="mission-search-status"></label><p id="mission-search-status" class="hint" role="status" hidden></p><div class="form-row"><label>已儲存任務（最新版）<select id="edit-mission"></select></label><button id="load-mission" class="secondary">載入最新版</button><button id="launch-selected-mission" class="quiet">選用此任務開場</button><button id="new-mission" class="quiet">新任務</button></div><p class="hint">修訂會保留原版本與既有場次；另存新任務則建立獨立任務。</p>
           <div id="mission-history" hidden><div class="form-row"><label>草稿所屬任務的版本紀錄<select id="mission-version"></select></label><button id="load-version" class="quiet">載入選取版本</button><button id="compare-version" class="quiet">與目前草稿比較</button><button id="export-mission-template" type="button" class="quiet" hidden disabled>下載選取版本的範本</button><button id="more-versions" class="quiet">讀取更舊版本</button><button id="launch-version" class="secondary">選用草稿原版開場</button></div><p id="history-status" class="hint" role="status"></p></div>
           <section id="mission-comparison" class="layout-report" hidden aria-labelledby="mission-comparison-title">
             <h3 id="mission-comparison-title">任務版本比較</h3><p id="mission-comparison-summary" class="hint" role="status"></p>
@@ -650,7 +650,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.266 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.267 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>
