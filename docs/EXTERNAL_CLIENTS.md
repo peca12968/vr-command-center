@@ -136,7 +136,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 `
   -WindowsSeatMap .\windows-seat-map.json -WindowsOutputDirectory 'F:\private\windows-seats'
 ```
 
-搭配管理包 0.31.148，工具在寫入暫存目錄前及正式交付前各核對一次全館 25 份原票券、現行入場、遊戲端點及近期原來源畫格。核對成功後才一次交付對照表中的原 VR 連線檔，例如 `pc-PC-A-room-01-seat-02.json`。若來源在暫存期間停止更新，工具會指出受影響的房間和席位並移除這批暫存。來源恢復且原票券仍有效時，可用同一份 ZIP 重新執行。
+搭配管理包 0.31.148，工具在寫入暫存目錄前及正式交付前各核對一次原包內所有票券、現行入場、遊戲端點及近期原來源畫格。核對成功後才一次交付對照表中的原 VR 連線檔，例如 `pc-PC-A-room-01-seat-02.json`。若來源在暫存期間停止更新，工具會指出受影響的房間和席位並移除這批暫存。來源恢復且原票券仍有效時，可用同一份 ZIP 重新執行。
 
 選到 Quest 3、MR 房間、重複席位、過期票券或過時名冊時，整批拒絕。成功摘要列出每台電腦的檔名、端點與效期，並記錄 `liveSourceVerified: true`。純 VR 同機排演可使用 loopback，玩家只能在遊戲伺服器所在電腦使用該目的地。跨機仍須使用場館 LAN 端點。
 
@@ -549,6 +549,7 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `questCaptures` | 選用。填原 Quest 網路計畫、裝置對照表或兩者，以及 1 至 25 份原擷取報告。可與 UDP 預檢報告一併使用 |
 | `questDeployments` | 選用。填原離線發行報告及 1 至 25 份正式 Quest 部署報告，核對原入場及 APK 雜湊 |
 | `roomAlignmentBundle` | 選用。填原 MR 或混合部署 ZIP 路徑。與 `sessions[].roomAlignments` 擇一，並提供每場原回放檔 |
+| `roomAlignmentBundleSha256` | 選用。原部署 ZIP 的 SHA-256。使用準備指令時會自動保存，正式驗收和六批收件會重新比對 |
 | `venueReleaseReport` | 選用。核對全館所有 Windows 與 Quest 席位共用的原發行報告。Quest 的 `questDeployments` 此時只填 `reports` |
 | `sessions` | 獨立模式填五場，合併模式填一場 |
 | `sessions[].launcherReport` 或 `sessions[].sessionId` | 個別啟動時填各場原終止報告路徑。使用 `venueLauncherReport` 時填各場原 `sessionId` |
@@ -747,7 +748,7 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json --inspect-c
 
 在 `stages.json` 加入 `"requireVerifiedVenueStart": true`，並在六份批次清單各自引用原 `verifiedVenueStart`。驗收會逐批核對原預檢、就緒及結束報告，並拒絕重複使用同一個啟動批次 ID。缺少回條時，錯誤會指出總清單中的項次。摘要會顯示各批已核對的回條及原啟動 ID。 [保存及引用回條](#核對-windows-五房啟動回條)
 
-用 `--inspect-venue-stages` 檢查待補資料。回條記載的 SHA-256 與所引用的檔案不符時，`issues[].evidenceMismatch` 會列出 `kind`、檔名 `name` 及 `sha256-mismatch`。`kind` 對應 `venueLauncherReport`（結束報告）、`udpPreflightBatch`（原 UDP 預檢）、`windowsReadyReport`（就緒報告）或 `windowsLaunchPreview`（啟動預覽）。檔案不存在時，查看 `missingFile` 或 `udpPreflight` 的對應項目。這些欄位只列檔名，正式驗收仍會拒絕缺檔或雜湊不一致的批次。
+用 `--inspect-venue-stages` 檢查待補資料。記載的 SHA-256 與所引用的檔案不符時，`issues[].evidenceMismatch` 會列出 `kind`、檔名 `name` 及 `sha256-mismatch`。`kind` 例如 `venueLauncherReport`（結束報告）、`udpPreflightBatch`（原 UDP 預檢）、`windowsReadyReport`（就緒報告）、`windowsLaunchPreview`（啟動預覽）或 `roomAlignmentBundle`（MR 或混合部署 ZIP）。檔案不存在時，查看 `missingFile` 或 `udpPreflight` 的對應項目。這些欄位只列檔名，正式驗收會拒絕缺檔或雜湊不一致的批次。
 
 ##### 六批核對同一份 Windows 伺服器發行
 
@@ -927,7 +928,9 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json --inspect-c
 
 ### 核對 MR 校正封存
 
-五房驗收可在產生清單的指令加上 `--room-alignment-bundle .\deployment.zip`，直接引用原 MR 或混合部署 ZIP。手動建立清單時填 `"roomAlignmentBundle": "deployment.zip"`。產生清單與完整驗收都會核對 ZIP 的獨立或合併模式、各房原場次及校正檔 SHA-256。混合 ZIP 另核對各房 VR 或 MR 模式及封存 UDP 端點。工具只讀 ZIP 的房間清單與校正檔，連線票券留在原 ZIP 內，請依部署資料的原存放權限保管。
+五房驗收可在產生清單的指令加上 `--room-alignment-bundle .\deployment.zip`，直接引用原 MR 或混合部署 ZIP。5 人試場加上 `--players-per-room 1`，10 人試場加上 `--players-per-room 2`。手動建立清單時，填 `roomAlignmentBundle` 為原 ZIP 路徑，另用 `expectedPlayersPerRoom` 設定試場席數。準備與驗收會比對 ZIP 的拓撲、原場次、部署席數及分房連線檔名稱。固定人數批次也會核對封存名冊的房號與席位。離場稽核則以 `expectedFinalPlayersByRoom` 核對結束名冊，可引用開場時較多席位的部署包。混合 ZIP 另核對各房 VR 或 MR 模式及封存 UDP 端點。
+
+準備指令會保存整份原 ZIP 的 `roomAlignmentBundleSha256`。正式驗收與六批收件會重新比對，六批結果會列出原 ZIP 雜湊與通過校正的房間數。工具讀取套件清單、各分房 ZIP 的檔名索引與校正檔，票券內容留在原 ZIP 內。請按部署資料的原存放權限保管。
 
 若逐房提供 JSON，在整批清單的每個 MR 場次填入 `roomAlignments`，混合批次的 VR 場次只填自己的回放檔。單場驗收加入 `--world-journal .\room-02.worldlog --room-alignment 2 .\room-02-alignment.json`。合併 MR 場次每房各加一次 `--room-alignment`。兩種校正來源都須提供全部場次的原 `worldJournal`，並核對原任務的 MR 模式、遊戲伺服器回放的 `quest-room-mr-v1` 設定、校正 JSON 的房號與原始位元。選用校正核對後，任一 MR 房間缺檔或校正檔改寫即拒絕整批。
 

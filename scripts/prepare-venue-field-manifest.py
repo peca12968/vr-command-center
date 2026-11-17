@@ -145,7 +145,11 @@ def prepare(args, output):
         _, controls = field.read_venue_control_batches(control_batches, expected, closure, recorded_at, evidence_path, mode=mode)
 
     alignment_path = evidence_path(args.room_alignment_bundle.resolve()) if args.room_alignment_bundle is not None else None
-    alignment_bundle = field.read_venue_alignment_bundle(alignment_path, mode, expected) if alignment_path is not None else None
+    alignment_bundle = alignment_digest = None
+    deployment_seats = players_per_room if final_counts is None else None
+    if alignment_path is not None:
+        alignment_bundle, alignment_digest = field.read_venue_alignment_bundle(
+            alignment_path, mode, expected, expected_players_per_room=deployment_seats)
     network_path = evidence_path(args.venue_network_plan.resolve()) if args.venue_network_plan is not None else None
     venue_network = field.read_venue_network_plan(network_path, mode, players_per_room) if network_path is not None else None
     field.check_network_server_inventory(venue_network, args.topology, addresses)
@@ -181,7 +185,8 @@ def prepare(args, output):
             field.check_venue_network_session(venue_network, session, endpoint, binding)
         if alignment_bundle is not None:
             experience = field.verify_experience(session, world['header'])
-            alignments = field.venue_session_alignments(alignment_bundle, rooms, experience, endpoint)
+            alignments = field.venue_session_alignments(
+                alignment_bundle, session, experience, endpoint, expected_players_per_room=deployment_seats)
             if alignments is not None:
                 field.verify_room_alignments(session, world['header'], alignments)
         field.require(result['peerDiagnosticsEnabled'] is True, f'Original Windows launch did not record UDP peers for {stem}')
@@ -225,6 +230,7 @@ def prepare(args, output):
         manifest['venueControlBatches'] = control_batches
     if alignment_path is not None:
         manifest['roomAlignmentBundle'] = ref(alignment_path)
+        manifest['roomAlignmentBundleSha256'] = alignment_digest
     if network_path is not None:
         manifest['venueNetworkPlan'] = ref(network_path)
     if args.verify_reconnect_history:

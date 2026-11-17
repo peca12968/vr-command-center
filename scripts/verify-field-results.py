@@ -94,7 +94,7 @@ class UdpPreflightIncomplete(EvidenceError):
         self.reports = reports
 
 
-class VerifiedStartDigestMismatch(EvidenceError):
+class EvidenceDigestMismatch(EvidenceError):
     def __init__(self, message, kind, path):
         super().__init__(message)
         self.evidence = {'kind': kind, 'name': path.name, 'status': 'sha256-mismatch'}
@@ -1716,9 +1716,15 @@ def venue_bundle(path, mode):
         return closure, {name: evidence_zip_entry(archive, name) for name in names}, receipts
 
 
-def read_venue_alignment_bundle(path, mode, expected):
+def read_venue_alignment_bundle(path, mode, expected, *, expected_players_per_room=None, expected_sha256=None):
     sessions = {room: session_id for session_id, row in expected.items() for room in row['roomIds']}
-    with path.open('rb') as source, zipfile.ZipFile(io.BytesIO(limited_read(source))) as archive:
+    with path.open('rb') as source:
+        raw_bundle = limited_read(source)
+    digest = hashlib.sha256(raw_bundle).hexdigest()
+    if expected_sha256 is not None and digest != expected_sha256:
+        raise EvidenceDigestMismatch(
+            'MR or mixed deployment ZIP SHA-256 differs from the prepared manifest', 'roomAlignmentBundle', path)
+    with zipfile.ZipFile(io.BytesIO(raw_bundle)) as archive:
         names = archive.namelist()
         require(7 <= len(names) <= 11 and len(names) == len(set(names)) and 'venue.json' in names,
                 'Invalid MR or mixed deployment ZIP members')
@@ -1729,6 +1735,11 @@ def read_venue_alignment_bundle(path, mode, expected):
         mixed = version == 2
         require(manifest['topology'] == mode and (not mixed or (mode == 'Independent' and manifest.get('mode') == 'Mixed')),
                 'MR or mixed deployment topology differs from the original closure')
+        players_per_room = manifest.get('playersPerRoom', 5)
+        require(type(players_per_room) is int and players_per_room in (1, 2, 5),
+                'MR or mixed deployment ZIP requires 1, 2 or 5 seats per room')
+        require(expected_players_per_room is None or players_per_room == expected_players_per_room,
+                'MR or mixed deployment ZIP seat count differs from the declared stage')
         rows = manifest['rooms']
         require(type(rows) is list and len(rows) == len(sessions), 'MR or mixed deployment ZIP must identify all five rooms')
         rooms, expected_names = {}, {'venue.json'}
@@ -1737,7 +1748,14 @@ def read_venue_alignment_bundle(path, mode, expected):
             require(room not in rooms and identity(row['sessionId']) == sessions[room],
                     'MR or mixed deployment room differs from the original closure session')
             ticket = f'room-{room:02}-connections.zip'
-            require(row['ticketsZip'] == ticket, 'Invalid room connection ZIP name in deployment manifest')
+            require(row['ticketsZip'] == ticket and ticket in names, 'Invalid room connection ZIP name in deployment manifest')
+            require(0 < archive.getinfo(ticket).file_size <= 65536, 'Invalid room connection ZIP size in deployment bundle')
+            seat_files = {f'room-{room:02}-seat-{seat:02}.json' for seat in range(1, players_per_room + 1)}
+            with zipfile.ZipFile(io.BytesIO(evidence_zip_entry(archive, ticket))) as connections:
+                files = connections.infolist()
+                require(len(files) == players_per_room and {entry.orig_filename for entry in files} == seat_files
+                        and all(0 < entry.file_size <= 4096 for entry in files),
+                        f'Deployment room {room} connection files differ from the bundle seat count or assigned seats')
             expected_names.add(ticket)
             experience = row['mode'] if mixed else 'MR'
             require(experience in ('MR', 'VR'), 'Invalid experience mode in mixed deployment manifest')
@@ -1755,10 +1773,15 @@ def read_venue_alignment_bundle(path, mode, expected):
             rooms[room] = (experience, binding, raw)
         require(set(names) == expected_names and (not mixed or {row[0] for row in rooms.values()} == {'MR', 'VR'}),
                 'Invalid MR or mixed deployment ZIP members')
-        return rooms
+        return rooms, digest
 
 
-def venue_session_alignments(bundle, rooms, experience, endpoint):
+def venue_session_alignments(bundle, session, experience, endpoint, *, expected_players_per_room=None):
+    rooms = session['roomIds']
+    if expected_players_per_room is not None:
+        sealed_seats = sorted((integer(player['roomId'], 1, 5), integer(player['seat'], 0, 4)) for player in session['players'])
+        deployed_seats = [(room, seat) for room in sorted(rooms) for seat in range(expected_players_per_room)]
+        require(sealed_seats == deployed_seats, 'Deployment ZIP seats differ from the original sealed roster')
     alignments = {}
     for room in rooms:
         room_mode, binding, raw = bundle[room]
@@ -3091,13 +3114,13 @@ def read_verified_venue_start(path, readiness_path, terminal, results, mode, *, 
             and receipt['mode'] == mode,
             'Verified start receipt differs from the original terminal venue report')
     if receipt['terminalSha256'] != terminal['sha256']:
-        raise VerifiedStartDigestMismatch('Verified start receipt differs from the original terminal venue report',
-                                          'venueLauncherReport', terminal_path)
+        raise EvidenceDigestMismatch('Verified start receipt differs from the original terminal venue report',
+                                     'venueLauncherReport', terminal_path)
     with readiness_path.open('rb') as stream:
         readiness = limited_read(stream)
     if receipt['readinessSha256'] != hashlib.sha256(readiness).hexdigest():
-        raise VerifiedStartDigestMismatch('Verified start receipt differs from the original UDP readiness report',
-                                          'udpPreflightBatch', readiness_path)
+        raise EvidenceDigestMismatch('Verified start receipt differs from the original UDP readiness report',
+                                     'udpPreflightBatch', readiness_path)
     preflight = read_json(readiness.decode('utf-8-sig'))
     require(type(preflight) is dict and preflight.get('scope') == 'venue-udp-preflight-only'
             and preflight.get('complete') is True and preflight.get('mode') == mode
@@ -3111,8 +3134,8 @@ def read_verified_venue_start(path, readiness_path, terminal, results, mode, *, 
     ready_path = resolve_evidence_reference(path.parent, receipt['readyReport'], 'windowsReadyReport')
     ready, ready_raw = read_quest_document(ready_path)
     if receipt['readySha256'] != hashlib.sha256(ready_raw).hexdigest():
-        raise VerifiedStartDigestMismatch('Verified start receipt differs from the original ready venue report',
-                                          'windowsReadyReport', ready_path)
+        raise EvidenceDigestMismatch('Verified start receipt differs from the original ready venue report',
+                                     'windowsReadyReport', ready_path)
     require(integer(ready['schemaVersion'], 1, 1) == 1 and ready['status'] == 'venue-ready'
             and ready['topology'] == mode and identity(ready['instanceId']) == terminal['instanceId'],
             'Verified start receipt differs from the original ready venue report')
@@ -3136,7 +3159,7 @@ def read_verified_venue_start(path, readiness_path, terminal, results, mode, *, 
         preview, preview_raw = read_quest_document(preview_path)
         message = 'The original launch preview does not match the verified Windows server release'
         if hashlib.sha256(preview_raw).hexdigest() != binding.get('previewSha256'):
-            raise VerifiedStartDigestMismatch(message, 'windowsLaunchPreview', preview_path)
+            raise EvidenceDigestMismatch(message, 'windowsLaunchPreview', preview_path)
         preview_stamps = server_release_stamps(preview)
         preview_digest = preview_stamps.get('serverManifestSha256')
         if preview_digest != server_digest:
@@ -3503,11 +3526,19 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     begin_kind = 'trackingBegin' if verify_tracking_begin else 'participationBegin' if verify_participation_begin else None
     manual_alignments = any('roomAlignments' in entry for entry in entries)
     bundled_alignments = 'roomAlignmentBundle' in manifest
+    alignment_pin = manifest.get('roomAlignmentBundleSha256')
+    if 'roomAlignmentBundleSha256' in manifest:
+        require(bundled_alignments and type(alignment_pin) is str and re.fullmatch(r'[0-9a-f]{64}', alignment_pin),
+                'roomAlignmentBundleSha256 requires the original deployment ZIP and its lowercase SHA-256')
     require(not (manual_alignments and bundled_alignments), 'Use either roomAlignmentBundle or individual room alignment files')
     check_alignments = manual_alignments or bundled_alignments
     require(not check_alignments or journals, 'MR alignment evidence requires the original world journals for the full batch')
-    alignment_bundle = (read_venue_alignment_bundle(evidence_path(manifest['roomAlignmentBundle']), mode, expected)
-                        if bundled_alignments and not inspect_windows else None)
+    alignment_bundle = alignment_digest = None
+    deployment_seats = players_per_room if final_counts is None else None
+    if bundled_alignments and not inspect_windows:
+        alignment_bundle, alignment_digest = read_venue_alignment_bundle(
+            evidence_path(manifest['roomAlignmentBundle'], kind='roomAlignmentBundle'), mode, expected,
+            expected_players_per_room=deployment_seats, expected_sha256=alignment_pin)
     preflights = any('udpPreflight' in entry for entry in entries)
     source_lists = any('udpSourcePreflights' in entry for entry in entries)
     single_batch, multiple_batches = 'udpPreflightBatch' in manifest, 'udpPreflightBatches' in manifest
@@ -3684,7 +3715,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
             header = launcher['finalWorld']['header']
             experience = verify_experience(session, header)
             if alignment_bundle is not None:
-                alignments = venue_session_alignments(alignment_bundle, session['roomIds'], experience, endpoint)
+                alignments = venue_session_alignments(
+                    alignment_bundle, session, experience, endpoint, expected_players_per_room=deployment_seats)
             elif experience == 'MR':
                 files = entry.get('roomAlignments')
                 require(type(files) is dict and set(files) == {str(room) for room in session['roomIds']},
@@ -4006,6 +4038,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
                if concurrency is not None else {}),
             **begin_summary,
             **reconnect_summary,
+            **({'roomAlignmentBundleSha256': alignment_digest} if alignment_digest is not None else {}),
             **({'roomAlignmentsVerified': sum(len(row.get('roomAlignments', [])) for row in summaries)} if check_alignments else {})}
     return report, {'manifestSha256': hashlib.sha256(raw_manifest).hexdigest(), 'closureRequestId': closure_id,
                     'started': min(start_times), 'ended': max(end_times),
@@ -4042,7 +4075,8 @@ def staged_batch_report(report, batch):
             **{key: report[key] for key in ('combatJournalsVerified', 'distinctRemoteRoster', 'windowsLinkCriteria', 'questLinkCriteria', 'questOpenXR',
                                            'questLinkMetricsVerified',
                                            'windowsStationAddresses', 'venueNetworkPlan', 'reconnectSourcePlan',
-                                           'verifiedVenueStart') if key in report}, **observed}
+                                           'verifiedVenueStart', 'roomAlignmentsVerified', 'roomAlignmentBundleSha256')
+               if key in report}, **observed}
 
 
 VENUE_STAGE_KEYS = tuple((mode, players) for players in (5, 10, 25) for mode in ('Independent', 'Linked'))
@@ -4175,7 +4209,7 @@ def verify_venue_stages(plan_path, *, inspect=False):
         except UdpPreflightIncomplete as error:
             reject(f'Venue manifest entry {index}: {error}', index, udpPreflight=error.reports)
             continue
-        except (VerifiedStartDigestMismatch, VenueReleaseEvidenceError) as error:
+        except (EvidenceDigestMismatch, VenueReleaseEvidenceError) as error:
             reject(f'Venue manifest entry {index}: {error}', index, evidenceMismatch=error.evidence)
             continue
         except VenueReleaseIncomplete as error:

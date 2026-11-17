@@ -938,7 +938,7 @@ class FieldResultsTests(unittest.TestCase):
                                         ('readySha256', 'windowsReadyReport', ready_path)):
                 with self.subTest(kind=kind):
                     receipt_path.write_text(json.dumps(receipt | {key: '0' * 64}), encoding='utf-8')
-                    with self.assertRaises(field.VerifiedStartDigestMismatch) as raised:
+                    with self.assertRaises(field.EvidenceDigestMismatch) as raised:
                         field.read_verified_venue_start(receipt_path, readiness_path, terminal, {}, 'Linked',
                                                        terminal_path=terminal_path)
                     self.assertEqual({'kind': kind, 'name': original.name, 'status': 'sha256-mismatch'},
@@ -5532,6 +5532,9 @@ class FieldResultsTests(unittest.TestCase):
         venue = {'version': 2 if mixed else 1, 'topology': manifest['mode'], 'rooms': []}
         if mixed:
             venue['mode'] = 'Mixed'
+        seats = manifest.get('expectedPlayersPerRoom', 5)
+        if seats != 5:
+            venue['playersPerRoom'] = seats
         members = {}
         for entry in manifest['sessions']:
             session, _, endpoint = field.management_zip(root / entry['evidenceZip'])
@@ -5545,7 +5548,11 @@ class FieldResultsTests(unittest.TestCase):
                     row['alignmentFile'] = name
                     members[name] = (root / entry['roomAlignments'][str(room)]).read_bytes()
                 venue['rooms'].append(row)
-                members[ticket] = b'opaque private connection member'
+                connections = io.BytesIO()
+                with zipfile.ZipFile(connections, 'w', zipfile.ZIP_DEFLATED) as archive:
+                    for seat in range(1, seats + 1):
+                        archive.writestr(f'room-{room:02}-seat-{seat:02}.json', b'opaque private connection member')
+                members[ticket] = connections.getvalue()
         return venue, members
 
     def write_alignment_bundle(self, path, venue, members):
@@ -5555,44 +5562,109 @@ class FieldResultsTests(unittest.TestCase):
                 archive.writestr(name, raw)
 
     def test_prepare_and_verify_original_deployment_zip_alignment(self):
-        for mode, mr_rooms in (('Independent', (2,)), ('Independent', (1, 2, 3, 4, 5)), ('Linked', (1, 2, 3, 4, 5))):
-            with self.subTest(mode=mode, mr_rooms=mr_rooms), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
-                path, manifest, closure = venue_fixture(root, mode, remote=True, with_journals=True, mr_rooms=mr_rooms)
-                venue, members = self.alignment_bundle_fixture(root, manifest)
-                bundle = root / 'deployment.zip'
-                self.write_alignment_bundle(bundle, venue, members)
-                terminal, _, moved = self.terminal_venue_fixture(root, manifest, closure)
-                packed = self.pack_venue(root, manifest)
-                if not packed['windowsPlayers']:
-                    packed.pop('windowsPlayers')
-                path.write_text(json.dumps(packed), encoding='utf-8')
-                original = field.verify_venue(path)
-                output = root / 'prepared.json'
-                command = [sys.executable, str(SCRIPT.with_name('prepare-venue-field-manifest.py')),
-                           '--venue-bundle', str(root / packed['venueBundle']), '--launcher-report', str(terminal),
-                           '--topology', 'direct-lan', '--server-ip', manifest['serverIps'][0], '--server-work-root', str(moved),
-                           '--room-alignment-bundle', bundle.name, '--output', str(output)]
-                prepared = subprocess.run(command, cwd=root, capture_output=True)
-                self.assertEqual(0, prepared.returncode, prepared.stderr.decode())
-                raw_output = output.read_bytes()
-                self.assertNotIn(b'opaque private connection member', raw_output)
-                generated = json.loads(raw_output)
-                self.assertEqual(bundle.name, generated['roomAlignmentBundle'])
-                if 'windowsPlayers' in packed:
-                    generated['windowsPlayers'] = packed['windowsPlayers']
-                by_id = {entry['sessionId']: entry for entry in packed['sessions']}
-                for entry in generated['sessions']:
-                    self.assertNotIn('roomAlignments', entry)
-                    source = by_id[entry['sessionId']]
-                    if 'players' in source:
-                        entry['players'] = source['players']
-                    for name in source.get('roomAlignments', {}).values():
-                        (root / name).unlink()
-                output.write_text(json.dumps(generated), encoding='utf-8')
-                result = field.verify_venue(output)
-                self.assertEqual(original, result)
-                self.assertEqual(len(mr_rooms), result['roomAlignmentsVerified'])
+        all_rooms = (1, 2, 3, 4, 5)
+        for mode, mr_rooms in (('Independent', (2,)), ('Independent', all_rooms), ('Linked', all_rooms)):
+            for seats in (1, 2, 5):
+                with self.subTest(mode=mode, mr_rooms=mr_rooms, seats=seats), tempfile.TemporaryDirectory() as directory:
+                    self.verify_original_deployment_zip_alignment(Path(directory), mode, mr_rooms, seats)
+
+    def verify_original_deployment_zip_alignment(self, root, mode, mr_rooms, seats):
+        path, manifest, closure = venue_fixture(root, mode, remote=True, with_journals=True, mr_rooms=mr_rooms, room_sizes=(seats,) * 5)
+        if seats != 5:
+            manifest['expectedPlayersPerRoom'] = seats
+        venue, members = self.alignment_bundle_fixture(root, manifest)
+        bundle = root / 'deployment.zip'
+        self.write_alignment_bundle(bundle, venue, members)
+        digest = hashlib.sha256(bundle.read_bytes()).hexdigest()
+        terminal, _, moved = self.terminal_venue_fixture(root, manifest, closure)
+        packed = self.pack_venue(root, manifest)
+        if not packed['windowsPlayers']:
+            packed.pop('windowsPlayers')
+        path.write_text(json.dumps(packed), encoding='utf-8')
+        original = field.verify_venue(path)
+        output = root / 'prepared.json'
+        command = [sys.executable, str(SCRIPT.with_name('prepare-venue-field-manifest.py')),
+                   '--venue-bundle', str(root / packed['venueBundle']), '--launcher-report', str(terminal),
+                   '--topology', 'direct-lan', '--server-ip', manifest['serverIps'][0], '--server-work-root', str(moved),
+                   '--room-alignment-bundle', bundle.name, '--players-per-room', str(seats), '--output', str(output)]
+        prepared = subprocess.run(command, cwd=root, capture_output=True)
+        self.assertEqual(0, prepared.returncode, prepared.stderr.decode())
+        raw_output = output.read_bytes()
+        self.assertNotIn(b'opaque private connection member', raw_output)
+        generated = json.loads(raw_output)
+        self.assertEqual(bundle.name, generated['roomAlignmentBundle'])
+        self.assertEqual(digest, generated['roomAlignmentBundleSha256'])
+        if 'windowsPlayers' in packed:
+            generated['windowsPlayers'] = packed['windowsPlayers']
+        by_id = {entry['sessionId']: entry for entry in packed['sessions']}
+        for entry in generated['sessions']:
+            self.assertNotIn('roomAlignments', entry)
+            source = by_id[entry['sessionId']]
+            if 'players' in source:
+                entry['players'] = source['players']
+            for name in source.get('roomAlignments', {}).values():
+                (root / name).unlink()
+        output.write_text(json.dumps(generated), encoding='utf-8')
+        result = field.verify_venue(output)
+        self.assertEqual(digest, result.pop('roomAlignmentBundleSha256'))
+        self.assertEqual(original, result)
+        self.assertEqual(len(mr_rooms), result['roomAlignmentsVerified'])
+        self.assertEqual(5 * seats, result['serverAcknowledgements'])
+
+        with zipfile.ZipFile(bundle, 'a') as archive:
+            archive.comment = b'repacked after preparation'
+        with self.assertRaisesRegex(field.EvidenceError, 'ZIP SHA-256 differs'):
+            field.verify_venue(output)
+
+    def test_staged_alignment_bundle_reports_missing_or_changed_original(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = self.staged_plan(root, remote=True, quest_links=True)
+            folder = root / 'mr-pilot'
+            folder.mkdir()
+            rooms = (1, 2, 3, 4, 5)
+            path, manifest, _ = venue_fixture(folder, 'Linked', remote=True, with_journals=True, mr_rooms=rooms,
+                                              room_sizes=(1,) * 5, id_offset=99000, minutes_after=1)
+            start = datetime.fromisoformat('2026-11-09T08:01:00+08:00')
+            self.concurrent_journals(folder, manifest, [0], tracked=True, capture_start=start)
+            self.add_shared_release(folder, manifest, 1)
+            manifest.update(expectedPlayersPerRoom=1, minimumConcurrentMilliseconds=2000)
+            bundle = folder / 'mr-pilot.zip'
+            self.write_alignment_bundle(bundle, *self.alignment_bundle_fixture(folder, manifest))
+            raw = bundle.read_bytes()
+            digest = hashlib.sha256(raw).hexdigest()
+            manifest.update(roomAlignmentBundle=bundle.name, roomAlignmentBundleSha256=digest)
+            manifest['sessions'][0].pop('roomAlignments')
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            plan['venueManifests'][1] = str(path.relative_to(root))
+            total = root / 'stages.json'
+            total.write_text(json.dumps(plan), encoding='utf-8')
+            accepted = field.verify_venue_stages(total)
+            self.assertEqual(80, accepted['serverAcknowledgements'])
+            stage = accepted['stages'][1]
+            self.assertEqual((digest, 5), (stage['roomAlignmentBundleSha256'], stage['roomAlignmentsVerified']))
+
+            archive_path = folder / manifest['sessions'][0]['evidenceZip']
+            original = archive_path.read_bytes()
+            session, statistics, endpoint = field.management_zip(archive_path)
+            session['players'][0]['seat'] = 1
+            with zipfile.ZipFile(archive_path, 'w') as archive:
+                for name, record in (('session', session), ('statistics', statistics), ('endpoint', endpoint)):
+                    archive.writestr(name + '.json', json.dumps(record))
+            with self.assertRaisesRegex(field.EvidenceError, 'Deployment ZIP seats differ from the original sealed roster'):
+                field.verify_venue(path)
+            archive_path.write_bytes(original)
+
+            bundle.unlink()
+            missing = field.verify_venue_stages(total, inspect=True)
+            self.assertEqual({'kind': 'roomAlignmentBundle', 'name': bundle.name}, missing['issues'][0]['missingFile'])
+            bundle.write_bytes(raw)
+            with zipfile.ZipFile(bundle, 'a') as archive:
+                archive.comment = b'changed after manifest preparation'
+            changed = field.verify_venue_stages(total, inspect=True)
+            self.assertEqual([2], changed['issues'][0]['entries'])
+            self.assertEqual({'kind': 'roomAlignmentBundle', 'name': bundle.name, 'status': 'sha256-mismatch'},
+                             changed['issues'][0]['evidenceMismatch'])
 
     def test_deployment_zip_alignment_rejects_mismatched_sources(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -5626,11 +5698,24 @@ class FieldResultsTests(unittest.TestCase):
                     self.write_alignment_bundle(bundle, invalid, members)
                     with self.assertRaisesRegex(field.EvidenceError, message):
                         field.verify_venue(path)
+            for seats, message in ((2, 'seat count differs from the declared stage'), (True, 'requires 1, 2 or 5 seats')):
+                self.write_alignment_bundle(bundle, dict(venue, playersPerRoom=seats), members)
+                with self.assertRaisesRegex(field.EvidenceError, message):
+                    field.verify_venue(path)
+                rejected = subprocess.run(command, capture_output=True)
+                self.assertEqual(1, rejected.returncode)
+                self.assertIn(message.encode(), rejected.stderr)
+                self.assertFalse(output.exists())
             alignment = 'room-02-alignment.json'
+            wrong_stations = io.BytesIO()
+            with zipfile.ZipFile(wrong_stations, 'w') as archive:
+                for seat in range(2, 7):
+                    archive.writestr(f'room-02-seat-{seat:02}.json', b'opaque')
             for changed, message in (
                 ({name: raw for name, raw in members.items() if name != alignment}, 'alignment ZIP member for every MR room'),
                 ({**members, 'extra.json': b'{}'}, 'Invalid MR or mixed deployment ZIP members'),
                 ({**members, alignment: members[alignment].rstrip()}, 'bytes differ from the sealed session lock'),
+                ({**members, 'room-02-connections.zip': wrong_stations.getvalue()}, 'room 2 connection files differ'),
             ):
                 with self.subTest(message=message):
                     self.write_alignment_bundle(bundle, venue, changed)
