@@ -196,7 +196,9 @@ class QuestUdpProtocolTests(unittest.TestCase):
         launcher, parsed = quest_venue.launcher_proof(launch, preview, output)
         mode, groups = quest_venue.load_plan(device_map, network, launcher_preview=parsed)
         self.assertEqual('Linked', mode)
-        self.assertEqual([{'roomIds': rooms, 'address': SERVER, 'port': port, 'devices': devices}], groups)
+        launch_session = {key: parsed[2][tuple(rooms)][key] for key in ('sessionId', 'missionId', 'sessionSequence')}
+        self.assertEqual([{'roomIds': rooms, 'address': SERVER, 'port': port, 'devices': devices,
+                           'launchSession': launch_session}], groups)
 
         def java_probe(args, *, target):
             command = [*self.java, str(args.key_file), args.local_address, args.peer_address, str(args.port),

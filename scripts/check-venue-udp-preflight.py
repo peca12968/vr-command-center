@@ -102,48 +102,10 @@ def path_reference(path, directory):
 
 
 def quest_batch_pairs(report, path, mode, endpoints, sources):
-    field.require(field.integer(report['version'], 1, 1) and report.get('mode') == mode
-                  and type(report.get('complete')) is bool, 'Quest UDP preflight batch must use the original mode')
-    groups = report['groups']
-    field.require(type(groups) is list and 1 <= len(groups) <= len(endpoints), 'Invalid Quest UDP endpoint groups')
-    samples = field.integer(report.get('sampleCount'), 1, 20)
-    timeout_ms = field.integer(report['sampleTimeoutMs'], 200, 3000) if 'sampleTimeoutMs' in report else None
-    seen_groups, seen_seats, pairs = set(), set(), []
-    for group in groups:
-        rooms = group['roomIds']
-        field.require(type(rooms) is list and all(type(room) is int for room in rooms)
-                      and tuple(rooms) in endpoints and tuple(rooms) not in seen_groups, 'Invalid or repeated Quest UDP endpoint group')
-        group_key = tuple(rooms)
-        seen_groups.add(group_key)
-        rows = group['seats']
-        field.require(type(rows) is list and 1 <= len(rows) <= len(rooms) * 5, 'Invalid Quest UDP seat list')
-        verified = []
-        for row in rows:
-            seat = field.integer(row['roomId'], 1, 5), field.integer(row['seat'], 1, 5)
-            field.require(seat[0] in rooms and seat in sources and seat not in seen_seats,
-                          'Quest UDP seat differs from the original venue network plan')
-            seen_seats.add(seat)
-            stage = row.get('stage')
-            field.require(type(row['complete']) is bool and type(stage) is str
-                          and row['complete'] == (stage in ('verified', 'reused')), 'Invalid Quest UDP seat outcome')
-            if not row['complete']:
-                continue
-            refs = {role: row[role] for role in ('listener', 'probe')}
-            hashes = [row['listenerSha256'], row['probeSha256']]
-            exchange = row['exchangeSha256']
-            field.require(all(type(value) is str and re.fullmatch('[0-9a-f]{64}', value) for value in (*hashes, exchange))
-                          and all(type(value) is str and value for value in refs.values()), 'Invalid original Quest UDP pair metadata')
-            pairs.append(PairInput(refs, path.parent, group_key, hashes, (*endpoints[group_key], sources[seat]),
-                                   exchange, samples, timeout_ms))
-            verified.append(refs)
-        complete = len(verified) == len(rows)
-        field.require(group.get('complete') is complete and (
-            group.get('udpSourcePreflights') == verified if complete else 'udpSourcePreflights' not in group
-        ), 'Quest UDP endpoint completeness differs from its seat outcomes')
-    field.require(field.integer(report.get('expectedSeats'), 1, 25) == len(seen_seats)
-                  and field.integer(report.get('verifiedSeats'), 0, 25) == len(pairs)
-                  and report['complete'] == (len(seen_seats) == len(pairs)), 'Quest UDP batch totals differ from its seat outcomes')
-    return pairs
+    pairs, seats, samples, timeout_ms = field.quest_udp_batch_pairs(report, mode, endpoints)
+    field.require(seats <= sources.keys(), 'Quest UDP seat differs from the original venue network plan')
+    return [PairInput(refs, path.parent, group, hashes, (*endpoints[group], sources[seat]), exchange, samples, timeout_ms)
+            for group, seat, refs, hashes, exchange in pairs]
 
 
 def load_pairs(pairs_path, batch_paths, mode, endpoints, sources, binding, venue_network):

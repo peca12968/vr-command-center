@@ -2314,21 +2314,72 @@ def read_udp_launch_binding(batch, directory, mode, expected_sessions=None):
     return checked, plan[2]
 
 
+def quest_udp_batch_pairs(report, mode, expected_rooms):
+    require(integer(report['version'], 1, 1) and report.get('mode') == mode
+            and type(report.get('complete')) is bool, 'Quest UDP preflight batch must use the original mode')
+    groups = report['groups']
+    require(type(groups) is list and 1 <= len(groups) <= len(expected_rooms), 'Invalid Quest UDP endpoint groups')
+    samples = integer(report.get('sampleCount'), 1, 20)
+    timeout_ms = integer(report['sampleTimeoutMs'], 200, 3000) if 'sampleTimeoutMs' in report else None
+    seen_groups, seen_seats, pairs = set(), set(), []
+    for group in groups:
+        rooms = group['roomIds']
+        require(type(rooms) is list and all(type(room) is int for room in rooms)
+                and tuple(rooms) in expected_rooms and tuple(rooms) not in seen_groups, 'Invalid or repeated Quest UDP endpoint group')
+        group_key = tuple(rooms)
+        seen_groups.add(group_key)
+        rows = group['seats']
+        require(type(rows) is list and 1 <= len(rows) <= len(rooms) * 5, 'Invalid Quest UDP seat list')
+        verified = []
+        for row in rows:
+            seat = integer(row['roomId'], 1, 5), integer(row['seat'], 1, 5)
+            require(seat[0] in rooms and seat not in seen_seats, 'Quest UDP seat is outside its room group or repeated')
+            seen_seats.add(seat)
+            stage = row.get('stage')
+            require(type(row['complete']) is bool and type(stage) is str
+                    and row['complete'] == (stage in ('verified', 'reused')), 'Invalid Quest UDP seat outcome')
+            if not row['complete']:
+                continue
+            refs = {role: row[role] for role in ('listener', 'probe')}
+            hashes = [row['listenerSha256'], row['probeSha256']]
+            exchange = row['exchangeSha256']
+            require(all(type(value) is str and re.fullmatch('[0-9a-f]{64}', value) for value in (*hashes, exchange))
+                    and all(type(value) is str and value for value in refs.values()), 'Invalid original Quest UDP pair metadata')
+            pairs.append((group_key, seat, refs, hashes, exchange))
+            verified.append(refs)
+        complete = len(verified) == len(rows)
+        require(group.get('complete') is complete and (
+            group.get('udpSourcePreflights') == verified if complete else 'udpSourcePreflights' not in group
+        ), 'Quest UDP endpoint completeness differs from its seat outcomes')
+    require(integer(report.get('expectedSeats'), 1, 25) == len(seen_seats)
+            and integer(report.get('verifiedSeats'), 0, 25) == len(pairs)
+            and report['complete'] == (len(seen_seats) == len(pairs)), 'Quest UDP batch totals differ from its seat outcomes')
+    return pairs, seen_seats, samples, timeout_ms
+
+
 def read_udp_preflight_batch(path, mode, expected_rooms, *, expected_sessions=None, venue_network=None, original_pairs=None,
                              reported_sessions=None):
     batch = read_json(content(path))
     parsed = udp_preflight_batch(batch, path, mode, expected_rooms, expected_sessions=expected_sessions,
                                  venue_network=venue_network, reported_sessions=reported_sessions)
-    if batch['scope'] == 'venue-udp-preflight-only':
-        for group in batch['groups']:
-            for pair, hashes in zip(group['udpSourcePreflights'], udp_pair_digests(group), strict=True):
-                if hashes is not None:
-                    require(type(pair) is dict and set(pair) == {'listener', 'probe'}, 'Invalid UDP report paths')
-                    paths = tuple(resolve_evidence_reference(path.parent, pair[role], kind) for role, kind in
-                                  (('listener', 'udpListener'), ('probe', 'udpProbe')))
-                    require(udp_pair_hashes(paths) == hashes, 'UDP report bytes differ from the original venue preflight')
-                    if original_pairs is not None:
-                        require(original_pairs.setdefault(paths, hashes) == hashes, 'UDP batches disagree on original report bytes')
+    venue = batch['scope'] == 'venue-udp-preflight-only'
+    if venue:
+        pairs = [entry for group in batch['groups']
+                 for entry in zip(group['udpSourcePreflights'], udp_pair_digests(group), strict=True)]
+    elif 'verifiedSeats' in batch or any('seats' in group for group in batch['groups']):
+        quest_pairs, _, _, _ = quest_udp_batch_pairs(batch, mode, {tuple(rooms) for rooms in expected_rooms})
+        pairs = [(refs, hashes) for _, _, refs, hashes, _ in quest_pairs]
+    else:
+        pairs = []
+    for pair, hashes in pairs:
+        if hashes is not None:
+            require(type(pair) is dict and set(pair) == {'listener', 'probe'}, 'Invalid UDP report paths')
+            paths = tuple(resolve_evidence_reference(path.parent, pair[role], kind) for role, kind in
+                          (('listener', 'udpListener'), ('probe', 'udpProbe')))
+            label = 'venue' if venue else 'Quest'
+            require(udp_pair_hashes(paths) == hashes, f'UDP report bytes differ from the original {label} preflight')
+            if original_pairs is not None:
+                require(original_pairs.setdefault(paths, hashes) == hashes, 'UDP batches disagree on original report bytes')
     return parsed
 
 

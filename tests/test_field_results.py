@@ -5307,6 +5307,50 @@ class FieldResultsTests(unittest.TestCase):
             self.assertFalse(report['networkCapacityAccepted'])
 
     @unittest.skipUnless(HAS_POWERSHELL, 'UDP evidence requires PowerShell')
+    def test_sealed_quest_udp_batch_requires_the_recorded_pair_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Linked', remote=True, quest_per_room=1, room_sizes=(1,) * 5)
+            entry, = manifest['sessions']
+            launcher = root / entry['launcherReport']
+            saved = json.loads(launcher.read_bytes())
+            binding = saved['udpBinding']
+            binding['observedAtUtc'] = '2026-11-08T23:59:59Z'
+            launcher.write_text(json.dumps(saved), encoding='utf-8')
+            original = []
+            for room, owner in enumerate(entry['players'], 1):
+                pair = preflight_fixture(root, f'quest-room-{room}', server=binding['address'], peer=owner['address'], port=binding['port'])
+                original.append(pair)
+            refs = [{'listener': listener.name, 'probe': probe.name} for listener, probe in original]
+            seats = [{'roomId': room, 'seat': 1, 'stage': 'verified', 'complete': True, **ref,
+                      'listenerSha256': hashlib.sha256(listener.read_bytes()).hexdigest(),
+                      'probeSha256': hashlib.sha256(probe.read_bytes()).hexdigest(),
+                      'exchangeSha256': json.loads(probe.read_text(encoding='utf-8-sig'))['exchangeSha256']}
+                     for room, (ref, (listener, probe)) in enumerate(zip(refs, original, strict=True), 1)]
+            report = {'version': 1, 'scope': 'quest-udp-preflight-only', 'mode': 'Linked', 'complete': True,
+                      'expectedSeats': 5, 'verifiedSeats': 5, 'sampleCount': 1, 'sampleTimeoutMs': 900,
+                      'groups': [{'roomIds': [1, 2, 3, 4, 5], 'complete': True, 'seats': seats, 'udpSourcePreflights': refs}]}
+            batch_path = root / 'quest-preflight.json'
+            batch_path.write_text(json.dumps(report), encoding='utf-8')
+            manifest.update(udpPreflightBatch=batch_path.name, expectedPlayersPerRoom=1)
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            self.assertEqual(5, field.verify_venue(path)['udpSourcePreflightsVerified'])
+
+            for role, file in zip(('listener', 'probe'), original[-1], strict=True):
+                with self.subTest(role=role):
+                    raw = file.read_bytes()
+                    file.write_bytes(raw + (' '.encode('utf-16-le') if role == 'listener' else b' '))
+                    with self.assertRaisesRegex(field.EvidenceError, 'UDP report bytes differ from the original .* preflight'):
+                        field.verify_venue(path)
+                    file.write_bytes(raw)
+
+            changed = deepcopy(report)
+            changed['groups'][0]['seats'][-1]['probe'] = refs[0]['probe']
+            batch_path.write_text(json.dumps(changed), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'Quest UDP endpoint completeness differs'):
+                field.verify_venue(path)
+
+    @unittest.skipUnless(HAS_POWERSHELL, 'UDP evidence requires PowerShell')
     def test_venue_udp_reports_match_sealed_revision_without_the_network_plan(self):
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
