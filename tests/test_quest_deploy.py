@@ -3188,6 +3188,110 @@ else:
         self.assertEqual(0, one_seat.returncode, one_seat.stderr)
         self.assertEqual([(5, 5)], [(row['roomId'], row['seat']) for row in json.loads(one_seat.stdout)['devices']])
 
+    def test_prepare_quest_batch_upgrades_only_the_original_signed_release(self):
+        mapping, assignments = self.device_map()
+        assignments['seats'] = [row for row in assignments['seats'] if row['roomId'] == 1]
+        mapping.write_text(json.dumps(assignments), encoding='utf-8')
+        release, document, release_env = self.release_report(version_code=77)
+        signing_hash = 'a' * 64
+        document['quest']['signerSha256'] = signing_hash
+        release.write_text(json.dumps(document), encoding='utf-8')
+        previous_bytes = b'exact prior APK byte fixture'
+        previous = dict(document, quest=dict(document['quest'], versionCode=76,
+                                             sha256=hashlib.sha256(previous_bytes).hexdigest()))
+        prior_release = self.root / 'prior-release.json'
+        prior_release.write_text(json.dumps(previous), encoding='utf-8')
+        new_bytes = Path(release_env['VR_QUEST_FLEET_APK']).read_bytes()
+        old_seats = ('fixture-01', 'fixture-03', 'fixture-04')
+        command = ['pwsh', '-NoProfile', '-NonInteractive', '-File', str(ROOT / 'scripts/deploy-quest.ps1'),
+                   '-PrepareQuestApks', '-DeviceMap', str(mapping), '-ReleaseReport', str(release),
+                   '-ApkPath', release_env['VR_QUEST_FLEET_APK'], '-AdbPath', str(ROOT / 'tests/fixtures/mock-quest-fleet.ps1')]
+
+        def run(label, *options, faults=None, source=prior_release):
+            fleet = self.root / label
+            if not fleet.exists():
+                for serial in old_seats:
+                    device = fleet / serial
+                    device.mkdir(parents=True)
+                    (device / 'installed.apk').write_bytes(previous_bytes)
+                    (device / 'vr-connection.json').write_bytes(b'original settings')
+            result = subprocess.run([*command, *(['-UpgradeFromReleaseReport', str(source)] if source else []), *options],
+                capture_output=True, encoding='utf-8', timeout=45,
+                env={**os.environ, **release_env, 'VR_COMMAND_MASTER_KEY': '', 'VR_QUEST_FLEET_FIXTURE': str(fleet),
+                     'VR_QUEST_FLEET_FRESH': 'fixture-02', 'VR_QUEST_FLEET_PREVIOUS': ','.join(old_seats),
+                     'VR_QUEST_FLEET_PREVIOUS_VERSION_CODE': '76', 'VR_QUEST_FLEET_FAULTS': json.dumps(faults or {})})
+            return result, fleet
+
+        def writes(fleet):
+            return [tuple(line.split()[1:4]) for line in (fleet / 'adb.log').read_text().splitlines() if ' install ' in line]
+
+        for label, changes, error in (
+            ('same-or-newer', {'versionCode': 78}, 'requires a newer release'),
+            ('same-apk', {'sha256': document['quest']['sha256']}, 'requires a newer release'),
+            ('other-signer', {'signerSha256': 'b' * 64}, 'same APK signing certificate'),
+            ('unknown-signer', {'signerSha256': None}, 'same APK signing certificate'),
+        ):
+            with self.subTest(label=label):
+                bad = self.root / f'{label}-release.json'
+                bad.write_text(json.dumps(dict(previous, quest=dict(previous['quest'], **changes))), encoding='utf-8')
+                result, fleet = run(label, '-CheckOnly', source=bad)
+                self.assert_rejected(result, error)
+                self.assertFalse((fleet / 'transport.log').exists())
+
+        result, fleet = run('default', '-CheckOnly', source=None)
+        self.assertEqual(1, result.returncode, result.stderr)
+        self.assertEqual('version-mismatch', json.loads(result.stdout)['devices'][0]['status'])
+        self.assertEqual([], writes(fleet))
+
+        result, fleet = run('preview', '-CheckOnly')
+        self.assertEqual(0, result.returncode, result.stderr)
+        preview = json.loads(result.stdout)
+        self.assertEqual(['upgrade-required', 'install-required', 'upgrade-required', 'upgrade-required', 'ready'],
+                         [row['status'] for row in preview['devices']])
+        self.assertEqual(76, preview['previousVersionCode'])
+        self.assertEqual(hashlib.sha256(prior_release.read_bytes()).hexdigest(), preview['previousVenueReleaseReportSha256'])
+        self.assertEqual([], writes(fleet))
+
+        for label, serial, phase, status in (
+            ('apk-hash-mismatch', 'fixture-03', 'apk-preflight', 'apk-hash-mismatch'),
+            ('app-running', 'fixture-03', 'apk-preflight', 'app-running'),
+            ('app-query-failed', 'fixture-03', 'apk-preflight', 'app-state-unavailable'),
+            ('app-started', 'fixture-01', 'apk-preparation', 'app-running'),
+            ('upgrade-disappeared', 'fixture-01', 'apk-preparation', 'apk-state-changed'),
+        ):
+            with self.subTest(label=label):
+                result, fleet = run(label, faults={serial: label})
+                self.assertEqual(1, result.returncode, result.stderr)
+                report = json.loads(result.stdout)
+                self.assertEqual(phase, report['phase'])
+                self.assertEqual(status, report['devices'][int(serial[-2:]) - 1]['status'])
+                self.assertEqual([], writes(fleet))
+                self.assertEqual(previous_bytes, (fleet / serial / 'installed.apk').read_bytes())
+
+        result, fleet = run('fleet', faults={'fixture-03': 'upgrade-failed'})
+        self.assertEqual(1, result.returncode, result.stderr)
+        partial = json.loads(result.stdout)
+        self.assertTrue(partial['devices'][0]['upgradedApk'] and partial['devices'][0]['apkVerified'])
+        self.assertTrue(partial['devices'][1]['installedApk'] and partial['devices'][1]['apkVerified'])
+        self.assertEqual('upgrade-apk', partial['devices'][2]['failedStep'])
+        self.assertEqual('not-attempted', partial['devices'][3]['status'])
+        self.assertEqual([('fixture-01', 'install', '-r'), ('fixture-02', 'install', '-R'), ('fixture-03', 'install', '-r')], writes(fleet))
+        self.assertEqual(new_bytes, (fleet / 'fixture-01' / 'installed.apk').read_bytes())
+        self.assertEqual(previous_bytes, (fleet / 'fixture-03' / 'installed.apk').read_bytes())
+        (fleet / 'adb.log').unlink()
+
+        result, _ = run('fleet')
+        self.assertEqual(0, result.returncode, result.stderr)
+        final = json.loads(result.stdout)
+        self.assertTrue(final['complete'] and all(row['status'] == 'ready' and row['apkVerified'] for row in final['devices']))
+        self.assertEqual([('fixture-03', 'install', '-r'), ('fixture-04', 'install', '-r')], writes(fleet))
+        for serial in old_seats:
+            self.assertEqual(new_bytes, (fleet / serial / 'installed.apk').read_bytes())
+            self.assertEqual(b'original settings', (fleet / serial / 'vr-connection.json').read_bytes())
+        calls = (fleet / 'transport.log').read_text()
+        self.assertNotRegex(calls, r' (?:push|uninstall|shell am) ')
+        self.assertNotRegex(result.stdout, r'fixture-\d+|HARDWARE-SERIAL|joinTicket')
+
     def test_install_missing_quest_apks_during_mapped_deployment_and_retry(self):
         files, configs = self.vr_bundle('Independent')
         bundle = self.write_bundle(files)

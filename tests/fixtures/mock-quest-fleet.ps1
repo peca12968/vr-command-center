@@ -44,11 +44,17 @@ $appMissing = ($env:VR_QUEST_FLEET_FRESH -csplit ',') -ccontains $serial -and -n
 $gamePid = 4300 + [int]$serial.Substring(8)
 $openxrProbe = Join-Path $device 'openxr-probe'
 $versionCode = if ($env:VR_QUEST_FLEET_VERSION_CODE) { [int]$env:VR_QUEST_FLEET_VERSION_CODE } else { 61 }
+$upgradedMarker = Join-Path $device 'upgraded-apk'
+$previouslyInstalled = ($env:VR_QUEST_FLEET_PREVIOUS -csplit ',') -ccontains $serial -and -not [IO.File]::Exists($upgradedMarker)
+if ($previouslyInstalled) { $versionCode = [int]$env:VR_QUEST_FLEET_PREVIOUS_VERSION_CODE }
 if ($args[2] -ceq 'install') {
-    if ($args.Count -ne 9 -or ($args[3..7] -join ' ') -cne '-R --user current --pkg com.vrcommand.quest') { exit 98 }
-    if (-not $appMissing -or $fault -ceq 'install-failed') { exit 1 }
+    if ($args.Count -ne 9 -or $args[3] -cnotin @('-R','-r') -or ($args[4..7] -join ' ') -cne '--user current --pkg com.vrcommand.quest') { exit 98 }
+    $upgrade = $args[3] -ceq '-r'
+    if ($fault -cin @('install-failed','upgrade-failed') -or ($upgrade -and (-not $previouslyInstalled -or $appMissing)) -or
+        (-not $upgrade -and -not $appMissing)) { exit 1 }
     $null = [IO.Directory]::CreateDirectory($device)
     Copy-Item -LiteralPath $args[8] -Destination $installedApk
+    if ($upgrade) { [IO.File]::WriteAllText($upgradedMarker, 'replaced') }
     if ($fault -ceq 'installed-apk-mismatch') { [IO.File]::AppendAllText($installedApk, 'different APK bytes') }
     'Success'
     exit 0
@@ -93,6 +99,10 @@ switch -CaseSensitive ($args[3]) {
         exit 0
     }
     'pm' {
+        if ($fault -ceq 'upgrade-disappeared' -and @(Get-Content -LiteralPath (Join-Path $root 'adb.log') |
+            Where-Object { $_ -ceq "-s $serial shell pm list packages -e --show-versioncode --user current com.vrcommand.quest" }).Count -gt 1) {
+            $appMissing = $true
+        }
         if (($args[4..9] -join ' ') -ceq 'list packages -u --user current com.vrcommand.quest') {
             if (-not $appMissing -or $fault -ceq 'package-disabled') { 'package:com.vrcommand.quest' }
             exit 0
@@ -175,6 +185,18 @@ switch -CaseSensitive ($args[3]) {
     'pidof' {
         if ($args[4] -cne 'com.vrcommand.quest' -or -not (Test-Path -LiteralPath $openxrProbe)) { exit 1 }
         $gamePid
+        exit 0
+    }
+    'ps' {
+        if (($args[4..7] -join ' ') -cne '-A -w -o NAME') { exit 98 }
+        if ($fault -ceq 'app-query-failed') { 'UNEXPECTED-HEADER'; exit 0 }
+        'NAME'
+        'init'
+        if ($fault -ceq 'app-running') { 'com.vrcommand.quest:worker' }
+        if ($fault -ceq 'app-started' -and @(Get-Content -LiteralPath (Join-Path $root 'adb.log') |
+            Where-Object { $_ -ceq "-s $serial shell ps -A -w -o NAME" }).Count -gt 1) {
+            'com.vrcommand.quest'
+        }
         exit 0
     }
     'am' {

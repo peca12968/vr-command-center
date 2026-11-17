@@ -548,6 +548,19 @@ pwsh -NoProfile -NonInteractive -File .\scripts\deploy-quest.ps1 `
 
 正式準備會安裝缺少的 APK，並逐台讀回版號與 SHA-256。`apk-preparation` 完整報告表示指定的頭盔都已通過 APK 核對。中途失敗可用同一命令重跑，已核對的 APK 會直接沿用。這個步驟只準備應用程式。完成後，從主控台下載剛配發的五房 ZIP，再用同一裝置清單執行 `-DeployMappedSeats`。 [發行 APK 核對與部署](#核對頭盔內已安裝的發行-apk)
 
+#### 配票前升級已安裝的 Quest APK
+
+從已驗證的舊版升級時，在 `-PrepareQuestApks` 加上原舊版發行報告 `-UpgradeFromReleaseReport`。兩份報告須有相同的 APK 簽章憑證指紋，目標版號須較新。頭盔上已安裝的舊版也須符合原版號與 SHA-256。預檢會辨識出可升級、可首次安裝和已符合新版的席位。 [Android 應用程式簽章](https://developer.android.com/studio/publish/app-signing)
+
+```powershell
+pwsh -NoProfile -NonInteractive -File .\scripts\deploy-quest.ps1 `
+    -PrepareQuestApks -DeviceMap .\device-map.json `
+    -ReleaseReport .\venue-release-new.json -ApkPath .\VrCommand.apk `
+    -UpgradeFromReleaseReport .\venue-release-old.json -CheckOnly
+```
+
+先退出要升級的頭盔上的遊戲。預檢顯示 `upgrade-required` 後，可移除 `-CheckOnly` 進行安裝。工具會在更新前逐席重查原裝置、舊版與遊戲程序。若遊戲仍在執行，會回報 `app-running` 並在該席更新前停止。原地升級使用 ADB `install -r` 保留應用程式資料。讀回新版 APK 後，報告顯示 `upgradedApk` 與 `apkVerified`。中途停止後可重跑同一命令，已核對的新版 APK 會略過。 [ADB 安裝選項](https://developer.android.com/tools/adb)
+
 #### 同批安裝尚未安裝遊戲的 Quest 3
 
 部署 5、10 或 25 席時，可在 `-DeployMappedSeats` 加上 `-InstallMissing`。工具先核對原 APK 的 SHA-256、整批裝置與席位，再對未裝遊戲的 Quest 3 執行首次安裝。只有已安裝且符合原版的遊戲會直接進入設定部署。若 Android 列出停用或保留的套件、版本不符，或 APK 雜湊不同，預檢會報出該席並停止整批。APK 安裝使用 Android 的 `-R` 選項，防止覆寫已存在的套件。 [Android 套件查詢](https://developer.android.com/tools/adb#pm) · [Android 套件管理程式](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/pm/PackageManagerShellCommand.java)

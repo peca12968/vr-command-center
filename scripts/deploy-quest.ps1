@@ -25,6 +25,7 @@ param(
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Smoke')][Parameter(ParameterSetName='PrepareApks')][ValidateNotNullOrEmpty()][string]$ApkPath,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][switch]$UseInstalledApk,
     [Parameter(Mandatory, ParameterSetName='PrepareApks')][switch]$PrepareQuestApks,
+    [Parameter(ParameterSetName='PrepareApks')][ValidateNotNullOrEmpty()][string]$UpgradeFromReleaseReport,
     [Parameter(ParameterSetName='Bundle')][switch]$DeployMappedSeats,
     [Parameter(ParameterSetName='Bundle')][switch]$InstallMissing,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$SaveDeploymentReport,
@@ -1039,7 +1040,22 @@ function Read-QuestRelease([string]$Path) {
     }
     if ($RecordLinkMetrics -and $quest.versionCode -lt 75) { throw 'Quest link metrics require an APK with version code 75 or later.' }
     if ($RequireOpenXR -and $quest.versionCode -lt 74) { throw 'The OpenXR check requires a Quest APK with version code 74 or later.' }
-    return @{ versionCode = $quest.versionCode; sha256 = $quest.sha256; reportSha256 = Get-QuestSha256 $original.Bytes }
+    return @{ versionCode = $quest.versionCode; sha256 = $quest.sha256; signerSha256 = $quest.signerSha256;
+        reportSha256 = Get-QuestSha256 $original.Bytes }
+}
+
+function Read-QuestUpgradeSource($Release) {
+    if (-not $UpgradeFromReleaseReport) { return $null }
+    $previous = Read-QuestRelease $UpgradeFromReleaseReport
+    if ($previous.versionCode -ge $Release.versionCode -or $previous.sha256 -ceq $Release.sha256) {
+        throw 'A Quest upgrade requires a newer release with different APK bytes.'
+    }
+    if ($Release.signerSha256 -isnot [string] -or $previous.signerSha256 -isnot [string] -or
+        $previous.signerSha256 -cnotmatch '\A[0-9a-f]{64}\z' -or
+        $previous.signerSha256 -cne $Release.signerSha256) {
+        throw 'Quest upgrade release reports must identify the same APK signing certificate.'
+    }
+    return $previous
 }
 
 function Get-QuestApkStatus([string[]]$Target, [string]$ExpectedHash) {
@@ -1078,12 +1094,24 @@ function New-VerifiedQuestApk([string]$Path, [string]$ExpectedHash) {
     return $stagePath
 }
 
-function Install-QuestReleaseApk([string[]]$Target, [string]$Path) {
-    $output = @(Invoke-QuestAdb ($Target + @('install', '-R', '--user', 'current', '--pkg', 'com.vrcommand.quest', $Path)) 2>$null)
+function Install-QuestReleaseApk([string[]]$Target, [string]$Path, [switch]$Upgrade) {
+    $option = if ($Upgrade) { '-r' } else { '-R' }
+    $output = @(Invoke-QuestAdb ($Target + @('install', $option, '--user', 'current', '--pkg', 'com.vrcommand.quest', $Path)) 2>$null)
     if ($LASTEXITCODE -ne 0 -or $output -cnotcontains 'Success') { throw 'Quest APK installation did not return Success.' }
 }
 
-function Get-MappedQuestStatus($Row, $Inventory, [int]$VersionCode, [string]$ExpectedHash, [switch]$AllowMissingApk) {
+function Get-QuestUpgradeStatus([string[]]$Target, [string]$PreviousHash) {
+    $apk = Get-QuestApkStatus $Target $PreviousHash
+    if ($apk -cne 'ready') { return $apk }
+    $processes = @(Invoke-QuestAdb ($Target + @('shell', 'ps', '-A', '-w', '-o', 'NAME')) 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $processes.Count -lt 2 -or $processes[0] -cnotmatch '\A\s*NAME\s*\z') {
+        return 'app-state-unavailable'
+    }
+    if ($processes | Where-Object { $_ -cmatch '\A\s*com\.vrcommand\.quest(?::\S+)?\s*\z' }) { return 'app-running' }
+    return 'upgrade-required'
+}
+
+function Get-MappedQuestStatus($Row, $Inventory, [int]$VersionCode, [string]$ExpectedHash, [switch]$AllowMissingApk, $UpgradeFrom) {
     $result = [ordered]@{ roomId = $Row.roomId; seat = $Row.seat; status = 'ready' }
     $connected = $Inventory[$Row.serial]
     $status = $connected.Status
@@ -1113,7 +1141,12 @@ function Get-MappedQuestStatus($Row, $Inventory, [int]$VersionCode, [string]$Exp
         $result.status = 'package-unavailable'; return $result
     }
     $result.versionCode = $code
-    if ($code -ne $VersionCode) { $result.status = 'version-mismatch'; return $result }
+    if ($code -ne $VersionCode) {
+        $result.status = if ($UpgradeFrom -and $code -eq $UpgradeFrom.versionCode) {
+            Get-QuestUpgradeStatus $target $UpgradeFrom.sha256
+        } else { 'version-mismatch' }
+        return $result
+    }
     if ($ExpectedHash) {
         $result.status = Get-QuestApkStatus $target $ExpectedHash
         if ($result.status -ceq 'ready') { $result.apkVerified = $true }
@@ -1428,18 +1461,18 @@ function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, $R
         PreviousVenueSha256 = $previousVenueSha256; ReleaseReportSha256 = $releaseReportHash; PendingLaunch = $pendingLaunch }
 }
 
-function Read-MappedQuestPreflight([object[]]$Map, [int]$VersionCode, [string]$ExpectedHash, $Retry, [switch]$AllowMissingApk) {
+function Read-MappedQuestPreflight([object[]]$Map, [int]$VersionCode, [string]$ExpectedHash, $Retry, [switch]$AllowMissingApk, $UpgradeFrom) {
     Confirm-QuestAdbStartup 'Android platform-tools are not installed.'
     $inventory = Get-QuestDeviceInventory
     $devices = @($Map | ForEach-Object {
         $preflightSeat = $_
-        try { Get-MappedQuestStatus $preflightSeat $inventory $VersionCode $ExpectedHash -AllowMissingApk:$AllowMissingApk }
+        try { Get-MappedQuestStatus $preflightSeat $inventory $VersionCode $ExpectedHash -AllowMissingApk:$AllowMissingApk -UpgradeFrom $UpgradeFrom }
         catch [TimeoutException] { [ordered]@{ roomId = $preflightSeat.roomId; seat = $preflightSeat.seat; status = 'adb-timeout' } }
     })
     $reportedSerials = [string[]]::new($Map.Count)
     $firstSeatBySerial = [Collections.Generic.Dictionary[string,int]]::new([StringComparer]::OrdinalIgnoreCase)
     for ($index = 0; $index -lt $Map.Count; $index++) {
-        if ($devices[$index].status -cnotin @('ready','install-required')) { continue }
+        if ($devices[$index].status -cnotin @('ready','install-required','upgrade-required')) { continue }
         $target = @('-t', [string]$inventory[$Map[$index].serial].TransportId)
         try { $reportedSerial = Read-QuestDeviceSerial $target }
         catch [TimeoutException] { $devices[$index].status = 'adb-timeout'; continue }
@@ -1464,25 +1497,31 @@ function Read-MappedQuestPreflight([object[]]$Map, [int]$VersionCode, [string]$E
     return @{ Inventory = $inventory; Devices = $devices; Serials = $reportedSerials }
 }
 
-function Install-MappedQuestApk($Row, $Inventory, $Release, [string]$StagedApk, $Device, $Operation) {
-    $Operation.Step = 'install-apk'
+function Install-MappedQuestApk($Row, $Inventory, $Release, [string]$StagedApk, $Device, $Operation, [switch]$Upgrade) {
+    $Operation.Step = if ($Upgrade) { 'upgrade-apk' } else { 'install-apk' }
     $target = @('-t', [string]$Inventory[$Row.serial].TransportId)
-    Install-QuestReleaseApk $target $StagedApk
-    $Device.installedApk = $true
+    Install-QuestReleaseApk $target $StagedApk -Upgrade:$Upgrade
+    if ($Upgrade) { $Device.upgradedApk = $true }
+    else { $Device.installedApk = $true }
     $Operation.Step = 'verify-installed-apk'
     return Get-MappedQuestStatus $Row $Inventory $Release.versionCode $Release.sha256
 }
 
-function Invoke-QuestApkPreparation([object[]]$Map, $Release, [string]$StagedApk) {
-    $preflight = Read-MappedQuestPreflight $Map $Release.versionCode $Release.sha256 -AllowMissingApk
+function Invoke-QuestApkPreparation([object[]]$Map, $Release, [string]$StagedApk, $UpgradeFrom) {
+    $preflight = Read-MappedQuestPreflight $Map $Release.versionCode $Release.sha256 -AllowMissingApk -UpgradeFrom $UpgradeFrom
     $devices = $preflight.Devices
     $report = [ordered]@{ phase = 'apk-preflight'; expectedVersionCode = $Release.versionCode;
         expectedApkSha256 = $Release.sha256; venueReleaseReportSha256 = $Release.reportSha256;
         complete = $false; devices = $devices }
-    if ($devices | Where-Object { $_.status -cnotin @('ready','install-required') }) { return $report }
+    if ($UpgradeFrom) {
+        $report.previousVersionCode = $UpgradeFrom.versionCode
+        $report.previousVenueReleaseReportSha256 = $UpgradeFrom.reportSha256
+    }
+    if ($devices | Where-Object { $_.status -cnotin @('ready','install-required','upgrade-required') }) { return $report }
     if ($CheckOnly) { $report.complete = $true; return $report }
 
     $report.phase = 'apk-preparation'
+    $planned = @($devices | ForEach-Object { $_.status })
     foreach ($device in $devices) { $device.status = 'not-attempted'; $device.Remove('apkVerified') }
     for ($index = 0; $index -lt $Map.Count; $index++) {
         $row = $Map[$index]; $device = $devices[$index]
@@ -1493,12 +1532,34 @@ function Invoke-QuestApkPreparation([object[]]$Map, $Release, [string]$StagedApk
             if (-not $serial) { $device.status = 'device-identity-unavailable'; return $report }
             if ($serial -cne $preflight.Serials[$index]) { $device.status = 'device-identity-changed'; return $report }
             $operation.Step = 'check-apk-before-install'
-            $current = Get-MappedQuestStatus $row $preflight.Inventory $Release.versionCode $Release.sha256 -AllowMissingApk
-            if ($current.status -ceq 'install-required') {
-                $current = Install-MappedQuestApk $row $preflight.Inventory $Release $StagedApk $device $operation
+            $current = Get-MappedQuestStatus $row $preflight.Inventory $Release.versionCode $Release.sha256 -AllowMissingApk -UpgradeFrom $UpgradeFrom
+            if ($current.status -cin @('install-required','upgrade-required')) {
+                if ($UpgradeFrom -and $current.status -cne $planned[$index]) {
+                    $device.status = 'apk-state-changed'; $device.failedStep = $operation.Step; return $report
+                }
+                if ($current.status -ceq 'upgrade-required') {
+                    $operation.Step = 'verify-device-before-upgrade'
+                    $confirmedSerial = Read-QuestDeviceSerial $target
+                    if (-not $confirmedSerial -or $confirmedSerial -cne $serial) {
+                        $device.status = if ($confirmedSerial) { 'device-identity-changed' } else { 'device-identity-unavailable' }
+                        $device.failedStep = $operation.Step
+                        return $report
+                    }
+                }
+                $current = Install-MappedQuestApk $row $preflight.Inventory $Release $StagedApk $device $operation `
+                    -Upgrade:($current.status -ceq 'upgrade-required')
             }
             $device.status = $current.status
             if ($current.status -cne 'ready') { $device.failedStep = $operation.Step; return $report }
+            if ($UpgradeFrom) {
+                $operation.Step = 'verify-device-after-apk'
+                $confirmedSerial = Read-QuestDeviceSerial $target
+                if (-not $confirmedSerial -or $confirmedSerial -cne $serial) {
+                    $device.status = if ($confirmedSerial) { 'device-identity-changed' } else { 'device-identity-unavailable' }
+                    $device.failedStep = $operation.Step
+                    return $report
+                }
+            }
             $device.versionCode = $current.versionCode
             $device.apkVerified = $true
         } catch {
@@ -2111,15 +2172,16 @@ if ($PSCmdlet.ParameterSetName -eq 'PrepareApks') {
     if (-not $PrepareQuestApks) { throw 'Specify -PrepareQuestApks to prepare the mapped Quest APKs.' }
     $map = @(Read-QuestVenueMap $null $DeviceMap -Partial)
     $release = Read-QuestRelease $ReleaseReport
+    $upgradeFrom = Read-QuestUpgradeSource $release
     if ($CheckOnly) {
         Confirm-LocalQuestApk $apk $release.sha256
-        $result = Invoke-QuestApkPreparation $map $release
+        $result = Invoke-QuestApkPreparation $map $release -UpgradeFrom $upgradeFrom
     } else {
         $deploymentLock = Enter-QuestDeployment
         $stagedApk = $null
         try {
             $stagedApk = New-VerifiedQuestApk $apk $release.sha256
-            $result = Invoke-QuestApkPreparation $map $release $stagedApk
+            $result = Invoke-QuestApkPreparation $map $release $stagedApk -UpgradeFrom $upgradeFrom
         } finally {
             if ($stagedApk) { Remove-Item -LiteralPath $stagedApk -ErrorAction SilentlyContinue }
             $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose()
