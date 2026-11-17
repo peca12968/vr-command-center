@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 從個人回放返回任務統計
+
+- 控制台 0.31.257 從「開啟個人事件回放」或「跳到最近中彈」進入觀戰後，可按「返回任務統計」。控制台重讀原場次封存戰績，保留原分房範圍，並把鍵盤焦點帶回原先選取的玩家。 [戰績與回放操作](REPORTS.md#從戰績開啟個人回放)
+- 正式解壓包通過 26 項 Chromium 與 125 項 Node 檢查。五房獨立與合併各用 25 個模擬席位，主控與房控驗證房間重用後仍返回原玩家、拒絕不符的封存序號、一般觀戰沒有返回任務統計的按鈕，以及全館批次仍返回自己的席位表。管理程序無 TCP 監聽或 UDP 端點。 [合併場](../artifacts/session-score-return-031257/package-linked/checks.json) · [獨立場](../artifacts/session-score-return-031257/package-independent/checks.json) · [程序紀錄](../artifacts/session-score-return-031257/package-runtime.json)
+- `d125a04` 管理包逐檔核對 595 檔，與既有 Windows 玩家、伺服器及 Quest 0.50.12 通過離線發行核對。Quest 仍未出現 ADB 偵錯介面，實機與跨機驗收待做。GitHub Actions 因帳務或支出上限未啟動。 [管理包](../artifacts/session-score-return-031257/VRCommand-ControlServer-0.31.257.zip) · [發行核對](../artifacts/session-score-return-031257/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44034345427)
+
 ## 2026-11-17 單席等候 Quest 追蹤就緒
 
 - `-VerifyPlayerTracking` 支援 `-WaitForTrackedSeconds 1..120`，可等候原入場的新鮮準備畫格，並以成功回條交給戰後驗收。查詢在等待期限、票券到期、入場變更、存取拒絕或來源已離開準備階段時停止。單席與五房使用同一套等候流程。 [單席操作](QUEST3.md#單房實機追蹤驗收)
