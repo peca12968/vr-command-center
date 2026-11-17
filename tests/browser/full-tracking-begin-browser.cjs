@@ -463,6 +463,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       check(await seatState(1, 5) === 'NeedsTracking' && await seatState(5, 5) === 'Vacant'
         && await page.locator('[data-begin-seat-room] td[data-begin-seat]').count() === 25,
       `${mode} the tracked-only policy identifies exactly which simulated and vacant seats need attention`);
+      assert.equal(await page.locator('[data-begin-seat-room="1"] [data-begin-seat="5"] button').count(), 1);
+      assert.equal(await page.locator('[data-begin-seat-room="5"] [data-begin-seat="5"] button').count(), 0);
       await page.locator('#venue-phase').screenshot({ path: path.join(screenshots, `full-tracking-${mode.toLowerCase()}-waiting.png`) });
       if (mode === 'Linked') {
         await status(1).filter({ hasText: '快照已過期' }).waitFor();

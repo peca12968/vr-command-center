@@ -16,6 +16,7 @@
 .layout-report{margin:14px 0;padding:12px;border:1px solid var(--line);border-radius:5px}.layout-report ul{max-height:220px;overflow:auto;margin:8px 0 0;padding-left:22px;font-size:.85rem}.layout-report li{margin:5px 0}.layout-report [data-status=invalid]{color:#ffb9a8}.layout-report [data-status=valid]{color:var(--accent)}#prop-layer [data-layout-invalid=true]{stroke:#ff9f8b;stroke-width:.12}#prop-layer [data-layout-invalid=true] [data-envelope]{stroke:#ff9f8b}#layout-spawns circle{fill:#4e839433;stroke:#80c4d5;stroke-width:.05;stroke-dasharray:.08 .04}#layout-spawns text{fill:#b2dfec;font-size:.3px;text-anchor:middle;pointer-events:none}
 
 .ready-player{color:var(--accent);font-weight:650}
+#roster [data-roster-seat]:focus{outline:2px solid var(--accent);outline-offset:-2px}
 .tracking-attention{color:#ffcb83;font-weight:650}
 .closure-status, .mr-start-check { margin: 1rem 0; padding: .8rem 1rem; border: 1px solid var(--line, #31413e); border-radius: 8px; }
 .closure-status h3, .mr-start-check h3 { margin-top: 0; }

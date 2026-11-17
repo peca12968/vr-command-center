@@ -508,10 +508,13 @@ async function selectSession(id, rosterRoom = '') {
   if (selection !== selectionEpoch || epoch !== state.epoch) return;
   try { await refresh(); } catch (error) { showRefreshError(error); }
 }
-function focusRoster(sessionId, roomId) {
+function focusRoster(sessionId, roomId, seat = null) {
   if ($('operations-view').hidden || state.session?.id !== sessionId || $('roster-room').value !== String(roomId)) return false;
-  $('roster-title').scrollIntoView({ block: 'start' });
-  $('roster-title').focus({ preventScroll: true });
+  const target = seat === null ? $('roster-title')
+    : $('roster').querySelector(`[data-roster-room="${roomId}"][data-roster-seat="${seat}"]:not([hidden])`);
+  if (!target) return false;
+  target.scrollIntoView({ block: seat === null ? 'start' : 'center' });
+  target.focus({ preventScroll: true });
   return true;
 }
 function commonLaunchRevision() {
@@ -1147,6 +1150,23 @@ function venueBeginRows(targets, policy, playersPerRoom) {
   return rows.sort((a, b) => a.roomId - b.roomId);
 }
 
+const reviewableBeginSeatStates = new Set(['AwaitingAdmission', 'WaitingRevision', 'AwaitingPose', 'PoseUnavailable',
+  'Eliminated', 'NeedsTracking', 'OutsideStage']);
+
+async function openVenueRosterSeat(row, seat) {
+  const { sessionId, sessionSequence, roomId } = row;
+  if (!master() || state.busy || state.pending || $('operations-view').hidden) return;
+  const isOriginal = () => venueTargets('Begin').some(target => target.sessionId === sessionId
+    && target.sessionSequence === sessionSequence && target.roomIds.includes(roomId));
+  const changed = () => notify('原席位的準備名冊已變更。請重新核對全館開場清單。', true);
+  if (!isOriginal()) { changed(); return; }
+  const epoch = state.epoch, view = operationsViewEpoch, selection = selectionEpoch + 1;
+  await selectSession(sessionId, String(roomId));
+  if (!master() || state.epoch !== epoch || operationsViewEpoch !== view || selectionEpoch !== selection) return;
+  if (!isOriginal() || state.session?.sequence !== sessionSequence || state.session.state !== 'Preparing'
+    || !focusRoster(sessionId, roomId, seat)) changed();
+}
+
 function renderVenueBegin(targets, waiting, policy, playersPerRoom) {
   const summary = $('venue-begin-evidence'), list = $('venue-begin-rooms');
   const rows = venueBeginRows(targets, policy, playersPerRoom);
@@ -1190,6 +1210,13 @@ function renderVenueBegin(targets, waiting, policy, playersPerRoom) {
       cell.dataset.beginSeat = index + 1;
       cell.dataset.seatState = status;
       cell.classList.toggle('ready-player', status === 'Tracked' || status === 'Simulated');
+      if (row.sessionId && reviewableBeginSeatStates.has(status)) {
+        const button = element('button', beginSeatLabels[status], 'quiet small');
+        button.type = 'button'; button.disabled = locked;
+        button.setAttribute('aria-label', `查看房間 ${row.roomId} 第 ${index + 1} 席名冊：${beginSeatLabels[status]}`);
+        button.addEventListener('click', () => void openVenueRosterSeat(row, index + 1));
+        cell.replaceChildren(button);
+      }
       tr.append(cell);
     }
     return tr;
@@ -1775,6 +1802,9 @@ function renderSession(statistics, events) {
     rosterRoom.dataset.preferred ?? rosterRoom.value);
   delete rosterRoom.dataset.preferred;
   rosterFilter.hidden = visibleRooms.length < 2;
+  const focused = document.activeElement;
+  const focusedAdmission = focused?.matches('#roster [data-roster-seat]')
+    ? focused.querySelector('[data-admission]')?.dataset.admission : null;
   $('roster').replaceChildren(...session.players.map(player => {
     const actions = element('div', undefined, 'button-row');
     for (const [kind, label, action, cls] of [['ticket', '下載連線檔', () => downloadTicket(player), 'secondary'], ['remove', '移除', () => removePlayer(player), 'danger']]) {
@@ -1785,10 +1815,15 @@ function renderSession(statistics, events) {
     const participation = element('span', '等待本次入場同步'); participation.dataset.readinessPlayer = player.id; participation.dataset.admission = player.admissionId;
     const item = row([player.name, `${player.roomId} / ${player.seat + 1}`, player.headset === 'Quest3' ? 'Quest 3' : 'VIVE XR', participation, actions]);
     item.dataset.rosterRoom = player.roomId;
+    item.dataset.rosterSeat = player.seat + 1;
+    item.tabIndex = -1;
     return item;
   }));
   if (!session.players.length) emptyTable('roster', 5, '尚未加入玩家');
   filterRoster();
+  if (archiveId.test(focusedAdmission ?? '')) {
+    $('roster').querySelector(`tr:not([hidden]) [data-admission="${focusedAdmission}"]`)?.closest('tr')?.focus({ preventScroll: true });
+  }
   connections.update();
   $('statistics-origin').textContent = statistics.origin === 'Simulation' ? '模擬資料' : statistics.origin === 'GameServer' ? '遊戲伺服器回報' : '尚無戰鬥資料';
   $('telemetry-status').hidden = !session.combatStream;
