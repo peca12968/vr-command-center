@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-17 開場確認後重讀已變更的五房名冊
+
+- 0.31.260 在確認後發現名冊版本對不上時，會重讀場次，再顯示開場條件已變更。修正前，房控移除第 5 房第 5 席後，五房獨立與合併均擋下舊開場，但通知出現時仍看不到空席。新版可從更新後的空席直達名冊，完成補登，等新入場具有效追蹤後再以新的確認開場。 [操作說明](PLAYER_READINESS.md#五房追蹤驗收開場) · [合併場](../artifacts/venue-begin-roster-031260/package/linked/checks.json) · [獨立場](../artifacts/venue-begin-roster-031260/package/independent/checks.json)
+- `ea7398c` 管理包核對 595 檔，通過 10 項 Chromium 與 125 項 Node 檢查。每種模式各用 25 個模擬席位，原開場零筆命令，補登後各確認一筆。管理程序透過本機 IPC 執行，TCP 監聽與 UDP 端點皆為零。 [管理包](../artifacts/venue-begin-roster-031260/VRCommand-ControlServer-0.31.260.zip) · [程序驗證](../artifacts/venue-begin-roster-031260/package/runtime.json) · [離線發行核對](../artifacts/venue-begin-roster-031260/venue-release.json)
+- 另一次 IPC 回放回歸在首次啟動管理程序時逾時。使用獨立目錄與啟動日誌重試後，兩種模式共 6 個場次完成雙封存，6 份錄製的 24 個畫格均通過重啟後回放。 [IPC 回放](../artifacts/venue-begin-roster-031260/world-ipc.json)
+- Windows 目前只列出 Quest 的檔案傳輸介面，頭盔與跨機 25 人驗收待做。GitHub Actions 因帳務或支出上限未啟動。 [Quest USB 查核](../artifacts/venue-begin-roster-031260/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44038709962)
+
 ## 2026-11-17 切離操作頁時結束待送出的五房開場
 
 - 0.31.259 的「全館場次控制」把待送出的開場流程綁定在原操作頁。0.31.258 在兩種模式都重現背景更新後延遲跳出確認。新版在待更新或確認後重讀時切頁，均未送開場命令。留在原頁重新確認後，各模式只送一筆開場，切頁後仍可取得已送命令的回條。 [操作說明](PLAYER_READINESS.md#五房追蹤驗收開場) · [合併場](../artifacts/venue-begin-view-031259/package/linked/checks.json) · [獨立場](../artifacts/venue-begin-view-031259/package/independent/checks.json)
