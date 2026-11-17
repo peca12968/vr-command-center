@@ -264,6 +264,7 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
                 *, require_distinct_remote_roster=False, explain_failures=False, inspect_retry=False):
     document, raw = field.read_quest_document(plan)
     mode, endpoints, sources, launch_sessions = field.parse_quest_network_plan(document, allow_shared_sources=True)
+    report_sessions = [{'roomIds': list(rooms), **session} for rooms, session in sorted(launch_sessions.items())]
     inventory_checked = 'serverIps' in document
     require_distinct_remote_roster |= inventory_checked
     plan_hash = hashlib.sha256(raw).hexdigest()
@@ -296,6 +297,8 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
     if retry_report is not None:
         field.require(launch_matches, 'Retry requires the original matching Windows plan and preview')
         prior, prior_hash = read_retry(retry_report, mode, plan_hash)
+        field.require('networkPlanSessions' not in prior or prior['networkPlanSessions'] == report_sessions,
+                      'Retry report launch sessions differ from the original network plan')
         require_distinct_remote_roster |= field.udp_preflight_distinct_roster(prior)
     if require_distinct_remote_roster and not inventory_checked:
         field.require_distinct_remote_sources(sources, endpoints.values())
@@ -441,6 +444,7 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
             'checkedAtUtc': checked_at, 'expectedSources': len(expected),
             'verifiedSources': sum(row['status'] == 'verified' for row in results.values()),
             'unmatchedPairs': unmatched, 'unreadablePairs': unreadable, 'groups': groups,
+            **({'networkPlanSessions': report_sessions} if report_sessions else {}),
             **({'requireDistinctRemoteRoster': True} if require_distinct_remote_roster else {}),
             **({'inbox': inbox_summary} if inbox_summary is not None else {}),
             **({'retrySources': retry_sources} if not complete and launch_matches else {}),

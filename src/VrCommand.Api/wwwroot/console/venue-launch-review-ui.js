@@ -1,5 +1,6 @@
 import { validDestination } from './connection-ui.js';
 import { beginSeatLabels } from './readiness-ui.js';
+import { parseVenueServerPlanPreview } from './venue-server-plan-ui.js';
 
 const guid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const isId = value => typeof value === 'string' && guid.test(value) && value !== '00000000-0000-0000-0000-000000000000';
@@ -29,12 +30,14 @@ const udpSeatReasons = {
   'exchange-mismatch': '雙端交換不符', 'binding-mismatch': '端點或來源不符'
 };
 const udpReportRoles = { listener: '缺監聽端報告', probe: '缺探測端報告' };
+const startupStates = { 'missing-session': '尚無準備場次', 'not-preparing': '已離開準備階段',
+  'source-bound': '已附掛遊戲來源', 'alignment-unlocked': '等待鎖定 MR 校正' };
 const boundedCount = (value, limit) => Number.isInteger(value) && value >= 0 && value <= limit;
 const hasLabel = (labels, value) => typeof value === 'string' && Object.hasOwn(labels, value);
 
 function projectUdpPreflight(value) {
   const { version, mode, network, complete, checkedAtUtc, groups, expectedSources, verifiedSources,
-    unreadablePairs, unmatchedPairs, inbox, launchBinding, launcherPreview } = value;
+    unreadablePairs, unmatchedPairs, inbox, launchBinding, launcherPreview, networkPlanSessions, networkPlanSha256 } = value;
   const independent = mode === 'Independent';
   const planMatches = launchBinding?.complete ?? launcherPreview?.complete ?? true;
   if (version !== 1 || !['Independent', 'Linked'].includes(mode) || !['same-host', 'private-lan-plan'].includes(network)
@@ -78,8 +81,26 @@ function projectUdpPreflight(value) {
   if (sourceCount !== expectedSources || verifiedCount !== verifiedSources || [...seatRows.values()].some(rows => !rows.size)
       || complete !== (sourceCount === verifiedCount && !unreadablePairs && !unmatchedPairs && !inboxIssues && planMatches))
     throw new Error('Invalid UDP report totals');
+  const launchByRoom = new Map();
+  if (networkPlanSessions !== undefined) {
+    if (typeof networkPlanSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(networkPlanSha256)
+        || !Array.isArray(networkPlanSessions) || networkPlanSessions.length !== groups.length)
+      throw new Error('Invalid UDP launch sessions');
+    const sessionIds = new Set();
+    for (const row of networkPlanSessions) {
+      if (!row || Object.keys(row).length !== 4) throw new Error('Invalid UDP launch session');
+      const { roomIds, sessionId, missionId, sessionSequence } = row;
+      if (!Array.isArray(roomIds) || !groups.some(group => group.roomIds.length === roomIds.length
+          && group.roomIds.every((room, index) => room === roomIds[index]))
+          || roomIds.some(id => launchByRoom.has(id)) || !isId(sessionId) || sessionIds.has(sessionId) || !isId(missionId)
+          || !Number.isSafeInteger(sessionSequence) || sessionSequence < 1)
+        throw new Error('Invalid UDP launch session fields');
+      sessionIds.add(sessionId);
+      for (const room of roomIds) launchByRoom.set(room, {sessionId, missionId, sessionSequence});
+    }
+  }
   return { mode, network, checkedAtUtc, seatRows, verifiedSources, expectedSources, pending,
-    unmatchedPairs, unreadablePairs, inboxIssues, planMatches };
+    unmatchedPairs, unreadablePairs, inboxIssues, planMatches, launchByRoom };
 }
 
 function projectSeal(result, roomIds, launchId) {
@@ -207,6 +228,8 @@ export function mountVenueLaunchReview(getState, api, selectSession, focusRoster
   function clear() {
     seatViews = [];
     $('summary').textContent = '';
+    $('udp-current').textContent = '';
+    $('udp-current').hidden = true;
     $('closure').replaceChildren();
     $('roster-status').textContent = '';
     $('rooms').replaceChildren();
@@ -256,6 +279,37 @@ export function mountVenueLaunchReview(getState, api, selectSession, focusRoster
         .map(([seat, label]) => `第 ${seat} 席${label}`).join(' · ')}`;
       return row;
     }));
+  }
+
+  async function reviewUdpLaunch(report, current) {
+    if (!report.launchByRoom.size) return;
+    const summary = $('udp-current');
+    summary.hidden = false;
+    summary.textContent = '正在比對目前的五房場次與席位…';
+    try {
+      const preview = parseVenueServerPlanPreview(await api('/venue/server-plan'));
+      if (!current()) return;
+      const changed = [];
+      for (const row of preview.rooms) {
+        const target = report.launchByRoom.get(row.roomId);
+        const reasons = [];
+        if (row.state !== 'ready') reasons.push(startupStates[row.state]);
+        if (row.sessionId !== target.sessionId) reasons.push('原場次已變更');
+        else {
+          if (row.missionId !== target.missionId) reasons.push('原任務版本不符');
+          if (row.sessionSequence !== target.sessionSequence) reasons.push('原場次修訂不符');
+          const seats = report.seatRows.get(row.roomId);
+          if (row.registeredSeats.length !== seats.size || row.registeredSeats.some(seat => !seats.has(seat)))
+            reasons.push('原登記席位不符');
+        }
+        if (reasons.length) changed.push(`房間 ${row.roomId}：${reasons.join('、')}`);
+      }
+      if (preview.topology !== report.mode) changed.unshift('五房模式不符');
+      summary.textContent = changed.length ? `目前準備狀態與原報告不符。${changed.join(' · ')}。`
+        : '本次取樣的五房場次、任務版本、修訂與席位均和原報告相符。';
+    } catch {
+      if (current()) summary.textContent = '無法核對目前五房準備狀態。可重新核對此份報告。';
+    }
   }
 
   function show(review, request) {
@@ -362,7 +416,9 @@ export function mountVenueLaunchReview(getState, api, selectSession, focusRoster
         const value = JSON.parse(await selected.text());
         if (!current()) return;
         if (value?.scope === 'venue-udp-preflight-only') {
-          showUdpPreflight(projectUdpPreflight(value));
+          const udp = projectUdpPreflight(value);
+          showUdpPreflight(udp);
+          await reviewUdpLaunch(udp, current);
           return;
         }
         if (selected.size > 65536) throw new Error('Invalid launcher report size');

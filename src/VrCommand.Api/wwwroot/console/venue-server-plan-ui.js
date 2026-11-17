@@ -9,7 +9,7 @@ const roomStates = {
 };
 const guid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 
-function parsePreview(value) {
+export function parseVenueServerPlanPreview(value) {
   const { topology, ready, rooms } = value ?? {};
   if (![null, 'Independent', 'Linked'].includes(topology) || typeof ready !== 'boolean' || !Array.isArray(rooms) || rooms.length !== 5)
     throw new Error('Invalid venue preview');
@@ -208,7 +208,7 @@ export function mountVenueServerPlan(getState, api, download) {
     resetPreview();
     const request = begin('正在讀取五房場次…');
     try {
-      const value = parsePreview(await api('/venue/server-plan'));
+      const value = parseVenueServerPlanPreview(await api('/venue/server-plan'));
       if (request.current()) show(value);
     } catch {
       if (request.current()) $('status').textContent = '無法讀取五房場次，請重試。';
@@ -242,7 +242,7 @@ export function mountVenueServerPlan(getState, api, download) {
     const expected = preview;
     const request = begin('正在重新核對原場次…');
     try {
-      const current = parsePreview(await api('/venue/server-plan'));
+      const current = parseVenueServerPlanPreview(await api('/venue/server-plan'));
       if (!request.current()) return;
       if (JSON.stringify(current) !== JSON.stringify(expected)) {
         const changed = current.rooms.filter((room, index) => JSON.stringify(room) !== JSON.stringify(expected.rooms[index]))

@@ -134,8 +134,101 @@ async function checkVenueUdpReview({ context, tokens, base, screenshots, check, 
   } finally { await page.close(); }
 }
 
+async function checkBoundVenueUdpReview({ context, api, tokens, base, screenshots, check, captureErrors }) {
+  const page = await context.newPage();
+  captureErrors(page);
+  const active = new Set(), requests = [];
+  const roomIds = [1, 2, 3, 4, 5];
+  const current = page.locator(panel + '-udp-current');
+  const capturedCounts = page.locator(summary);
+  page.on('request', request => {
+    const pathname = new URL(request.url()).pathname;
+    if (pathname === '/api/venue/server-plan' || pathname === '/api' + route)
+      requests.push({pathname, method: request.method(), body: request.postData()});
+  });
+  async function checkFile(value, text) {
+    await choose(page, value);
+    await page.locator(button).click();
+    await current.filter({hasText: text}).waitFor();
+  }
+  async function endSessions() {
+    for (const id of active) {
+      await api(`/sessions/${id}/commands`, 'POST', {commandId: randomUUID(), action: 'End'});
+      active.delete(id);
+    }
+  }
+  const join = (id, roomId) => api(`/sessions/${id}/players`, 'POST', {
+    playerId: randomUUID(), roomId, name: 'UDP fixture player', headset: 'Quest3'
+  });
+  try {
+    await login(page, base, tokens.Master);
+    await page.locator(panel + ' summary').click();
+    const mission = await api('/missions', 'POST', {name: 'UDP plan review fixture', briefing: '', durationSeconds: 300,
+      environment: {mode: 'VR', weather: 'Clear', timeOfDay: 'Day', lightning: false},
+      enemies: {count: 0, behavior: 'Hold', autoAttack: false}, props: []}, 'Master', 201);
+    const script = path.join(__dirname, '..', '..', 'scripts', 'check-venue-udp-preflight.py');
+    for (const [mode, count] of [['Independent', 1], ['Linked', 2]]) {
+      const batches = mode === 'Linked' ? [roomIds] : roomIds.map(room => [room]);
+      for (const rooms of batches) {
+        const session = await api('/sessions', 'POST', {missionId: mission.id, mode, roomIds: rooms}, 'Master', 201);
+        active.add(session.id);
+        for (const room of rooms) for (let seat = 0; seat < count; seat++) await join(session.id, room);
+      }
+      const plan = await api('/venue/server-plan');
+      const byRoom = roomId => plan.rooms.find(room => room.roomId === roomId);
+      const network = {version: 1, mode,
+        endpoints: batches.map((rooms, index) => {
+          const {sessionId, missionId, sessionSequence} = byRoom(rooms[0]);
+          return {roomIds: rooms, sessionId, missionId, sessionSequence, address: '192.168.50.10', port: 17777 + index};
+        }), sources: plan.rooms.flatMap(room => room.registeredSeats.map(seat =>
+          ({roomId: room.roomId, seat, address: `192.168.50.${20 + room.roomId * 5 + seat}`})))};
+      const original = path.join(screenshots, `udp-${mode.toLowerCase()}-network.json`);
+      const output = path.join(screenshots, `udp-${mode.toLowerCase()}-report.json`);
+      await fs.writeFile(original, JSON.stringify(network), {flag: 'wx'});
+      const cli = spawnSync('python', [script, '--network-plan', original, '--output', output],
+        {encoding: 'utf8', timeout: 12000, windowsHide: true});
+      assert.equal(cli.status, 1, cli.stderr);
+      const report = JSON.parse(await fs.readFile(output, 'utf8'));
+      assert.equal(report.complete, false);
+      assert.equal(report.expectedSources, 5 * count);
+      assert.deepEqual(report.networkPlanSessions, network.endpoints.map(({roomIds, sessionId, missionId, sessionSequence}) =>
+        ({roomIds, sessionId, missionId, sessionSequence})));
+      const before = requests.length;
+      await checkFile(report, '修訂與席位均和原報告相符');
+      check((await capturedCounts.textContent()).includes(`${5 * count} 席待補測`) && requests.length === before + 1
+        && requests.at(-1).pathname === '/api/venue/server-plan' && requests.at(-1).method === 'GET' && requests.at(-1).body === null,
+        `${mode} compares the exported report against current sessions without transmitting the file or claiming UDP success`);
+
+      const malformed = {...report, networkPlanSessions: report.networkPlanSessions.slice(1)};
+      await choose(page, malformed);
+      await page.locator(button).click();
+      await capturedCounts.filter({hasText: '請選擇 64 KiB'}).waitFor();
+      assert.ok(await current.isHidden());
+      assert.equal(requests.length, before + 1);
+      const sessionId = byRoom(5).sessionId;
+      const player = (await api(`/sessions/${sessionId}`)).players.find(row => row.roomId === 5 && row.seat === count - 1);
+      await api(`/sessions/${sessionId}/players/${player.id}`, 'DELETE', undefined, 'Master', 204, player.admissionId);
+      await join(sessionId, 5);
+      await checkFile(report, '房間 5：原場次修訂不符');
+      const changed = await current.textContent();
+      check(!changed.includes('原登記席位不符') && (mode === 'Linked') === changed.includes('房間 1：原場次修訂不符'),
+        `${mode} reports the changed revision even when the player is replaced at the same seat`);
+
+      await page.route('**/api/venue/server-plan', route => route.fulfill({status: 503, json: {code: 'fixture-unavailable'}}), {times: 1});
+      await checkFile(report, '無法核對目前五房準備狀態');
+      check((await capturedCounts.textContent()).includes(`${5 * count} 席待補測`) && await page.locator(rows).count() === 5,
+        `${mode} retains the local report when the current management lookup fails`);
+      await endSessions();
+    }
+  } finally {
+    await page.close();
+    await endSessions();
+  }
+}
+
 async function checkVenueLaunchReview({ context, api, tokens, base, screenshots, check, captureErrors, instanceId, udpPreflightReport }) {
   await checkVenueUdpReview({ context, tokens, base, screenshots, check, captureErrors, udpPreflightReport });
+  await checkBoundVenueUdpReview({ context, api, tokens, base, screenshots, check, captureErrors });
   const page = await context.newPage();
   captureErrors(page);
   const launchId = randomUUID(), streamId = randomUUID();
@@ -392,7 +485,7 @@ async function checkVenueLaunchReview({ context, api, tokens, base, screenshots,
   }
 }
 
-module.exports = { checkVenueLaunchReview, checkVenueUdpReview };
+module.exports = { checkVenueLaunchReview, checkVenueUdpReview, checkBoundVenueUdpReview };
 
 if (require.main === module) {
   (async () => {

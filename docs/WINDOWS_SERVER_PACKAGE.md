@@ -125,6 +125,8 @@ Unity 0.47.0 伺服器可搭配控制台 0.31.14。啟動器 1.5 可選擇待開
 
 ### 以 UDP 預檢報告啟動五房
 
+使用新版 `check-venue-udp-preflight.py` 讀取含原場次資料的網路清單時，回條會保存 `networkPlanSessions`。管理台 0.31.239 可在「核對全館預檢、啟動與封存」選取該回條。畫面保留報告當時的 UDP 結果，並另向管理服務讀取目前準備狀態，標出原場次、任務版本、修訂或席位不符的房間。選檔內容留在瀏覽器。舊回條可查閱原測量及待補件。
+
 可先用 `start-verified-venue.py --verify-only --launch-plan .\venue-plan.json --network-plan .\venue-network.json --readiness .\venue-readiness.json` 重驗全館預檢引用的原檔。完整且有效時回傳 `udp-evidence-verified`。未完成的報告也可帶入。工具會重驗其中保留的原檔，回傳 `udp-evidence-incomplete`、待補房號與席號，以及未配對、無法讀取或仍待處理的收件問題數，退出碼為 1。這一步只核對檔案和預檢有效期限，實際啟動須提供完整報告並向管理服務確認最新名冊與場次。
 
 待補席位的 `reason` 可指出原檔無法讀取（`unreadable-original`）、超過 30 分鐘（`expired`）、量測時間未早於核對時間（`clock-ahead`）、雙端屬不同交換（`exchange-mismatch`）、端點不符（`binding-mismatch`）或報告無效（`invalid-report`）。若可從一端的完成報告確認原計畫中的來源，`missingRole` 會指出需補的 `listener`（監聽端）或 `probe`（探測端）。若雙端都無法確認，請依待補席位與無法讀取的配對數量查找原檔。

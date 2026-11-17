@@ -311,11 +311,21 @@ class NetworkPlanPreparationTests(unittest.TestCase):
         first = json.loads(partial.read_bytes())
         self.assertIs(first['requireDistinctRemoteRoster'], True)
         self.assertEqual(5, first['expectedSources'])
+        sessions = [{field: row[field] for field in ('roomIds', 'sessionId', 'missionId', 'sessionSequence')}
+                    for row in launch_value['servers']]
+        self.assertEqual(sessions, first['networkPlanSessions'])
         checked = preflight(retry, '--retry-report', partial)
         self.assertEqual(1, checked.returncode, checked.stderr)
-        self.assertIs(json.loads(retry.read_bytes())['requireDistinctRemoteRoster'], True)
-        bad = self.store('bad-partial.json', dict(first, requireDistinctRemoteRoster='true'))
+        retried = json.loads(retry.read_bytes())
+        self.assertIs(retried['requireDistinctRemoteRoster'], True)
+        self.assertEqual(sessions, retried['networkPlanSessions'])
+        altered = self.store('changed-sessions.json', dict(first, networkPlanSessions=[
+            {**sessions[0], 'sessionSequence': sessions[0]['sessionSequence'] + 1}]))
         refused = self.root / 'refused.json'
+        checked = preflight(refused, '--retry-report', altered)
+        self.assertIn('Retry report launch sessions differ', checked.stderr)
+        self.assertFalse(refused.exists())
+        bad = self.store('bad-partial.json', dict(first, requireDistinctRemoteRoster='true'))
         checked = preflight(refused, '--retry-report', bad)
         self.assertIn('Invalid distinct remote roster option', checked.stderr)
         self.assertFalse(refused.exists())
