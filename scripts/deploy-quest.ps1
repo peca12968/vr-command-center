@@ -851,6 +851,16 @@ function Confirm-PreparingReadinessFrames($Target, $Report, [hashtable]$PlayersB
     } finally { $cancellation.Dispose(); $client.Dispose() }
 }
 
+function Confirm-ReadbackFreshness($Report, [hashtable]$Snapshots, [double]$ElapsedMilliseconds, [int]$MaxAge) {
+    foreach ($seat in $Report.seats) {
+        if ($seat.status -ceq 'tracked-ready' -and
+            $Snapshots[$seat.sessionId].sourceAgeMilliseconds + $ElapsedMilliseconds -gt $MaxAge) {
+            $seat.status = 'source-expired-in-transit'
+            $Report.complete = $false
+        }
+    }
+}
+
 function Confirm-PlayerTrackedSeat($Target, $Ticket) {
     $sessionId = $Ticket.SessionId.ToString('D')
     $url = [Uri]::new($Target.Origin, "/api/sessions/$sessionId/readiness")
@@ -874,6 +884,7 @@ function Confirm-PlayerTrackedSeat($Target, $Ticket) {
     if ($report.complete) {
         $playersBySeat = @{ "$($seat.roomId)/$($seat.seat)" = $Ticket.PlayerId.ToString('D') }
         Confirm-PreparingReadinessFrames $Target $report $playersBySeat ([int][Math]::Floor(10000 - $timer.Elapsed.TotalMilliseconds))
+        Confirm-ReadbackFreshness $report @{ $sessionId = $snapshot } $timer.Elapsed.TotalMilliseconds $sample.MaxAge
     }
     if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) {
         $seat.status = 'ticket-expired'
@@ -899,6 +910,7 @@ function Read-TrackedSeatReport($Target, $Venue, [object[]]$Map, [int]$RequestMi
         }
         $remaining = [int][Math]::Floor($RequestMilliseconds - $timer.Elapsed.TotalMilliseconds)
         Confirm-PreparingReadinessFrames $Target $report $playersBySeat $remaining
+        Confirm-ReadbackFreshness $report $batch.Sessions $timer.Elapsed.TotalMilliseconds $batch.MaxAge
     }
     return $report
 }

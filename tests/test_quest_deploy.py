@@ -1324,6 +1324,82 @@ class QuestVenueTests(unittest.TestCase):
                 server.shutdown()
                 worker.join()
 
+    def test_quest_tracking_keeps_original_freshness_deadline_through_frame_readback(self):
+        runner = self.root / 'readiness-freshness.ps1'
+        runner.write_text(r'''
+param($Source, $Mode)
+$ErrorActionPreference = 'Stop'
+$functions = @('Test-JsonInteger', 'Test-TrackedReadinessSnapshot', 'Get-TrackedSeatStatus', 'New-TrackedSeatReport',
+               'Confirm-PlayerTrackedSeat', 'Read-TrackedSeatReport', 'Get-QuestSha256', 'Confirm-ReadbackFreshness')
+$ast = [Management.Automation.Language.Parser]::ParseFile($Source, [ref]$null, [ref]$null)
+foreach ($definition in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+                                      $node.Name -cin $functions }, $false)) {
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+$session = '91bdc053-1490-468f-bd0a-7fd851570977'
+$player = 'a95a4a2c-583c-4750-a16a-983c30d1a4f4'
+$admission = '8bb407fd-9dc4-4c2d-b467-7fe971dab013'
+$second = 'c609db2c-4b64-4680-9a6a-7d752804fee0'
+$sampled = [DateTimeOffset]::UtcNow
+$ticket = @{ SessionId = [Guid]$session; PlayerId = [Guid]$player; AdmissionId = [Guid]$admission;
+             RoomId = 1; Seat = 0; ExpiresAtUtc = $sampled.AddMinutes(1) }
+$row = @{roomId=1; seat=0; playerId=$player; admissionId=$admission; canParticipate=$true; state='Participating'; rigKind='Tracked'}
+$snapshot = [pscustomobject]@{ version=1; sessionId=$session; sourceState='Fresh'; origin='GameServer'; worldSequence=30;
+    sessionSequence=18; observedSequence=18; sourceAgeMilliseconds=950; sampledAtUtc=$sampled; capturedAtUtc=$sampled.AddMilliseconds(-950);
+    players=@([pscustomobject]$row) }
+$other = $snapshot.PSObject.Copy()
+$other.sessionId = $second
+$other.sourceAgeMilliseconds = 0
+$other.capturedAtUtc = $sampled
+$other.players = @([pscustomobject]($row.Clone()))
+$other.players[0].roomId = 2
+$secondTicket = $ticket.Clone()
+$secondTicket.SessionId = [Guid]$second; $secondTicket.RoomId = 2
+$script:reads = 0
+function Read-ManagementJson { return @{ Document=$snapshot; Elapsed=5 } }
+function Read-VenueTrackedReadiness {
+    $snapshots = @{ $session = $snapshot }
+    if (-not $Mode.StartsWith('linked-')) { $snapshots[$second] = $other }
+    return @{ Sessions=$snapshots; MaxAge=1500; SampledAtUtc=$sampled; Elapsed=5 }
+}
+function Confirm-PreparingReadinessFrames {
+    $script:reads++
+    if ($Mode.EndsWith('-late')) { Start-Sleep -Milliseconds 700 }
+}
+$target = @{ Origin = [Uri]'http://127.0.0.1:1' }
+if ($Mode.StartsWith('single-')) { $report = Confirm-PlayerTrackedSeat $target $ticket }
+else {
+    $DeploymentReport = 'original'
+    $topology = if ($Mode.StartsWith('linked-')) { 'Linked' } else { 'Independent' }
+    if ($topology -ceq 'Linked') {
+        $snapshot.players += $other.players
+        $secondTicket.SessionId = $ticket.SessionId
+    }
+    $map = @(@{roomId=1; seat=1}, @{roomId=2; seat=1})
+    $venue = @{ Report=@{ topology=$topology; mode='VR' }; SeatHeadsets=@{'1/1'='Quest3'; '2/1'='Quest3'};
+                Connections=@{'1/1'=@{Ticket=$ticket}; '2/1'=@{Ticket=$secondTicket}} }
+    $report = Read-TrackedSeatReport $target $venue $map 10000
+}
+@{ report=$report; readbacks=$script:reads } | ConvertTo-Json -Depth 8 -Compress
+''', encoding='utf-8')
+        command = ['pwsh', '-NoProfile', '-NonInteractive', '-File', str(runner), str(ROOT / 'scripts/deploy-quest.ps1')]
+        for mode, expected in (
+            ('single-fresh', ['tracked-ready']), ('single-late', ['source-expired-in-transit']),
+            ('venue-fresh', ['tracked-ready'] * 2), ('venue-late', ['source-expired-in-transit', 'tracked-ready']),
+            ('linked-fresh', ['tracked-ready'] * 2), ('linked-late', ['source-expired-in-transit'] * 2),
+        ):
+            with self.subTest(mode=mode):
+                response = subprocess.run([*command, mode], capture_output=True, text=True, encoding='utf-8', timeout=10)
+                self.assertEqual(0, response.returncode, response.stderr)
+                result = json.loads(response.stdout)
+                self.assertEqual(1, result['readbacks'])
+                report = result['report']
+                self.assertEqual(expected, [seat['status'] for seat in report['seats']])
+                self.assertIs(report['complete'], mode.endswith('-fresh'))
+                if mode.startswith('single-'):
+                    self.assertEqual(mode.endswith('-fresh'), 'evidenceVersion' in report)
+                    self.assertEqual(mode.endswith('-fresh'), 'admissionSha256' in report['seats'][0])
+
     def prepare(self, topology):
         manifest = {'version':1, 'topology':topology, 'rooms':[]}
         rooms = {}
