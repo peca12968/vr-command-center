@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-17 在配票前準備 Quest APK
+
+- `-PrepareQuestApks` 使用同一格式的裝置清單與原發行報告，先準備 1 至 25 台 Quest 3 的 APK。安裝及裝置雜湊核對可在五分鐘票券發出前完成。`-CheckOnly` 可列出已核對及待安裝的席位。 [配票前準備](QUEST3.md#配票前準備-quest-apk)
+- 10 項部署測試通過。模擬 25 席中，第 11 台安裝失敗後重跑，只安裝尚缺 APK 的兩台，且無設定傳輸或遊戲啟動。另用原 0.50.12／77 發行 APK 在五個模擬席位檢查，兩份安裝副本讀回 SHA-256 相符。Windows 目前仍只列出 Meta 檔案傳輸介面，實機部署待 ADB 接通。 [部署回歸](../artifacts/quest-apk-preparation/final-deployment-tests.log) · [發行 APK 核對](../artifacts/quest-apk-preparation/release-05012-five-seat/release-verification.json)
+
 ## 2026-11-17 在五房部署中安裝缺少的 Quest APK
 
 - `-InstallMissing` 允許五房部署工具對尚未裝遊戲的 Quest 3 安裝原發行 APK。開始前核對整批席位、裝置及本機 APK，逐席在原 ADB 連線上裝完後再核對版號、裝置 APK 雜湊及管理來源。Android 回報安裝的席位會在原部署報告留下 `installedApk`。 [五房部署操作](QUEST3.md#同批安裝尚未安裝遊戲的-quest-3)

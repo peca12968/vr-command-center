@@ -2739,6 +2739,85 @@ else:
             self.assertEqual({alignment, 'vr-connection.json'}, {file.name for file in directory.iterdir()})
         self.assertNotIn('v2.', result.stdout)
 
+    def test_prepare_quest_apks_before_tickets_and_without_launching(self):
+        mapping, assignments = self.device_map()
+        release, document, release_env = self.release_report()
+        apk = Path(release_env['VR_QUEST_FLEET_APK'])
+        command = ['pwsh', '-NoProfile', '-NonInteractive', '-File', str(ROOT / 'scripts/deploy-quest.ps1'),
+                   '-PrepareQuestApks', '-DeviceMap', str(mapping), '-ReleaseReport', str(release), '-ApkPath', str(apk),
+                   '-AdbPath', str(ROOT / 'tests/fixtures/mock-quest-fleet.ps1')]
+        fresh = ('fixture-01', 'fixture-11', 'fixture-25')
+
+        def run(fleet, *options, faults=None):
+            fleet.mkdir(exist_ok=True)
+            return subprocess.run([*command, *options], capture_output=True, encoding='utf-8', timeout=35,
+                env={**os.environ, **release_env, 'VR_COMMAND_MASTER_KEY': '', 'VR_QUEST_FLEET_FIXTURE': str(fleet),
+                     'VR_QUEST_FLEET_FRESH': ','.join(fresh), 'VR_QUEST_FLEET_FAULTS': json.dumps(faults or {})})
+
+        check = self.root / 'preview'
+        original_apk = apk.read_bytes()
+        apk.write_bytes(b'other APK')
+        self.assert_rejected(run(check, '-CheckOnly'), 'APK SHA-256 differs')
+        self.assertFalse((check / 'transport.log').exists())
+        apk.write_bytes(original_apk)
+        preview = run(check, '-CheckOnly')
+        self.assertEqual(0, preview.returncode, preview.stderr)
+        planned = json.loads(preview.stdout)
+        self.assertEqual('apk-preflight', planned['phase'])
+        self.assertTrue(planned['complete'])
+        self.assertEqual(['install-required' if index in (0, 10, 24) else 'ready' for index in range(25)],
+                         [row['status'] for row in planned['devices']])
+        self.assertFalse(list(check.glob('fixture-*')))
+
+        blocked = self.root / 'blocked'
+        failed = run(blocked, faults={'fixture-02': 'identity-first-device', 'fixture-24': 'version-mismatch'})
+        self.assertEqual(1, failed.returncode, failed.stderr)
+        invalid = json.loads(failed.stdout)
+        self.assertEqual('apk-preflight', invalid['phase'])
+        self.assertEqual(['duplicate-device', 'duplicate-device'], [row['status'] for row in invalid['devices'][:2]])
+        self.assertEqual('version-mismatch', invalid['devices'][23]['status'])
+        self.assertFalse(list(blocked.glob('fixture-*')))
+
+        changed = self.root / 'changed'
+        swapped = run(changed, faults={'fixture-01': 'identity-changed'})
+        self.assertEqual(1, swapped.returncode, swapped.stderr)
+        self.assertEqual('device-identity-changed', json.loads(swapped.stdout)['devices'][0]['status'])
+        self.assertFalse(list(changed.glob('fixture-*')))
+
+        fleet = self.root / 'fleet'
+        interrupted = run(fleet, faults={'fixture-11': 'install-failed'})
+        self.assertEqual(1, interrupted.returncode, interrupted.stderr)
+        partial = json.loads(interrupted.stdout)
+        self.assertFalse(partial['complete'])
+        self.assertTrue(partial['devices'][0]['installedApk'] and partial['devices'][0]['apkVerified'])
+        self.assertEqual('install-apk', partial['devices'][10]['failedStep'])
+        self.assertEqual('not-attempted', partial['devices'][24]['status'])
+        first_apk = fleet / 'fixture-01' / 'installed.apk'
+        self.assertEqual(original_apk, first_apk.read_bytes())
+        log = fleet / 'adb.log'
+        log.unlink()
+        resumed = run(fleet)
+        self.assertEqual(0, resumed.returncode, resumed.stderr)
+        ready = json.loads(resumed.stdout)
+        self.assertEqual(('apk-preparation', True), (ready['phase'], ready['complete']))
+        self.assertEqual(document['quest']['sha256'], ready['expectedApkSha256'])
+        self.assertEqual(hashlib.sha256(release.read_bytes()).hexdigest(), ready['venueReleaseReportSha256'])
+        self.assertTrue(all(row['status'] == 'ready' and row['apkVerified'] for row in ready['devices']))
+        self.assertEqual(['fixture-11', 'fixture-25'], [line.split()[1] for line in log.read_text().splitlines() if ' install ' in line])
+        for serial in fresh:
+            self.assertEqual(original_apk, (fleet / serial / 'installed.apk').read_bytes())
+        for directory in (check, blocked, changed, fleet):
+            calls = (directory / 'transport.log').read_text()
+            self.assertNotIn(' push ', calls)
+            self.assertNotIn(' shell am ', calls)
+        self.assertNotRegex(resumed.stdout, 'fixture-\\d+|HARDWARE-SERIAL|joinTicket')
+
+        assignments['seats'] = [row for row in assignments['seats'] if row['serial'] == 'fixture-25']
+        mapping.write_text(json.dumps(assignments), encoding='utf-8')
+        one_seat = run(fleet, '-CheckOnly')
+        self.assertEqual(0, one_seat.returncode, one_seat.stderr)
+        self.assertEqual([(5, 5)], [(row['roomId'], row['seat']) for row in json.loads(one_seat.stdout)['devices']])
+
     def test_install_missing_quest_apks_during_mapped_deployment_and_retry(self):
         files, configs = self.vr_bundle('Independent')
         bundle = self.write_bundle(files)

@@ -467,7 +467,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.z
 
 #### 用裝置清單部署 25 席
 
-先在各台 Quest 3 安裝同一版場館 APK 並授權 USB 偵錯。開發 APK `0.50.2` 的版本代碼為 `67`。建立 25 席清單後，依實體標籤把每個 `REPLACE-*` 換成對應的 ADB 裝置序號。每組房號與席位須對應一個唯一序號，清單只保存在操作電腦。腳本透過 `adb devices -l` 讀取授權狀態及 ADB 連線識別，再用 Android 套件管理器查詢已啟用的應用程式版本。 [ADB 命令參考](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/docs/user/adb.1.md) · [套件管理器版本輸出](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/pm/PackageManagerShellCommand.java#1130)
+在各台 Quest 3 授權 USB 偵錯。建立 25 席清單後，依實體標籤把每個 `REPLACE-*` 換成對應的 ADB 裝置序號。每組房號與席位須對應一個唯一序號，清單只保存在操作電腦。可以在配票前用 `-PrepareQuestApks` 安裝原發行 APK。腳本透過 `adb devices -l` 讀取授權狀態及 ADB 連線識別，再用 Android 套件管理器查詢已啟用的應用程式版本。 [配票前準備](#配票前準備-quest-apk) · [ADB 命令參考](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/docs/user/adb.1.md)
 
 ```powershell
 $seats = foreach ($room in 1..5) {
@@ -519,6 +519,20 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 批次預檢會先核對所有指定裝置。`apk-hash-mismatch` 表示版本代碼相符但 APK 位元組不同。`apk-unverified` 表示無法讀出 APK 的雜湊，或 Android 回傳多個套件檔。正式部署逐席開始寫入前會再核對一次。若第二次核對失敗，該席不寫入設定，後續席位標記為 `not-attempted`。`apkVerified: true` 表示該席已完成當階段的 APK 核對，入場及追蹤仍由主控台驗證。
 
 使用 `-ReleaseReport` 時，預檢與部署報告會記錄整份原發行 JSON 的 `venueReleaseReportSha256`。請將原發行 JSON 和 `-DeployMappedSeats` 的輸出一併保留，包括中途中斷但已有成功席位的報告。成功席位附原場次、玩家、入場及連線埠，可在封存驗收與 logcat 和原戰績對照。 [核對封存席位](EXTERNAL_CLIENTS.md#核對封存席位的-quest-發行-apk)
+
+#### 配票前準備 Quest APK
+
+五房新配發的玩家票券有效期為五分鐘。`-PrepareQuestApks` 可在建立場次或配票前準備 1 至 25 台頭盔，只需裝置清單、原發行報告及 APK。混合場館的清單可只列要準備的 Quest 3 席位。
+
+```powershell
+pwsh -NoProfile -NonInteractive -File .\scripts\deploy-quest.ps1 `
+    -PrepareQuestApks -DeviceMap .\device-map.json `
+    -ReleaseReport .\venue-release.json -ApkPath .\VrCommand.apk
+```
+
+加上 `-CheckOnly` 可先讀取裝置狀態。`apk-preflight` 報告的 `ready` 代表裝置 APK 已核對，`install-required` 代表可首次安裝。有裝置未授權、重複指派、型號不符，或已有的遊戲與發行報告不符時，整批在安裝前停止。
+
+正式準備會安裝缺少的 APK，並逐台讀回版號與 SHA-256。`apk-preparation` 完整報告表示指定的頭盔都已通過 APK 核對。中途失敗可用同一命令重跑，已核對的 APK 會直接沿用。這個步驟只準備應用程式。完成後，從主控台下載剛配發的五房 ZIP，再用同一裝置清單執行 `-DeployMappedSeats`。 [發行 APK 核對與部署](#核對頭盔內已安裝的發行-apk)
 
 #### 同批安裝尚未安裝遊戲的 Quest 3
 

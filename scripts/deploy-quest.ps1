@@ -2,7 +2,7 @@
 param(
     [Parameter(Mandatory, ParameterSetName='Player')][Parameter(Mandatory, ParameterSetName='Refresh')][Parameter(Mandatory, ParameterSetName='PlayerTracking')][string]$ClientConfig,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Refresh')][Parameter(Mandatory, ParameterSetName='Smoke')][string]$Serial,
-    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Refresh')][Parameter(ParameterSetName='Smoke')][string]$AdbPath = 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe',
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Refresh')][Parameter(ParameterSetName='Smoke')][Parameter(ParameterSetName='PrepareApks')][string]$AdbPath = 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe',
     [Parameter(Mandatory, ParameterSetName='Smoke')][switch]$SmokeTest,
     [Parameter(ParameterSetName='Smoke')][switch]$ResumeSmokeTest,
     [Parameter(ParameterSetName='Smoke')][Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][switch]$RequireOpenXR,
@@ -11,18 +11,19 @@ param(
     [Parameter(ParameterSetName='Player')][string]$AlignmentFile,
     [Parameter(ParameterSetName='Player')][switch]$Passthrough,
     [Parameter(ParameterSetName='Player')][switch]$MixedReality,
-    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][switch]$CheckOnly,
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='PrepareApks')][switch]$CheckOnly,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][switch]$RecordLinkMetrics,
     [Parameter(Mandatory, ParameterSetName='Venue')][string]$VenueManifest,
     [Parameter(Mandatory, ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='CapturePlan')][Parameter(Mandatory, ParameterSetName='Windows')][string]$VenueBundle,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,5)][int]$RoomId,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,5)][int]$Seat,
-    [Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='CapturePlan')][ValidateNotNullOrEmpty()][string]$DeviceMap,
+    [Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='CapturePlan')][Parameter(Mandatory, ParameterSetName='PrepareApks')][ValidateNotNullOrEmpty()][string]$DeviceMap,
     [Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='CapturePlan')][switch]$AllowPartialMap,
     [Parameter(Mandatory, ParameterSetName='CapturePlan')][switch]$ReadCapturePlan,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,2147483647)][int]$ExpectedVersionCode,
-    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Smoke')][ValidateNotNullOrEmpty()][string]$ReleaseReport,
-    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Smoke')][ValidateNotNullOrEmpty()][string]$ApkPath,
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Smoke')][Parameter(Mandatory, ParameterSetName='PrepareApks')][ValidateNotNullOrEmpty()][string]$ReleaseReport,
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Smoke')][Parameter(ParameterSetName='PrepareApks')][ValidateNotNullOrEmpty()][string]$ApkPath,
+    [Parameter(Mandatory, ParameterSetName='PrepareApks')][switch]$PrepareQuestApks,
     [Parameter(ParameterSetName='Bundle')][switch]$DeployMappedSeats,
     [Parameter(ParameterSetName='Bundle')][switch]$InstallMissing,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$RetryIncomplete,
@@ -605,7 +606,7 @@ function Export-WindowsVenueSeats {
 
 function Read-QuestVenueMap($Venue, [string]$Path, [switch]$Partial) {
     $map = (Read-DeploymentJson $Path 16384 'device map').Document
-    $count = $Venue.Report.seats
+    $count = if ($Venue) { $Venue.Report.seats } else { 25 }
     $minimum = if ($Partial) { 1 } else { $count }
     if (-not (Test-JsonInteger $map.version) -or $map.version -ne 1 -or $map.seats -isnot [array] -or
         $map.seats.Count -lt $minimum -or $map.seats.Count -gt $count -or
@@ -624,7 +625,7 @@ function Read-QuestVenueMap($Venue, [string]$Path, [switch]$Partial) {
         }
         if (-not $seats.Add("$($row.roomId)/$($row.seat)")) { throw "Room $($row.roomId) seat $($row.seat) is mapped more than once." }
         if (-not $serials.Add($row.serial)) { throw "Room $($row.roomId) seat $($row.seat) repeats an ADB serial." }
-        if (-not $Venue.Connections.ContainsKey("$($row.roomId)/$($row.seat)")) {
+        if ($Venue -and -not $Venue.Connections.ContainsKey("$($row.roomId)/$($row.seat)")) {
             throw "Room $($row.roomId) seat $($row.seat) is outside the original venue bundle."
         }
     }
@@ -1346,15 +1347,12 @@ function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, $R
         ReleaseReportSha256 = $releaseReportHash }
 }
 
-function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Release, $Retry, [string]$StagedApk) {
-    $expectedHash = [string]$Release.sha256
+function Read-MappedQuestPreflight([object[]]$Map, [int]$VersionCode, [string]$ExpectedHash, $Retry, [switch]$AllowMissingApk) {
     Confirm-QuestAdbStartup 'Android platform-tools are not installed.'
-    $originalMap = $Map
-    if ($Retry) { $Map = @($Map | Select-Object -Skip $Retry.Completed.Count) }
     $inventory = Get-QuestDeviceInventory
     $devices = @($Map | ForEach-Object {
         $preflightSeat = $_
-        try { Get-MappedQuestStatus $preflightSeat $inventory $VersionCode $ExpectedHash -AllowMissingApk:([bool]$StagedApk) }
+        try { Get-MappedQuestStatus $preflightSeat $inventory $VersionCode $ExpectedHash -AllowMissingApk:$AllowMissingApk }
         catch [TimeoutException] { [ordered]@{ roomId = $preflightSeat.roomId; seat = $preflightSeat.seat; status = 'adb-timeout' } }
     })
     $reportedSerials = [string[]]::new($Map.Count)
@@ -1382,6 +1380,64 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
             $firstSeatBySerial.Add($reportedSerial, $index)
         }
     }
+    return @{ Inventory = $inventory; Devices = $devices; Serials = $reportedSerials }
+}
+
+function Install-MappedQuestApk($Row, $Inventory, $Release, [string]$StagedApk, $Device, $Operation) {
+    $Operation.Step = 'install-apk'
+    $target = @('-t', [string]$Inventory[$Row.serial].TransportId)
+    Install-QuestReleaseApk $target $StagedApk
+    $Device.installedApk = $true
+    $Operation.Step = 'verify-installed-apk'
+    return Get-MappedQuestStatus $Row $Inventory $Release.versionCode $Release.sha256
+}
+
+function Invoke-QuestApkPreparation([object[]]$Map, $Release, [string]$StagedApk) {
+    $preflight = Read-MappedQuestPreflight $Map $Release.versionCode $Release.sha256 -AllowMissingApk
+    $devices = $preflight.Devices
+    $report = [ordered]@{ phase = 'apk-preflight'; expectedVersionCode = $Release.versionCode;
+        expectedApkSha256 = $Release.sha256; venueReleaseReportSha256 = $Release.reportSha256;
+        complete = $false; devices = $devices }
+    if ($devices | Where-Object { $_.status -cnotin @('ready','install-required') }) { return $report }
+    if ($CheckOnly) { $report.complete = $true; return $report }
+
+    $report.phase = 'apk-preparation'
+    foreach ($device in $devices) { $device.status = 'not-attempted'; $device.Remove('apkVerified') }
+    for ($index = 0; $index -lt $Map.Count; $index++) {
+        $row = $Map[$index]; $device = $devices[$index]
+        $target = @('-t', [string]$preflight.Inventory[$row.serial].TransportId)
+        $operation = @{ Step = 'verify-device' }
+        try {
+            $serial = Read-QuestDeviceSerial $target
+            if (-not $serial) { $device.status = 'device-identity-unavailable'; return $report }
+            if ($serial -cne $preflight.Serials[$index]) { $device.status = 'device-identity-changed'; return $report }
+            $operation.Step = 'check-apk-before-install'
+            $current = Get-MappedQuestStatus $row $preflight.Inventory $Release.versionCode $Release.sha256 -AllowMissingApk
+            if ($current.status -ceq 'install-required') {
+                $current = Install-MappedQuestApk $row $preflight.Inventory $Release $StagedApk $device $operation
+            }
+            $device.status = $current.status
+            if ($current.status -cne 'ready') { $device.failedStep = $operation.Step; return $report }
+            $device.versionCode = $current.versionCode
+            $device.apkVerified = $true
+        } catch {
+            $device.status = if ($_.Exception -is [TimeoutException]) { 'adb-timeout' } else { 'apk-preparation-failed' }
+            $device.failedStep = $operation.Step
+            return $report
+        }
+    }
+    $report.complete = $true
+    return $report
+}
+
+function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Release, $Retry, [string]$StagedApk) {
+    $expectedHash = [string]$Release.sha256
+    $originalMap = $Map
+    if ($Retry) { $Map = @($Map | Select-Object -Skip $Retry.Completed.Count) }
+    $preflight = Read-MappedQuestPreflight $Map $VersionCode $ExpectedHash $Retry -AllowMissingApk:([bool]$StagedApk)
+    $inventory = $preflight.Inventory
+    $devices = $preflight.Devices
+    $reportedSerials = $preflight.Serials
     $report = [ordered]@{ phase = 'preflight'; topology = $Venue.Report.topology; expectedVersionCode = $VersionCode;
         earliestExpiryUtc = $Venue.Report.earliestExpiryUtc; complete = $false; devices = $devices }
     if ($ExpectedHash) { $report.expectedApkSha256 = $ExpectedHash }
@@ -1465,11 +1521,7 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
                     if ($connection.Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) {
                         $device.status = 'ticket-expired'; return $report
                     }
-                    $deployment.Step = 'install-apk'
-                    Install-QuestReleaseApk $target $StagedApk
-                    $device.installedApk = $true
-                    $deployment.Step = 'verify-installed-apk'
-                    $current = Get-MappedQuestStatus $row $inventory $VersionCode $ExpectedHash
+                    $current = Install-MappedQuestApk $row $inventory $Release $StagedApk $device $deployment
                 }
                 if ($current.status -cne 'ready') { throw 'The installed Quest app could not be verified for this release.' }
                 $device.versionCode = $current.versionCode
@@ -1875,6 +1927,28 @@ if ($PSCmdlet.ParameterSetName -eq 'PlayerTracking') {
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $apk = if ($ApkPath) { $ApkPath } else { Join-Path $projectRoot 'artifacts/quest/VrCommand.apk' }
+if ($PSCmdlet.ParameterSetName -eq 'PrepareApks') {
+    if (-not $PrepareQuestApks) { throw 'Specify -PrepareQuestApks to prepare the mapped Quest APKs.' }
+    $map = @(Read-QuestVenueMap $null $DeviceMap -Partial)
+    $release = Read-QuestRelease $ReleaseReport
+    if ($CheckOnly) {
+        Confirm-LocalQuestApk $apk $release.sha256
+        $result = Invoke-QuestApkPreparation $map $release
+    } else {
+        $deploymentLock = Enter-QuestDeployment
+        $stagedApk = $null
+        try {
+            $stagedApk = New-VerifiedQuestApk $apk $release.sha256
+            $result = Invoke-QuestApkPreparation $map $release $stagedApk
+        } finally {
+            if ($stagedApk) { Remove-Item -LiteralPath $stagedApk -ErrorAction SilentlyContinue }
+            $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose()
+        }
+    }
+    $result | ConvertTo-Json -Depth 4 -Compress
+    if (-not $result.complete) { exit 1 }
+    return
+}
 if ($PSCmdlet.ParameterSetName -eq 'Smoke') {
     if (-not $SmokeTest) { throw 'Specify -SmokeTest to install and check a first launch.' }
     $release = Read-QuestRelease $ReleaseReport
