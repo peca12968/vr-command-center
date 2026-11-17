@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 讀回五房配置的原保存紀錄
+
+- 控制台 0.31.253 依配置 ID 查閱原紀錄，比對模式、名稱、保存時間及依房號排列的版本後才套用。舊包會採用清單中被替換、但本身有效的第 5 房任務。新版保留目前準備；若同一原版本讀回不符，會列出所有相關房間。 [五房配置操作](MISSION_VERSIONS.md#在開場前保存五房任務配置)
+- 先用 0.31.252 保存混合獨立與合併配置及更新任務庫，再由 0.31.253 開啟同一隔離資料。正式解壓包以 AF_UNIX 與 Chromium 通過七項，還原原歷史版本且保留草稿及復原，單筆查閱核對 `no-store`、權限與 `404`。測試夾具曾在健康回應後尚未見監聽日誌行，已讓隔離服務等待二者。在另一輪早期瀏覽器夾具加入等待第二個查閱回覆後，正式解壓包通過。另通過 125 項 Node 測試和合併、獨立各 25 個模擬席位錄製重啟回歸。無 TCP 監聽或 UDP 端點。 [配置驗證](../artifacts/saved-venue-plan-record-031253/package-final/checks.json) · [原資料重開](../artifacts/saved-venue-plan-record-031253/package-final/runtime.json) · [錄製回歸](../artifacts/saved-venue-plan-record-031253/world-regression.json)
+- `85385c1` 管理包核對 595 檔，與原 Windows 玩家、伺服器及 Quest 0.50.12 通過離線發行核對。GitHub Actions 因帳務或支出上限未啟動。 [Windows 管理包](../artifacts/saved-venue-plan-record-031253/VRCommand-ControlServer-0.31.253.zip) · [發行核對](../artifacts/saved-venue-plan-record-031253/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44020712501)
+
 ## 2026-11-17 核對任務草稿的保存回條
 
 - 控制台 0.31.252 在確認新任務及修訂前，核對回應的 `Location`、任務 ID、送出的完整內容與讀回的保存版本。座標及角度沿用 API 單精度。舊版會接受保留原版本 ID、但替換物件位置的回覆。新版保留草稿、原開場版本及原重試請求。 [任務庫操作](MISSION_VERSIONS.md#控制台操作)
