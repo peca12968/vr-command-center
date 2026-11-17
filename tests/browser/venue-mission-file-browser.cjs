@@ -87,6 +87,11 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
         'Substituting a valid version in a saved list row cannot replace the current preparation');
     } finally { await page.unroute(planList); }
     await page.locator('#refresh-venue-plans').click();
+    await page.locator('#preview-venue-plan').click();
+    await savedPanel.locator('#venue-missions-review').waitFor();
+    check(await mode.inputValue() === 'Linked' && await mission.inputValue() === a.id
+      && JSON.stringify(await reviewRows.evaluateAll(rows => rows.map(row => row.dataset.fileMission))) === JSON.stringify(ids)
+      && (await review.innerText()).includes('保存配置指定'), 'Previewing a saved plan compares all five original versions without applying them');
     await page.locator('#load-venue-plan').click();
     await page.locator('#venue-plan-status').filter({ hasText: '已載入「原保存配置」' }).waitFor();
     check(await mode.inputValue() === 'IndependentSet' && JSON.stringify(await selected()) === JSON.stringify(ids),
