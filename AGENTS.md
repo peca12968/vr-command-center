@@ -1,6 +1,6 @@
 # 開發指引
 
-2026-11-17 使用者要求無人值守開發不得出現 Windows 防火牆允許視窗。所有專案啟動器一律查核可能顯示入站通知的網路設定檔，繼承 `VR_COMMAND_UNATTENDED=0` 也無法放寬。所有可能啟動 Windows 入站連接的背景開發及測試指令，仍先在該 PowerShell 指令內設定 `$env:VR_COMMAND_UNATTENDED = '1'`，涵蓋舊版套件。由受查核的入口啟動 Unity、`VrCommand.exe` 及 ADB。查核拒絕時記錄原因，繼續離線建置、封裝與測試。背景工作避免提權及安全性確認視窗。
+2026-11-17 使用者要求背景開發無需人員在場按「允許」，也不能觸發 Windows 防火牆或 UAC 提權視窗。由受查核的入口啟動 Unity、`VrCommand.exe` 及 ADB，避免直接執行遊戲本體或未經查核的舊版啟動器。專案啟動器查核所有可能顯示入站通知的網路設定檔，繼承 `VR_COMMAND_UNATTENDED=0` 也無法放寬。可能啟動 Windows 入站連線的背景開發及測試指令，先在同一 PowerShell 指令設定 `$env:VR_COMMAND_UNATTENDED = '1'`，涵蓋舊版套件。查核拒絕或無法完成時，在終端機記錄原因並略過原生測試，繼續離線建置、封裝或本機 IPC 測試。
 
 PowerShell 的本機管理、UDP 探測及 Quest 部署入口強制以 `-Unattended` 查核，避免繼承手動模式。先查核會探測或繫結連接埠的程式；五房預覽完成後，實際開場前再查核啟動器及 `VrCommand.exe`。背景啟動的套件子程序一律繼承無人值守模式。本機管理與瀏覽器迴歸可用沒有 TCP 或 UDP 監聽的 IPC 測試。
 
