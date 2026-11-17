@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import hashlib
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from itertools import count
 import json
 import os
 from pathlib import Path
@@ -23,11 +24,13 @@ import urllib.request
 import uuid
 import zipfile
 
-from local_api import add_api_arguments, checked_api_command
+from local_api import add_api_arguments, api_command as resolve_api_command, checked_api_command
+from windows_ipc_api import UnixHttpConnection, accept_unix, bind_unix, connect_unix, has_no_ip_endpoints, unix_address, unix_http_opener
 from windows_firewall import require_silent_windows_launch
 
 ROOT = Path(__file__).resolve().parents[1]
 HIDDEN = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+IPC_DIRECTORY = 'VR_COMMAND_HARDWARE_IPC_DIRECTORY'
 
 
 def sha(path):
@@ -35,8 +38,46 @@ def sha(path):
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
+class RehearsalIpc:
+    def __init__(self, directory):
+        self.directory = directory
+        self.mock_ports = count(19000)
+        self.authority_ports = count(18001)
+
+    def management_socket(self, port):
+        return self.directory / f'management-{port}.sock'
+
+    def management(self, port):
+        return UnixHttpConnection(unix_address(self.management_socket(port)))
+
+    def peer(self, port):
+        return connect_unix(unix_address(self.directory / f'mock-{port}.sock'))
+
+    @contextmanager
+    def fault_server(self, handler):
+        port = next(self.authority_ports)
+        path = self.management_socket(port)
+
+        class Server(ThreadingHTTPServer):
+            address_family = 1
+            server_port = port
+            server_name = 'localhost'
+
+            def server_bind(self):
+                bind_unix(self.socket, unix_address(path))
+
+            def get_request(self):
+                return accept_unix(self.socket), ('localhost', 0)
+
+        try:
+            with Server(str(path), handler) as server:
+                yield server
+        finally:
+            path.unlink(missing_ok=True)
+
+
 @contextmanager
-def authority_gate(port, owners):
+def authority_gate(port, owners, ipc=None):
     routes = {f'/api/sessions/{session}/rooms/{room}/hardware-feedback': room for room, session in owners.items()}
     faults, injected = {}, set()
 
@@ -58,8 +99,10 @@ def authority_gate(port, owners):
             if fault is not None and not callable(fault):
                 status, body = fault
             elif room is not None or path == '/api/me':
-                with closing(http.client.HTTPConnection('127.0.0.1', port, timeout=2)) as upstream:
-                    upstream.request('GET', self.path, headers={'Authorization': self.headers['Authorization']})
+                connection = ipc.management(port) if ipc else http.client.HTTPConnection('127.0.0.1', port, timeout=2)
+                with closing(connection) as upstream:
+                    upstream.request('GET', self.path, headers={
+                        'Authorization': self.headers['Authorization'], 'Host': f'127.0.0.1:{port}'})
                     reply = upstream.getresponse()
                     status, body = reply.status, reply.read(192 * 1024 + 1)
                 if fault is not None and status == 200:
@@ -72,7 +115,8 @@ def authority_gate(port, owners):
             self.end_headers()
             self.wfile.write(body)
 
-    with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+    listener = ipc.fault_server(Handler) if ipc else ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    with listener as server:
         server.daemon_threads = False
         worker = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .05})
         worker.start()
@@ -92,7 +136,7 @@ def run(args, api_command, api_cwd):
     token = secrets.token_hex(32)
     private = [*keys.values(), token]
     env = {k:v for k,v in os.environ.items() if not k.lower().startswith('operatorkeys__') and k.lower() not in
-           ('operatorkeyfile','playerticketsigningkey','controlpipetoken','datadirectory','sessiondatadirectory','vr_command_room_key','vr_command_master_key')
+           ('operatorkeyfile','playerticketsigningkey','controlpipetoken','datadirectory','sessiondatadirectory','vr_command_room_key','vr_command_master_key', IPC_DIRECTORY.lower())
            and k.upper() not in {f'VR_COMMAND_ROOM_{room}_KEY' for room in range(1,6)}}
     findings, closed, processes, api_log = [], [], [], []
     binary = args.simulator_dll.resolve()
@@ -128,6 +172,8 @@ def run(args, api_command, api_cwd):
         def __init__(self, room=None):
             self.lines = queue.Queue()
             command = [sys.executable, str(peer_script), '--manual']
+            if ipc:
+                command += ['--port', str(next(ipc.mock_ports))]
             if room is not None:
                 command += ['--room', str(room)]
             self.process = start(command, env)
@@ -148,18 +194,24 @@ def run(args, api_command, api_cwd):
             self.process.stdin.write(command+'\n')
             self.process.stdin.flush()
 
-    with tempfile.TemporaryDirectory(prefix='vr-live-hardware-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='vr-hw-', dir=args.ipc_work_root) as temporary:
         runtime = Path(temporary)
-        with socket.socket() as reserve:
-            reserve.bind(('127.0.0.1',0))
-            port = reserve.getsockname()[1]
+        ipc = RehearsalIpc(runtime) if args.ipc_work_root else None
+        if ipc:
+            port = 18000
+            env[IPC_DIRECTORY] = str(runtime)
+        else:
+            with socket.socket() as reserve:
+                reserve.bind(('127.0.0.1',0))
+                port = reserve.getsockname()[1]
         base = f'http://127.0.0.1:{port}'
         keyfile = runtime/'keys.json'
         keyfile.write_text(json.dumps({'OperatorKeys':keys}), encoding='utf-8')
         options = {**env, 'OperatorKeyFile':str(keyfile), 'DataDirectory':str(runtime/'missions'),
             'SessionDataDirectory':str(runtime/'sessions'), 'ControlPipeToken':token,
             'Logging__LogLevel__Default':'Warning', 'Logging__LogLevel__Microsoft.AspNetCore.Hosting.Diagnostics':'Information'}
-        api = start([*api_command, '--urls', base], options, cwd=api_cwd)
+        api_urls = ['--urls', 'http://unix:/' + str(ipc.management_socket(port)), '--preferHostingUrls', 'true'] if ipc else ['--urls', base]
+        api = start([*api_command, *api_urls], options, cwd=api_cwd)
 
         def collect():
             for line in api.stdout:
@@ -167,7 +219,10 @@ def run(args, api_command, api_cwd):
 
         api_reader = threading.Thread(target=collect, daemon=True)
         api_reader.start()
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        opener = unix_http_opener(ipc.management_socket) if ipc else urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+        def connect_peer(mock_port):
+            return ipc.peer(mock_port) if ipc else socket.create_connection(('127.0.0.1', mock_port), timeout=3)
 
         def request(path, body=None, role='Master', *, method=None, admission=None):
             headers = {'Authorization':'Bearer '+keys[role], 'Content-Type':'application/json'}
@@ -186,6 +241,8 @@ def run(args, api_command, api_cwd):
 
         try:
             wait(health,'management ready')
+            if ipc:
+                check(has_no_ip_endpoints([os.getpid(), api.pid]), 'Windows IPC begins with no TCP listeners or UDP endpoints')
             mission = request('/api/missions', {'name':'Live mock feedback', 'briefing':'Isolated test session', 'durationSeconds':600,
                 'environment':{'mode':'VR','weather':'Clear','timeOfDay':'Day','lightning':False},
                 'enemies':{'count':0,'behavior':'Hold','autoAttack':False},'props':[]})
@@ -590,13 +647,13 @@ def run(args, api_command, api_cwd):
                     return True
 
             hello = {'version':1,'kind':'hello','mode':'simulation','connectionId':str(uuid.uuid4()),'roomId':1}
-            with socket.create_connection(('127.0.0.1',bound_peers[2].port),timeout=3) as sock, sock.makefile('rb') as wire:
+            with connect_peer(bound_peers[2].port) as sock, sock.makefile('rb') as wire:
                 mock_send(sock,hello)
                 assert mock_refused(wire)
             check(bound_peers[2].read('room-rejected')=={'kind':'room-rejected','roomId':1,'expectedRoomId':2},
                   'A room-assigned mock rejects the wrong room even when no gateway owns its port')
             for wrong in ({'roomId':1},{'connectionId':str(uuid.uuid4())}):
-                with socket.create_connection(('127.0.0.1',bound_peers[2].port),timeout=3) as sock, sock.makefile('rb') as wire:
+                with connect_peer(bound_peers[2].port) as sock, sock.makefile('rb') as wire:
                     valid = {**hello,'roomId':2,'connectionId':str(uuid.uuid4())}
                     mock_send(sock,valid)
                     assert bound_peers[2].read('hello')==valid
@@ -1152,7 +1209,7 @@ def run(args, api_command, api_cwd):
                     fault_stop = runtime/'linked-fleet-authority-faults.stop'
                     fault_bindings = runtime/'linked-fleet-authority-fault-bindings'
                     shutil.copytree(folder, fault_bindings)
-                    with authority_gate(port, owners) as (origin, faults, injected):
+                    with authority_gate(port, owners, ipc) as (origin, faults, injected):
                         for file in fault_bindings.glob('room-*.json'):
                             value = json.loads(file.read_bytes())
                             file.write_text(json.dumps(dict(value, managementUrl=origin)), encoding='utf-8')
@@ -1301,7 +1358,7 @@ def run(args, api_command, api_cwd):
                 shutil.copytree(folder, continuity_bindings)
                 continuity_directory = out/f'{label}-continuity'
                 continuity_stop = runtime/f'{label}-continuity.stop'
-                with authority_gate(port, owners) as (origin, faults, _):
+                with authority_gate(port, owners, ipc) as (origin, faults, _):
                     for file in continuity_bindings.glob('room-*.json'):
                         config = json.loads(file.read_bytes())
                         file.write_text(json.dumps(dict(config, managementUrl=origin)), encoding='utf-8')
@@ -1664,6 +1721,9 @@ def run(args, api_command, api_cwd):
                       f'{mode} all five terminal snapshots identify the mock run that ended')
                 save(f'{label}-venue-status-terminal.json', terminal)
                 check(request('/api/sessions')==[], f'{mode} launches all five generated settings and confirms 25 exact mock deliveries before ending')
+            if ipc:
+                check(has_no_ip_endpoints([os.getpid(), *(process.pid for process in processes if process.poll() is None)]),
+                      'Owned IPC fixtures and mock processes have zero TCP listeners and UDP endpoints')
         finally:
             for process in reversed(processes):
                 if process is api:
@@ -1685,7 +1745,9 @@ def run(args, api_command, api_cwd):
     check(sha(peer_script)==peer_hash, 'The exact mock peer remains byte-identical')
     save('checks.json', {'complete':True,'checks':len(findings),'findings':findings,'simulatorDll':str(binary),
                          'binaryFiles':files,'helperSha256':sha(Path(__file__)),'peerSha256':peer_hash,
-                         'scope':'Actual API and loopback mock devices, no physical device I/O'})
+                         'transport':'Windows AF_UNIX' if args.ipc_work_root else 'Loopback TCP',
+                         'ipcSupportSha256':sha(Path(__file__).with_name('windows_ipc_api.py')) if args.ipc_work_root else None,
+                         'scope':'Actual API and mock devices, no physical device I/O'})
     print(json.dumps({'complete':True,'checks':len(findings),'directory':str(out)}))
 
 
@@ -1695,10 +1757,17 @@ if __name__ == '__main__':
     parser.add_argument('--simulator-dll',type=Path,default=ROOT/'tools/VrCommand.HardwareSimulator/bin/Release/net10.0/VrCommand.HardwareSimulator.dll')
     parser.add_argument('--mock-peer-script',type=Path,default=ROOT/'scripts/hardware-mock-peer.py')
     parser.add_argument('--evidence-root',type=Path,default=ROOT/'artifacts/live-hardware-gateway')
+    parser.add_argument('--ipc-work-root', type=Path, help='Short existing Windows folder for the AF_UNIX rehearsal')
     args = parser.parse_args()
     try:
-        api_command, api_cwd, _ = checked_api_command(args)
-        require_silent_windows_launch(sys.executable)
+        if args.ipc_work_root:
+            if os.name != 'nt' or not args.ipc_work_root.is_dir():
+                raise ValueError('Use a short existing Windows IPC work root.')
+            args.ipc_work_root = args.ipc_work_root.resolve(strict=True)
+            api_command, api_cwd, _ = resolve_api_command(args)
+        else:
+            api_command, api_cwd, _ = checked_api_command(args)
+            require_silent_windows_launch(sys.executable)
     except (OSError, RuntimeError, ValueError) as error:
         parser.exit(2, f'{error}\n')
     run(args, api_command, api_cwd)

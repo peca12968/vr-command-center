@@ -1,24 +1,34 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using VrCommand.Core;
 using VrCommand.Simulation;
 
 var pairs = args.Chunk(2).ToArray();
-if (pairs.Any(pair => pair.Length != 2 || pair[0] is not ("--journal" or "--base-url" or "--key-file" or "--demo-room"))
-    || pairs.Select(pair => pair[0]).Distinct().Count() != pairs.Length) throw new ArgumentException("Use --journal, --base-url, --key-file and optional --demo-room as value pairs.");
+if (pairs.Any(pair => pair.Length != 2 || pair[0] is not ("--journal" or "--base-url" or "--key-file" or "--demo-room" or "--local-socket"))
+    || pairs.Select(pair => pair[0]).Distinct().Count() != pairs.Length) throw new ArgumentException("Use --journal, --base-url, --key-file and optional --demo-room or --local-socket as value pairs.");
 var options = pairs.ToDictionary(pair => pair[0], pair => pair[1]);
+var address = new Uri(options.GetValueOrDefault("--base-url", "http://127.0.0.1:5080"));
+UnixDomainSocketEndPoint? local = null;
+if (options.TryGetValue("--local-socket", out var socketPath))
+{
+    if (!Path.IsPathFullyQualified(socketPath) || address.Scheme != "http" || address.Host != "127.0.0.1"
+        || address.UserInfo.Length != 0 || address.AbsolutePath != "/" || address.Query.Length != 0 || address.Fragment.Length != 0)
+        throw new ArgumentException("Use an absolute local socket and a loopback HTTP management origin.");
+    local = new(Path.GetFullPath(socketPath));
+}
 var journalPath = Path.GetFullPath(options.GetValueOrDefault("--journal") ?? throw new ArgumentException("--journal is required."));
 var root = new DirectoryInfo(Environment.CurrentDirectory);
 while (!File.Exists(Path.Combine(root.FullName, "VrCommand.slnx"))) root = root.Parent ?? throw new InvalidOperationException("Run from the repository.");
 using var keys = JsonDocument.Parse(File.ReadAllText(options.GetValueOrDefault("--key-file", Path.Combine(root.FullName, "data/operator-keys.local.json"))).TrimStart('\uFEFF'));
-using var http = new HttpClient { BaseAddress = new Uri(options.GetValueOrDefault("--base-url", "http://127.0.0.1:5080")), Timeout = TimeSpan.FromSeconds(10) };
+using var http = Client(address, local);
 http.DefaultRequestHeaders.Authorization = new("Bearer", keys.RootElement.GetProperty("OperatorKeys").GetProperty("GameServer").GetString());
 if (options.TryGetValue("--demo-room", out var value))
 {
     var room = int.Parse(value); if (room is < 1 or > 5 || File.Exists(journalPath)) throw new ArgumentException("Demo needs room 1–5 and a new journal path.");
-    using var master = new HttpClient { BaseAddress = http.BaseAddress, Timeout = http.Timeout };
+    using var master = Client(address, local);
     master.DefaultRequestHeaders.Authorization = new("Bearer", keys.RootElement.GetProperty("OperatorKeys").GetProperty("Master").GetString());
     var rooms = await master.GetFromJsonAsync<RoomView[]>("/api/rooms", JsonFormat.Options);
     if (rooms!.Single(entry => entry.Id == room).SessionId.HasValue) throw new InvalidOperationException("Room is occupied; no existing session changed.");
@@ -100,6 +110,19 @@ using (var queue = TelemetryOutbox.OpenExisting(journalPath))
     var statistics = await http.GetFromJsonAsync<SessionStatistics>(path + "/statistics", JsonFormat.Options);
     Console.WriteLine(JsonSerializer.Serialize(new { sessionId = queue.SessionId, acknowledged = queue.AcknowledgedSequence, complete = queue.Complete, sealedStream = queue.Sealed, statistics }, JsonFormat.Options));
 }
+static HttpClient Client(Uri address, UnixDomainSocketEndPoint? endpoint)
+{
+    var client = endpoint is null ? new HttpClient() : new HttpClient(new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        UseProxy = false,
+        ConnectCallback = (_, cancellation) => LocalSocketTransport.Connect(endpoint, cancellation)
+    });
+    client.BaseAddress = address;
+    client.Timeout = TimeSpan.FromSeconds(10);
+    return client;
+}
+
 static Task<T> Post<T>(HttpClient http, string path, object body) => PostJson<T>(http, path, JsonSerializer.Serialize(body, JsonFormat.Options));
 static async Task<T> PostJson<T>(HttpClient http, string path, string json)
 {

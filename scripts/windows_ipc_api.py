@@ -7,7 +7,10 @@ import select
 import socket
 from socketserver import BaseRequestHandler, ThreadingTCPServer
 import struct
+import subprocess
 import threading
+import urllib.request
+from urllib.parse import urlsplit
 
 from windows_firewall import require_silent_windows_launch
 
@@ -34,6 +37,23 @@ def connect_unix(address):
         raise
 
 
+def bind_unix(sock, address):
+    winsock = ctypes.WinDLL('Ws2_32')
+    winsock.bind.argtypes = (ctypes.c_size_t, ctypes.c_void_p, ctypes.c_int)
+    if winsock.bind(sock.fileno(), ctypes.c_char_p(address), len(address)):
+        raise OSError(winsock.WSAGetLastError(), 'Could not bind the Windows IPC socket')
+
+
+def accept_unix(listener):
+    winsock = ctypes.WinDLL('Ws2_32')
+    winsock.accept.argtypes = (ctypes.c_size_t, ctypes.c_void_p, ctypes.c_void_p)
+    winsock.accept.restype = ctypes.c_size_t
+    handle = winsock.accept(listener.fileno(), None, None)
+    if handle == ctypes.c_size_t(-1).value:
+        raise OSError(winsock.WSAGetLastError(), 'Could not accept the Windows IPC socket')
+    return socket.socket(1, socket.SOCK_STREAM, 0, fileno=handle)
+
+
 class UnixHttpConnection(HTTPConnection):
     def __init__(self, address):
         super().__init__('localhost')
@@ -41,6 +61,28 @@ class UnixHttpConnection(HTTPConnection):
 
     def connect(self):
         self.sock = connect_unix(self.address)
+
+
+def unix_http_opener(socket_for_port):
+    class Handler(urllib.request.HTTPHandler):
+        def http_open(self, request):
+            url = urlsplit(request.full_url)
+            if url.hostname != '127.0.0.1' or url.port is None:
+                raise ValueError('Use a loopback HTTP address with an explicit IPC port')
+            address = unix_address(socket_for_port(url.port))
+            return self.do_open(lambda host, **_: UnixHttpConnection(address), request)
+
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), Handler())
+
+
+def has_no_ip_endpoints(process_ids):
+    ids = ','.join(str(int(pid)) for pid in process_ids)
+    script = (f'$ids=@({ids}); '
+              '@(Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object { $_.OwningProcess -in $ids }).Count; '
+              '@(Get-NetUDPEndpoint -ErrorAction Stop | Where-Object { $_.OwningProcess -in $ids }).Count')
+    counts = subprocess.check_output(['pwsh', '-NoProfile', '-NonInteractive', '-Command', script],
+                                     text=True, timeout=20, creationflags=subprocess.CREATE_NO_WINDOW)
+    return counts.split() == ['0', '0']
 
 
 class RelayHandler(BaseRequestHandler):

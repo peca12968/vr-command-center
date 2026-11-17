@@ -1,7 +1,9 @@
 """Offline device feedback replay from a real isolated API and ArenaSession outbox. No physical hardware I/O."""
-import argparse,hashlib,json,os,secrets,shutil,socket,subprocess,tempfile,threading,time,urllib.request,uuid
+import argparse,hashlib,json,os,secrets,shutil,socket,subprocess,sys,tempfile,threading,time,urllib.request,uuid
 from pathlib import Path
-from local_api import add_api_arguments, checked_api_command
+from local_api import add_api_arguments, api_command as resolve_api_command, checked_api_command
+from windows_firewall import require_silent_windows_launch
+from windows_ipc_api import has_no_ip_endpoints, unix_http_opener
 ROOT=Path(__file__).resolve().parents[1]
 def read(p):return json.loads(p.read_text(encoding='utf-8'))
 def sha(p):
@@ -12,30 +14,45 @@ def main():
     for name,project in [('simulator','VrCommand.HardwareSimulator'),('relay','VrCommand.TelemetryRelay')]:
         default=ROOT/'tools'/project/'bin/Release/net10.0'/(project+'.dll')
         p.add_argument('--'+name+'-dll',type=Path,default=default)
-    p.add_argument('--runtime-root',type=Path);args=p.parse_args()
+    runtime_options = p.add_mutually_exclusive_group()
+    runtime_options.add_argument('--runtime-root', type=Path)
+    runtime_options.add_argument('--ipc-work-root', type=Path, help='Short existing Windows folder for the AF_UNIX rehearsal')
+    args=p.parse_args()
+    use_ipc = args.ipc_work_root is not None
     try:
-        api_command, api_cwd, api_assembly = checked_api_command(args)
+        if use_ipc:
+            if os.name != 'nt' or not args.ipc_work_root.is_dir():
+                raise ValueError('Use a short existing Windows IPC work root.')
+            api_command, api_cwd, api_assembly = resolve_api_command(args)
+        else:
+            api_command, api_cwd, api_assembly = checked_api_command(args)
+            require_silent_windows_launch(sys.executable)
     except (OSError, RuntimeError, ValueError) as error:
         p.exit(2, f'{error}\n')
     binaries=[api_assembly,args.simulator_dll.resolve(),args.relay_dll.resolve()]
     if not all(v.is_file() for v in binaries):p.error('Build the complete solution first')
     binary_files={name:{v.relative_to(binary.parent).as_posix():sha(v) for v in binary.parent.rglob('*') if v.is_file()} for name,binary in zip(['api','simulator','relay'],binaries)}
     out=ROOT/'artifacts/hardware-simulator'/('run-'+uuid.uuid4().hex);out.mkdir(parents=True)
-    runtime=(args.runtime_root.resolve()/out.name) if args.runtime_root else Path(tempfile.mkdtemp(prefix='vr-hardware-simulator-'))
-    if args.runtime_root:runtime.mkdir(parents=True,exist_ok=False)
+    root = args.ipc_work_root or args.runtime_root
+    runtime=(root.resolve()/out.name) if root else Path(tempfile.mkdtemp(prefix='vr-hardware-simulator-'))
+    if root:runtime.mkdir(parents=True,exist_ok=False)
     print(json.dumps({'stage':'starting','directory':str(out)}),flush=True)
     keys={name:secrets.token_hex(32) for name in ['Master','GameServer']};pipe=secrets.token_hex(32)
     keyfile=runtime/'keys.private.json';keyfile.write_text(json.dumps({'OperatorKeys':keys}),encoding='utf-8')
     env={k:v for k,v in os.environ.items() if not k.lower().startswith('operatorkeys__') and k.lower() not in ('operatorkeyfile','playerticketsigningkey','controlpipetoken','datadirectory','sessiondatadirectory')}
     env.update(OperatorKeyFile=str(keyfile),DataDirectory=str(runtime/'missions'),SessionDataDirectory=str(runtime/'sessions'),ControlPipeToken=pipe,Logging__LogLevel__Default='Warning')
-    with socket.socket() as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
+    endpoint = runtime / 'api.sock'
+    if use_ipc:
+        port = 18000
+    else:
+        with socket.socket() as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
     base='http://127.0.0.1:'+str(port);logs=[];checks=[];complete=False;process=None;cleanup_errors=[]
     def check(value,label):
         if not value:raise AssertionError(label)
         checks.append(label);print('PASS: '+label,flush=True)
     def save(file,value,folder=out):
         with (folder/file).open('x',encoding='utf-8') as f:json.dump(value,f,indent=2);f.write('\n')
-    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    opener=unix_http_opener(lambda _port: endpoint) if use_ipc else urllib.request.build_opener(urllib.request.ProxyHandler({}))
     def get(path):
         req=urllib.request.Request(base+path,headers={'Authorization':'Bearer '+keys['Master']})
         with opener.open(req,timeout=5) as response:return json.load(response)
@@ -47,7 +64,8 @@ def main():
         (out/(name+'.log')).write_text(text,encoding='utf-8');check(result.returncode==(0 if success else 1),name+' exit status')
         return result
     try:
-        process=subprocess.Popen([*api_command,'--urls',base],cwd=api_cwd,env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+        api_urls = ['--urls', 'http://unix:/' + str(endpoint), '--preferHostingUrls', 'true'] if use_ipc else ['--urls', base]
+        process=subprocess.Popen([*api_command,*api_urls],cwd=api_cwd,env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
         def collect():
             for line in iter(process.stdout.readline,b''):
                 logs.append(line.decode('utf-8',errors='replace'))
@@ -61,6 +79,8 @@ def main():
             time.sleep(.1)
         check(get('/')['version']=='0.31.0','original API contract remains unchanged')
         journal=runtime/'combat.ndjson';relay=['dotnet',str(binaries[2]),'--journal',str(journal),'--base-url',base,'--key-file',str(keyfile)]
+        if use_ipc:
+            relay += ['--local-socket', str(endpoint)]
         run('arena-capture',relay+['--demo-room','3']);run('outbox-publish',relay)
         sessions=get('/api/sessions?includeEnded=true');check(len(sessions)==1,'isolated ArenaSession created exactly one original session')
         session=sessions[0];sid=session['id'];events=[];after=0
@@ -98,6 +118,8 @@ def main():
             file=runtime/(name+'.json');save(name+'.json',bad,runtime);dest=out/(name+'-must-not-exist.json');run(name,tool+['--input',str(file),'--output',str(dest)],False);check(not dest.exists(),name+' leaves no accepted output')
         check(get(f'/api/sessions/{sid}/events?limit=500')==events and get(f'/api/sessions/{sid}/statistics')==stats and get('/api/sessions')==[],'offline simulator does not mutate accepted session history, statistics or active rooms')
         check(all(secret not in file.read_text(encoding='utf-8') for file in out.iterdir() if file.is_file() for secret in [*keys.values(),pipe]),'public reports and logs contain none of the generated credentials')
+        if use_ipc:
+            check(has_no_ip_endpoints([os.getpid(), process.pid]), 'Owned IPC fixture and API have zero TCP listeners and UDP endpoints')
         check(all(sha(binary.parent/name)==value for group,binary in zip(['api','simulator','relay'],binaries) for name,value in binary_files[group].items()),'the tested API, simulator and relay output graphs remain byte-identical')
         complete=True
     finally:
@@ -114,7 +136,9 @@ def main():
         if cleanup_errors:raise RuntimeError('Owned API cleanup not confirmed; preserve original runtime')
         # Every child is terminal before the single raw snapshot. Never open preserved SQLite.
         shutil.copytree(runtime,out/'runtime-snapshot')
-    save('checks.json',{'complete':complete,'checks':len(checks),'findings':checks,'runtimeDirectory':str(runtime),'binaries':{name:str(binary) for name,binary in zip(['api','simulator','relay'],binaries)},'binaryFiles':binary_files,'helperSha256':sha(Path(__file__)),'scope':'Actual API and ArenaSession outbox plus compiled offline device simulator only; no physical hardware, vendor protocol, Unity/headset or gameplay load evidence'})
+    save('checks.json',{'complete':complete,'checks':len(checks),'findings':checks,'runtimeDirectory':str(runtime),'binaries':{name:str(binary) for name,binary in zip(['api','simulator','relay'],binaries)},'binaryFiles':binary_files,'helperSha256':sha(Path(__file__)),'transport':'Windows AF_UNIX' if use_ipc else 'Loopback TCP',
+         'ipcSupportSha256':sha(Path(__file__).with_name('windows_ipc_api.py')) if use_ipc else None,
+         'scope':'Actual API and ArenaSession outbox plus compiled offline device simulator only; no physical hardware, vendor protocol, Unity/headset or gameplay load evidence'})
     (ROOT/'artifacts/hardware-simulator-latest-path.txt').write_text(str(out),encoding='utf-8')
     print(json.dumps({'complete':complete,'checks':len(checks),'directory':str(out)}))
 if __name__=='__main__':main()

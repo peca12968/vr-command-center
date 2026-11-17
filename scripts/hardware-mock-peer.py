@@ -1,6 +1,8 @@
 """A loopback-only simulated device for VR Command hardware rehearsals."""
 import argparse
 import json
+import os
+from pathlib import Path
 import socket
 import struct
 import sys
@@ -97,22 +99,50 @@ def main():
     args = parser.parse_args()
     if args.port != 0 and not 1024 <= args.port <= 65535:
         parser.error('Use 0 or a port in 1024–65535')
-    try:
-        require_silent_windows_launch(sys.executable)
-    except WindowsFirewallLaunchError as error:
-        parser.exit(2, f'{error}\n')
-    with socket.socket() as listener:
-        listener.bind(('127.0.0.1', args.port))
-        listener.listen()
-        emit({'kind':'listening', 'port':listener.getsockname()[1]})
-        while True:
-            sock, _ = listener.accept()
-            with sock:
-                sock.settimeout(125)
-                try:
-                    exchange(sock, args.manual, args.room)
-                except (KeyError, TypeError, ValueError, OSError, struct.error):
-                    continue
+    directory = os.environ.get('VR_COMMAND_HARDWARE_IPC_DIRECTORY')
+    if directory is None:
+        try:
+            require_silent_windows_launch(sys.executable)
+        except WindowsFirewallLaunchError as error:
+            parser.exit(2, f'{error}\n')
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', args.port))
+            serve(listener, listener.getsockname()[1], args)
+        return
+
+    root = Path(directory)
+    if not root.is_absolute() or not root.is_dir() or not args.port:
+        parser.error('Local IPC requires an existing absolute directory and an explicit mock port number')
+    path = root / f'mock-{args.port}.sock'
+    accept = accept_connection
+    if os.name == 'nt':
+        from windows_ipc_api import accept_unix, bind_unix, unix_address
+        accept = accept_unix
+    with socket.socket(getattr(socket, 'AF_UNIX', 1), socket.SOCK_STREAM) as listener:
+        if os.name == 'nt':
+            bind_unix(listener, unix_address(path))
+        else:
+            listener.bind(str(path))
+        try:
+            serve(listener, args.port, args, accept)
+        finally:
+            path.unlink(missing_ok=True)
+
+
+def accept_connection(listener):
+    return listener.accept()[0]
+
+
+def serve(listener, port, args, accept=accept_connection):
+    listener.listen()
+    emit({'kind':'listening', 'port':port})
+    while True:
+        with accept(listener) as sock:
+            sock.settimeout(125)
+            try:
+                exchange(sock, args.manual, args.room)
+            except (KeyError, TypeError, ValueError, OSError, struct.error):
+                continue
 
 
 if __name__ == '__main__':

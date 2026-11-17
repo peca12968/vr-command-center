@@ -92,6 +92,11 @@ internal static partial class LiveHardwareGateway
         if (string.IsNullOrWhiteSpace(key) || key.Length > 512 || key.Any(c => c <= 32 || c >= 127)) throw new ArgumentException("Set the required operator key in the environment.");
 
         var handler = new SocketsHttpHandler { AllowAutoRedirect = false, UseProxy = false };
+        if (LocalRehearsalSocket.DirectoryPath() is { } directory)
+        {
+            var endpoint = LocalRehearsalSocket.Management(directory, api);
+            handler.ConnectCallback = (_, cancellation) => LocalSocketTransport.Connect(endpoint, cancellation);
+        }
         if (certificatePin is not null)
             handler.SslOptions.RemoteCertificateValidationCallback = (_, certificate, _, errors) =>
                 certificate is not null && (errors & ~SslPolicyErrors.RemoteCertificateChainErrors) == SslPolicyErrors.None
@@ -292,10 +297,8 @@ internal static partial class LiveHardwareGateway
                         continue;
                     }
                     PublishStatus("connecting");
-                    using var mock = new TcpClient(AddressFamily.InterNetwork);
                     var connection = Guid.NewGuid();
-                    await Connect(mock, config.MockPort, run.Token);
-                    var wire = mock.GetStream();
+                    using var wire = await Connect(config.MockPort, run.Token);
                     await Exchange(wire, new { version = 1, kind = "hello", mode = "simulation", connectionId = connection, config.RoomId },
                         "ready", connection, null, run.Token);
                     connections++;
@@ -423,7 +426,7 @@ internal static partial class LiveHardwareGateway
 
     // Monitor the authority while the peer holds the batch, and read it again after an ACK.
     // Cancelling the exchange joins its socket read before the caller closes and replaces the connection.
-    private static async Task<RoomHardwareFeedback?> ExchangeFeedback(NetworkStream wire, Func<long?, CancellationToken, Task<Observation>> readCurrent, int roomId,
+    private static async Task<RoomHardwareFeedback?> ExchangeFeedback(Stream wire, Func<long?, CancellationToken, Task<Observation>> readCurrent, int roomId,
         long after, RoomHardwareFeedback page, Delivery[] deliveries, Guid connection, Guid batch, CancellationToken run)
     {
         using var pending = CancellationTokenSource.CreateLinkedTokenSource(run);
@@ -522,15 +525,15 @@ internal static partial class LiveHardwareGateway
         && signal.Seat is >= 0 and <= 4 && signal.Kind is CombatKind.ShotFired or CombatKind.PlayerDamaged
         && signal.Damage == (signal.Kind == CombatKind.ShotFired ? 0 : Math.Clamp(signal.Damage, 1, 1000));
 
-    private static async Task Connect(TcpClient mock, int port, CancellationToken run)
+    private static async Task<Stream> Connect(int port, CancellationToken run)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(run); deadline.CancelAfter(RequestTimeout);
-        try { await mock.ConnectAsync(IPAddress.Loopback, port, deadline.Token); }
+        try { return await LocalSocketTransport.Connect(LocalRehearsalSocket.Mock(port), deadline.Token); }
         catch (SocketException) { throw new MockFailure("mock-disconnected"); }
         catch (OperationCanceledException) when (!run.IsCancellationRequested) { throw new MockFailure("mock-timeout"); }
     }
 
-    private static async Task Exchange(NetworkStream wire, object message, string kind, Guid connection, Guid? batch, CancellationToken run)
+    private static async Task Exchange(Stream wire, object message, string kind, Guid connection, Guid? batch, CancellationToken run)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(run); deadline.CancelAfter(RequestTimeout);
         var frame = JsonSerializer.SerializeToUtf8Bytes(message, Wire);

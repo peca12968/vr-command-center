@@ -169,6 +169,18 @@ dotnet .\VrCommand.HardwareSimulator.dll --verify-venue-report ..\venue\venue-bi
 
 需要重新排演該房時，使用原房控憑證和仍有效的房間設定，以 `--live` 另開該房，並指定新的報告和停止標記。新閘道使用當前游標。重開的房間由自己的標記控制，五房原輸出中的房間報告保留原樣。
 
+## Windows 無人值守的本機排演
+
+開發主機可用 0.2.23 的 AF_UNIX 模式排演。下列檢查會啟動隔離的管理服務、五房模擬閘道與模擬設備，使用既有的短路徑作為工作目錄。三者均使用本機 socket，可在防火牆仍啟用入站通知時執行。
+
+```powershell
+python scripts/check-live-hardware-gateway.py --ipc-work-root C:\VrRehearsal `
+  --api-exe '<解壓後的管理包>\Runtime\VrCommand.Api.exe' `
+  --simulator-dll '<解壓後的模擬器>\VrCommand.HardwareSimulator.dll'
+```
+
+若要自行啟動同機排演，在閘道及模擬設備的程序環境設定 `VR_COMMAND_HARDWARE_IPC_DIRECTORY` 為同一個短的私有絕對目錄。設定檔的管理 URL 為 `http://127.0.0.1:<數字>`，管理服務只繫結到目錄內的 `management-<數字>.sock`。每房用設定中的 `mockPort` 執行 `mock-device.py --port <數字> --room <房號>`，對應 `mock-<數字>.sock`。這些數字用來選 socket 檔和辨識模擬資源。程序依原設定驗證金鑰、名冊和回饋，報告沿用原格式。場館連線按原流程使用 TCP／HTTPS，請在該工作階段移除本機 IPC 環境變數。
+
 ## 即時模擬閘道
 
 解壓模擬器後，用 Python 3.12 開啟模擬設備。每房使用自己的程序和 TCP 埠，模擬連線固定使用本機 `127.0.0.1`。指定 `--room` 時，設備只接受該房握手。後續批次須符合握手房號及連線 ID 才會確認。

@@ -5,6 +5,7 @@ ROOT=Path(__file__).resolve().parents[1]
 FILES=['VrCommand.HardwareSimulator.dll','VrCommand.HardwareSimulator.deps.json','VrCommand.HardwareSimulator.runtimeconfig.json','VrCommand.Core.dll','VrCommand.Simulation.dll']
 VERSION='0.2.23'
 MOCK_FIREWALL_FILES=('windows_firewall.py','check-windows-firewall-notifications.ps1')
+MOCK_IPC_FILE='windows_ipc_api.py'
 LIVE_VERSIONS={*(f'0.2.{minor}' for minor in range(15)), *(f'0.2.{minor}' for minor in range(19, 23)), VERSION}
 README=f'''VR Command 硬體回饋模擬器 {VERSION}
 
@@ -15,6 +16,7 @@ dotnet VrCommand.HardwareSimulator.dll --input example.json --output <新的包�
 即時模式使用 Windows 管理包 0.31.27 以上與同房房控憑證。Python 3.12 可啟動本機模擬設備：
 python mock-device.py --room 1 --port 19101
 Windows 預設採用無人值守查核。任一啟用中的防火牆設定檔仍會顯示入站通知時，模擬設備會在終端機記錄原因並略過啟動。
+本機 AF_UNIX 排演可由操作人員明確設定 VR_COMMAND_HARDWARE_IPC_DIRECTORY，使用短的私有目錄。管理服務與模擬設備都走本機 socket，見 docs/HARDWARE.md。
 在另一個終端設定 VR_COMMAND_ROOM_KEY，再執行：
 dotnet VrCommand.HardwareSimulator.dll --live <包外room-config.json> --output <新的包外report.json>
 加上 --status 可在終端查看逐行 JSON 狀態，例如暫停、握手、等待 ACK 及模擬設備失聯。每行只包含房號、狀態和累計數字，stopped 表示報告已寫出並關閉。
@@ -78,6 +80,7 @@ def verify(folder):
     expected=set(FILES)|{'example.json','README.txt'}
     if mode=='OfflineAndLiveSimulation':expected.add('mock-device.py')
     if version in {'0.2.20', '0.2.21', '0.2.22', VERSION}:expected.update(MOCK_FIREWALL_FILES)
+    if version==VERSION:expected.add(MOCK_IPC_FILE)
     if set(manifest['files'])!=expected:raise ValueError('Unexpected simulator package payload')
     actual={p.relative_to(folder).as_posix() for p in folder.rglob('*') if p.is_file()}
     if actual!=set(manifest['files'])|{'hardware-package.json'}:raise ValueError('Missing or additional package file')
@@ -99,6 +102,12 @@ def main():
         raise ValueError('Require the completed live rehearsal and process cleanup')
     if witness['helperSha256']!=sha(ROOT/'scripts/check-live-hardware-gateway.py') or witness['peerSha256']!=sha(peer):
         raise ValueError('Live proof helper or tested mock changed')
+    transports={name: report.get('transport') for name,report in (('offlineSource',checks),('rehearsal',witness))}
+    if any(value not in ('Loopback TCP','Windows AF_UNIX') for value in transports.values()):
+        raise ValueError('Record how the original API and mock devices were reached in each proof')
+    ipc_hash=sha(ROOT/'scripts'/MOCK_IPC_FILE)
+    if any(report['transport']=='Windows AF_UNIX' and report.get('ipcSupportSha256')!=ipc_hash for report in (checks,witness)):
+        raise ValueError('The tested local socket support changed')
     binary=Path(checks['binaries']['simulator']).parent
     stage=args.stage_root.resolve()/('hardware-simulator-'+uuid.uuid4().hex);stage.mkdir(parents=True,exist_ok=False);folder=stage/'VRCommand-HardwareSimulator';folder.mkdir()
     for name in FILES:
@@ -108,10 +117,10 @@ def main():
     sample=evidence/'simulation-input.json';expected=read(evidence/'simulation-report.json')
     if not expected['simulatedHardwareOnly'] or expected['physicalDeliveryConfirmed']:raise ValueError('Not an offline simulation report')
     shutil.copyfile(sample,folder/'example.json');shutil.copyfile(peer,folder/'mock-device.py');(folder/'README.txt').write_text(README,encoding='utf-8')
-    for name in MOCK_FIREWALL_FILES:
+    for name in (*MOCK_FIREWALL_FILES, MOCK_IPC_FILE):
         shutil.copyfile(ROOT/'scripts'/name,folder/name)
     manifest={'schemaVersion':1,'toolVersion':VERSION,'mode':'OfflineAndLiveSimulation','requires':'.NET 10 runtime; Python 3.12 for the optional mock device',
-        'testEvidence':str(evidence),'liveTestEvidence':str(live),'inputSteps':expected['inputSteps'],
+        'testEvidence':str(evidence),'liveTestEvidence':str(live),'testTransports':transports,'inputSteps':expected['inputSteps'],
         'scope':'No physical device, vendor wire format, authentication attestation, Unity / headset / network capacity acceptance. File hashes are not signatures.',
         'files':{p.name:{'bytes':p.stat().st_size,'sha256':sha(p)} for p in sorted(folder.iterdir()) if p.is_file()}}
     (folder/'hardware-package.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8');verify(folder)
@@ -122,7 +131,7 @@ def main():
         for file in sorted(folder.iterdir()):z.write(file,'VRCommand-HardwareSimulator/'+file.name)
     with zipfile.ZipFile(output) as z:
         if z.testzip() is not None:raise ValueError('ZIP checksum failure')
-    receipt={'complete':True,'directory':str(folder),'zip':str(output),'bytes':output.stat().st_size,'sha256':sha(output),'files':len(manifest['files']),'scope':'Tested DLLs, offline fixture and loopback mock peer'}
+    receipt={'complete':True,'directory':str(folder),'zip':str(output),'bytes':output.stat().st_size,'sha256':sha(output),'files':len(manifest['files']),'testTransports':transports,'scope':'Tested DLLs, offline fixture and mock peer'}
     with output.with_suffix('.receipt.json').open('x',encoding='utf-8') as f:json.dump(receipt,f,indent=2);f.write('\n')
     (ROOT/'artifacts/hardware-simulator-package-path.txt').write_text(str(folder),encoding='utf-8');print(json.dumps(receipt))
 if __name__=='__main__':main()
