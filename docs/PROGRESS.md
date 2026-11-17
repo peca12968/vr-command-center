@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 無部署回條時也核對擷取中的 Quest 頭盔
+
+- `112d47e` 讓單席及五房擷取在沒有部署指紋時，以開始擷取時的頭盔序號核對後續就緒、定期檢查與日誌發布。序號只在記憶體保留。修正前，同一 ADB 連線位置及 PID 換機仍可通報就緒與交付；修正後會中止並保留 `.partial`。 [Quest 擷取操作](QUEST3.md#收集-quest-場館驗收日誌) · [修正前測試](../artifacts/quest-capture-unbound-20261117/before.log)
+- 21 項擷取測試及 7 項場館流程測試通過。使用模擬 ADB 和原驗收 CLI，合併與五房獨立模式各核對 25 席，獨立模式包含中斷後補擷取。最初場館測試被本機防火牆查核攔下，測試入口改為只接受已替換成離線資料來源的模擬 ADB。正式入口仍執行啟動前查核。 [擷取測試](../artifacts/quest-capture-unbound-20261117/capture-final.log) · [場館流程](../artifacts/quest-capture-unbound-20261117/venue-capture-final.log) · [兩種模式驗收](../artifacts/quest-capture-unbound-20261117/venue-cli.json)
+- Windows USB 查核目前仍只有 Quest 檔案傳輸介面，待 ADB 裝置可用後驗證實體頭盔。GitHub Actions 因帳務或支出上限未啟動。 [USB 查核](../artifacts/quest-capture-unbound-20261117/usb-status.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44045744901)
+
 ## 2026-11-17 無人值守啟動查核與 Quest 裝置表驗收
 
 - `f17c375` 補上管理服務 GUI 的 Python 連接埠探測查核。GUI 與 HTTPS 測試每次啟動管理程序前重查實際路徑，HTTPS 遊戲測試在準備場次及啟動伺服器前重查 `VrCommand.exe`。10 項啟動回歸通過。以這台 Windows 的設定執行三個入口，皆在啟動前退出 2。開發版遊戲程序數前後皆為零，兩個管理測試未建立執行目錄。 [遊戲啟動紀錄](../artifacts/windows-unattended-bdf099c6/startup-refusal.json) · [管理入口紀錄](../artifacts/windows-unattended-bdf099c6/control-refusal.json)
