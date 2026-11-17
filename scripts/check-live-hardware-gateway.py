@@ -996,7 +996,7 @@ def run(args, api_command, api_cwd):
                 fleet_report = json.loads((fleet_directory/'venue-report.json').read_bytes())
                 assert json.loads(fleet_stdout)==fleet_report and fleet_report['mode']==mode and not fleet_report['physicalDeliveryConfirmed']
                 manifest_path = folder/'venue-bindings.json'
-                assert fleet_report['version']==3 and fleet_report['bindingManifestSha256']==sha(manifest_path)
+                assert fleet_report['version']==4 and fleet_report['bindingManifestSha256']==sha(manifest_path)
                 assert fleet.returncode==int(mode=='Independent') and fleet_report['complete'] is (mode=='Linked') and fleet_stop.is_file()
                 assert len(set(venue_connections.values()))==5
                 assert [(row['roomId'],row['sessionId']) for row in fleet_report['rooms']]==list(owners.items())
@@ -1130,7 +1130,7 @@ def run(args, api_command, api_cwd):
                     rejected_pack = runtime/'invalid-handoff.zip'
                     altered_config = copied_bindings/'room-01.json'
                     altered_config.write_bytes(exact_config+b'\n')
-                    # Restore the version 3 aggregate to check the altered configuration.
+                    # Restore the original aggregate to check the altered configuration.
                     copied_aggregate.write_bytes(original_aggregate)
                     refused = handoff('--pack-venue-report',copied_manifest,'--report-directory',copied,'--output',rejected_pack)
                     assert refused.returncode==1 and not refused.stdout and not rejected_pack.exists()

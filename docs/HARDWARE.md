@@ -135,6 +135,8 @@ dotnet .\VrCommand.HardwareSimulator.dll --verify-venue-report ..\venue\venue-bi
 
 模擬器 0.2.17 產生版本 3 總報告。交接時也須保留綁定清單同目錄中的 `room-01.json` 至 `room-05.json`。工具核對排演實際讀入的設定檔雜湊，以及每筆訊號的設備、玩家、入場及席位是否與設定相符。輸出 `configurationsVerified: true` 並逐席列出結果，席號從 0 起算。版本 2 仍可查各房總數，`configurationsVerified` 為 `false`。
 
+模擬器 0.2.23 的版本 4 總報告會保存每批模擬回饋的原始串流及執行階段序號。離線核對會查驗事件與串流序號，並拒絕同一場次中重複的事件或回報，包括合併場跨房重複。通過時摘要顯示 `attemptIdentitiesVerified: true`。舊版報告仍可用原方式核對，其摘要會顯示 `attemptIdentitiesVerified: false`。
+
 模擬器 0.2.18 可將原綁定檔與原報告打包成單一 ZIP。接收方可直接驗證 ZIP，核對結果與讀取原資料夾相同。ZIP 包含場次、玩家、入場與設備識別，請私下交接。
 
 ```powershell

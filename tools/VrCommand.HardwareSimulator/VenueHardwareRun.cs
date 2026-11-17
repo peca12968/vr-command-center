@@ -64,7 +64,7 @@ internal static partial class LiveHardwareGateway
                 (await RunVenueRoom(entry.Config, clients[index], entry.Path, output, stopFile, leases[index]))
                 with { ConfigurationSha256 = entry.Sha256 }));
             var complete = rooms.All(room => room.ExitCode == 0);
-            var report = new VenueRunReport(3, complete, manifest.Mode, true, false, bindingManifestSha256, rooms);
+            var report = new VenueRunReport(4, complete, manifest.Mode, true, false, bindingManifestSha256, rooms);
             var stagedReport = Path.Combine(output, "venue-report.tmp");
             using (var file = new FileStream(stagedReport, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {

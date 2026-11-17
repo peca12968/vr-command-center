@@ -52,15 +52,20 @@ internal static partial class LiveHardwareGateway
         var manifest = ParseVenueManifest(manifestBytes);
         var manifestHash = ReportHash(manifestBytes);
         var report = JsonSerializer.Deserialize<VenueRunReport>(read(HandoffReport, 8192), HeartbeatWire);
-        if (report is not { Version: 2 or 3, SimulatedHardwareOnly: true, PhysicalDeliveryConfirmed: false, Rooms.Length: SessionManager.RoomCount }
+        if (report is not { Version: 2 or 3 or 4, SimulatedHardwareOnly: true, PhysicalDeliveryConfirmed: false, Rooms.Length: SessionManager.RoomCount }
             || report.Mode != manifest.Mode || report.BindingManifestSha256 != manifestHash
             || report.Complete != report.Rooms.All(room => room?.ExitCode == 0))
             throw new InvalidDataException("Venue report does not match the original binding manifest.");
 
-        var configurationsVerified = report.Version == 3;
+        var configurationsVerified = report.Version >= 3;
+        var attemptIdentitiesVerified = report.Version == 4;
+        var eventIds = new HashSet<(Guid Session, Guid Event)>();
+        var reportIds = new HashSet<(Guid Session, Guid Report)>();
+        var eventSequences = new HashSet<(Guid Session, long Sequence)>();
+        var streamSequences = new HashSet<(Guid Session, Guid Stream, long Sequence)>();
         var rooms = report.Rooms.Zip(manifest.Rooms, ReviewRoom).ToArray();
         return new { version = 1, verified = true, rehearsalComplete = report.Complete,
-            report.Mode, report.BindingManifestSha256, configurationsVerified, simulatedHardwareOnly = true,
+            report.Mode, report.BindingManifestSha256, configurationsVerified, attemptIdentitiesVerified, simulatedHardwareOnly = true,
             physicalDeliveryConfirmed = false, rooms };
 
         RoomRunReview ReviewRoom(VenueRunResult row, VenueBindingRoom binding)
@@ -99,6 +104,7 @@ internal static partial class LiveHardwareGateway
                     || attempt.Deliveries.Any(delivery => delivery is null || delivery.DeviceId == Guid.Empty || delivery.Signal is null)
                     || attempt.Status is not ("simulated-acknowledged" or "cancelled" or "mock-timeout" or "mock-disconnected" or "mock-invalid-reply")))
                 throw new InvalidDataException("Room report does not match the venue result.");
+            if (attemptIdentitiesVerified) VerifyAttempts(room);
             var acknowledged = Count("simulated-acknowledged");
             var cancelled = Count("cancelled");
             if (acknowledged != room.Acknowledged) throw new InvalidDataException("Room acknowledgement count does not match.");
@@ -107,6 +113,32 @@ internal static partial class LiveHardwareGateway
                 room.Attempts.Sum(attempt => attempt.Deliveries.Length) - acknowledged - cancelled, seats);
 
             int Count(string status) => room.Attempts.Where(attempt => attempt.Status == status).Sum(attempt => attempt.Deliveries.Length);
+        }
+
+        void VerifyAttempts(RoomRunReport room)
+        {
+            var batches = new HashSet<Guid>();
+            var streamTails = new Dictionary<Guid, long>();
+            long lastEvent = 0;
+            foreach (var attempt in room.Attempts)
+            {
+                if (!batches.Add(attempt.BatchId) || attempt.StreamId is not { } stream || stream == Guid.Empty
+                    || attempt.RunningSinceSequence is not (> 0))
+                    throw new InvalidDataException("A hardware attempt lacks a unique batch or valid original stream and phase.");
+                var lastStream = streamTails.GetValueOrDefault(stream);
+                foreach (var delivery in attempt.Deliveries)
+                {
+                    var signal = delivery.Signal;
+                    if (!ValidSignal(signal, attempt.RunningSinceSequence.Value, lastEvent, lastStream)
+                        || !eventIds.Add((room.SessionId, signal.EventId)) || !reportIds.Add((room.SessionId, signal.ReportId))
+                        || !eventSequences.Add((room.SessionId, signal.EventSequence))
+                        || !streamSequences.Add((room.SessionId, stream, signal.StreamSequence)))
+                        throw new InvalidDataException("A hardware attempt repeats a signal or violates its original sequence.");
+                    lastEvent = signal.EventSequence;
+                    lastStream = signal.StreamSequence;
+                }
+                streamTails[stream] = lastStream;
+            }
         }
     }
 

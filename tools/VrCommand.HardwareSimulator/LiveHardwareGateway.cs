@@ -34,7 +34,9 @@ internal static partial class LiveHardwareGateway
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ManagementCertificateSha256 = null);
     private sealed record MockReply(int Version, string Kind, Guid ConnectionId, Guid? BatchId);
     private sealed record Delivery(Guid DeviceId, RoomHardwareSignal Signal);
-    private sealed record Attempt(Guid ConnectionId, Guid BatchId, string Status, Delivery[] Deliveries);
+    private sealed record Attempt(Guid ConnectionId, Guid BatchId, string Status, Delivery[] Deliveries,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? StreamId = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? RunningSinceSequence = null);
     private sealed record Observation(RoomHardwareFeedback Page, long RequestStarted)
     {
         internal bool IsFresh(RoomHardwareSignal signal) => Page.CheckedAtUtc >= signal.AcceptedAtUtc
@@ -346,7 +348,7 @@ internal static partial class LiveHardwareGateway
                             acknowledged += deliveries.Length;
                         }
                         catch (MockFailure failure) { status = failure.Message; throw; }
-                        finally { attempts.Add(new(connection, batch, status, deliveries)); }
+                        finally { attempts.Add(new(connection, batch, status, deliveries, epoch.Stream, epoch.Since)); }
                         PublishStatus("active");
                     }
                     if (page.State == SessionState.Ended)
@@ -504,18 +506,21 @@ internal static partial class LiveHardwareGateway
         var reportIds = new HashSet<Guid>();
         foreach (var signal in page.Signals)
         {
-            if (signal is null || signal.EventSequence <= last || signal.EventSequence > page.ThroughSequence
-                || signal.ObservedSequence < page.RunningSinceSequence || signal.ObservedSequence >= signal.EventSequence || signal.StreamSequence <= lastStream
-                || signal.EventId == Guid.Empty || signal.ReportId == Guid.Empty || signal.PlayerId == Guid.Empty || signal.AdmissionId == Guid.Empty
-                || !eventIds.Add(signal.EventId) || !reportIds.Add(signal.ReportId)
-                || signal.Seat is < 0 or > 4 || signal.Kind is not (CombatKind.ShotFired or CombatKind.PlayerDamaged)
-                || signal.Damage != (signal.Kind == CombatKind.ShotFired ? 0 : Math.Clamp(signal.Damage, 1, 1000)))
+            if (signal is null || !ValidSignal(signal, page.RunningSinceSequence.GetValueOrDefault(), last, lastStream)
+                || signal.EventSequence > page.ThroughSequence || !eventIds.Add(signal.EventId) || !reportIds.Add(signal.ReportId))
                 throw new InvalidDataException("Invalid feedback signal.");
             last = signal.EventSequence;
             lastStream = signal.StreamSequence;
         }
         return new(page, started);
     }
+
+    private static bool ValidSignal(RoomHardwareSignal signal, long runningSince, long lastEvent, long lastStream) =>
+        signal.EventSequence > lastEvent && signal.StreamSequence > lastStream
+        && signal.ObservedSequence >= runningSince && signal.ObservedSequence < signal.EventSequence
+        && signal.EventId != Guid.Empty && signal.ReportId != Guid.Empty && signal.PlayerId != Guid.Empty && signal.AdmissionId != Guid.Empty
+        && signal.Seat is >= 0 and <= 4 && signal.Kind is CombatKind.ShotFired or CombatKind.PlayerDamaged
+        && signal.Damage == (signal.Kind == CombatKind.ShotFired ? 0 : Math.Clamp(signal.Damage, 1, 1000));
 
     private static async Task Connect(TcpClient mock, int port, CancellationToken run)
     {

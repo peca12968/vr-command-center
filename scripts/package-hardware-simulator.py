@@ -3,9 +3,9 @@ import argparse,hashlib,json,shutil,uuid,zipfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 FILES=['VrCommand.HardwareSimulator.dll','VrCommand.HardwareSimulator.deps.json','VrCommand.HardwareSimulator.runtimeconfig.json','VrCommand.Core.dll','VrCommand.Simulation.dll']
-VERSION='0.2.22'
+VERSION='0.2.23'
 MOCK_FIREWALL_FILES=('windows_firewall.py','check-windows-firewall-notifications.ps1')
-LIVE_VERSIONS={*(f'0.2.{minor}' for minor in range(15)), '0.2.19', '0.2.20', '0.2.21', VERSION}
+LIVE_VERSIONS={*(f'0.2.{minor}' for minor in range(15)), *(f'0.2.{minor}' for minor in range(19, 23)), VERSION}
 README=f'''VR Command 硬體回饋模擬器 {VERSION}
 
 需要 .NET 10 runtime，本機使用10.0.14驗證。這不是Unity玩家程式或廠商SDK。
@@ -38,7 +38,7 @@ dotnet VrCommand.HardwareSimulator.dll --live-venue <包外venue-bindings.json> 
 五房結果見輸出目錄的 venue-report.json 與各房報告。某房入場失效時，其他房可繼續排演，總結果會列出各房退出碼。
 原綁定清單與整個輸出目錄可搬到另一台電腦後離線核對：
 dotnet VrCommand.HardwareSimulator.dll --verify-venue-report <原venue-bindings.json> --report-directory <原五房輸出目錄>
-版本 3 另需原綁定清單旁的 room-01.json 至 room-05.json。核對原設定及每筆設備與入場對應，列出逐席模擬確認、取消與失敗數。版本 2 報告仍可讀取各房總數。
+版本 3 及 4 另需原綁定清單旁的 room-01.json 至 room-05.json。版本 4 逐筆核對原串流、階段、事件和回報序號，並拒絕同場次的重複追蹤資料。版本 2 報告仍可讀取各房總數。
 verified 代表檔案一致性，排演結果見 rehearsalComplete。
 可將通過核對的原檔打包成一份交接 ZIP，再直接核對：
 dotnet VrCommand.HardwareSimulator.dll --pack-venue-report <原venue-bindings.json> --report-directory <原五房輸出目錄> --output <新ZIP>
@@ -76,7 +76,7 @@ def verify(folder):
     if manifest.get('schemaVersion')!=1 or not valid_version:raise ValueError('Unsupported simulator package')
     expected=set(FILES)|{'example.json','README.txt'}
     if mode=='OfflineAndLiveSimulation':expected.add('mock-device.py')
-    if version in {'0.2.20', '0.2.21', VERSION}:expected.update(MOCK_FIREWALL_FILES)
+    if version in {'0.2.20', '0.2.21', '0.2.22', VERSION}:expected.update(MOCK_FIREWALL_FILES)
     if set(manifest['files'])!=expected:raise ValueError('Unexpected simulator package payload')
     actual={p.relative_to(folder).as_posix() for p in folder.rglob('*') if p.is_file()}
     if actual!=set(manifest['files'])|{'hardware-package.json'}:raise ValueError('Missing or additional package file')
