@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 核對即時重連與封存尾格
+
+- 控制台 0.31.249 在即時觀戰重連遇到同序號時核對整份快照及統計。差異會保留上次已接受畫面、房間及鏡頭。即時封存須與已結束的最後一格及累計時間相符。舊版在兩種拓撲都接受替換天候的同序號、以執行中畫格封存，以及錯誤的封存時間。 [重連操作](WORLD_RECORDING.md#即時觀戰斷線後重新連接)
+- 正式解壓包以 Chromium 及 Windows AF_UNIX 通過 10 項查核。合併及獨立各用 25 個模擬席位，在第 5 房中斷 SSE 並核對自動重連的拒絕及恢復，正向封存使用管理服務的真實 SSE。另通過 125 項 Node 測試。管理服務沒有 TCP 監聽及 UDP 端點。 [合併場重連](../artifacts/live-reconnect-frame-031249/package-linked-active/checks.json) · [獨立場封存](../artifacts/live-reconnect-frame-031249/package-independent-ended/checks.json)
+- `17474ad` 管理包核對 595 檔，與原 Windows 0.50.12 玩家、伺服器及 Quest APK 完成離線發行核對。GitHub Actions 因帳務或支出上限未啟動。 [Windows 管理包](../artifacts/live-reconnect-frame-031249/VRCommand-ControlServer-0.31.249.zip) · [發行核對](../artifacts/live-reconnect-frame-031249/venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/44016883524)
+
 ## 2026-11-17 核對原封存席位與戰績
 
 - 控制台 0.31.248 在單房及全館席位表顯示前，核對原結束名冊、戰鬥封存序號及錄製最後一格。舊版在合併及獨立五房都接受替換玩家、對調席位、替換合理戰績或更改戰鬥尾界。新版遇到不符會清空席位表，重新讀取原資料才恢復操作。 [收尾操作](SESSION_CLOSURE.md#從全館收尾查看席位)
