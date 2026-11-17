@@ -23,7 +23,17 @@ spec = importlib.util.spec_from_file_location('player_package', ROOT / 'scripts/
 package = importlib.util.module_from_spec(spec); spec.loader.exec_module(package)
 
 
-def check_ticket_refresh(folder, directory):
+def compile_release_form_checks(directory):
+    compiler = Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+    runner = directory / 'release-form-checks.exe'
+    subprocess.run([str(compiler), '/nologo', '/target:exe', '/platform:x64', '/warnaserror+',
+                    '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/reference:System.Web.Extensions.dll',
+                    '/out:' + str(runner), str(ROOT / 'tools/WindowsPlayerLauncher/ReleaseFormChecks.cs')],
+                   check=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
+    return runner
+
+
+def check_ticket_refresh(folder, directory, form_runner):
     launcher = folder / 'Launch-Player.exe'
     fixture = directory / 'Ticket renewal 玩家'
     fixture.mkdir()
@@ -81,6 +91,22 @@ def check_ticket_refresh(folder, directory):
     lock.unlink()
     run('Accepts the same renewal after the original is available again', 'ticket-file-refreshed')
     assert not lock.exists()
+
+    form_original = fixture / 'form-original.json'
+    other_original = fixture / 'other-original.json'
+    other_renewal = fixture / 'other-renewal.json'
+    write(form_original, config(now - 45))
+    write(other_original, config(now - 30, seat=1))
+    write(other_renewal, config(now + 250, seat=1))
+    result = subprocess.run([str(form_runner), '--ticket-renewal-only', str(folder), str(fixture), str(form_original),
+                             str(renewal), str(other_original), str(other_renewal)],
+                            capture_output=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
+    (fixture / 'renewal-form.log').write_bytes(result.stdout + result.stderr)
+    result.check_returncode()
+    report = json.loads((fixture / 'renewal-form-checks.json').read_bytes())
+    assert report['complete'] and report['checks'] == 7
+    findings.append('Packaged WinForms renewal preserves the launched admission, process and status in seven hidden form checks')
+    print('PASS:', findings[-1], flush=True)
     return findings
 
 
@@ -262,7 +288,8 @@ def main():
         findings.append(label); print('PASS:', label, flush=True)
 
     check('Actual launcher verifies the full extracted runtime', ['--verify'], success=True)
-    findings.extend(check_ticket_refresh(folder, directory))
+    runner = compile_release_form_checks(directory)
+    findings.extend(check_ticket_refresh(folder, directory, runner))
     rejected = subprocess.run([str(folder / 'Launch-Player.exe'), '--launch', '--headless'], cwd=directory,
                               stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                               timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
@@ -352,12 +379,6 @@ def main():
         findings.append('Graphical OpenXR launch with a missing runtime exits before admission')
         print('PASS:', findings[-1], flush=True)
     if args.check_release_form:
-        compiler = Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
-        runner = directory / 'release-form-checks.exe'
-        subprocess.run([str(compiler), '/nologo', '/target:exe', '/platform:x64', '/warnaserror+',
-                        '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/reference:System.Web.Extensions.dll',
-                        '/out:' + str(runner), str(ROOT / 'tools/WindowsPlayerLauncher/ReleaseFormChecks.cs')],
-                       check=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
         result = subprocess.run([str(runner), str(folder), str(directory), str(valid), str(release), str(other_release), str(preflight_manifest)],
                                 capture_output=True, timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
         (directory / 'release-form-run.log').write_bytes(result.stdout + result.stderr)

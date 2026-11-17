@@ -209,8 +209,21 @@ internal static class PlayerLauncher
     {
         return path != null && Regex.IsMatch(path, @"\A[A-Za-z]:[\\/][^:\x00-\x1f]*\z");
     }
-    private static string RefreshTicket(string current, string renewal)
+    private static string ConfigEndpoint(Dictionary<string, object> value)
+    { return Text(value, "address") + ":" + Number(value, "port"); }
+
+    private sealed class TicketRenewal
     {
+        internal readonly string Status, FileHash;
+        internal readonly TicketPreview Ticket;
+        internal TicketRenewal(string status, string fileHash, TicketPreview ticket)
+        { Status = status; FileHash = fileHash; Ticket = ticket; }
+    }
+
+    private static TicketRenewal RefreshTicket(string current, string renewal, TicketPreview activeSeat = null, string activeEndpoint = null)
+    {
+        Require(LocalFullPath(current) && LocalFullPath(renewal) && !SamePath(current, renewal)
+            && !current.StartsWith(Root, StringComparison.OrdinalIgnoreCase), "Use separate local connection files outside the player package.");
         PlainPath(current); PlainPath(renewal);
         // Serialize concurrent refreshes of the same connection file. Unity can still read it.
         using (var guard = new FileStream(current + ".refresh.lock", FileMode.CreateNew, FileAccess.Write, FileShare.None, 1, FileOptions.DeleteOnClose))
@@ -222,15 +235,17 @@ internal static class PlayerLauncher
             var b = Config(Read(replacement, 32768, recordHash: hash => replacementHash = hash));
             var oldTicket = Text(a, "joinTicket"); var newTicket = Text(b, "joinTicket");
             var oldSeat = TicketPreview.Read(oldTicket); var newSeat = TicketPreview.Read(newTicket);
-            Require(oldSeat != null && oldSeat.SameAdmission(newSeat)
-                && Text(a, "address") == Text(b, "address") && Number(a, "port") == Number(b, "port"),
+            var endpoint = ConfigEndpoint(a);
+            Require(oldSeat != null && oldSeat.SameAdmission(newSeat) && endpoint == ConfigEndpoint(b)
+                && (activeSeat == null || activeSeat.SameAdmission(oldSeat) && activeEndpoint == endpoint),
                 "The connection files must use the original admission, seat and endpoint.");
-            Require(newSeat.ExpiresAtUtc > DateTimeOffset.UtcNow && newSeat.ExpiresAtUtc >= oldSeat.ExpiresAtUtc,
+            Require(newSeat.ExpiresAtUtc > DateTimeOffset.UtcNow && newSeat.ExpiresAtUtc >= oldSeat.ExpiresAtUtc
+                && (activeSeat == null || newSeat.ExpiresAtUtc >= activeSeat.ExpiresAtUtc),
                 "The replacement ticket is expired or older than the current ticket.");
             if (oldTicket == newTicket)
             {
                 Require(Hash(current) == originalHash, "The original file changed during renewal.");
-                return "ticket-file-current";
+                return new TicketRenewal("ticket-file-current", originalHash, oldSeat);
             }
             var temporary = current + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
@@ -244,7 +259,7 @@ internal static class PlayerLauncher
                 Require(Hash(temporary) == replacementHash && Hash(current) == originalHash, "The connection file changed during renewal.");
                 File.Replace(temporary, current, null);
                 Require(Hash(current) == replacementHash, "The updated file could not be confirmed.");
-                return "ticket-file-refreshed";
+                return new TicketRenewal("ticket-file-refreshed", replacementHash, newSeat);
             }
             finally { if (File.Exists(temporary)) File.Delete(temporary); }
         }
@@ -262,7 +277,7 @@ internal static class PlayerLauncher
                 && !File.Exists(output) && !Directory.Exists(output), "Use separate files and a new report outside the player package.");
             PlainPath(Path.GetDirectoryName(output));
             report = output;
-            var status = RefreshTicket(current, renewal);
+            var status = RefreshTicket(current, renewal).Status;
             Report(report, new { status, complete = true }, replaceExisting: false);
             return 0;
         }
@@ -609,6 +624,8 @@ internal static class PlayerLauncher
         public string Endpoint { get; private set; }
         public TicketPreview Ticket { get; private set; }
         public bool Loaded { get { return FilePath != null; } }
+        internal bool CanRenew { get { return LocalFullPath(FilePath) && !FilePath.StartsWith(Root, StringComparison.OrdinalIgnoreCase)
+            && Ticket != null && Ticket.HasAdmission; } }
         public void Clear() { FilePath = null; ContentHash = null; Endpoint = null; Ticket = null; }
         public void Load(string file)
         {
@@ -620,9 +637,17 @@ internal static class PlayerLauncher
             {
                 var value = Config(full); var hash = Hash(full);
                 FilePath = full; ContentHash = hash;
-                Endpoint = Text(value, "address") + ":" + Number(value, "port");
+                Endpoint = ConfigEndpoint(value);
                 Ticket = TicketPreview.Read(Text(value, "joinTicket"));
             }
+        }
+        internal string Renew(string file)
+        {
+            Require(CanRenew && LocalFullPath(file), "The active ticket and replacement must be local files.");
+            var result = RefreshTicket(FilePath, Path.GetFullPath(file), Ticket, Endpoint);
+            ContentHash = result.FileHash;
+            Ticket = result.Ticket;
+            return result.Status;
         }
         public void RequireCurrent()
         {
@@ -665,6 +690,7 @@ internal static class PlayerLauncher
         public int Room { get; private set; }
         public int Seat { get; private set; }
         public DateTimeOffset ExpiresAtUtc { get; private set; }
+        internal bool HasAdmission { get { return session != Guid.Empty && player != Guid.Empty && admission != Guid.Empty; } }
 
         public static TicketPreview Read(string ticket)
         {
@@ -690,7 +716,7 @@ internal static class PlayerLauncher
 
         internal bool SameAdmission(TicketPreview other)
         {
-            return other != null && session != Guid.Empty && player != Guid.Empty && admission != Guid.Empty
+            return other != null && HasAdmission
                 && session == other.session && player == other.player && admission == other.admission
                 && Room == other.Room && Seat == other.Seat;
         }
@@ -761,7 +787,9 @@ internal static class PlayerLauncher
         private readonly Label ticketInfo = new Label { AutoSize = false, Dock = DockStyle.Top, Height = 58, UseMnemonic = false };
         private readonly Label status = new Label { AutoSize = false, Dock = DockStyle.Top, Height = 65 };
         private readonly Label linkStatus = new Label { Dock = DockStyle.Top, Height = 35, UseMnemonic = false, Visible = false };
+        private readonly Label renewalStatus = new Label { Dock = DockStyle.Top, Height = 55, Visible = false, UseMnemonic = false };
         private readonly Button play = new Button { Text = "開始遊戲(&S)", AccessibleName = "開始遊戲", AutoSize = true, Enabled = false };
+        private readonly Button refreshTicket = new Button { Text = "更新重連票券(&T)", AccessibleName = "更新重連票券", AutoSize = true, Enabled = false, Visible = false };
         private readonly RadioButton openXR = new RadioButton { Text = "Windows OpenXR(&O)", AutoSize = true };
         private readonly Button checkOpenXR = new Button { Text = "檢查 OpenXR(&X)", AccessibleName = "檢查 OpenXR", AutoSize = true };
         private readonly Label openXRStatus = new Label { Dock = DockStyle.Top, Height = 46, UseMnemonic = false, Visible = false };
@@ -783,7 +811,7 @@ internal static class PlayerLauncher
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 45 };
             var choose = new Button { Text = "選擇連線檔…", AutoSize = true };
             var load = new Button { Text = "載入／更新", AutoSize = true };
-            buttons.Controls.Add(choose); buttons.Controls.Add(load); buttons.Controls.Add(play);
+            buttons.Controls.Add(choose); buttons.Controls.Add(load); buttons.Controls.Add(play); buttons.Controls.Add(refreshTicket);
             var modes = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40, AccessibleName = "遊戲模式" };
             modes.Controls.Add(new RadioButton { Text = "桌面模式(&D)", AutoSize = true, Checked = true });
             modes.Controls.Add(openXR);
@@ -795,7 +823,7 @@ internal static class PlayerLauncher
             var chooseRelease = new Button { Text = "選擇發行報告…", AutoSize = true };
             var loadRelease = new Button { Text = "核對發行報告(&R)", AccessibleName = "核對發行報告", AutoSize = true };
             releaseButtons.Controls.Add(chooseRelease); releaseButtons.Controls.Add(loadRelease);
-            Controls.Add(hint); Controls.Add(records); Controls.Add(linkStatus); Controls.Add(status); Controls.Add(buttons);
+            Controls.Add(hint); Controls.Add(records); Controls.Add(linkStatus); Controls.Add(status); Controls.Add(renewalStatus); Controls.Add(buttons);
             Controls.Add(openXRStatus); Controls.Add(modes);
             Controls.Add(releaseInfo); Controls.Add(releaseButtons); Controls.Add(releasePath);
             Controls.Add(ticketInfo); Controls.Add(selected); Controls.Add(pathHint); Controls.Add(path); Controls.Add(title);
@@ -830,6 +858,13 @@ internal static class PlayerLauncher
             {
                 using (var dialog = new OpenFileDialog { Filter = "玩家連線檔 (*.json)|*.json", CheckFileExists = true, Multiselect = false })
                     if (dialog.ShowDialog(this) == DialogResult.OK) SelectConfig(dialog.FileName);
+            };
+            refreshTicket.Click += delegate
+            {
+                if (!CanRenewPlayerTicket()) return;
+                using (var dialog = new OpenFileDialog { Title = "選擇控制人員發出的新票券", Filter = "玩家連線檔 (*.json)|*.json",
+                    CheckFileExists = true, Multiselect = false })
+                    if (dialog.ShowDialog(this) == DialogResult.OK) RefreshCurrentPlayerTicket(dialog.FileName);
             };
             releasePath.TextChanged += delegate
             {
@@ -890,6 +925,8 @@ internal static class PlayerLauncher
                     choose.Enabled = false; load.Enabled = false; path.Enabled = false; modes.Enabled = false;
                     releasePath.Enabled = false; chooseRelease.Enabled = false; loadRelease.Enabled = false;
                     status.Text = monitor.Message;
+                    renewalStatus.Text = "取得原席位的新連線檔後，可在此更新原遊戲的重連票券。";
+                    UpdateTicketRenewal();
                     RenderTicket();
                 }
                 catch (WindowsFirewallPreflight error)
@@ -909,6 +946,7 @@ internal static class PlayerLauncher
                 if (child == null) { RenderTicket(); return; }
                 var exited = child.HasExited;
                 monitor.Poll(exited); status.Text = monitor.Message;
+                UpdateTicketRenewal();
                 if (activeMetrics != null)
                 {
                     if (measurement == null && File.Exists(activeMetrics))
@@ -1002,6 +1040,28 @@ internal static class PlayerLauncher
             if (!release.Loaded) measureLink.Checked = false;
             measureLink.Enabled = child == null && release.Loaded;
             play.Enabled = child == null && review.Loaded && (!HasReleasePath || release.Loaded);
+        }
+        private bool CanRenewPlayerTicket()
+        { return child != null && !child.HasExited && monitor != null && monitor.State != "Final" && review.CanRenew; }
+
+        private void UpdateTicketRenewal()
+        {
+            var available = CanRenewPlayerTicket();
+            refreshTicket.Enabled = refreshTicket.Visible = renewalStatus.Visible = available;
+        }
+
+        private void RefreshCurrentPlayerTicket(string file)
+        {
+            if (!CanRenewPlayerTicket()) { UpdateTicketRenewal(); return; }
+            try
+            {
+                var result = review.Renew(file);
+                renewalStatus.Text = (result == "ticket-file-current" ? "原連線檔已是此票券。" : "原連線檔的票券已更新。")
+                    + "請回到原遊戲操作重連。";
+                RenderTicket();
+            }
+            catch (Exception)
+            { renewalStatus.Text = "未能確認更新。請核對原席位、端點及所選連線檔，再試一次。"; }
         }
         private void SelectRelease()
         {

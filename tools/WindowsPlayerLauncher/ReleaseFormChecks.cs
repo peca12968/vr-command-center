@@ -1,4 +1,4 @@
-// Runs shipped WinForms handlers with real packaged children.
+// Runs shipped WinForms handlers in extracted packages. The renewal check has no game child.
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -20,7 +20,8 @@ public sealed class ReleaseFormChecks : MarshalByRefObject
     private static int Main(string[] args)
     {
         var measured = args[0] == "--measured-session";
-        var offset = measured ? 1 : 0;
+        var ticketRenewal = args[0] == "--ticket-renewal-only";
+        var offset = measured || ticketRenewal ? 1 : 0;
         var package = Path.GetFullPath(args[offset]).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         var output = args[offset + 1];
         var domain = AppDomain.CreateDomain("Extracted player", null, new AppDomainSetup { ApplicationBase = package });
@@ -28,8 +29,10 @@ public sealed class ReleaseFormChecks : MarshalByRefObject
         {
             var runner = (ReleaseFormChecks)domain.CreateInstanceFromAndUnwrap(typeof(ReleaseFormChecks).Assembly.Location,
                 typeof(ReleaseFormChecks).FullName);
-            var report = measured ? runner.RunMeasured(output, args[3], args[4]) : runner.Run(output, args[2], args[3], args[4], args[5]);
-            using (var stream = new FileStream(Path.Combine(output, "release-form-checks.json"), FileMode.CreateNew))
+            var report = ticketRenewal ? runner.RunTicketRenewal(args[3], args[4], args[5], args[6])
+                : measured ? runner.RunMeasured(output, args[3], args[4]) : runner.Run(output, args[2], args[3], args[4], args[5]);
+            var reportName = ticketRenewal ? "renewal-form-checks.json" : "release-form-checks.json";
+            using (var stream = new FileStream(Path.Combine(output, reportName), FileMode.CreateNew))
             using (var writer = new StreamWriter(stream)) writer.WriteLine(report);
             return 0;
         }
@@ -66,6 +69,57 @@ public sealed class ReleaseFormChecks : MarshalByRefObject
         var wait = Stopwatch.StartNew();
         while (!button.Enabled && wait.Elapsed < TimeSpan.FromSeconds(8))
         { Application.DoEvents(); Thread.Sleep(20); }
+    }
+
+    public string RunTicketRenewal(string original, string valid, string otherOriginal, string otherRenewal)
+    {
+        var launcher = Assembly.LoadFrom(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Launch-Player.exe"));
+        var formType = launcher.GetType("PlayerLauncher+PlayerForm", true);
+        var monitorType = launcher.GetType("PlayerConnectionMonitor", true);
+        var originalBytes = File.ReadAllBytes(original);
+        var originalHash = Hash(original);
+        var renewalHash = Hash(valid);
+        var update = formType.GetMethod("UpdateTicketRenewal", BindingFlags.Instance | BindingFlags.NonPublic);
+        var renew = formType.GetMethod("RefreshCurrentPlayerTicket", BindingFlags.Instance | BindingFlags.NonPublic);
+        var childField = formType.GetField("child", BindingFlags.Instance | BindingFlags.NonPublic);
+        using (var form = (Form)Activator.CreateInstance(formType, new object[] { original, null, null }))
+        using (var process = Process.GetCurrentProcess())
+        {
+            var button = Field<Button>(form, "refreshTicket");
+            var status = Field<Label>(form, "renewalStatus");
+            var liveStatus = Field<Label>(form, "status");
+            update.Invoke(form, null);
+            renew.Invoke(form, new object[] { valid });
+            Check(!button.Enabled && Hash(original) == originalHash, "A form without a running player cannot update a ticket");
+            childField.SetValue(form, process);
+            var monitor = Activator.CreateInstance(monitorType, new object[] { null, false });
+            formType.GetField("monitor", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(form, monitor);
+            update.Invoke(form, null);
+            Check(button.Enabled, "An active reviewed player enables renewal");
+
+            renew.Invoke(form, new object[] { otherRenewal });
+            Check(Hash(original) == originalHash && status.Text.StartsWith("未能確認更新", StringComparison.Ordinal),
+                "The active form rejects another admission");
+            File.Copy(otherOriginal, original, true);
+            renew.Invoke(form, new object[] { otherRenewal });
+            Check(Hash(original) == Hash(otherOriginal) && status.Text.StartsWith("未能確認更新", StringComparison.Ordinal),
+                "A swapped original and matching replacement do not override the launched admission");
+
+            File.WriteAllBytes(original, originalBytes);
+            var before = liveStatus.Text;
+            renew.Invoke(form, new object[] { valid });
+            Check(Hash(original) == renewalHash && status.Text.Contains("票券已更新") && ReferenceEquals(Field<Process>(form, "child"), process)
+                && !process.HasExited && liveStatus.Text == before, "The exact renewal changes the live file without replacing the process or its connection status");
+            renew.Invoke(form, new object[] { valid });
+            Check(Hash(original) == renewalHash && status.Text.Contains("已是此票券"), "The form confirms an already current renewal");
+            childField.SetValue(form, null);
+            update.Invoke(form, null);
+            var review = Field<object>(form, "review");
+            review.GetType().GetMethod("RequireCurrent").Invoke(review, null);
+            Check(!button.Enabled && Hash(original) == renewalHash && !form.Visible,
+                "The reviewed file follows the confirmed update and the form remains hidden for this check");
+        }
+        return Json.Serialize(new { complete = true, checks, scope = "Shipped WinForms handlers with a local process witness, without a dialog or game" });
     }
 
     public string Run(string output, string config, string originalRelease, string otherRelease, string runtimeManifest)
