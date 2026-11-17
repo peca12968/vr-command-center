@@ -14,6 +14,7 @@ import time
 import urllib.request
 import uuid
 from udp_gate import LoopbackGate
+from windows_firewall import require_silent_windows_launch, start_checked_windows_process
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('race_debrief', ROOT/'scripts/check-desktop-debrief.py')
@@ -34,7 +35,8 @@ class PackagedRaceVenue(vm.Venue):
         path = self.directory / name
         report = path.with_suffix('.launch.json')
         status = path.with_suffix('.status.json')
-        process = subprocess.Popen([str(self.args.player_package / 'Launch-Player.exe'), '--launch', '--headless', '--wait',
+        require_silent_windows_launch(self.args.player_package / 'VrCommand.exe')
+        process = start_checked_windows_process([self.args.player_package / 'Launch-Player.exe', '--launch', '--headless', '--wait',
             '--config', str(path.with_suffix('.json')), '--log', str(path.with_suffix('.log')),
             '--report', str(report), '--status-report', str(status)], cwd=self.directory, creationflags=subprocess.CREATE_NO_WINDOW)
         self.processes[name] = process

@@ -11,7 +11,7 @@ $dotnet = (Get-Command dotnet -CommandType Application | Select-Object -First 1)
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($env:OS -eq 'Windows_NT') {
     $program = Join-Path $release 'VrCommand.Api.exe'
-    & (Join-Path $PSScriptRoot 'check-windows-firewall-notifications.ps1') -Executable $program
+    & (Join-Path $PSScriptRoot 'check-windows-firewall-notifications.ps1') -Executable $program -Unattended
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } else {
     $program = $dotnet

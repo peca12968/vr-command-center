@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Executable)
+param([Parameter(Mandatory)][string]$Executable, [switch]$Unattended)
 
 $ErrorActionPreference = 'Stop'
 $file = Get-Item -LiteralPath $Executable
@@ -16,7 +16,7 @@ if ($active -lt 1 -or $active -gt 7) {
 
 # Unattended runs require notification suppression even if a matching rule exists.
 # Include inactive profiles so a network change during startup does not reopen the prompt.
-if ($env:VR_COMMAND_UNATTENDED -ne '0') {
+if ($Unattended -or $env:VR_COMMAND_UNATTENDED -ne '0') {
     $notifyingProfiles = @($profiles.GetEnumerator() | Where-Object {
         $policy.FirewallEnabled($_.Value) -and -not $policy.NotificationsDisabled($_.Value)
     } | ForEach-Object Key)

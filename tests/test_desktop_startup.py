@@ -46,7 +46,7 @@ class NativeLaunchTests(unittest.TestCase):
             image.touch()
             fixture = image.with_suffix('.ps1')
             fixture.write_text('''
-param($Checker, $Image, [int]$Enabled, [int]$Notifying, [int]$RuleProfiles)
+param($Checker, $Image, [int]$Enabled, [int]$Notifying, [int]$RuleProfiles, [int]$ForceUnattended)
 function New-Object {
     param([string]$ComObject)
     if ($ComObject -ne 'HNetCfg.FwPolicy2') { throw 'Unexpected COM request' }
@@ -62,7 +62,7 @@ function New-Object {
     $policy | Add-Member ScriptMethod NotificationsDisabled { param($mask) ($this.Notifying -band $mask) -eq 0 }
     $policy
 }
-& $Checker -Executable $Image
+& $Checker -Executable $Image -Unattended:([bool]$ForceUnattended)
 exit $LASTEXITCODE
 ''', encoding='utf-8')
             power_shell = shutil.which('pwsh') or 'powershell.exe'
@@ -70,30 +70,49 @@ exit $LASTEXITCODE
             environment = os.environ.copy()
             environment.pop('VR_COMMAND_UNATTENDED', None)
             cases = [
-                (None, '7', '4', '0', 2),
-                ('1', '7', '4', '0', 2),
-                ('unexpected', '7', '4', '0', 2),
-                (None, '7', '4', '7', 2),
-                (None, '7', '0', '0', 0),
-                (None, '3', '4', '0', 0),
-                ('0', '7', '4', '0', 0),
-                ('0', '7', '2', '0', 2),
-                ('0', '7', '2', '2', 0),
+                (None, '7', '4', '0', '0', 2),
+                ('1', '7', '4', '0', '0', 2),
+                ('unexpected', '7', '4', '0', '0', 2),
+                (None, '7', '4', '7', '0', 2),
+                (None, '7', '0', '0', '0', 0),
+                (None, '3', '4', '0', '0', 0),
+                ('0', '7', '4', '0', '0', 0),
+                ('0', '7', '2', '0', '0', 2),
+                ('0', '7', '2', '2', '0', 0),
+                ('0', '7', '4', '7', '1', 2),
+                ('0', '7', '0', '0', '1', 0),
             ]
-            for mode, enabled, notifying, rules, expected in cases:
-                with self.subTest(mode=mode, enabled=enabled, notifying=notifying, rules=rules):
+            for mode, enabled, notifying, rules, force, expected in cases:
+                with self.subTest(mode=mode, enabled=enabled, notifying=notifying, rules=rules, force=force):
                     env = environment.copy()
                     if mode is not None:
                         env['VR_COMMAND_UNATTENDED'] = mode
-                    result = subprocess.run([*cmd, enabled, notifying, rules],
+                    result = subprocess.run([*cmd, enabled, notifying, rules, force],
                                             env=env,
                                             capture_output=True, text=True, timeout=15,
                                             creationflags=subprocess.CREATE_NO_WINDOW)
                     self.assertEqual(result.returncode, expected, result.stderr)
                     if expected == 2:
-                        message = ('may prompt on the Private profile.' if mode == '0'
+                        message = ('may prompt on the Private profile.' if mode == '0' and force == '0'
                                    else 'notifications are enabled on: Public.')
                         self.assertIn(message, result.stderr)
+
+    def test_packaged_result_race_rechecks_the_game_before_calling_the_launcher(self):
+        spec = importlib.util.spec_from_file_location('end_race', ROOT / 'scripts/check-desktop-end-race.py')
+        race = importlib.util.module_from_spec(spec); spec.loader.exec_module(race)
+        with tempfile.TemporaryDirectory() as directory:
+            package = Path(directory).resolve()
+            venue = SimpleNamespace(args=SimpleNamespace(player_package=package), directory=package,
+                                    save=Mock(), processes={}, packaged={})
+            refusal = windows_firewall.WindowsFirewallLaunchError('Firewall profile changed.')
+            with patch.object(race, 'require_silent_windows_launch', side_effect=refusal) as check, \
+                    patch.object(race, 'start_checked_windows_process') as launch:
+                with self.assertRaises(windows_firewall.WindowsFirewallLaunchError):
+                    race.PackagedRaceVenue.launch(venue, 'end-race-late', {})
+
+            check.assert_called_once_with(package / 'VrCommand.exe')
+            launch.assert_not_called()
+            self.assertEqual(venue.processes, {})
 
     def test_venue_rechecks_before_each_child_and_stops_on_policy_change(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -246,7 +246,7 @@ try {
     $target = [Net.IPEndPoint]::new($peer, $Port)
     if ($env:OS -eq 'Windows_NT') {
         $step = 'firewall-preflight'
-        & (Join-Path $PSScriptRoot 'check-windows-firewall-notifications.ps1') -Executable ([Diagnostics.Process]::GetCurrentProcess().MainModule.FileName)
+        & (Join-Path $PSScriptRoot 'check-windows-firewall-notifications.ps1') -Executable ([Diagnostics.Process]::GetCurrentProcess().MainModule.FileName) -Unattended
         if ($LASTEXITCODE -ne 0) { throw 'Windows Firewall preflight did not pass.' }
     }
     $step = 'bind'

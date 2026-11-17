@@ -42,7 +42,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 function Confirm-QuestAdbStartup([string]$MissingMessage) {
     if (-not (Test-Path -LiteralPath $AdbPath -PathType Leaf)) { throw $MissingMessage }
     if ($env:OS -eq 'Windows_NT' -and [IO.Path]::GetExtension($AdbPath) -eq '.exe') {
-        & (Join-Path $PSScriptRoot 'check-windows-firewall-notifications.ps1') -Executable $AdbPath
+        & (Join-Path $PSScriptRoot 'check-windows-firewall-notifications.ps1') -Executable $AdbPath -Unattended
         if ($LASTEXITCODE -ne 0) { throw 'ADB startup skipped after the Windows Firewall check.' }
     }
 }
