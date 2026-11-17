@@ -641,7 +641,7 @@ python scripts/prepare-venue-field-manifest.py `
 
 ### 分階段驗收 5 人與 10 人
 
-5 人階段在五房各登記 1 席，10 人階段各登記 2 席。使用一般全館開始及全館結束，按每個階段與模式保留一份原場館驗收 ZIP、原封存和完整日誌。將 `expectedPlayersPerRoom` 分別填成 `1` 或 `2`，沿用 `verify-field-results.py --venue-manifest`。驗收會逐房確認宣告的席數、原席位、UDP 來源及伺服器戰績確認，結果同時列出每房預期席數與實際人數。合併場的總人數相符時，仍須核對每房的席數。
+5 人階段在五房各登記 1 席，10 人階段各登記 2 席。使用全館開始及全館結束，按每個階段與模式保留一份原場館驗收 ZIP、原封存和完整日誌。開啟追蹤或有效姿態政策時，選擇同一階段的每房席數。將 `expectedPlayersPerRoom` 分別填成 `1` 或 `2`，沿用 `verify-field-results.py --venue-manifest`。驗收會逐房確認宣告的席數、原席位、UDP 來源及伺服器戰績確認，結果同時列出每房預期席數與實際人數。
 
 管理包 0.31.236 可為全 MR 或獨立的 VR／MR 混合五房配發 5 人及 10 人試場票券。每房當前名冊須符合選取席數，MR 房仍使用各自鎖定的校正原檔。 [MR 五房部署](QUEST3.md#五房-mr-部署預檢) · [混合部署](QUEST3.md#混合-vr-與-mr-五房部署包)
 
@@ -802,7 +802,7 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json --inspect-c
 
 ### 核對五房有效姿態開場
 
-若場次使用「五房開場須各有 5 席已連線且姿態有效」，用管理包 0.31.79 下載原全館收尾的場館驗收 ZIP。在 `venue.json` 設定 `"verifyParticipationBegin": true`，每場提供原 `worldJournal`。此選項與 `verifyTrackingBegin` 擇一。
+若場次使用五房有效姿態政策，從全館收尾下載原場館驗收 ZIP。在 `venue.json` 設定 `"verifyParticipationBegin": true`，每場提供原 `worldJournal`。此選項與 `verifyTrackingBegin` 擇一。
 
 工具從 `closure.json` 讀取 `participationBegin`，依原錄製核對同一次開場、管理序號、準備中畫格及原名冊玩家及房間，再找出各場在結束前套用開場的第一個有效執行格。VR 開場可核對合成或追蹤姿態，MR 須為追蹤。結果的 `participationBegin` 列出全館及逐場的確認席數，並分列合成與追蹤。 [開場操作](PLAYER_READINESS.md#五房各-5-席有效姿態開場)
 

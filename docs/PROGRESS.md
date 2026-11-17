@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-17 小規模五房試場的開場條件與回放
+
+- 控制台 0.31.237 的五房追蹤與有效姿態政策可選每房 1、2 或 5 席。伺服器核對五房原版本、第 1 席起的完整名冊及有效準備快照。額外登記、缺席或姿態失效均會阻止整批。5／10 席開場回條及封存保存每房席數，重試會比對原請求，回放和離線工具依原數字核對開場畫格。 [主控操作](PLAYER_READINESS.md#五房追蹤驗收開場) · [封存核對](EXTERNAL_CLIENTS.md#核對五房追蹤開場錄製)
+- 最終解壓包以本機 IPC 執行管理 API 與 Chromium，22 項通過。四個排演涵蓋 50 席、12 個來源，包含五房合併 VR、獨立 VR、合併 MR 及獨立 VR／MR 混合，全數取得開場原畫格與雙封存。驗證改動回條席數後保持待確認並以相同請求重送，及 5 席回放在原準備格與首個執行格間切換。首輪正式包的夾具收到無逐席明細的拒絕，複驗在同一斷言前發布新畫格並留存 API 回應。隔離管理程序的 TCP 監聽與 UDP 端點均為零，最後無活動場次。 [最終驗證](../artifacts/venue-guarded-pilot-031237/package-final-v2/checks.json) · [首輪夾具失敗](../artifacts/venue-guarded-pilot-031237/package-final/browser.log)
+- 核心 1,163 項、Node 133 項及離線驗收 153 項通過，SQLite 回歸確認重開後原開場席數和重送回條。原六批 Windows 驗收重算仍為 80 筆戰績確認，摘要逐位元一致。管理包核對 589 檔，與既有 Windows 及 Quest 0.50.12 通過離線發行核對。GitHub Actions 對 `d70a0c6` 回報帳務或支出上限，工作未啟動。Quest USB 仍無 ADB 介面，實機與跨機待驗。 [Windows 管理包](../artifacts/venue-guarded-pilot-031237/final/VRCommand-ControlServer-0.31.237.zip) · [發行核對](../artifacts/venue-guarded-pilot-031237/final/venue-release.json) · [離線驗收測試](../artifacts/venue-guarded-pilot-031237/field-tests.log) · [原六批重驗](../artifacts/venue-guarded-pilot-031237/legacy-six-stages.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43993546604)
+
 ## 2026-11-17 MR 五房部署包與封存驗收對照
 
 - `prepare-venue-field-manifest.py` 與 `verify-field-results.py` 核對 MR／混合原部署 ZIP 的每房席數、分房連線檔名稱及封存名冊的原席位。準備清單保存整份 ZIP 的 SHA-256，六批收件會指出缺檔或換包的批次。離場稽核可用開場時較多席位的原包，並以原離場資料核對結束名冊。 [操作方式](EXTERNAL_CLIENTS.md#核對-mr-校正封存)
