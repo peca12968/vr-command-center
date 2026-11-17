@@ -107,7 +107,7 @@ public sealed partial class SessionManager
         return new(batch.Id, batch.RecordedAtUtc, climate.Weather, climate.TimeOfDay, climate.Lightning, targets);
     }
 
-    public (long AppliedAtSequence, ControlCommand Command) ReadVenueSettingCommand(Guid sessionId, Guid requestId,
+    public (long AppliedAtSequence, ControlCommand Command, long? SupersededAtSequence, long ThroughSequence) ReadVenueSettingCommand(Guid sessionId, Guid requestId,
         ControlAction action, OperatorIdentity actor)
     {
         RequireVenueMaster(actor);
@@ -119,7 +119,13 @@ public sealed partial class SessionManager
             var command = entry?.Read<ControlCommand>();
             if (entry is null || command is null || command.Action != action)
                 throw new KeyNotFoundException("No original venue setting command for this session.");
-            return (entry.Sequence, command);
+            var history = Find(sessionId);
+            long? superseded = null;
+            if (action == ControlAction.SetEnvironment && history.EnvironmentSinceSequence > entry.Sequence)
+                superseded = history.Commands.Values.Where(later => later.Sequence > entry.Sequence
+                        && later.Read<ControlCommand>().Action == ControlAction.SetEnvironment)
+                    .Min(later => (long?)later.Sequence);
+            return (entry.Sequence, command, superseded, history.View.Sequence);
         }
     }
 

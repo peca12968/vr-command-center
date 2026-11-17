@@ -531,8 +531,10 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await publishUntil(first, changedClimate[0], () => climateReplay(1, 'Applied').isVisible());
     check(await climateRoom(2, 'Waiting').isVisible() && await environmentBatch.getByText('1 / 2 房已確認', { exact: false }).isVisible(),
       'The environment batch confirms each room only after its own source applies the command');
+    await run(preparing[1], 'Pause');
+    const resumedRoomTwo = (await run(preparing[1], 'Resume')).session;
     await publishUntil(first, changedClimate[0], () => {
-      second(changedClimate[1]);
+      second(resumedRoomTwo);
       return Promise.all([1, 2].map(room => roomEnvironment(room).filter({ hasText: '全館環境已套用' }).isVisible())).then(rows => rows.every(Boolean));
     });
     check(true, 'Both rooms confirm their own matching environment frames');
@@ -559,9 +561,10 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const originalRoomTwo = await api(climateEvidence(preparing[1]));
     const firstRoomTwo = (await api(`/sessions/${preparing[1]}/world/frames/${originalRoomTwo.worldSequence}`)).packet;
     const preceding = (await api(`/sessions/${preparing[1]}/world/frames/${originalRoomTwo.worldSequence - 1}`)).packet;
-    check(firstRoomTwo.observedSequence === originalRoomTwo.appliedAtSequence && firstRoomTwo.frame.tick > 0
+    check(firstRoomTwo.observedSequence === resumedRoomTwo.sequence && firstRoomTwo.observedSequence === originalRoomTwo.observedSequence
+      && firstRoomTwo.observedSequence > originalRoomTwo.appliedAtSequence && firstRoomTwo.frame.tick > 0
       && preceding.observedSequence < originalRoomTwo.appliedAtSequence,
-      'The look-up selects the first active frame at the original environment command sequence');
+      'The lookup selects the first active frame after a later pause and resume with the original environment still in effect');
     await page.locator('#world-viewport').screenshot({ path: path.join(screenshots, 'venue-environment-frame.png') });
     await page.locator('#tab-operations').click();
     const override = await updateRoom2({ ...changedClimate[1].environment, weather: 'Rain', lightning: false });
@@ -572,7 +575,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       && await climateReplay(2, 'Superseded').count() === 0, 'A later local environment change preserves the original batch row without its live shortcut');
     const localEnvironment = page.locator('[data-room-environment="2"]');
     await localEnvironment.filter({ hasText: '場次環境待確認' }).waitFor();
-    second(changedClimate[1]);
+    second(resumedRoomTwo);
     check(await environmentFrame(2).isHidden(), 'A single-room override clears the venue marker and cannot reuse the previous command frame');
     await publishUntil(second, override.session, () => environmentFrame(2).isVisible());
     const scoped = (await api('/rooms/readiness', 'GET', undefined, 'Room2')).rooms;
@@ -582,6 +585,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const priorRoomTwoFrame = await openSetting('environment', 2, preparing[1], originalClimateReplay(2, 'Superseded'));
     await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${priorRoomTwoFrame} 格的環境快照` }).waitFor();
     check(priorRoomTwoFrame === originalRoomTwo.worldSequence && await page.locator('#world-room').inputValue() === '2'
+      && (await api(climateEvidence(preparing[1]))).supersededAtSequence === override.appliedAtSequence
       && await page.locator('#world-environment').innerText() === 'Storm · 夜間 · 雷電啟用',
       'After a room switches to rain, the old batch opens its exact storm frame with the original room scope');
     await page.locator('#tab-operations').click();

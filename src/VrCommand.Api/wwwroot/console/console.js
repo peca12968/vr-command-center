@@ -1055,14 +1055,18 @@ async function openOriginalVenueSetting(kind, batch, session, roomId) {
   try {
     const original = await api(`/sessions/${session.sessionId}/world/venue-${kind}/${batch.requestId}`);
     if (!current()) return;
-    const { streamId, worldSequence, appliedAtSequence } = original;
+    const { streamId, worldSequence, appliedAtSequence, observedSequence, supersededAtSequence } = original;
     if (original.sessionId !== session.sessionId || original.requestId !== batch.requestId || appliedAtSequence !== session.appliedAtSequence
       || typeof streamId !== 'string' || !Array.isArray(original.roomIds) || !original.roomIds.includes(roomId))
       throw new Error('Original venue setting changed');
     if (worldSequence === null) { notify(`原錄製中找不到套用這筆${label}指令的有效執行畫格。`, true); return; }
     if (!Number.isSafeInteger(worldSequence) || worldSequence < 1) throw new Error('Invalid saved frame');
+    if (!enemy && (!Number.isSafeInteger(observedSequence) || observedSequence < appliedAtSequence
+      || (supersededAtSequence !== undefined && (!Number.isSafeInteger(supersededAtSequence) || observedSequence >= supersededAtSequence))))
+      throw new Error('Original environment revision differs');
     const { weather, timeOfDay, lightning, behavior, autoAttack } = batch;
-    const witness = { kind, exactObserved: true, setting: enemy ? { appliedAtSequence, behavior, autoAttack }
+    const witness = { kind, exactObserved: true, observedSequence: enemy ? appliedAtSequence : observedSequence,
+      setting: enemy ? { appliedAtSequence, behavior, autoAttack }
       : { appliedAtSequence, weather, timeOfDay, lightning } };
     if (enemy) {
       const rows = original.enemyPopulations;

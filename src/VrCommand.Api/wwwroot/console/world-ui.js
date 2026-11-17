@@ -1049,7 +1049,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
       return roomIds.every(room => counts.get(room) === playersPerRoom);
     }
     if (!Number.isSafeInteger(packet.observedSequence) || packet.observedSequence < setting.appliedAtSequence) return false;
-    if (exactObserved && (packet.observedSequence !== setting.appliedAtSequence || packet.suspended !== false
+    if (exactObserved && (packet.observedSequence !== (target.witness.observedSequence ?? setting.appliedAtSequence) || packet.suspended !== false
       || packet.frame.phase !== 'Running' || !(packet.frame.tick > 0))) return false;
     if (kind === 'environment') return packet.weather === setting.weather && packet.frame.night === (setting.timeOfDay === 'Night')
       && packet.lightning === setting.lightning;
