@@ -2,6 +2,8 @@
 import importlib.util
 import hashlib
 import json
+import shutil
+import subprocess
 from pathlib import Path
 import struct
 import tempfile
@@ -120,6 +122,40 @@ class VenueReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'new field kit ZIP path'):
             package()
         self.assertEqual(release.digest(destination), before)
+
+    @unittest.skipUnless(shutil.which('pwsh'), 'PowerShell is required for the field workstation check')
+    def test_workstation_checks_the_selected_copy_against_the_delivery_digest(self):
+        kit = self.root / 'kit.zip'
+        with zipfile.ZipFile(kit, 'w') as archive:
+            archive.writestr('VRCommand-Player/Data/Player.bin', b'original')
+            archive.writestr('Quest/game.apk', b'other role')
+        local = self.root / 'installed'
+        self.write(local, 'Data/Player.bin', 'original')
+        script = Path(release.__file__).with_name('check-field-install.ps1')
+        expected = release.digest(kit)
+
+        def run(digest=expected):
+            return subprocess.run(['pwsh', '-NoProfile', '-NonInteractive', '-File', str(script),
+                                   '-Role', 'Player', '-InstallDirectory', str(local), '-Archive', str(kit),
+                                   '-ArchiveSha256', digest], capture_output=True, encoding='utf-8', timeout=30)
+
+        ok = run()
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+        self.assertEqual(json.loads(ok.stdout), {'verified': True, 'scope': 'installed-files', 'role': 'Player',
+                                               'files': 1, 'archiveSha256': expected})
+        def rejected(message, digest=expected):
+            result = run(digest)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(message, result.stderr)
+            self.assertFalse(result.stdout.strip())
+        rejected('Archive SHA-256 differs', '0' * 64)
+        self.write(local, 'extra.txt', 'unexpected')
+        rejected('Unexpected package file')
+        (local / 'extra.txt').unlink()
+        self.write(local, 'Data/Player.bin', 'modified')
+        rejected('Package file content differs')
+        (local / 'Data/Player.bin').unlink()
+        rejected('Missing package file')
 
     def test_individually_valid_player_with_replaced_runtime_is_not_a_pair(self):
         self.write(self.player, 'VrCommand.exe', 'different but manifest-consistent game')

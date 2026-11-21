@@ -335,7 +335,8 @@ def write_field_kit(destination, control, server, player, apk, report):
             for path, key in ((apk, 'sha256'), (apk.with_suffix('.receipt.json'), 'receiptSha256')):
                 copy_verified(archive, path, 'Quest/' + path.name, report['quest'][key])
             scripts = Path(__file__).resolve().parent
-            for name in ('deploy-quest.ps1', 'quest-adb-process.ps1', 'check-quest-usb.ps1', 'check-windows-firewall-notifications.ps1'):
+            for name in ('deploy-quest.ps1', 'quest-adb-process.ps1', 'check-quest-usb.ps1',
+                         'check-windows-firewall-notifications.ps1', 'check-field-install.ps1'):
                 archive.write(scripts / name, 'scripts/' + name)
             archive.write(scripts.parent / 'docs/VENUE_FIELD_KIT.md', 'README.md')
             archive.writestr('venue-release.json', json.dumps(report, indent=2) + '\n')

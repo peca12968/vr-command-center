@@ -9,6 +9,16 @@
 | Windows 玩家 | `VRCommand-Player`，使用包內啟動器載入該席玩家的連線檔。 |
 | Quest 3 | `Quest` 內的 APK 與原始建置回條，以及 `scripts` 內的 USB 診斷和部署工具。 |
 
+將資料夾複製到各台電腦後，可在啟動前用 PowerShell 逐檔核對。原始 ZIP 可放在 USB 隨身碟。以下範例檢查 Windows 玩家電腦，請使用交付方提供的 ZIP SHA-256，並替換兩個路徑。
+
+```powershell
+.\scripts\check-field-install.ps1 -Archive 'E:\VRCommand-Venue.zip' `
+  -ArchiveSha256 '<交付方提供的 64 位十六進位 SHA-256>' `
+  -Role Player -InstallDirectory 'C:\Venue\VRCommand-Player'
+```
+
+`-Role` 可選 `Control`、`Server`、`Player` 或 `Quest`，並將 `-InstallDirectory` 指向該角色的資料夾。選 `All` 時指向完整解壓目錄。請把原 ZIP、連線檔及產生的執行資料放在待核對目錄外。成功時會輸出 `verified: true` 與檔案數。缺檔、多檔或內容不同時會指出檔名。此檢查可離線執行，無需 Unity、Android SDK 或管理員權限。Quest 角色核對的是待部署 APK 與建置回條。
+
 在解壓目錄用 PowerShell 7 執行以下命令，可唯讀查看 Windows 是否已列舉頭盔及其 USB 偵錯介面。
 
 ```powershell
