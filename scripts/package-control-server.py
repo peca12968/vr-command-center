@@ -109,8 +109,8 @@ def notices(build,output):
         plain(file);shutil.copyfile(file,output/file.name)
     (output/'bundled-packages.json').write_text(json.dumps({'packages':sources,'scope':'Original restored package licenses / metadata plus separately attributed upstream references'},indent=2)+'\n',encoding='utf-8')
     return sources
-def verify(folder):
-    folder=plain(folder);manifest=read(folder/'control-package.json')
+def verify(folder, *, manifest_bytes=None):
+    folder=plain(folder);manifest=json.loads(manifest_bytes) if manifest_bytes is not None else read(folder/'control-package.json')
     if manifest.get('schemaVersion')!=1 or manifest.get('target')!='win-x64' or manifest.get('apiVersion')!='0.31.0':raise ValueError('Unsupported control package')
     seen=set()
     for row in manifest['files']:

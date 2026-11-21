@@ -12,6 +12,8 @@
 
 先完整解壓三個 Windows 套件，把 Quest 開發 APK 與同名的原始 `.receipt.json` 放在一起。使用 Unity 的 Android SDK Build Tools 36.0.0 及 OpenJDK，在儲存庫執行下列命令並替換路徑。
 
+需要帶到另一台電腦時，可在同一命令加上 `--field-kit 'C:\Delivery\VRCommand-Venue.zip'`。指定既有父目錄下的新 ZIP 名稱。工具會打包三套 Windows 程式、Quest APK 與建置回條、部署工具及同一次核對產生的發行報告。交付資料夾不需另放開發環境或玩家憑證。 [包內使用說明](VENUE_FIELD_KIT.md)
+
 ```powershell
 $release = python scripts/verify-venue-release.py `
   --control 'C:\Delivery\VRCommand-ControlServer' `

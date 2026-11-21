@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import struct
 import subprocess
+import tempfile
 from xml.etree.ElementTree import Element
 import zipfile
 
@@ -67,7 +68,10 @@ def require_matching_identity(expected, actual, message):
 
 
 def verify_windows(control, server, player):
-    control_manifest = control_package.verify(control)
+    control_path = control_package.plain(control / 'control-package.json')
+    control_bytes = control_path.read_bytes()
+    control_hash = hashlib.sha256(control_bytes).hexdigest()
+    control_manifest = control_package.verify(control, manifest_bytes=control_bytes)
     server_manifest_path = player_package.plain(server / 'server-package.json')
     server_manifest_bytes = server_manifest_path.read_bytes()
     server_manifest_hash = hashlib.sha256(server_manifest_bytes).hexdigest()
@@ -111,10 +115,12 @@ def verify_windows(control, server, player):
             'Windows player package contains unlisted files')
     require(digest(manifest_path) == player_manifest_hash, 'Windows player manifest changed during verification')
     require(digest(server_manifest_path) == server_manifest_hash, 'Windows server manifest changed during verification')
+    require(digest(control_path) == control_hash, 'Windows control manifest changed during verification')
     return game, {'apiVersion': control_manifest['apiVersion'], 'consoleVersion': console, 'buildCommit': published['baseCommit'],
                   'controlFiles': len(control_manifest['files']), 'pairedGameFiles': len(runtime),
                   'serverFiles': len(server_manifest['files']), 'playerFiles': len(player_manifest['files']),
-                  'playerManifestSha256': player_manifest_hash, 'serverManifestSha256': server_manifest_hash}
+                  'playerManifestSha256': player_manifest_hash, 'serverManifestSha256': server_manifest_hash,
+                  'controlManifestSha256': control_hash}
 
 
 def quest_metadata(badging, signing):
@@ -268,7 +274,8 @@ def quest_native_libraries(apk, *, extract_native_libs):
 
 def verify_quest(apk, sdk, jdk, game):
     require(apk.is_file() and apk.suffix.lower() == '.apk', 'Choose the original Quest APK')
-    receipt = read(apk.with_suffix('.receipt.json'))
+    receipt_bytes = apk.with_suffix('.receipt.json').read_bytes()
+    receipt = json.loads(receipt_bytes)
     require(receipt.get('artifact') == apk.name and type(receipt.get('bytes')) is int
             and apk.stat().st_size == receipt['bytes'] and digest(apk) == receipt.get('sha256'),
             'Quest APK differs from its original release receipt')
@@ -295,22 +302,69 @@ def verify_quest(apk, sdk, jdk, game):
     native_libraries = quest_native_libraries(apk, extract_native_libs=android_manifest['extractNativeLibs'])
     require(digest(apk) == receipt['sha256'], 'Quest APK changed during verification')
     return {**meta, 'bytes': receipt['bytes'], 'sha256': receipt['sha256'], 'androidManifest': android_manifest,
-            'nativeLibraries': native_libraries}
+            'nativeLibraries': native_libraries, 'receiptSha256': hashlib.sha256(receipt_bytes).hexdigest()}
+
+
+def write_field_kit(destination, control, server, player, apk, report):
+    destination = control_package.plain(destination)
+    require(destination.suffix.lower() == '.zip' and not destination.exists(), 'Choose a new field kit ZIP path')
+    for folder in (control, server, player):
+        require(not destination.is_relative_to(folder.resolve()), 'Save the field kit outside its input packages')
+
+    def copy_verified(archive, path, name, expected):
+        checksum = hashlib.sha256()
+        with control_package.plain(path).open('rb') as source, archive.open(name, 'w') as target:
+            while chunk := source.read(1024 * 1024):
+                checksum.update(chunk)
+                target.write(chunk)
+        require(checksum.hexdigest() == expected, f'File changed before field kit publication: {name}')
+
+    with tempfile.TemporaryDirectory(prefix='.field-kit-', dir=destination.parent) as work:
+        pending = Path(work) / 'kit.zip'
+        with zipfile.ZipFile(pending, 'x', compression=zipfile.ZIP_DEFLATED, compresslevel=3) as archive:
+            for folder, top, role in ((control, 'VRCommand-ControlServer', 'control'),
+                                      (server, 'VRCommand-GameServer', 'server'), (player, 'VRCommand-Player', 'player')):
+                filename = role + '-package.json'
+                raw = control_package.plain(folder / filename).read_bytes()
+                require(hashlib.sha256(raw).hexdigest() == report['windows'][role + 'ManifestSha256'],
+                        f'{role} manifest changed before field kit publication')
+                archive.writestr(top + '/' + filename, raw)
+                for row in json.loads(raw)['files']:
+                    relative = control_package.relative(row['path'])
+                    copy_verified(archive, folder / relative, top + '/' + relative.as_posix(), row['sha256'])
+            for path, key in ((apk, 'sha256'), (apk.with_suffix('.receipt.json'), 'receiptSha256')):
+                copy_verified(archive, path, 'Quest/' + path.name, report['quest'][key])
+            scripts = Path(__file__).resolve().parent
+            for name in ('deploy-quest.ps1', 'quest-adb-process.ps1', 'check-quest-usb.ps1', 'check-windows-firewall-notifications.ps1'):
+                archive.write(scripts / name, 'scripts/' + name)
+            archive.write(scripts.parent / 'docs/VENUE_FIELD_KIT.md', 'README.md')
+            archive.writestr('venue-release.json', json.dumps(report, indent=2) + '\n')
+        with zipfile.ZipFile(pending) as archive:
+            require(archive.testzip() is None, 'Field kit ZIP readback failed')
+        # Publish only a complete archive and never replace a concurrent delivery.
+        if os.name == 'nt':
+            pending.rename(destination)
+        else:
+            os.link(pending, destination)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('control', 'server', 'player', 'quest-apk', 'sdk', 'jdk'):
         parser.add_argument('--' + name, type=Path, required=True)
+    parser.add_argument('--field-kit', type=Path, help='Publish a new ZIP containing all verified packages and the release report')
     args = parser.parse_args()
     try:
         game, windows = verify_windows(args.control.absolute(), args.server.absolute(), args.player.absolute())
         quest = verify_quest(args.quest_apk.absolute(), args.sdk.absolute(), args.jdk.absolute(), game)
+        report = {'verified': True, 'scope': 'offline-package-consistency', 'game': game, 'windows': windows, 'quest': quest}
+        if args.field_kit:
+            write_field_kit(args.field_kit, args.control, args.server, args.player, args.quest_apk, report)
     except subprocess.SubprocessError as error:
         parser.exit(1, f'Venue release rejected: Android verification tool failed ({type(error).__name__}).\n')
     except (ValueError, OSError, KeyError, TypeError, AttributeError, zipfile.BadZipFile) as error:
         parser.exit(1, f'Venue release rejected: {error}\n')
-    print(json.dumps({'verified': True, 'scope': 'offline-package-consistency', 'game': game, 'windows': windows, 'quest': quest}))
+    print(json.dumps(report))
 
 
 if __name__ == '__main__':

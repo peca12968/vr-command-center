@@ -91,6 +91,36 @@ class VenueReleaseTests(unittest.TestCase):
         self.assertEqual(repackaged['pairedGameFiles'], summary['pairedGameFiles'])
         self.assertNotEqual(repackaged['playerManifestSha256'], summary['playerManifestSha256'])
 
+    def test_field_kit_binds_exact_files_and_publishes_only_once(self):
+        game, windows = release.verify_windows(self.control, self.server, self.player)
+        apk = self.root / 'sample.apk'
+        self.write_native_apk(apk)
+        receipt = apk.with_suffix('.receipt.json')
+        self.write(self.root, receipt.name, {'artifact': apk.name})
+        report = {'windows': windows, 'game': game, 'quest': {'sha256': release.digest(apk),
+                  'receiptSha256': release.digest(receipt)}}
+        destination = self.root / 'delivery.zip'
+        def package():
+            release.write_field_kit(destination, self.control, self.server, self.player, apk, report)
+
+        for path in [self.control / 'control-package.json', self.server / 'Runtime/VrCommand.exe', receipt, apk]:
+            original = path.read_bytes()
+            path.write_bytes(original + b'\n')
+            with self.subTest(path=path), self.assertRaisesRegex(ValueError, 'changed before field kit'):
+                package()
+            self.assertFalse(destination.exists())
+            path.write_bytes(original)
+        package()
+        with zipfile.ZipFile(destination) as archive:
+            self.assertEqual(json.loads(archive.read('venue-release.json')), report)
+            self.assertEqual(archive.read('Quest/sample.apk'), apk.read_bytes())
+            self.assertEqual(archive.read('scripts/check-windows-firewall-notifications.ps1'),
+                             (Path(release.__file__).parent / 'check-windows-firewall-notifications.ps1').read_bytes())
+        before = release.digest(destination)
+        with self.assertRaisesRegex(ValueError, 'new field kit ZIP path'):
+            package()
+        self.assertEqual(release.digest(destination), before)
+
     def test_individually_valid_player_with_replaced_runtime_is_not_a_pair(self):
         self.write(self.player, 'VrCommand.exe', 'different but manifest-consistent game')
         self.manifest(self.player, 'player-package.json', {'version': 1, 'platform': 'Windows-x64', 'build': self.source})

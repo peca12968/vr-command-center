@@ -1,0 +1,27 @@
+# 場館安裝包
+
+請先完整解壓 ZIP。根目錄的 `venue-release.json` 是這一組 Windows 程式與 Quest APK 的版本核對報告。分發到不同電腦時，複製對應的整個資料夾，保留其中的啟動器、清單及說明。
+
+| 電腦或裝置 | 交付內容 |
+| --- | --- |
+| 主控台 | `VRCommand-ControlServer`，由 `Start-Control.exe` 開啟，依資料夾中的 README 建立或選取管理實例。 |
+| 遊戲伺服器 | `VRCommand-GameServer`，使用包內啟動器載入場次的伺服器設定。 |
+| Windows 玩家 | `VRCommand-Player`，使用包內啟動器載入該席玩家的連線檔。 |
+| Quest 3 | `Quest` 內的 APK 與原始建置回條，以及 `scripts` 內的 USB 診斷和部署工具。 |
+
+在解壓目錄用 PowerShell 7 執行以下命令，可唯讀查看 Windows 是否已列舉頭盔及其 USB 偵錯介面。
+
+```powershell
+.\scripts\check-quest-usb.ps1
+```
+
+首次安裝時，請準備已開啟開發者模式、允許本機 USB 偵錯的 Quest 3，以及 Android SDK 的 `adb.exe`。請把下列序號與 ADB 路徑替換成現場值。部署工具會查核防火牆條件、APK 雜湊及裝置型號，啟動後查核 OpenXR 顯示與輸入狀態。若防火牆查核略過啟動，可繼續使用上方的唯讀診斷。
+
+```powershell
+$env:VR_COMMAND_UNATTENDED = '1'
+$apk = (Get-ChildItem -LiteralPath .\Quest -Filter '*.apk' -File).FullName
+.\scripts\deploy-quest.ps1 -SmokeTest -RequireOpenXR -Serial '<頭盔序號>' `
+  -AdbPath 'C:\Android\platform-tools\adb.exe' -ApkPath $apk -ReleaseReport .\venue-release.json
+```
+
+各席實際入場時使用主控台為該玩家產生的連線檔。MR 場次還需要現場校正資料。五房連線與實機操作須在場館網路驗收。
