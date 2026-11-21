@@ -174,6 +174,40 @@ module.exports = async function missionReadRecovery({ context, api, tokens, base
         'History pagination independently recovers its exact next page without reloading the draft or mutating missions');
     });
 
+    await page.locator('#load-mission').click(); await wait(() => document.querySelector('#mission-version').options.length === 20);
+    await page.locator('#launch-version').click(); await page.locator('#tab-missions').click();
+    const historical = await page.locator('#mission-version option').last().getAttribute('value');
+    await page.locator('#mission-version').selectOption(historical);
+    await page.locator('#draft-briefing').fill('保留現場備註');
+    let concurrent = latest;
+    for (let number = 23; number <= 45; number++)
+      concurrent = await api(`/missions/${concurrent.id}/revisions`, 'POST', { ...first.definition, name: `其他主控第${number}版` }, 'Master', 201, undefined, randomUUID());
+    await page.locator('#more-versions').click();
+    await wait(id => document.querySelector('#edit-mission').value === id && !document.querySelector('#more-versions').disabled, concurrent.id);
+    check(await page.locator('#launch-mission').inputValue() === latest.id && await page.locator('#mission-version').inputValue() === historical
+      && await page.locator('#draft-briefing').inputValue() === '保留現場備註',
+      'A newer catalog head discovered during paging preserves the pending briefing, history selection and pinned launch');
+    await page.locator('#more-versions').click();
+    await wait(() => document.querySelector('#mission-version').options.length === 45 && document.querySelector('#more-versions').disabled);
+    const numbers = await page.locator('#mission-version option').evaluateAll(rows => rows.map(row => Number(row.textContent.match(/^第 (\d+) 版/)[1])));
+    check(numbers.every((number, i) => number === 45 - i) && mutations() === initialMutations,
+      'Every intermediate revision is reachable exactly once after a concurrent update larger than a history page');
+    await decision(click('load-mission'), true); await draft(concurrent.definition.name);
+
+    const decoy = await api('/missions', 'POST', concurrent.definition, 'Master', 201, undefined, randomUUID());
+    await page.locator('#refresh').click();
+    await page.locator(`#edit-mission option[value="${decoy.id}"]`).waitFor({ state: 'attached' });
+    await page.locator('#mission-search').fill(concurrent.definition.name);
+    await page.locator('#edit-mission').selectOption(concurrent.id);
+    await api(`/missions/${concurrent.id}/revisions`, 'POST', { ...first.definition, name: '另一名稱' }, 'Master', 201, undefined, randomUUID());
+    await page.locator('#more-versions').click();
+    await wait(() => document.querySelector('#history-status').textContent.includes('46 版') && !document.querySelector('#mission-fields').disabled);
+    check(await page.locator('#edit-mission').inputValue() === '' && await page.locator('#launch-selected-mission').isDisabled()
+      && await page.locator('#mission-search').inputValue() === concurrent.definition.name
+      && await page.locator('#edit-mission option').count() === 1 && await page.locator('#edit-mission option').getAttribute('value') === decoy.id,
+      'A renamed series leaving the search does not silently select a different matching mission for launch');
+    await page.locator('#mission-search').fill('');
+
     const originalText = { ...first.definition, name: '  保留原任務名稱  ', briefing: '第一行\r\n第二行\r第三行\n' };
     const savedText = await api('/missions', 'POST', originalText, 'Master', 201);
     await page.locator('#refresh').click();

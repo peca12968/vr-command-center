@@ -3060,11 +3060,29 @@ $('compare-version').addEventListener('click', () => {
 $('more-versions').addEventListener('click', () => run(async () => {
   if (!state.history?.nextBefore) return;
   const previous = state.history, epoch = state.epoch;
-  const history = await api(`/missions/${previous.seriesId}/history?before=${previous.nextBefore}`);
+  const page = await api(`/missions/${previous.seriesId}/history?before=${previous.nextBefore}`);
   if (epoch !== state.epoch || state.history !== previous) return;
-  requireMissionHistory(history, previous.seriesId, previous.headNumber);
-  history.versions = [...previous.versions, ...history.versions.filter(row => !previous.versions.some(old => old.id === row.id))];
-  state.history = history; renderHistory(); draftStatus();
+  requireMissionHistory(page, previous.seriesId, previous.headNumber);
+  const versions = new Map([...previous.versions, ...page.versions].map(row => [row.number, row]));
+  let newest = page;
+  if (page.headId !== previous.headId) {
+    newest = await api(`/missions/${previous.seriesId}/history`);
+    if (epoch !== state.epoch || state.history !== previous) return;
+    requireMissionHistory(newest, previous.seriesId, page.headNumber);
+    if (!newest.versions.some(row => row.id === newest.headId && row.number === newest.headNumber))
+      throw new MissionVersionMismatch();
+    const edit = state.catalog.find(row => row.mission.id === $('edit-mission').value);
+    if (!await rememberHead(newest, epoch) || state.history !== previous) return;
+    for (const row of newest.versions) versions.set(row.number, row);
+    const selected = state.catalog.find(row => row.seriesId === edit?.seriesId);
+    missionOptions(undefined, selected?.mission.id);
+    if (selected && !matchesMissionSearch(selected, missionSearchQuery())) $('edit-mission').selectedIndex = -1;
+  }
+  // A concurrent burst of revisions can leave a gap between the newest page and the pages already read.
+  let oldest = newest.headNumber;
+  while (versions.has(oldest - 1)) oldest--;
+  state.history = { ...newest, versions: [...versions.values()], nextBefore: oldest > 1 ? oldest : null };
+  renderHistory(); draftStatus();
 }, true));
 $('save-revision').addEventListener('click', () => { if ($('mission-form').reportValidity()) run(() => saveMission(true)); });
 function pinLaunchVersion(revision) {
