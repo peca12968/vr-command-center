@@ -139,6 +139,7 @@ module.exports = async function missionBrowser({ page, context, api, tokens, bas
     await editor.locator('#launch-version').click();
     check(await editor.locator('#launch-mission').inputValue() === mission.id, 'Historical draft explicitly selects its saved original version for launch');
     await editor.locator('#tab-missions').click(); await editor.locator('#draft-name').fill('從舊版另存的獨立任務');
+    await editor.locator('#mission-search').fill(fourth.definition.name);
     let loseCreate = true; const creates = [];
     await editor.route('**/api/missions', async route => {
       if (route.request().method() !== 'POST') { await route.continue(); return; }
@@ -155,11 +156,16 @@ module.exports = async function missionBrowser({ page, context, api, tokens, bas
     await waitForDom(() => !document.querySelector('#retry-command').disabled); await editor.locator('#retry-command').click();
     await waitForDom(() => !document.querySelector('#retry-command').disabled && !document.querySelector('#pending-command').hidden);
     check(await editor.locator('#draft-name').isDisabled(), 'Accepted mission save retains its retry receipt when reading version metadata fails');
+    check(await editor.locator('#mission-search').inputValue() === fourth.definition.name,
+      'Pending save confirmation preserves the original library search');
     await editor.locator('#retry-command').click();
     await waitForDom(() => document.querySelector('#pending-command').hidden && document.querySelector('#draft-status').textContent.startsWith('已儲存')); await ready();
     const heads = await api('/mission-library'), copied = heads.find(row => row.mission.definition.name === '從舊版另存的獨立任務');
     check(heads.length === 2 && copied.number === 1 && copied.seriesId === copied.mission.id && creates.length === 3 && creates.every(row => JSON.stringify(row) === JSON.stringify(creates[0])),
       'Save-as-new retries once into a separate series without duplicating the accepted mission');
+    check(await editor.locator('#mission-search').inputValue() === '' && await editor.locator('#edit-mission').inputValue() === copied.mission.id
+      && await editor.locator('#launch-mission').inputValue() === mission.id,
+      'Confirmed save reveals the independent copy while retaining the previously pinned launch');
     await editor.unroute('**/api/missions'); await editor.locator('#edit-mission').selectOption(fourth.id); await editor.locator('#load-mission').click();
     await waitForDom(() => document.querySelector('#draft-status').textContent.includes('第 4 版')); await ready(); await editor.locator('#launch-version').click();
     await editor.locator('#launch-room').selectOption('3'); await editor.locator('#create-session-form button').click();

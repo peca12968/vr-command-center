@@ -2283,10 +2283,14 @@ async function sendPending() {
       state.history = history;
       clearMissionComparison();
       state.launchPinned = selectedLaunch ?? (pending.restoredFrom ? null : revision);
-      renderHistory(response.id); missionOptions(state.launchPinned?.mission.id, history.headId); draftStatus();
+      const head = state.catalog.find(row => row.seriesId === revision.seriesId);
+      const resetSearch = head && !matchesMissionSearch(head, missionSearchQuery());
+      if (resetSearch) $('mission-search').value = '';
+      renderHistory(response.id); missionOptions(state.launchPinned?.mission.id, head?.mission.id ?? history.headId); draftStatus();
       state.pending = null;
-      notify(pending.restoredFrom ? `已將第 ${pending.restoredFrom} 版內容保存為第 ${revision.number} 版。`
-        : '任務保存已確認，原版本與既有場次保持不變。可選擇此版本開場。'); return;
+      const savedMessage = pending.restoredFrom ? `已將第 ${pending.restoredFrom} 版內容保存為第 ${revision.number} 版。`
+        : '任務保存已確認，原版本與既有場次保持不變。可選擇此版本開場。';
+      notify(savedMessage + (resetSearch ? ' 已清除搜尋，任務清單已選取此任務的最新版。' : '')); return;
     }
     if (pending.kind === 'venue-plan-save') {
       if (!validSavedVenuePlan(response) || response.id !== pending.requestId || !matchesVenuePlan(response.plan, pending.body))
@@ -2513,10 +2517,13 @@ function missionOptions(launch, edit) {
   editMissionOptions(edit);
   placement.scheduleLaunch();
 }
+function missionSearchQuery() { return $('mission-search').value.trim().toLowerCase(); }
+function matchesMissionSearch(row, query) {
+  return !query || [row.mission.definition.name, row.mission.definition.briefing].some(text => text.toLowerCase().includes(query));
+}
 function editMissionOptions(selected) {
-  const query = $('mission-search').value.trim().toLowerCase();
-  const matches = state.catalog.filter(row => !query || [row.mission.definition.name, row.mission.definition.briefing]
-    .some(text => text.toLowerCase().includes(query)));
+  const query = missionSearchQuery();
+  const matches = state.catalog.filter(row => matchesMissionSearch(row, query));
   const entries = matches.map(row => [row.mission.id, `${row.mission.definition.name} · 第 ${row.number} 版`]);
   const empty = query ? '沒有符合的任務' : '尚無儲存任務';
   fillOptions('edit-mission', entries.length ? entries : [['', empty]], selected);
