@@ -429,6 +429,8 @@ Windows 設定 `VR_COMMAND_UNATTENDED=1` 時，`smoke_world.py` 預設讓 HTTP�
 
 若入站通知仍開啟，可用 `check-venue-world-ipc.py` 在 Windows 直接經由 AF_UNIX 測試正式管理包。HTTP、WebSocket 發布和 SSE 觀戰與回放都使用同一個本機 socket。腳本建立隔離資料，驗證合併 VR 與五房獨立 VR／MR 各 25 席、追蹤中斷攔截開場、全館天候指令、戰損、封存及重啟後逐格回放。`--work-root` 指向已存在的短路徑，報告使用新檔名。姿態及戰鬥來源是測試資料。
 
+報告中的 `headsetRoster` 是操作員登記的裝置類型。`deviceChange` 記錄滿房換機後舊票券的拒絕結果，`ticketsRevalidatedInRunning` 是開場後以同一張票券再驗成功的席數。測試只在管理服務公告模擬遊戲端點，不會在那些位址啟動遊戲。
+
 ```powershell
 $env:VR_COMMAND_UNATTENDED = '1'
 python scripts/check-venue-world-ipc.py --api-exe '<解壓管理包>/Runtime/VrCommand.Api.exe' --work-root '<短路徑資料夾>' --report '<新報告.json>'

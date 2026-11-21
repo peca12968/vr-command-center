@@ -1,6 +1,7 @@
 """Check five-room publication, observation and replay on Windows without IP listeners."""
 
 import argparse
+from collections import Counter
 from contextlib import ExitStack, closing, contextmanager
 from datetime import datetime, timezone
 import hashlib
@@ -197,6 +198,45 @@ def next_event(response):
     raise AssertionError('Observation ended before the expected SSE event')
 
 
+def publish_destinations(venue, sources, mode):
+    targets = [{'sessionId': source.session['id'], 'endpoint': {
+        'address': '127.0.0.1', 'port': 17770 + min(source.session['roomIds']),
+        'streamId': source.stream_id, 'version': 1}} for source in sources]
+    receipt = venue.request('/api/venue/connection-endpoints', method='PUT', role='GameServer',
+                            body={'version': 1, 'topology': mode, 'servers': targets})
+    expected = {t['sessionId']: (t['endpoint']['address'], t['endpoint']['port']) for t in targets}
+    assert {row['sessionId']: (row['address'], row['port']) for row in receipt['servers']} == expected
+    return expected
+
+
+def check_ticket(venue, session, player, ticket):
+    approved = venue.request('/api/player-tickets/validate', method='POST', role='GameServer',
+                             body={'sessionId': session['id'], 'ticket': ticket, 'protocolVersion': 2})
+    assert approved['sessionId'] == session['id'] and approved['playerId'] == player['id']
+    assert approved['throughSequence'] == session['sequence']
+    assert all(approved[key] == player[key] for key in ('roomId', 'seat', 'admissionId'))
+
+
+def replace_headset_before_start(venue, route, old, headset):
+    player_route = route + '/players/' + old['id']
+    session = venue.request(route)
+    invitation = venue.request(player_route + '/join-ticket', method='POST', admission=old['admissionId'])
+    check_ticket(venue, session, old, invitation['ticket'])
+    with venue.response(player_route, method='DELETE', admission=old['admissionId'], status=204):
+        pass
+    rejoined = venue.request(route + '/players', method='POST', body={
+        'playerId': old['id'], 'name': old['name'], 'roomId': old['roomId'], 'headset': headset})
+    current, = [p for p in rejoined['players'] if p['id'] == old['id']]
+    assert current['admissionId'] != old['admissionId']
+    assert (current['roomId'], current['seat'], current['headset']) == (old['roomId'], old['seat'], headset)
+    with venue.response('/api/player-tickets/validate', method='POST', role='GameServer', status=403,
+                        body={'sessionId': session['id'], 'ticket': invitation['ticket'], 'protocolVersion': 2}):
+        pass
+    with venue.response(player_route + '/join-ticket', method='POST', admission=old['admissionId'], status=409):
+        pass
+    return current
+
+
 def check_mode(venue, mode):
     def mission(experience, enemies=1):
         return venue.request('/api/missions', method='POST', status=201, body={'name': f'{mode} {experience} IPC review',
@@ -211,21 +251,54 @@ def check_mode(venue, mode):
         mr = mission('MR')
         sessions = venue.request('/api/sessions/independent-set', method='POST', status=201, body={
             'rooms': [{'roomId': room, 'missionId': mr if room in (2, 4) else vr} for room in ROOMS]})['sessions']
+    rosters = {}
+    headsets = Counter()
+    tickets = {}
     for session in sessions:
         route = '/api/sessions/' + session['id']
+        expected = rosters[route] = {}
         if session['environment']['mode'] == 'MR':
             room, = session['roomIds']
+            with venue.response(route + '/players', method='POST', status=409, body={
+                    'playerId': str(uuid4()), 'roomId': room, 'name': 'MR device check', 'headset': 'ViveXr'}):
+                pass
+            assert venue.request(route) == session
             venue.request(route + '/commands', method='POST', body={'action': 'SetRoomAlignment', 'commandId': str(uuid4()),
                           'expectedSequence': session['sequence'], 'roomAlignment': {f'room{room}': secrets.token_hex(32)}})
         for room in session['roomIds']:
             for seat in range(1, 6):
-                venue.request(route + '/players', method='POST', body={'playerId': str(uuid4()), 'roomId': room,
-                              'name': f'Room {room} seat {seat}', 'headset': 'Quest3'})
+                headset = 'ViveXr' if session['environment']['mode'] == 'VR' and seat % 2 == 0 else 'Quest3'
+                if (room, seat) == (5, 2):
+                    headset = 'Quest3'  # This attendee switches devices after the room is full.
+                player_id = str(uuid4())
+                joined = venue.request(route + '/players', method='POST', body={'playerId': player_id, 'roomId': room,
+                                       'name': f'Room {room} seat {seat}', 'headset': headset})
+                player, = [p for p in joined['players'] if p['id'] == player_id]
+                assert (player['roomId'], player['seat'], player['headset']) == (room, seat - 1, headset)
+                expected[player_id] = player
+        if 5 in session['roomIds']:
+            old, = [p for p in expected.values() if p['roomId'] == 5 and p['seat'] == 1]
+            replacement = replace_headset_before_start(venue, route, old, 'ViveXr')
+            expected[old['id']] = replacement
+            device_change = {'room': old['roomId'], 'seatNumber': old['seat'] + 1, 'from': old['headset'],
+                             'to': replacement['headset'], 'oldTicketRejected': True}
+        headsets.update(p['headset'] for p in expected.values())
     with ExitStack() as stack:
         sources = [Publisher(venue, session, stack) for session in sessions]
         assert sum(len(source.state['players']) for source in sources) == 25
+        destinations = publish_destinations(venue, sources, mode)
         for source in sources:
             source.publish(drop_pose=True)
+            assert {p['id']: p for p in source.state['players']} == rosters[source.route]
+            for player in source.state['players']:
+                invitation = venue.request(source.route + '/players/' + player['id'] + '/join-ticket',
+                                           method='POST', admission=player['admissionId'])
+                endpoint = invitation['endpoint']
+                assert (endpoint['address'], endpoint['port']) == destinations[source.session['id']]
+                assert invitation.get('roomAlignmentSha256') == (source.state.get('roomAlignment') or {}).get(
+                    'room' + str(player['roomId']))
+                tickets[player['id']] = invitation['ticket']
+                check_ticket(venue, source.state, player, invitation['ticket'])
         refused = venue.phase('Begin', 'begin', status=409, requireFullTracking=True)
         assert refused['code'] == 'venue-begin-not-ready' and refused['roomIds'] == [5], refused
         assert all(venue.request(source.route)['state'] == 'Preparing' for source in sources)
@@ -237,6 +310,8 @@ def check_mode(venue, mode):
         for source in sources:
             source.state = venue.request(source.route)
             assert source.state['state'] == 'Running'
+            for player in source.state['players']:
+                check_ticket(venue, source.state, player, tickets[player['id']])
             source.publish(damage=True)
 
         observed = next(source for source in sources if 5 in source.session['roomIds'])
@@ -296,7 +371,9 @@ def check_mode(venue, mode):
         assert venue.request('/api/sessions') == []
         return {'mode': mode, 'seats': 25, 'recordings': len(sources), 'combatEvents': sum(source.combat for source in sources),
                 'frames': sum(source.sequence for source in sources), 'closureRoute': closure_route, 'closure': closure,
-                'roomFiveWorld': observed.world, 'roomFiveLive': visible, 'saved': saved}
+                'roomFiveWorld': observed.world, 'roomFiveLive': visible, 'saved': saved, 'rosters': rosters,
+                'headsetRoster': dict(headsets), 'ticketsRevalidatedInRunning': len(tickets),
+                'deviceChange': device_change}
 
 
 def check_departed_clip(venue):
@@ -337,6 +414,8 @@ def check_departed_clip(venue):
 def check_after_restart(venue, result):
     assert venue.request('/api/sessions') == []
     assert venue.request(result['closureRoute']) == result['closure']
+    for route, expected in result['rosters'].items():
+        assert {row['id']: row for row in venue.request(route)['players']} == expected
     for world, frames in result['saved'].items():
         with venue.response(world + '/watch?mode=replay&fromFrame=1&throughFrame=latest&rate=4') as replay:
             kind, info = next_event(replay)
@@ -370,7 +449,8 @@ def main():
         with venue.start():
             for result in results:
                 check_after_restart(venue, result)
-        summary = {'verified': [{field: result[field] for field in ('mode', 'seats', 'recordings', 'combatEvents', 'frames')}
+        summary = {'verified': [{field: result[field] for field in ('mode', 'seats', 'recordings', 'combatEvents', 'frames',
+                                                                     'headsetRoster', 'ticketsRevalidatedInRunning', 'deviceChange')}
                                 for result in results], 'apiSha256': hashlib.sha256(args.api_exe.read_bytes()).hexdigest(),
                    'transport': 'Windows AF_UNIX', 'restarted': True, 'tcpListeners': 0, 'udpEndpoints': 0, 'activeSessions': 0,
                    'scope': 'Synthetic tracked poses and combat using packaged management API, real WebSocket and SSE'}
