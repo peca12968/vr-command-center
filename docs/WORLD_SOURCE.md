@@ -13,6 +13,14 @@ dotnet tools/VrCommand.WorldRelay/bin/Release/net10.0/VrCommand.WorldRelay.dll `
 
 管理服務須已在指定 socket 上啟動，房間須空閒，輸出檔須為新檔。示範會建立一位 Simulation 玩家，使用共用 `ArenaSession` 運算射擊、AI 傷害及場景，再保存和發布世界畫格。示範完成後，可用相同命令移除 `--demo-room`、`--seconds` 及 `--environment-demo`，讀取原來源重送。重啟後的戰績及世界回放由管理服務的原封存讀回。
 
+已結束的場次可用原伺服器設定檔恢復封存確認。以下命令從設定檔讀取管理位址、場次與憑證，透過指定的 socket 連到原管理服務。設定檔內的管理位址須為 `http://127.0.0.1` 原點，可含埠號。`--work` 指向既有父目錄下的新目錄。工具在副本中補回確認，成功後寫出 `recovery.json`。
+
+```powershell
+dotnet tools/VrCommand.WorldRelay/bin/Release/net10.0/VrCommand.WorldRelay.dll `
+    --recover-server C:/vr-local/server.json --work C:/vr-local/recovery-01 `
+    --local-socket C:/vr-local/api.sock
+```
+
 本機 WebSocket 使用 .NET 提供的 `HttpMessageInvoker` 連線介面，傳輸與 HTTP 沿用同一個本機 socket。 [Microsoft ClientWebSocket.ConnectAsync](https://learn.microsoft.com/en-us/dotnet/api/system.net.websockets.clientwebsocket.connectasync?view=net-10.0)
 
 目前 Unity NGO protocol18／Android code20、bundle0.19.0，API 仍 0.16；真正 Editor 已通過 39 項 EditMode 及 Windows／Quest 同源建置。PC 重連及 Simulated 恢復姿態的 admission 隔離見 [RECONNECT](RECONNECT.md)；不能把桌面快取當 Tracked 或持久世界恢復。下方 v0.13／14 為歷次改動。新 header 預設 environmentVersion 1，舊 journal 保持 0／原始 JSON／checksum，codec 正規化比較支援缺少選用欄位的原樣恢復。`--environment-demo true` 只搭配新 `--demo-room` 產生 Storm／Night／雷電 Simulation；完整聲光規則、UTC 與升級見 [ENVIRONMENT.md](ENVIRONMENT.md)。

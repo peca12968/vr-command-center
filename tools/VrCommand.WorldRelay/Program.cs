@@ -27,7 +27,7 @@ if (values.ContainsKey("--recover-server") || values.ContainsKey("--work"))
 {
     try
     {
-        if (values.Count != 2 || !values.TryGetValue("--recover-server", out var config) || !values.TryGetValue("--work", out var directory))
+        if (values.Count != (local is null ? 2 : 3) || !values.TryGetValue("--recover-server", out var config) || !values.TryGetValue("--work", out var directory))
             throw new RecoveryRejected("require-server-config-and-new-work-directory");
         await RecoverServer(config, directory);
     }
@@ -122,6 +122,8 @@ async Task PublishBinary(HttpClient client, TelemetryOutbox combat, WorldOutbox 
 async Task RecoverServer(string configPath, string directory)
 {
     var source = RecoverySource.Read(configPath);
+    if (local is not null && (source.Api.Scheme != "http" || source.Api.Host != "127.0.0.1"))
+        throw new RecoveryRejected("local-recovery-requires-loopback-http-origin");
     var work = Path.GetFullPath(directory);
     if (Directory.Exists(work) || File.Exists(work) || !Directory.Exists(Path.GetDirectoryName(work)))
         throw new RecoveryRejected("require-new-work-directory");
@@ -139,11 +141,16 @@ async Task RecoverServer(string configPath, string directory)
     var header = world.Header;
     source.CheckJournals(combat, world, header);
 
-    var handler = new HttpClientHandler { AllowAutoRedirect = false };
-    if (source.CertificatePin.Length != 0)
+    HttpMessageHandler handler = local is null ? new HttpClientHandler { AllowAutoRedirect = false }
+        : new SocketsHttpHandler
+        {
+            AllowAutoRedirect = false, UseProxy = false,
+            ConnectCallback = (_, cancellation) => LocalSocketTransport.Connect(local, cancellation)
+        };
+    if (handler is HttpClientHandler network && source.CertificatePin.Length != 0)
     {
-        handler.UseProxy = false;
-        handler.ServerCertificateCustomValidationCallback = (_, certificate, _, errors) =>
+        network.UseProxy = false;
+        network.ServerCertificateCustomValidationCallback = (_, certificate, _, errors) =>
             certificate is not null && (errors & ~SslPolicyErrors.RemoteCertificateChainErrors) == SslPolicyErrors.None
             && ManagementCertificatePin.Matches(certificate.RawData, source.CertificatePin);
     }

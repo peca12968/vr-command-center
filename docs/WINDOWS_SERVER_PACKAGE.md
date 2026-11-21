@@ -425,7 +425,7 @@ Windows 套件及 GUI 驗證在 Python 首次探測本機連接埠前查核 `pyt
 
 `tests/browser/check-external-native.cjs` 在開啟瀏覽器及送出操作前，會核對這一輪實際使用的 `VrCommand.exe`。執行 `--launcher-status` 時也會核對負責 UDP 的 Node。管理服務 GUI 及 HTTPS 測試會先核對負責探測連接埠的 Python。HTTPS 測試另在開始原生連線情境及啟動伺服器前重新查核實際的 `VrCommand.exe`。管理服務重新啟動測試在每次啟動前重新查核管理啟動器、伺服器啟動器或玩家執行檔。舊版套件的子程序也會收到無人值守設定。
 
-Windows 的 `smoke_world.py` 可設定 `VR_COMMAND_WORLD_TEST_WINDOWS_IPC=1`，讓本機迴環流量由通過防火牆查核的 Python 轉送。腳本在每次啟動或重啟時核對管理程序沒有 TCP 監聽或 UDP 端點。
+Windows 設定 `VR_COMMAND_UNATTENDED=1` 時，`smoke_world.py` 預設讓 HTTP、SSE 與 WebSocket 直接走同一個 AF_UNIX socket。腳本在每次啟動或重啟管理服務時查核其端點，結束前也核對測試程序與管理服務均為零 TCP 監聽及 UDP 端點。可用 `VR_COMMAND_WORLD_TEST_WINDOWS_IPC=1` 明確選用本機 socket，或設為 `0` 選用需經防火牆查核的 TCP 測試。
 
 若入站通知仍開啟，可用 `check-venue-world-ipc.py` 在 Windows 直接經由 AF_UNIX 測試正式管理包。HTTP、WebSocket 發布和 SSE 觀戰與回放都使用同一個本機 socket。腳本建立隔離資料，驗證合併 VR 與五房獨立 VR／MR 各 25 席、追蹤中斷攔截開場、全館天候指令、戰損、封存及重啟後逐格回放。`--work-root` 指向已存在的短路徑，報告使用新檔名。姿態及戰鬥來源是測試資料。
 

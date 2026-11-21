@@ -1,7 +1,6 @@
 """Real WebSocket publisher, authenticated SSE observation and SQLite restart checks."""
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack
 import csv
 from decimal import Decimal
 import io
@@ -26,7 +25,9 @@ from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_
 
 ROOT = Path(__file__).resolve().parents[1]
 api_exe = os.environ.get("VR_COMMAND_API_EXE")
-use_ipc = os.name == "nt" and os.environ.get("VR_COMMAND_WORLD_TEST_WINDOWS_IPC") == "1"
+use_ipc = os.name == "nt" and os.environ.get(
+    "VR_COMMAND_WORLD_TEST_WINDOWS_IPC", os.environ.get("VR_COMMAND_UNATTENDED")
+) == "1"
 try:
     if not use_ipc:
         require_silent_windows_launch(sys.executable)
@@ -47,22 +48,24 @@ def check(condition, message):
     print(f"PASS {count}: {message}")
 
 
-with tempfile.TemporaryDirectory(prefix="vr-world-") as directory, ExitStack() as listeners:
+with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
     directory = Path(directory)
     tokens = {role: secrets.token_hex(32) for role in ("Master", "Room1", "Room5", "GameServer")}
     keys = directory / "keys.json"
     keys.write_text(json.dumps({"OperatorKeys": tokens}), encoding="utf-8")
     if use_ipc:
-        from windows_ipc_api import LoopbackIpcRelay, unix_address
+        from windows_ipc_api import has_no_ip_endpoints, unix_address, unix_http_opener
 
         ipc_endpoint = directory / "api.sock"
-        ipc_relay = LoopbackIpcRelay(unix_address(ipc_endpoint), sys.executable)
-        listeners.callback(ipc_relay.close)
-        port = ipc_relay.server_address[1]
+        port = 18000
+        open_http = unix_http_opener(lambda _port: ipc_endpoint).open
+        relay_transport = ["--local-socket", str(ipc_endpoint)]
     else:
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
             port = probe.getsockname()[1]
+        open_http = urllib.request.urlopen
+        relay_transport = []
     base = f"http://127.0.0.1:{port}"
     environment = {key: value for key, value in os.environ.items()
                    if not key.lower().startswith(("operatorkeys__", "kestrel__", "vr_command_managed_tls_"))
@@ -77,7 +80,7 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory, ExitStack() a
             data=None if body is None else json.dumps(body).encode(),
             headers={"Authorization": "Bearer " + tokens.get(role, role), "Content-Type": "application/json"})
         try:
-            response = urllib.request.urlopen(req, timeout=10)
+            response = open_http(req, timeout=10)
         except urllib.error.HTTPError as error:
             response = error
         if response.status != expected:
@@ -103,7 +106,7 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory, ExitStack() a
         try:
             for _ in range(150):
                 try:
-                    with urllib.request.urlopen(base + "/health", timeout=.5):
+                    with open_http(base + "/health", timeout=.5):
                         break
                 except OSError:
                     if child.poll() is not None:
@@ -111,13 +114,8 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory, ExitStack() a
                     time.sleep(.1)
             else:
                 raise AssertionError("Isolated world API startup timed out")
-            if use_ipc:
-                inspect = (f"@(Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object OwningProcess -EQ {child.pid}).Count; "
-                           f"@(Get-NetUDPEndpoint -ErrorAction Stop | Where-Object OwningProcess -EQ {child.pid}).Count")
-                owned = subprocess.check_output(["pwsh", "-NoProfile", "-NonInteractive", "-Command", inspect],
-                                                text=True, timeout=15, creationflags=flags)
-                if owned.split() != ["0", "0"]:
-                    raise AssertionError("The isolated IPC API must have zero TCP listeners and zero UDP endpoints")
+            if use_ipc and not has_no_ip_endpoints([child.pid]):
+                raise AssertionError("The isolated IPC API must have zero TCP listeners and zero UDP endpoints")
             return child
         except BaseException:
             if child.poll() is None:
@@ -137,6 +135,10 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory, ExitStack() a
                 return kind, json.loads(data)
         raise AssertionError("Missing SSE event")
 
+    def world_socket(route, token):
+        return WebSocket(None if use_ipc else port, route, token,
+                         ipc_address=unix_address(ipc_endpoint) if use_ipc else None)
+
     def next_live_event(response):
         for _ in range(5):
             item = event(response)
@@ -150,7 +152,7 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory, ExitStack() a
         request("/api/world-recordings", "invalid", 401)
         check(True, "World listing requires authentication")
         recording = directory / "world.ndjson"
-        command = ["dotnet", RELAY, "--recording", str(recording), "--base-url", base, "--key-file", str(keys)]
+        command = ["dotnet", RELAY, "--recording", str(recording), "--base-url", base, "--key-file", str(keys), *relay_transport]
         demo = subprocess.Popen(command + ["--demo-room", "5", "--seconds", "2"], cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
         for _ in range(100):
             entries = request("/api/world-recordings")
@@ -179,7 +181,7 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory, ExitStack() a
         request(route + "/publish", "Room5", 403)
         check(True, "Foreign room reads and operator world publication are rejected")
         check(request("/api/world-recordings", "Room1") == [], "World listing preserves room scope")
-        publisher = WebSocket(port, route + "/publish", tokens["GameServer"])
+        publisher = world_socket(route + "/publish", tokens["GameServer"])
         check(publisher.send({"type": "header", "payload": info["header"]})["type"] == "ack", "Publisher may reconnect to the immutable header")
         check(publisher.send({"type": "seal", "finalSequence": info["acceptedSequence"]})["type"] == "error", "Running or undrained world cannot seal")
         publisher.close()
@@ -527,14 +529,14 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory, ExitStack() a
             stats = final["statistics"][0]
             check(final["packet"]["frame"]["phase"] == "Ended" and final["packet"]["weather"] == "Storm" and final["packet"]["frame"]["night"], "Replay retains pause, environment changes and the final world")
             check(stats["ammoUsed"] == 2 and stats["kills"] == 1 and stats["health"] == 80, "Frame statistics agree with actual recorded combat")
-        publisher = WebSocket(port, route + "/publish", tokens["GameServer"])
+        publisher = world_socket(route + "/publish", tokens["GameServer"])
         publisher.send(frames[0])
         check(publisher.send(frames[1])["info"]["acceptedSequence"] == 44, "Late exact frame retry confirms the original record after sealing")
         altered = json.loads(json.dumps(frames[1]))
         altered["payload"]["frame"]["players"][0]["health"] = 1
         check(publisher.send(altered)["type"] == "error", "Conflicting retry cannot overwrite an accepted frame")
         publisher.close()
-        publisher = WebSocket(port, route + "/publish", tokens["GameServer"])
+        publisher = world_socket(route + "/publish", tokens["GameServer"])
         check(publisher.send(frames[1])["type"] == "error", "Each new socket must establish its header before frames")
         publisher.close()
         request(route + "/watch?rate=999", expected=400)
@@ -542,11 +544,11 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory, ExitStack() a
         check(True, "Unbounded replay speed and invalid seeks are rejected")
         unsupported_header = json.loads(json.dumps(info["header"]))
         unsupported_header["environmentVersion"] = 2
-        publisher = WebSocket(port, route + "/publish", tokens["GameServer"])
+        publisher = world_socket(route + "/publish", tokens["GameServer"])
         check(publisher.send({"type": "header", "payload": unsupported_header})["type"] == "error", "Unknown environment versions cannot publish a world")
         publisher.close()
         unsupported_header["environmentVersion"] = 0
-        publisher = WebSocket(port, route + "/publish", tokens["GameServer"])
+        publisher = world_socket(route + "/publish", tokens["GameServer"])
         check(publisher.send({"type": "header", "payload": unsupported_header})["type"] == "error", "Existing versioned world cannot be relabeled as a legacy presentation")
         publisher.close()
         cameras = route + "/cameras"
@@ -673,7 +675,7 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory, ExitStack() a
             packet["frame"]["players"].append(other_body)
             return packet
 
-        damage_publisher = WebSocket(port, overkill_world + "/publish", tokens["GameServer"])
+        damage_publisher = world_socket(overkill_world + "/publish", tokens["GameServer"])
         try:
             reply = damage_publisher.send({"type": "header", "payload": damage_header})
             assert reply["type"] == "ack", reply
@@ -813,7 +815,7 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory, ExitStack() a
         check(request(route) == info, "Whole-source retry changes no frame or archive metadata")
         check(request("/api/sessions/" + session)["players"][0]["name"] == "World Simulation", "Observer creates no extra player seat")
         shared = directory / "shared.worldlog"
-        shared_command = ["dotnet", RELAY, "--world-journal", str(shared), "--base-url", base, "--key-file", str(keys)]
+        shared_command = ["dotnet", RELAY, "--world-journal", str(shared), "--base-url", base, "--key-file", str(keys), *relay_transport]
         native = subprocess.run(shared_command + ["--demo-room", "5", "--seconds", "1"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)
         check(native.returncode == 0, "Shared netstandard publisher completes through a real authenticated WebSocket: " + native.stderr[-400:])
         shared_result = json.loads(native.stdout)
@@ -842,12 +844,20 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory, ExitStack() a
         def recover(label, config):
             recovery_config.write_text(json.dumps(config), encoding="utf-8-sig")
             work = directory / label
-            result = subprocess.run([*RECOVERY, "--recover-server", str(recovery_config), "--work", str(work)],
+            result = subprocess.run([*RECOVERY, "--recover-server", str(recovery_config), "--work", str(work), *relay_transport],
                                     cwd=directory, capture_output=True, encoding="utf-8", timeout=30)
             assert not any(key in result.stdout + result.stderr for key in tokens.values())
             return work, result
 
         old_session = request(shared_route.rsplit("/", 1)[0])
+        if use_ipc:
+            for label, origin, pin in (
+                ("remote-http", "http://venue.invalid", ""),
+                ("pinned-https", base.replace("http:", "https:", 1), "a" * 64),
+            ):
+                work, denied = recover(label, {**recovery_draft, "managementApiUrl": origin, "managementCertificateSha256": pin})
+                check(denied.returncode == 1 and json.loads(denied.stderr)["reason"] == "local-recovery-requires-loopback-http-origin"
+                      and not work.exists(), "Local recovery rejects " + label + " before staging journals")
         for label, config in (
             ("http-with-pin", {**recovery_draft, "managementCertificateSha256": "a" * 64}),
             ("https-without-pin", {**recovery_draft, "managementApiUrl": base.replace("http:", "https:", 1)}),
@@ -896,7 +906,7 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory, ExitStack() a
         older_stream = str(uuid4())
         request(older_route + "/combat-stream", "GameServer", method="POST",
                 body={"streamId": older_stream, "origin": "Simulation"})
-        publisher = WebSocket(port, older_route + "/world/publish", tokens["GameServer"])
+        publisher = world_socket(older_route + "/world/publish", tokens["GameServer"])
         try:
             reply = publisher.send({"type": "header", "payload": dict(damage_header, sessionId=older_active,
                 streamId=older_stream, roomIds=[3])})
@@ -917,7 +927,7 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory, ExitStack() a
                 stream = str(uuid4())
                 request(historical_session + "/combat-stream", "GameServer", method="POST",
                         body={"streamId": stream, "origin": "Simulation"})
-                publisher = WebSocket(port, historical_session + "/world/publish", tokens["GameServer"])
+                publisher = world_socket(historical_session + "/world/publish", tokens["GameServer"])
                 try:
                     reply = publisher.send({"type": "header", "payload": dict(damage_header, sessionId=historical_id,
                         streamId=stream, roomIds=[room])})
@@ -976,7 +986,7 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory, ExitStack() a
         check(request(page_path)["pinned"] == [], "The previously pinned source drops out of the live pins after End")
 
         demo = subprocess.Popen([*shared_command[:2], "--world-journal", str(directory / "list-live.worldlog"),
-            "--base-url", base, "--key-file", str(keys), "--demo-room", "5", "--seconds", "3"],
+            "--base-url", base, "--key-file", str(keys), "--demo-room", "5", "--seconds", "3", *relay_transport],
             cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8")
         for _ in range(100):
             if any(row["header"]["sessionId"] not in initial and 0 < row["acceptedSequence"] and not row["complete"]
@@ -1023,7 +1033,7 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory, ExitStack() a
         sparse_session = f"/api/sessions/{sparse['id']}"
         sparse_stream = str(uuid4())
         request(sparse_session + "/combat-stream", "GameServer", method="POST", body={"streamId": sparse_stream, "origin": "Simulation"})
-        publisher = WebSocket(port, sparse_session + "/world/publish", tokens["GameServer"])
+        publisher = world_socket(sparse_session + "/world/publish", tokens["GameServer"])
         try:
             reply = publisher.send({"type": "header", "payload": dict(damage_header, sessionId=sparse["id"], streamId=sparse_stream, roomIds=[3])})
             assert reply["type"] == "ack", reply
@@ -1053,6 +1063,8 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory, ExitStack() a
         check(inclusive["includeFrom"] and inclusive["frame"] is None and inclusive["scannedToFrame"] == inclusive["nextFromFrame"] == 78
               and "includeFrom" not in resumed and resumed["frame"]["frameSequence"] == 1,
               "Live policy lookup includes its anchor once and resumes before the empty page boundary")
+        if use_ipc:
+            check(has_no_ip_endpoints([os.getpid(), process.pid]), "The owned world fixture and API have zero TCP listeners and UDP endpoints")
         print(f"All {count} world streaming checks passed. No Unity or headset execution.")
     finally:
         if demo is not None and demo.poll() is None:

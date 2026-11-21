@@ -1,5 +1,9 @@
 # 開發進度
 
+## 2026-11-22 本機任務回放與封存恢復
+
+Windows 無人值守模式已用管理包 0.31.267 與正式建置的 WorldRelay 完成 147 項錄製檢查。已結束任務的世界與戰績兩份副本成功補回封存確認，逐位元組符合原封存。損壞的錄製、錯誤角色或來源、與本機 socket 不相容的管理位址也均依預期拒絕。測試腳本及管理服務在結束前查得零 TCP 監聽及 UDP 端點，另通過 13 項啟動流程測試。Windows 本次唯讀裝置列舉未找到 Quest 或 ADB 介面，實機與跨機驗收仍待進行。 [操作方式](WORLD_SOURCE.md#無人值守的本機世界錄製)
+
 ## 2026-11-18 共用遊戲模擬經本機 socket 錄製與重送
 
 - `VrCommand.WorldRelay` 提供 `--local-socket`，HTTP 控制與戰鬥發布、兩種世界錄製的 WebSocket 都可連到同一 AF_UNIX 管理服務。沿用共用 `LocalSocketTransport`、`ArenaSession` 與世界 outbox。正式建置為零警告與錯誤。 [操作方式](WORLD_SOURCE.md#無人值守的本機世界錄製)
