@@ -2,6 +2,7 @@
 import importlib.util
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -133,7 +134,39 @@ class VenueReleaseTests(unittest.TestCase):
             for path in paths:
                 path.write_bytes(original)
 
-    def test_field_kit_binds_exact_files_and_publishes_only_once(self):
+    def fixture_guard(self):
+        dirs = {'control': self.control, 'server': self.server, 'player': self.player}
+        return {'launchers': {name: release.digest(dirs[role] / name) for role, name in release.LAUNCHERS.items()},
+                'scriptSha256': release.digest(Path(release.__file__).with_name('check-windows-firewall-notifications.ps1'))}
+
+    @unittest.skipUnless(os.name == 'nt' and shutil.which('pwsh'), 'Uses the Windows Framework compiler and PowerShell 7')
+    def test_field_kit_checks_the_named_resource_in_each_actual_launcher(self):
+        compiler = Path(os.environ['WINDIR']) / 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+        if not compiler.is_file():
+            self.skipTest('Framework compiler not installed')
+        source = self.root / 'Main.cs'
+        source.write_text('class MainClass { static void Main() {} }')
+        resource = Path(release.__file__).with_name('check-windows-firewall-notifications.ps1')
+        stale = self.root / 'stale.ps1'
+        stale.write_bytes(b'!' + resource.read_bytes()[1:])
+        folders = [self.control, self.server, self.player]
+        def compile_image(output, script):
+            subprocess.run([str(compiler), '/nologo', '/target:winexe', '/out:' + str(output),
+                            '/resource:' + str(script) + ',FirewallPreflight.ps1', str(source)], check=True)
+        for folder, name in zip(folders, release.LAUNCHERS.values()):
+            compile_image(folder / name, resource)
+        self.assertEqual(release.embedded_firewall(*folders), self.fixture_guard())
+        for folder, name in zip(folders, release.LAUNCHERS.values()):
+            image = folder / name
+            original = image.read_bytes()
+            compile_image(image, stale)
+            with self.subTest(image=name), self.assertRaisesRegex(ValueError, 'Outdated embedded firewall check'):
+                release.embedded_firewall(*folders)
+            image.write_bytes(original)
+
+    @patch.object(release, 'embedded_firewall')
+    def test_field_kit_binds_exact_files_and_publishes_only_once(self, guard):
+        guard.return_value = self.fixture_guard()
         game, windows = release.verify_windows(self.control, self.server, self.player)
         apk = self.root / 'sample.apk'
         self.write_native_apk(apk)
@@ -152,6 +185,11 @@ class VenueReleaseTests(unittest.TestCase):
                 package()
             self.assertFalse(destination.exists())
             path.write_bytes(original)
+        guard.return_value['launchers']['Launch-Server.exe'] = '0' * 64
+        with self.assertRaisesRegex(ValueError, 'launcher differs'):
+            package()
+        self.assertFalse(destination.exists())
+        guard.return_value = self.fixture_guard()
         package()
         with zipfile.ZipFile(destination) as archive:
             self.assertEqual(json.loads(archive.read('venue-release.json')), report)
@@ -163,7 +201,9 @@ class VenueReleaseTests(unittest.TestCase):
             package()
         self.assertEqual(release.digest(destination), before)
 
-    def test_optional_simulator_uses_its_checked_manifest_and_guarded_mock(self):
+    @patch.object(release, 'embedded_firewall')
+    def test_optional_simulator_uses_its_checked_manifest_and_guarded_mock(self, guard):
+        guard.return_value = self.fixture_guard()
         tool = release.hardware_package
         folder = self.root / 'hardware'
         for name in [*tool.FILES, 'example.json', 'README.txt']:

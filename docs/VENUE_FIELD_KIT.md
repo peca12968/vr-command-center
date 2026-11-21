@@ -2,6 +2,8 @@
 
 請先完整解壓 ZIP。根目錄的 `venue-release.json` 是這一組 Windows 程式與 Quest APK 的版本核對報告。分發到不同電腦時，複製對應的整個資料夾，保留其中的啟動器、清單及說明。
 
+報告的 `launcherFirewall` 列出三個 Windows 啟動器及其共用防火牆檢查的 SHA-256。啟動前若 Windows 可能顯示入站通知，或無法讀取通知設定，啟動器會略過該次啟動。工作站可以先完成下方的離線檔案核對。
+
 | 電腦或裝置 | 交付內容 |
 | --- | --- |
 | 主控台 | `VRCommand-ControlServer`，由 `Start-Control.exe` 開啟，依資料夾中的 README 建立或選取管理實例。 |
@@ -27,7 +29,15 @@ dotnet .\VRCommand-HardwareSimulator\VrCommand.HardwareSimulator.dll `
   --input .\VRCommand-HardwareSimulator\example.json --output ..\hardware-rehearsal.json
 ```
 
-在解壓目錄用 PowerShell 7 執行以下命令，可唯讀查看 Windows 是否已列舉頭盔及其 USB 偵錯介面。
+若使用 VIVE 的 Windows PC VR 連線方式，可在解壓根目錄執行下列檢查。請使用包外的新報告檔名。這一步讀取本機 OpenXR 設定與執行環境檔案；指定型號的頭盔畫面與左右控制器須在場館實測。
+
+```powershell
+$report = Join-Path (Split-Path (Get-Location).Path -Parent) 'windows-openxr.json'
+& .\VRCommand-Player\Launch-Player.exe --check-openxr --report $report | Out-Null
+Get-Content -LiteralPath $report
+```
+
+若使用 Quest 3，在解壓目錄用 PowerShell 7 執行以下命令，可唯讀查看 Windows 是否已列舉頭盔及其 USB 偵錯介面。
 
 ```powershell
 .\scripts\check-quest-usb.ps1

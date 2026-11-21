@@ -12,6 +12,8 @@
 
 Windows 套件的核對報告會列出 OpenXR 顯示與輸入子系統、兩個 x64 原生 DLL 及三個已註冊的程式集。這項查核只讀取交付檔案。頭盔畫面、追蹤與控制器輸入須另保留實機測試結果。
 
+建立場館 ZIP 時，發行工作站須可執行 PowerShell 7.2 以上的 `pwsh`。封裝工具會讀取三個啟動器內嵌的防火牆檢查，將其與目前專案指令檔逐一核對。舊版或缺少該項資源的啟動器會在發行前被拒絕。更新後請重新封裝對應的 Windows 程式。
+
 先完整解壓三個 Windows 套件，把 Quest 開發 APK 與同名的原始 `.receipt.json` 放在一起。使用 Unity 的 Android SDK Build Tools 36.0.0 及 OpenJDK，在儲存庫執行下列命令並替換路徑。
 
 需要帶到另一台電腦時，可在同一命令加上 `--field-kit 'C:\Delivery\VRCommand-Venue.zip'`。指定既有父目錄下的新 ZIP 名稱。工具會打包三套 Windows 程式、Quest APK 與建置回條、部署工具及同一次核對產生的發行報告。若場館要排演硬體介接，再加上 `--hardware-simulator 'C:\Delivery\VRCommand-HardwareSimulator'`，指向已解壓的硬體模擬包。 [包內使用說明](VENUE_FIELD_KIT.md)

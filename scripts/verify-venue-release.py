@@ -361,6 +361,20 @@ def verify_hardware(folder):
             'manifestSha256': hashlib.sha256(raw).hexdigest()}
 
 
+LAUNCHERS = {'control': 'Start-Control.exe', 'server': 'Launch-Server.exe', 'player': 'Launch-Player.exe'}
+
+
+def embedded_firewall(control, server, player):
+    checker = Path(__file__).with_name('check-embedded-firewall.ps1')
+    command = ['pwsh', '-NoProfile', '-NonInteractive', '-File', str(checker)]
+    for role, folder in (('control', control), ('server', server), ('player', player)):
+        command.extend(['-' + role, str((folder / LAUNCHERS[role]).resolve(strict=True))])
+    checked = subprocess.run(command, capture_output=True, encoding='utf-8', errors='replace', timeout=30,
+                             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    require(checked.returncode == 0, 'Launcher firewall verification failed: ' + checked.stderr.strip())
+    return json.loads(checked.stdout)
+
+
 def write_field_kit(destination, control, server, player, apk, report, hardware=None):
     destination = control_package.plain(destination)
     require(destination.suffix.lower() == '.zip' and not destination.exists(), 'Choose a new field kit ZIP path')
@@ -376,6 +390,7 @@ def write_field_kit(destination, control, server, player, apk, report, hardware=
                 target.write(chunk)
         require(checksum.hexdigest() == expected, f'File changed before field kit publication: {name}')
 
+    guard = embedded_firewall(control, server, player)
     with tempfile.TemporaryDirectory(prefix='.field-kit-', dir=destination.parent) as work:
         pending = Path(work) / 'kit.zip'
         with zipfile.ZipFile(pending, 'x', compression=zipfile.ZIP_DEFLATED, compresslevel=3) as archive:
@@ -388,6 +403,9 @@ def write_field_kit(destination, control, server, player, apk, report, hardware=
                 archive.writestr(top + '/' + filename, raw)
                 for row in json.loads(raw)['files']:
                     relative = control_package.relative(row['path'])
+                    if row['path'] == LAUNCHERS[role]:
+                        require(guard['launchers'][row['path']] == row['sha256'],
+                                f'{role} launcher differs from its firewall verification')
                     copy_verified(archive, folder / relative, top + '/' + relative.as_posix(), row['sha256'])
             if hardware:
                 raw = control_package.plain(hardware / 'hardware-package.json').read_bytes()
@@ -396,15 +414,19 @@ def write_field_kit(destination, control, server, player, apk, report, hardware=
                 top = 'VRCommand-HardwareSimulator/'
                 archive.writestr(top + 'hardware-package.json', raw)
                 for name, row in json.loads(raw)['files'].items():
+                    if name == 'check-windows-firewall-notifications.ps1':
+                        require(row['sha256'] == guard['scriptSha256'], 'Hardware and launcher firewall checks differ')
                     copy_verified(archive, hardware / control_package.relative(name), top + name, row['sha256'])
             for path, key in ((apk, 'sha256'), (apk.with_suffix('.receipt.json'), 'receiptSha256')):
                 copy_verified(archive, path, 'Quest/' + path.name, report['quest'][key])
             scripts = Path(__file__).resolve().parent
             for name in ('deploy-quest.ps1', 'quest-adb-process.ps1', 'check-quest-usb.ps1',
-                         'check-windows-firewall-notifications.ps1', 'check-field-install.ps1'):
+                         'check-field-install.ps1'):
                 archive.write(scripts / name, 'scripts/' + name)
+            firewall = scripts / 'check-windows-firewall-notifications.ps1'
+            copy_verified(archive, firewall, 'scripts/' + firewall.name, guard['scriptSha256'])
             archive.write(scripts.parent / 'docs/VENUE_FIELD_KIT.md', 'README.md')
-            archive.writestr('venue-release.json', json.dumps(report, indent=2) + '\n')
+            archive.writestr('venue-release.json', json.dumps(dict(report, launcherFirewall=guard), indent=2) + '\n')
         with zipfile.ZipFile(pending) as archive:
             require(archive.testzip() is None, 'Field kit ZIP readback failed')
         # Publish only a complete archive and never replace a concurrent delivery.
@@ -412,6 +434,7 @@ def write_field_kit(destination, control, server, player, apk, report, hardware=
             pending.rename(destination)
         else:
             os.link(pending, destination)
+    report['launcherFirewall'] = guard
 
 
 def main():
