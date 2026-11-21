@@ -161,8 +161,16 @@ function New-Object {
         }
     }
     $policy = [pscustomobject]@{ CurrentProfileTypes = 2; Enabled = $Enabled; Notifying = $Notifying; Rules = $rules }
-    $policy | Add-Member ScriptMethod FirewallEnabled { param($mask) ($this.Enabled -band $mask) -ne 0 }
-    $policy | Add-Member ScriptMethod NotificationsDisabled { param($mask) ($this.Notifying -band $mask) -eq 0 }
+    $policy | Add-Member ScriptMethod FirewallEnabled {
+        param($mask)
+        if ($this.Enabled -eq 8 -and $mask -eq 4) { return $null }
+        ($this.Enabled -band $mask) -ne 0
+    }
+    $policy | Add-Member ScriptMethod NotificationsDisabled {
+        param($mask)
+        if ($this.Notifying -eq 8 -and $mask -eq 4) { return 'unknown' }
+        ($this.Notifying -band $mask) -eq 0
+    }
     $policy
 }
 & $Checker -Executable $Image -Unattended:([bool]$ForceUnattended)
@@ -173,6 +181,8 @@ exit $LASTEXITCODE
             environment = os.environ.copy()
             environment.pop('VR_COMMAND_UNATTENDED', None)
             cases = [
+                ('1', '8', '0', '0', '1', 1),
+                ('1', '7', '8', '0', '1', 1),
                 (None, '7', '4', '0', '0', 2),
                 ('1', '7', '4', '0', '0', 2),
                 ('unexpected', '7', '4', '0', '0', 2),
@@ -197,6 +207,8 @@ exit $LASTEXITCODE
                                             capture_output=True, text=True, timeout=15,
                                             creationflags=subprocess.CREATE_NO_WINDOW)
                     self.assertEqual(result.returncode, expected, result.stderr)
+                    if expected == 1:
+                        self.assertIn('Could not read the Windows Firewall state for Public', result.stderr)
                     if expected == 2:
                         profile = 'Private' if notifying == '2' else 'Public'
                         message = f'notifications are enabled on: {profile}.'
