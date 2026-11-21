@@ -23,6 +23,7 @@ def local_module(name):
 server_package = local_module('package-windows-server')
 player_package = server_package.player
 control_package = local_module('package-control-server')
+hardware_package = local_module('package-hardware-simulator')
 digest = player_package.digest
 IDENTITY = ('unityVersion', 'sourceFingerprint', 'sceneNetworkId', 'playerPrefabId')
 HASH = r'[0-9a-f]{64}'
@@ -305,11 +306,28 @@ def verify_quest(apk, sdk, jdk, game):
             'nativeLibraries': native_libraries, 'receiptSha256': hashlib.sha256(receipt_bytes).hexdigest()}
 
 
-def write_field_kit(destination, control, server, player, apk, report):
+def verify_hardware(folder):
+    manifest_path = control_package.plain(folder / 'hardware-package.json')
+    raw = manifest_path.read_bytes()
+    manifest = hardware_package.verify(folder, manifest_bytes=raw)
+    files = manifest['files']
+    require({*hardware_package.MOCK_FIREWALL_FILES, hardware_package.MOCK_IPC_FILE} <= files.keys(),
+            'The field kit requires a simulator with guarded Windows and local socket support')
+    for name in hardware_package.MOCK_FIREWALL_FILES:
+        require(files[name]['sha256'] == digest(Path(__file__).with_name(name)),
+                f'The simulator uses a different Windows firewall check: {name}')
+    require(files['mock-device.py']['sha256'] == digest(Path(__file__).with_name('hardware-mock-peer.py')),
+            'The simulator uses a different mock device entry point')
+    return {'toolVersion': manifest['toolVersion'], 'mode': manifest['mode'], 'files': len(files),
+            'manifestSha256': hashlib.sha256(raw).hexdigest()}
+
+
+def write_field_kit(destination, control, server, player, apk, report, hardware=None):
     destination = control_package.plain(destination)
     require(destination.suffix.lower() == '.zip' and not destination.exists(), 'Choose a new field kit ZIP path')
-    for folder in (control, server, player):
-        require(not destination.is_relative_to(folder.resolve()), 'Save the field kit outside its input packages')
+    for folder in (control, server, player, hardware):
+        if folder is not None:
+            require(not destination.is_relative_to(folder.resolve()), 'Save the field kit outside its input packages')
 
     def copy_verified(archive, path, name, expected):
         checksum = hashlib.sha256()
@@ -332,6 +350,14 @@ def write_field_kit(destination, control, server, player, apk, report):
                 for row in json.loads(raw)['files']:
                     relative = control_package.relative(row['path'])
                     copy_verified(archive, folder / relative, top + '/' + relative.as_posix(), row['sha256'])
+            if hardware:
+                raw = control_package.plain(hardware / 'hardware-package.json').read_bytes()
+                require(hashlib.sha256(raw).hexdigest() == report['hardwareSimulator']['manifestSha256'],
+                        'Hardware simulator manifest changed before field kit publication')
+                top = 'VRCommand-HardwareSimulator/'
+                archive.writestr(top + 'hardware-package.json', raw)
+                for name, row in json.loads(raw)['files'].items():
+                    copy_verified(archive, hardware / control_package.relative(name), top + name, row['sha256'])
             for path, key in ((apk, 'sha256'), (apk.with_suffix('.receipt.json'), 'receiptSha256')):
                 copy_verified(archive, path, 'Quest/' + path.name, report['quest'][key])
             scripts = Path(__file__).resolve().parent
@@ -354,13 +380,16 @@ def main():
     for name in ('control', 'server', 'player', 'quest-apk', 'sdk', 'jdk'):
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--field-kit', type=Path, help='Publish a new ZIP containing all verified packages and the release report')
+    parser.add_argument('--hardware-simulator', type=Path, help='Verify an extracted hardware rehearsal package and include it when publishing a field kit')
     args = parser.parse_args()
     try:
         game, windows = verify_windows(args.control.absolute(), args.server.absolute(), args.player.absolute())
         quest = verify_quest(args.quest_apk.absolute(), args.sdk.absolute(), args.jdk.absolute(), game)
         report = {'verified': True, 'scope': 'offline-package-consistency', 'game': game, 'windows': windows, 'quest': quest}
+        if args.hardware_simulator:
+            report['hardwareSimulator'] = verify_hardware(args.hardware_simulator)
         if args.field_kit:
-            write_field_kit(args.field_kit, args.control, args.server, args.player, args.quest_apk, report)
+            write_field_kit(args.field_kit, args.control, args.server, args.player, args.quest_apk, report, args.hardware_simulator)
     except subprocess.SubprocessError as error:
         parser.exit(1, f'Venue release rejected: Android verification tool failed ({type(error).__name__}).\n')
     except (ValueError, OSError, KeyError, TypeError, AttributeError, zipfile.BadZipFile) as error:

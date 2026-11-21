@@ -1019,7 +1019,7 @@ def run(args, api_command, api_cwd):
                 wait(lambda:all(row['state']=='current' for room,row in zip(rooms,venue_status(fleet_directory),strict=True) if room!=2),
                      f'{mode} the four unaffected rooms publish current snapshots after room two stops')
                 fleet_delivered[5] |= send_venue_batch(5, 1)
-                wait(lambda:venue_status(fleet_directory)[4]['status']['progress']['acknowledged']==6,
+                wait(lambda:venue_ack_count(fleet_directory, 5)==6,
                      f'{mode} room five acknowledges on its original connection after room two stops')
 
                 separate_marker = runtime/f'{label}-room-two-restart.stop'
@@ -1046,7 +1046,7 @@ def run(args, api_command, api_cwd):
                     wait(lambda:venue_status(fleet_directory)[2]['state']=='stopped', 'revoked fleet room stops')
                     assert fleet.poll() is None and not (fleet_directory/'venue-report.json').exists()
                     fleet_delivered[4] |= send_venue_batch(4, 1)
-                    wait(lambda:venue_status(fleet_directory)[3]['status']['progress']['acknowledged']==6, 'unaffected room still acknowledges')
+                    wait(lambda:venue_ack_count(fleet_directory, 4)==6, 'unaffected room still acknowledges')
                     fleet_stop.touch()
                 else:
                     fleet_stop.touch()
@@ -1234,7 +1234,7 @@ def run(args, api_command, api_cwd):
                         recovery_peer = venue_peers[recovered_room]
                         prior_connection = venue_connections[recovered_room]
                         first = send_venue_batch(recovered_room, 1)
-                        wait(lambda:venue_status(fault_directory)[3]['status']['progress']['acknowledged']==1,
+                        wait(lambda:venue_ack_count(fault_directory, 4)==1,
                              'original room 4 acknowledgement before a temporary outage')
                         lost = send_venue_batch(recovered_room, 1, 'observe-close')
                         faults[recovered_room] = (503, b'')
@@ -1261,7 +1261,7 @@ def run(args, api_command, api_cwd):
                         new_hello = recovery_peer.read('hello')
                         assert new_hello['connectionId']!=prior_connection and new_hello['roomId']==recovered_room
                         recovery_peer.reply()
-                        wait(lambda:venue_status(fault_directory)[3]['status']['progress']['attachments']==2,
+                        wait(lambda:(status := venue_status(fault_directory)[3]['status']) and status['progress']['attachments']==2,
                              'room 4 attaches after management recovers')
                         venue_connections[recovered_room] = new_hello['connectionId']
                         fresh = send_venue_batch(recovered_room, 1)
@@ -1290,7 +1290,7 @@ def run(args, api_command, api_cwd):
                         for room, fault, reason in cases:
                             acknowledged[room] = first | fresh if room == recovered_room else send_venue_batch(room, 1)
                             expected_count = len(acknowledged[room])
-                            wait(lambda:venue_status(fault_directory)[room-1]['status']['progress']['acknowledged']==expected_count,
+                            wait(lambda:venue_ack_count(fault_directory, room)==expected_count,
                                  'original acknowledgment before authority fault')
                             cancelled[room] = send_venue_batch(room, 1, 'observe-close')
                             faults[room] = fault
@@ -1301,7 +1301,7 @@ def run(args, api_command, api_cwd):
                             assert terminal['status']['termination']==reason and terminal['status']['progress']['acknowledged']==expected_count
                         assert faulty.poll() is None and not (fault_directory/'venue-report.json').exists()
                         unaffected = send_venue_batch(5, 1)
-                        wait(lambda:venue_status(fault_directory)[4]['status']['progress']['acknowledged']==1,
+                        wait(lambda:venue_ack_count(fault_directory, 5)==1,
                              'unaffected room acknowledges on its original connection')
                         fault_stop.touch()
                         stdout, _ = faulty.communicate(timeout=8)

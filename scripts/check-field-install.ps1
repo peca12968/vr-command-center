@@ -3,12 +3,13 @@ param(
     [Parameter(Mandatory)][string]$Archive,
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ArchiveSha256,
     [Parameter(Mandatory)][string]$InstallDirectory,
-    [ValidateSet('All','Control','Server','Player','Quest')][string]$Role = 'All'
+    [ValidateSet('All','Control','Server','Player','Quest','Hardware')][string]$Role = 'All'
 )
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression
-$folders = @{ Control = 'VRCommand-ControlServer'; Server = 'VRCommand-GameServer'; Player = 'VRCommand-Player'; Quest = 'Quest' }
+$folders = @{ Control = 'VRCommand-ControlServer'; Server = 'VRCommand-GameServer'; Player = 'VRCommand-Player'
+    Quest = 'Quest'; Hardware = 'VRCommand-HardwareSimulator' }
 $prefix = if ($Role -eq 'All') { '' } else { $folders[$Role] + '/' }
 $root = Get-Item -LiteralPath $InstallDirectory -Force
 if (-not $root.PSIsContainer) { throw 'Choose the installed package directory.' }

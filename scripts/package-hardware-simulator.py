@@ -72,8 +72,8 @@ manifest只是完整性清單，不是數位簽章。詳細契約見專案docs/H
 def read(p):return json.loads(p.read_text(encoding='utf-8'))
 def sha(p):
     with p.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
-def verify(folder):
-    folder=folder.resolve();manifest=read(folder/'hardware-package.json')
+def verify(folder, *, manifest_bytes=None):
+    folder=folder.resolve();manifest=json.loads(manifest_bytes) if manifest_bytes is not None else read(folder/'hardware-package.json')
     version, mode=manifest.get('toolVersion'),manifest.get('mode')
     valid_version=(version=='0.1.0' and mode=='OfflineSimulationOnly') or (
         isinstance(version,str) and version in LIVE_VERSIONS and mode=='OfflineAndLiveSimulation')

@@ -8,6 +8,7 @@
 | 遊戲伺服器 | `VRCommand-GameServer`，使用包內啟動器載入場次的伺服器設定。 |
 | Windows 玩家 | `VRCommand-Player`，使用包內啟動器載入該席玩家的連線檔。 |
 | Quest 3 | `Quest` 內的 APK 與原始建置回條，以及 `scripts` 內的 USB 診斷和部署工具。 |
+| 硬體排演工作站（選配） | `VRCommand-HardwareSimulator` 內的模擬器、範例及操作說明。發行報告的 `hardwareSimulator` 欄記載隨包版本。 |
 
 將資料夾複製到各台電腦後，可在啟動前用 PowerShell 逐檔核對。原始 ZIP 可放在 USB 隨身碟。以下範例檢查 Windows 玩家電腦，請使用交付方提供的 ZIP SHA-256，並替換兩個路徑。
 
@@ -18,6 +19,13 @@
 ```
 
 `-Role` 可選 `Control`、`Server`、`Player` 或 `Quest`，並將 `-InstallDirectory` 指向該角色的資料夾。選 `All` 時指向完整解壓目錄。請把原 ZIP、連線檔及產生的執行資料放在待核對目錄外。成功時會輸出 `verified: true` 與檔案數。缺檔、多檔或內容不同時會指出檔名。此檢查可離線執行，無需 Unity、Android SDK 或管理員權限。Quest 角色核對的是待部署 APK 與建置回條。
+
+含硬體模擬器的交付包另可選 `-Role Hardware`，指向 `VRCommand-HardwareSimulator`。裝有 .NET 10 Runtime 的工作站可在解壓根目錄執行下列排演，輸出位置請使用包外的新檔案。報告內的確認與取消數來自模擬設備。廠商實體設備須依供應商協定另行聯測。
+
+```powershell
+dotnet .\VRCommand-HardwareSimulator\VrCommand.HardwareSimulator.dll `
+  --input .\VRCommand-HardwareSimulator\example.json --output ..\hardware-rehearsal.json
+```
 
 在解壓目錄用 PowerShell 7 執行以下命令，可唯讀查看 Windows 是否已列舉頭盔及其 USB 偵錯介面。
 

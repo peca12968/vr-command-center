@@ -123,6 +123,48 @@ class VenueReleaseTests(unittest.TestCase):
             package()
         self.assertEqual(release.digest(destination), before)
 
+    def test_optional_simulator_uses_its_checked_manifest_and_guarded_mock(self):
+        tool = release.hardware_package
+        folder = self.root / 'hardware'
+        for name in [*tool.FILES, 'example.json', 'README.txt']:
+            self.write(folder, name, 'fixture')
+        for name in [*tool.MOCK_FIREWALL_FILES, tool.MOCK_IPC_FILE, 'mock-device.py']:
+            source = 'hardware-mock-peer.py' if name == 'mock-device.py' else name
+            shutil.copyfile(Path(release.__file__).with_name(source), folder / name)
+        manifest = {'schemaVersion': 1, 'mode': 'OfflineAndLiveSimulation', 'toolVersion': tool.VERSION,
+                    'files': {p.name: {'bytes': p.stat().st_size, 'sha256': release.digest(p)} for p in folder.iterdir()}}
+        manifest_file = folder / 'hardware-package.json'
+        self.write(folder, manifest_file.name, manifest)
+        proof = release.verify_hardware(folder)
+        self.assertEqual(proof['manifestSha256'], release.digest(manifest_file))
+        self.assertEqual(proof['files'], 11)
+        game, windows = release.verify_windows(self.control, self.server, self.player)
+        apk = self.root / 'sample.apk'
+        self.write_native_apk(apk)
+        receipt = apk.with_suffix('.receipt.json')
+        self.write(self.root, receipt.name, {'artifact': apk.name})
+        report = {'windows': windows, 'game': game, 'hardwareSimulator': proof,
+                  'quest': {'sha256': release.digest(apk), 'receiptSha256': release.digest(receipt)}}
+        kit = self.root / 'with-simulator.zip'
+        release.write_field_kit(kit, self.control, self.server, self.player, apk, report, folder)
+        with zipfile.ZipFile(kit) as archive:
+            entries = {name.removeprefix('VRCommand-HardwareSimulator/') for name in archive.namelist()
+                       if name.startswith('VRCommand-HardwareSimulator/')}
+            self.assertEqual(entries, {*manifest['files'], manifest_file.name})
+            self.assertEqual(json.loads(archive.read('venue-release.json'))['hardwareSimulator'], proof)
+        peer = folder / 'mock-device.py'
+        peer.write_bytes(b'changed')
+        refused = self.root / 'changed-simulator.zip'
+        with self.assertRaisesRegex(ValueError, 'File changed before field kit'):
+            release.write_field_kit(refused, self.control, self.server, self.player, apk, report, folder)
+        self.assertFalse(refused.exists())
+        with self.assertRaisesRegex(ValueError, 'integrity mismatch'):
+            release.verify_hardware(folder)
+        manifest['files'][peer.name] = {'bytes': peer.stat().st_size, 'sha256': release.digest(peer)}
+        self.write(folder, manifest_file.name, manifest)
+        with self.assertRaisesRegex(ValueError, 'different mock device entry point'):
+            release.verify_hardware(folder)
+
     @unittest.skipUnless(shutil.which('pwsh'), 'PowerShell is required for the field workstation check')
     def test_workstation_checks_the_selected_copy_against_the_delivery_digest(self):
         kit = self.root / 'kit.zip'
