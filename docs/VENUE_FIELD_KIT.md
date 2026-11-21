@@ -37,11 +37,14 @@ $report = Join-Path (Split-Path (Get-Location).Path -Parent) 'windows-openxr.jso
 Get-Content -LiteralPath $report
 ```
 
-若使用 Quest 3，在解壓目錄用 PowerShell 7 執行以下命令，可唯讀查看 Windows 是否已列舉頭盔及其 USB 偵錯介面。
+若使用 Quest 3，在解壓目錄用 PowerShell 7 執行以下命令。第一行顯示交付包內的遊戲版本；第二行以本機預計接入五台為例，列出 Windows 裝置台數及 USB 偵錯狀態。請將 5 改成本次接到這台電腦的預期台數，可填 1 至 25。
 
 ```powershell
-.\scripts\check-quest-usb.ps1
+(Get-Content -Raw .\venue-release.json | ConvertFrom-Json).quest | Select-Object version, versionCode
+.\scripts\check-quest-usb.ps1 -ExpectedDevices 5 -Summary
 ```
+
+若只對應到部分裝置，摘要會列出仍無法對應的台數。若 Windows 或 ADB 清單無法讀取，摘要會指出資料不足。省略 `-Summary` 可輸出 JSON 記錄。裝置型號與實際安裝版本由接下來的部署工具核對。
 
 首次安裝時，請準備已開啟開發者模式、允許本機 USB 偵錯的 Quest 3，以及 Android SDK 的 `adb.exe`。請把下列序號與 ADB 路徑替換成現場值。部署工具會查核防火牆條件、APK 雜湊及裝置型號，啟動後查核 OpenXR 顯示與輸入狀態。若防火牆查核略過啟動，可繼續使用上方的唯讀診斷。
 

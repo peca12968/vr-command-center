@@ -28,6 +28,8 @@
 pwsh -NoProfile -NonInteractive -File .\scripts\check-quest-usb.ps1
 ```
 
+多機工作站可加上 `-ExpectedDevices 5 -Summary` 閱讀繁中摘要。台數填本次接到該電腦的 Meta USB 裝置數，可指定 1 至 25。省略 `-Summary` 時，JSON 的 `group` 會列出 Windows USB 主裝置數、能唯一對應到 ADB 的台數及尚未對應數。兩份清單都可讀、主裝置總數符合預期、且每一台都能以唯一序號對到 ADB 的 `device` 狀態時，`allExpectedInDeviceState` 才為真。無法取得任一份清單時，比對欄位為 `null`。實際 Quest 型號、APK 版本與 OpenXR 啟動狀態須由部署步驟核對。
+
 | 狀態 | 觀察結果 |
 | --- | --- |
 | `windows-usb-inventory-unavailable` | 無法讀取 Windows USB 裝置清單。 |
@@ -37,6 +39,7 @@ pwsh -NoProfile -NonInteractive -File .\scripts\check-quest-usb.ps1
 | `adb-usb-driver-problem` | Windows 已列出 ADB 介面，該介面有 PnP 問題碼。 |
 | `adb-server-inventory-unavailable` | Windows 已列出 ADB 介面，本機服務未回傳可解讀的裝置清單。 |
 | `adb-usb-transport-unmatched` | Windows 已列出 ADB 介面，本機 ADB 清單沒有可和 Meta USB 裝置比對的序號。 |
+| `adb-usb-partial-inventory` | Windows 列出的 Meta USB 主裝置中，僅有部分能與 ADB 清單唯一對應。 |
 | `adb-usb-unauthorized`／`adb-usb-offline` | ADB 清單中和 Meta USB 序號相符的裝置仍待授權，或處於離線。 |
 | `adb-usb-other` | 相同序號出現不支援的 ADB 狀態或重複項目。 |
 | `adb-usb-device`／`adb-usb-mixed-states` | 已比對的裝置處於 `device`，或有多種狀態。以 `adb.matchingMetaUsb` 查看每種狀態的數量，再由部署工具核對實際型號。 |
