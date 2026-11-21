@@ -51,7 +51,7 @@ function showFrameEvents() {
 function filterEvents() {
   matchingEvents = eventKind.value ? eventFrames.filter(row => row.counts[eventKind.value]) : eventFrames;
   eventKind.disabled = eventFrames.length === 0;
-  $('event-count').textContent = matchingEvents.length ? `${matchingEvents.length} 個事件畫格` : '片段內沒有符合的戰鬥事件。';
+  $('event-count').textContent = matchingEvents.length ? `${matchingEvents.length} 個事件畫格` : '目前範圍沒有符合的戰鬥事件。';
   showFrameEvents();
 }
 
@@ -70,6 +70,15 @@ function showFollowOptions() {
     new Option(`房間 ${roomId} · 玩家 ${number}`, id)));
   follow.disabled = options.length === 0;
   followStatus.textContent = options.length ? '' : '這個範圍沒有玩家。';
+}
+
+function updateRoomEvents() {
+  // Single-room exports already contain the room's events, including players who left before the clip.
+  const ids = replay.header.roomIds.length > 1 && room.value !== 'all'
+    ? new Set(replayPlayers.filter(player => player.roomId === Number(room.value)).map(player => player.id))
+    : null;
+  eventFrames = playerReplayEventFrames(replay.packets, ids);
+  filterEvents();
 }
 
 function updateFollow(frame) {
@@ -152,8 +161,7 @@ $('file').addEventListener('change', async () => {
     $('view').hidden = false;
     scene.resize();
     scene.preset('top', room.value);
-    eventFrames = playerReplayEventFrames(candidate.packets);
-    filterEvents();
+    updateRoomEvents();
     show(0);
     message(`已載入 ${candidate.packets.length} 格。`);
   } catch (error) {
@@ -220,6 +228,7 @@ room.addEventListener('change', () => {
   clearFollow();
   showFollowOptions();
   scene.preset('top', room.value);
+  updateRoomEvents();
 });
 follow.addEventListener('change', () => {
   if (!replay) return;

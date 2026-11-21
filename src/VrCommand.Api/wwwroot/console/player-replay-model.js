@@ -89,11 +89,12 @@ export function playerReplayPlayers(packets) {
   return [...players.values()].sort((left, right) => left.roomId - right.roomId || left.number - right.number);
 }
 
-export function playerReplayEventFrames(packets) {
+export function playerReplayEventFrames(packets, playerIds = null) {
   const frames = [];
   for (const [index, packet] of packets.entries()) {
     const counts = {};
-    for (const { kind } of packet.events) {
+    for (const { kind, playerId } of packet.events) {
+      if (playerIds && !playerIds.has(playerId)) continue;
       if (typeof kind === 'string' && Object.hasOwn(eventNames, kind)) counts[kind] = (counts[kind] || 0) + 1;
     }
     if (Object.keys(counts).length) frames.push({ index, counts });

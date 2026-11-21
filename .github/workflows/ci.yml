@@ -121,6 +121,10 @@ jobs:
       - run: npm install --global pnpm@11.25.0
       - run: pnpm --dir tests/browser install --frozen-lockfile
       - run: pnpm --dir tests/browser exec playwright install --with-deps chromium
+      - name: Verify offline player room navigation
+        run: |
+          node scripts/package-player-replay.mjs "$RUNNER_TEMP/player-replay-room.html"
+          node tests/browser/check-offline-replay-room.cjs "$RUNNER_TEMP/player-replay-room.html"
       - run: pnpm --dir tests/browser test
       - uses: actions/upload-artifact@v4
         if: always()
