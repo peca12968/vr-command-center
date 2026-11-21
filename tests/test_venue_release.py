@@ -39,6 +39,27 @@ class VenueReleaseTests(unittest.TestCase):
             self.write(self.server, 'Runtime/' + name, body)
         self.write(self.player, 'Launch-Player.exe', 'fixture launcher')
         self.write(self.server, 'Launch-Server.exe', 'fixture launcher')
+        for folder in (self.player, self.server / 'Runtime'):
+            data = folder / 'VrCommand_Data'
+            self.write(data, 'UnitySubsystems/UnityOpenXR/UnitySubsystemsManifest.json',
+                       {'libraryName': 'UnityOpenXR', 'displays': [{'id': 'OpenXR Display'}],
+                        'inputs': [{'id': 'OpenXR Input'}]})
+            assemblies = ['Unity.XR.Management.dll', 'Unity.XR.OpenXR.dll', 'VrCommand.Runtime.dll']
+            self.write(data, 'ScriptingAssemblies.json', {'names': assemblies})
+            for name in assemblies:
+                self.write(data, 'Managed/' + name, 'fixture assembly')
+            header = bytearray(256)
+            header[:2] = b'MZ'
+            struct.pack_into('<I', header, 60, 64)
+            struct.pack_into('<4sH', header, 64, b'PE\0\0', 0x8664)
+            struct.pack_into('<HHH', header, 84, 112, 0x2000, 0x20b)
+            plugins = data / 'Plugins/x86_64'
+            plugins.mkdir(parents=True)
+            for name in ('UnityOpenXR.dll', 'openxr_loader.dll'):
+                (plugins / name).write_bytes(header)
+        self.index_game_packages()
+
+    def index_game_packages(self):
         self.manifest(self.server, 'server-package.json', {'schemaVersion': 1, 'target': 'win-x64', 'build': self.source})
         self.manifest(self.player, 'player-package.json', {'version': 1, 'platform': 'Windows-x64', 'build': self.source})
 
@@ -76,7 +97,9 @@ class VenueReleaseTests(unittest.TestCase):
     def test_same_windows_game_runtime_and_management_publication(self):
         identity, summary = release.verify_windows(self.control, self.server, self.player)
         self.assertEqual(identity, {key: self.source[key] for key in release.IDENTITY})
-        self.assertEqual(summary['pairedGameFiles'], 4)
+        self.assertEqual(summary['pairedGameFiles'], 11)
+        self.assertEqual(summary['openXR']['inputId'], 'OpenXR Input')
+        self.assertEqual(summary['openXR']['nativeX64Libraries'], ['UnityOpenXR.dll', 'openxr_loader.dll'])
         self.assertEqual(summary['consoleVersion'], '0.31.83')
         server_manifest = self.server / 'server-package.json'
         server_bytes = server_manifest.read_bytes()
@@ -92,6 +115,23 @@ class VenueReleaseTests(unittest.TestCase):
         _, repackaged = release.verify_windows(self.control, self.server, self.player)
         self.assertEqual(repackaged['pairedGameFiles'], summary['pairedGameFiles'])
         self.assertNotEqual(repackaged['playerManifestSha256'], summary['playerManifestSha256'])
+
+    def test_identical_packages_with_invalid_openxr_components_are_rejected(self):
+        for relative, body, message in (
+            ('Plugins/x86_64/openxr_loader.dll', b'MZ', 'Windows x64 OpenXR DLL'),
+            ('ScriptingAssemblies.json', b'{"names":[]}', 'XR scripting assembly'),
+            ('UnitySubsystems/UnityOpenXR/UnitySubsystemsManifest.json',
+             b'{"libraryName":"UnityOpenXR","displays":[]}', 'OpenXR Display'),
+        ):
+            paths = [folder / 'VrCommand_Data' / relative for folder in (self.player, self.server / 'Runtime')]
+            original = paths[0].read_bytes()
+            for path in paths:
+                path.write_bytes(body)
+            self.index_game_packages()
+            with self.subTest(file=relative), self.assertRaisesRegex(ValueError, message):
+                release.verify_windows(self.control, self.server, self.player)
+            for path in paths:
+                path.write_bytes(original)
 
     def test_field_kit_binds_exact_files_and_publishes_only_once(self):
         game, windows = release.verify_windows(self.control, self.server, self.player)

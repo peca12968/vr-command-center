@@ -68,6 +68,44 @@ def require_matching_identity(expected, actual, message):
     require(not different, f'{message}: {", ".join(different)}')
 
 
+def windows_openxr(player, paired):
+    data = 'VrCommand_Data/'
+    def checked_bytes(relative):
+        name = data + relative
+        require(name in paired, 'Missing Windows OpenXR package file: ' + name)
+        raw = (player / name).read_bytes()
+        require(hashlib.sha256(raw).hexdigest() == paired[name][1], 'Windows OpenXR file changed: ' + name)
+        return raw
+
+    manifest = json.loads(checked_bytes('UnitySubsystems/UnityOpenXR/UnitySubsystemsManifest.json'))
+    require(isinstance(manifest, dict) and manifest.get('libraryName') == 'UnityOpenXR',
+            'Unexpected Windows OpenXR subsystem library')
+    for kind, identifier in [('displays', 'OpenXR Display'), ('inputs', 'OpenXR Input')]:
+        rows = manifest.get(kind)
+        require(isinstance(rows, list) and sum(isinstance(row, dict) and row.get('id') == identifier for row in rows) == 1,
+                f'Missing or duplicate Windows subsystem: {identifier}')
+    assemblies = json.loads(checked_bytes('ScriptingAssemblies.json'))
+    names = assemblies.get('names') if isinstance(assemblies, dict) else None
+    required_assemblies = ['Unity.XR.Management.dll', 'Unity.XR.OpenXR.dll', 'VrCommand.Runtime.dll']
+    for name in required_assemblies:
+        require(isinstance(names, list) and names.count(name) == 1
+                and paired.get(data + 'Managed/' + name, (0,))[0] > 0,
+                'Missing Windows XR scripting assembly or registration: ' + name)
+
+    libraries = ['UnityOpenXR.dll', 'openxr_loader.dll']
+    for name in libraries:
+        raw = checked_bytes('Plugins/x86_64/' + name)
+        error = 'Expected a Windows x64 OpenXR DLL: ' + name
+        require(len(raw) >= 64 and raw[:2] == b'MZ', error)
+        offset, = struct.unpack_from('<I', raw, 60)
+        require(64 <= offset <= len(raw) - 26 and raw[offset:offset + 4] == b'PE\0\0', error)
+        machine, = struct.unpack_from('<H', raw, offset + 4)
+        size, flags, magic = struct.unpack_from('<HHH', raw, offset + 20)
+        require(machine == 0x8664 and flags & 0x2000 and magic == 0x20b and 112 <= size <= len(raw) - offset - 24, error)
+    return {'libraryName': 'UnityOpenXR', 'displayId': 'OpenXR Display', 'inputId': 'OpenXR Input',
+            'nativeX64Libraries': libraries, 'registeredAssemblies': required_assemblies}
+
+
 def verify_windows(control, server, player):
     control_path = control_package.plain(control / 'control-package.json')
     control_bytes = control_path.read_bytes()
@@ -114,6 +152,7 @@ def verify_windows(control, server, player):
     require({f.relative_to(player).as_posix() for f in player.rglob('*') if f.is_file()}
             == {row['path'] for row in player_manifest['files']} | {'player-package.json'},
             'Windows player package contains unlisted files')
+    openxr = windows_openxr(player, paired)
     require(digest(manifest_path) == player_manifest_hash, 'Windows player manifest changed during verification')
     require(digest(server_manifest_path) == server_manifest_hash, 'Windows server manifest changed during verification')
     require(digest(control_path) == control_hash, 'Windows control manifest changed during verification')
@@ -121,7 +160,7 @@ def verify_windows(control, server, player):
                   'controlFiles': len(control_manifest['files']), 'pairedGameFiles': len(runtime),
                   'serverFiles': len(server_manifest['files']), 'playerFiles': len(player_manifest['files']),
                   'playerManifestSha256': player_manifest_hash, 'serverManifestSha256': server_manifest_hash,
-                  'controlManifestSha256': control_hash}
+                  'controlManifestSha256': control_hash, 'openXR': openxr}
 
 
 def quest_metadata(badging, signing):
