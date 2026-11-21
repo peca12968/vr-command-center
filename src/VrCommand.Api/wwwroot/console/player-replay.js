@@ -77,7 +77,7 @@ function updateRoomEvents() {
   const ids = replay.header.roomIds.length > 1 && room.value !== 'all'
     ? new Set(replayPlayers.filter(player => player.roomId === Number(room.value)).map(player => player.id))
     : null;
-  eventFrames = playerReplayEventFrames(replay.packets, ids);
+  eventFrames = playerReplayEventFrames(replay.packets, ids, Number(room.value), replay.eventRooms);
   filterEvents();
 }
 

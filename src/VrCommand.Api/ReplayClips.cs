@@ -166,10 +166,12 @@ public sealed partial class WorldRecordings
             json.WritePropertyName("header");
             JsonSerializer.Serialize(json, header, WorldJson.Options);
             json.WriteStartArray("packets");
+            var linkedExport = roomId is null && header.roomIds.Length > 1;
+            var eventRooms = new Dictionary<string, int>(StringComparer.Ordinal);
             using var command = Command("""
-                SELECT packet, CASE WHEN $scoped THEN statistics END
+                SELECT packet, statistics
                 FROM world_frames WHERE session=$session AND sequence BETWEEN $first AND $last ORDER BY sequence
-                """, ("$session", session), ("$first", clip.StartFrame), ("$last", clip.EndFrame), ("$scoped", roomId.HasValue));
+                """, ("$session", session), ("$first", clip.StartFrame), ("$last", clip.EndFrame));
             using var rows = command.ExecuteReader();
             var expected = clip.StartFrame;
             while (rows.Read())
@@ -183,15 +185,37 @@ public sealed partial class WorldRecordings
                     JsonSerializer.Serialize(json, ProjectReplayRoom(packet, statistics, previousEnemies, propRooms!, selectedRoom), WorldJson.Options);
                     previousEnemies = packet.frame.enemies;
                 }
-                else JsonSerializer.Serialize(json, packet, WorldJson.Options);
+                else
+                {
+                    if (linkedExport && packet.events.Length > 0)
+                    {
+                        var visible = packet.frame.players.Select(player => player.id).ToHashSet(StringComparer.Ordinal);
+                        var missing = packet.events.Where(entry => !visible.Contains(entry.playerId)).ToArray();
+                        if (missing.Length > 0)
+                        {
+                            var rooms = WorldJson.Read<PlayerStatistics[]>(rows.GetString(1))
+                                .ToDictionary(row => row.PlayerId.ToString("D"), row => row.RoomId);
+                            foreach (var entry in missing)
+                                if (rooms.TryGetValue(entry.playerId, out var roomNumber))
+                                    eventRooms.Add(entry.eventId, roomNumber);
+                        }
+                    }
+                    JsonSerializer.Serialize(json, packet, WorldJson.Options);
+                }
                 json.Flush();
                 if (output.Length > maxBytes - 2) throw new InvalidOperationException("Player replay exceeds 8 MiB.");
             }
             if (expected - 1 != clip.EndFrame) throw new InvalidOperationException("Replay clip has a missing saved frame.");
+            json.WriteEndArray();
+            if (eventRooms.Count > 0)
+            {
+                json.WritePropertyName("eventRooms");
+                JsonSerializer.Serialize(json, eventRooms, WorldJson.Options);
+            }
         }
-        json.WriteEndArray();
         json.WriteEndObject();
         json.Flush();
+        if (output.Length > maxBytes) throw new InvalidOperationException("Player replay exceeds 8 MiB.");
         return output.ToArray();
     }
 

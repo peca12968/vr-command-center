@@ -55,6 +55,17 @@ async function main() {
     await control('room').selectOption('all');
     await control('event-next').click();
     assert.match(await control('event-frame').innerText(), /2 筆/);
+    const departedEvent = '00000000-0000-0000-0000-000000000010';
+    clip.packets[0].frame.players.shift();
+    clip.packets[2].events[0].eventId = departedEvent;
+    clip.eventRooms = { [departedEvent]: 1 };
+    await load();
+    await control('room').selectOption('1');
+    assert.ok(await control('follow').isDisabled());
+    await control('event-next').click();
+    assert.match(await control('frame').innerText(), /第 12 格/);
+    assert.match(await control('event-frame').innerText(), /1 筆/);
+    delete clip.eventRooms;
     clip.playerReplayVersion = 2;
     clip.roomId = 1;
     clip.header.roomIds = [1];
@@ -64,6 +75,18 @@ async function main() {
     await load();
     await control('event-next').click();
     assert.match(await control('frame').innerText(), /第 12 格/);
+    if (process.argv[3]) {
+      await control('file').setInputFiles(resolve(process.argv[3]));
+      await control('message').filter({ hasText: '已載入 2 格' }).waitFor();
+      for (const selected of ['1', '5']) {
+        await control('room').selectOption(selected);
+        assert.equal(await control('event-count').innerText(), '1 個事件畫格');
+        assert.match(await control('event-frame').innerText(), /玩家受傷 1 筆/);
+        assert.equal(await control('follow').isDisabled(), selected === '1');
+      }
+      await control('room').selectOption('all');
+      assert.match(await control('event-frame').innerText(), /玩家受傷 2 筆/);
+    }
     assert.deepEqual(errors, []);
     assert.deepEqual(network, []);
     console.log('PASS: offline five-room event navigation, shared frame counts, departed player, empty room and scoped reload');

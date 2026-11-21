@@ -35,8 +35,10 @@ class Venue:
                         OperatorKeyFile=str(keys), ASPNETCORE_ENVIRONMENT='Production', VR_COMMAND_UNATTENDED='1')
 
     @contextmanager
-    def response(self, route, method='GET', body=None, role='Master', status=200):
+    def response(self, route, method='GET', body=None, role='Master', status=200, admission=None):
         headers = {'Authorization': 'Bearer ' + self.tokens[role]}
+        if admission:
+            headers.update({'If-Match-Admission': admission, 'Idempotency-Key': str(uuid4())})
         if body is not None:
             headers.update({'Content-Type': 'application/json', 'Idempotency-Key': str(uuid4())})
         with closing(UnixHttpConnection(self.address)) as connection:
@@ -131,7 +133,7 @@ class Publisher:
         assert reply['type'] == 'ack', reply
         return reply['info']
 
-    def publish(self, drop_pose=False, damage=False):
+    def publish(self, drop_pose=False, damage=False, departing=None):
         state = self.state
         if state['state'] == 'Running':
             self.tick += 1
@@ -151,10 +153,18 @@ class Publisher:
                 events.append({'sequence': self.combat, 'tick': self.tick, 'eventId': event_id,
                                'kind': 'PlayerDamaged', 'playerId': player_id, 'damage': 20,
                                'enemyId': self.enemies[room]['id']})
+                if player_id == departing:
+                    with self.venue.response(self.route + '/players/' + player_id, method='DELETE',
+                                             admission=row['admissionId'], status=204):
+                        pass
+                    continue
             players.append({'id': player_id, 'roomId': room, 'head': head, 'muzzle': head, 'connected': connected,
                             'forward': {'x': 0, 'y': 0, 'z': 1}, 'health': 80 if player_id in self.damaged else 100,
                             'magazine': 30, 'reserve': 90, 'rig': {'kind': 'Tracked' if connected else 'None',
                                                                  'left': head, 'right': head}})
+        if departing:
+            self.state = state = self.venue.request(self.route)
+            assert all(row['id'] != departing for row in state['players'])
         self.sequence += 1
         environment = state['environment']
         packet = {'sequence': self.sequence, 'observedSequence': state['sequence'],
@@ -289,6 +299,41 @@ def check_mode(venue, mode):
                 'roomFiveWorld': observed.world, 'roomFiveLive': visible, 'saved': saved}
 
 
+def check_departed_clip(venue):
+    mission = venue.request('/api/missions', method='POST', status=201, body={'name': 'Delayed event review',
+        'briefing': '', 'durationSeconds': 180, 'props': [], 'environment': {'mode': 'VR', 'weather': 'Clear',
+        'timeOfDay': 'Day', 'lightning': False}, 'enemies': {'count': 5, 'behavior': 'Hold', 'autoAttack': False}})
+    session = venue.request('/api/sessions', method='POST', status=201, body={
+        'missionId': mission['id'], 'mode': 'Linked', 'roomIds': list(ROOMS)})
+    route = '/api/sessions/' + session['id']
+    departed = str(uuid4())
+    for room in (1, 5):
+        venue.request(route + '/players', method='POST', body={'playerId': departed if room == 1 else str(uuid4()),
+                      'roomId': room, 'name': f'Seat {room}', 'headset': 'Quest3'})
+    with ExitStack() as stack:
+        source = Publisher(venue, session, stack)
+        source.publish()
+        venue.phase('Begin', 'begin')
+        source.state = venue.request(route)
+        source.publish(damage=True, departing=departed)
+        venue.phase('End', 'end')
+        source.state = venue.request(route)
+        source.publish()
+        source.seal()
+    clip = source.world + '/clips/' + str(uuid4())
+    venue.request(clip, method='PUT', body={'name': 'After departure', 'streamId': source.stream_id, 'startFrame': 2, 'endFrame': 3})
+    export = clip + '/player-replay.json'
+    full = venue.request(export)
+    assert all(body['id'] != departed for packet in full['packets'] for body in packet['frame']['players'])
+    event, = [event for packet in full['packets'] for event in packet['events'] if event['playerId'] == departed]
+    assert full['eventRooms'] == {event['eventId']: 1}
+    originals = [venue.request(source.world + f'/frames/{seq}')['packet'] for seq in (2, 3)]
+    assert full['packets'] == originals
+    room = venue.request(export + '?roomId=1')
+    assert 'eventRooms' not in room and [e['eventId'] for p in room['packets'] for e in p['events']] == [event['eventId']]
+    return full
+
+
 def check_after_restart(venue, result):
     assert venue.request('/api/sessions') == []
     assert venue.request(result['closureRoute']) == result['closure']
@@ -310,6 +355,7 @@ def main():
     parser.add_argument('--api-exe', required=True, type=Path, help='Extracted management package Runtime/VrCommand.Api.exe')
     parser.add_argument('--work-root', required=True, type=Path, help='Short existing Windows folder for temporary isolated data')
     parser.add_argument('--report', type=Path, help='New path for a JSON verification report')
+    parser.add_argument('--departed-clip', type=Path, help='New output file for the verified synthetic player clip')
     args = parser.parse_args()
     if os.name != 'nt':
         parser.error('This fixture uses Windows AF_UNIX')
@@ -320,6 +366,7 @@ def main():
         venue = Venue(folder, args)
         with venue.start():
             results = [check_mode(venue, mode) for mode in ('Linked', 'Independent')]
+            departed_clip = check_departed_clip(venue)
         with venue.start():
             for result in results:
                 check_after_restart(venue, result)
@@ -327,6 +374,10 @@ def main():
                                 for result in results], 'apiSha256': hashlib.sha256(args.api_exe.read_bytes()).hexdigest(),
                    'transport': 'Windows AF_UNIX', 'restarted': True, 'tcpListeners': 0, 'udpEndpoints': 0, 'activeSessions': 0,
                    'scope': 'Synthetic tracked poses and combat using packaged management API, real WebSocket and SSE'}
+    summary['verifiedDepartedEventRooms'] = len(departed_clip['eventRooms'])
+    if args.departed_clip:
+        with args.departed_clip.open('x', encoding='utf-8') as output:
+            json.dump(departed_clip, output)
     if args.report:
         with args.report.open('x', encoding='utf-8') as output:
             json.dump(summary, output, indent=2)

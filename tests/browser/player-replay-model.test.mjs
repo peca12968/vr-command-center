@@ -45,6 +45,22 @@ test('numbers players by their first appearance within each room, keeping the sa
   assert.deepEqual(playerReplayPlayers([{ frame: { players: [] } }]), []);
 });
 
+test('validates saved event room assignments against their clip and uses them for the original frame', () => {
+  const id = 'aa000000-0000-0000-0000-000000000001';
+  const full = replay(1, [1, 2, 3, 4, 5]);
+  full.packets[1].events = [{ eventId: id, playerId: actor, kind: 'PlayerDamaged', hasRay: false }];
+  full.eventRooms = { [id]: 5 };
+  assert.equal(readPlayerReplay(full), full);
+  assert.deepEqual(playerReplayEventFrames(full.packets, new Set(), 5, full.eventRooms),
+    [{ index: 1, counts: { PlayerDamaged: 1 } }]);
+  for (const patch of [{ [id]: 6 }, { [actor]: 5 }, [], null]) {
+    assert.throws(() => readPlayerReplay({ ...full, eventRooms: patch }), /無法辨識/);
+  }
+  assert.throws(() => readPlayerReplay({ ...replay(2, [3]), eventRooms: {} }), /無法辨識/);
+  full.packets[0].events = full.packets[1].events;
+  assert.throws(() => readPlayerReplay(full), /無法辨識/);
+});
+
 test('finds saved source pauses and running recoveries without counting an operator pause', () => {
   const packets = [
     { frame: { phase: 'Paused' } },

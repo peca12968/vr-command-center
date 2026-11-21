@@ -34,6 +34,11 @@ export function readPlayerReplay(data) {
   if (scoped) require(header.props.every(prop => recordedPointInRoom(prop.feet, roomId, 6)),
     `回放檔的場景物件超出房間 ${roomId}，請重新取得場館匯出的片段。`);
 
+  const eventRooms = data.eventRooms;
+  if (eventRooms !== undefined) require(!scoped && header.roomIds.length > 1 && eventRooms !== null
+    && typeof eventRooms === 'object' && !Array.isArray(eventRooms)
+    && Object.entries(eventRooms).every(([id, room]) => guid(id) && header.roomIds.includes(room)));
+  const unusedEvents = new Set(Object.keys(eventRooms ?? {}));
   let elapsed = 0, tick = 0;
   for (const [index, packet] of packets.entries()) {
     const frame = packet?.frame;
@@ -65,9 +70,14 @@ export function readPlayerReplay(data) {
       || (point(event.origin) && point(event.direction) && number(event.distance) && event.distance >= 0))));
     if (scoped) require(packet.events.every(event => !event.hasRay || recordedPointInRoom(event.origin, roomId, 6.01)),
       `回放檔的射線起點超出房間 ${roomId}，請重新取得場館匯出的片段。`);
+    if (eventRooms) for (const event of packet.events) {
+      if (Object.hasOwn(eventRooms, event.eventId))
+        require(unusedEvents.delete(event.eventId) && !frame.players.some(player => player.id === event.playerId));
+    }
     elapsed = packet.elapsedMilliseconds;
     tick = frame.tick;
   }
+  require(unusedEvents.size === 0);
   return data;
 }
 
@@ -89,12 +99,15 @@ export function playerReplayPlayers(packets) {
   return [...players.values()].sort((left, right) => left.roomId - right.roomId || left.number - right.number);
 }
 
-export function playerReplayEventFrames(packets, playerIds = null) {
+export function playerReplayEventFrames(packets, playerIds = null, roomId = null, eventRooms = {}) {
   const frames = [];
   for (const [index, packet] of packets.entries()) {
     const counts = {};
-    for (const { kind, playerId } of packet.events) {
-      if (playerIds && !playerIds.has(playerId)) continue;
+    for (const { kind, playerId, eventId } of packet.events) {
+      if (playerIds) {
+        const savedRoom = Object.hasOwn(eventRooms, eventId) ? eventRooms[eventId] : undefined;
+        if (savedRoom !== undefined ? savedRoom !== roomId : !playerIds.has(playerId)) continue;
+      }
       if (typeof kind === 'string' && Object.hasOwn(eventNames, kind)) counts[kind] = (counts[kind] || 0) + 1;
     }
     if (Object.keys(counts).length) frames.push({ index, counts });
