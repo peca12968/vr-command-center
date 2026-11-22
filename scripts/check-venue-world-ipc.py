@@ -273,6 +273,9 @@ def check_current_environment(venue, room, expected):
         with venue.response(route, role=role) as response:
             assert response.getheader('Cache-Control') == 'no-store'
             assert json.load(response) == {'version': 1, 'roomId': room, 'session': expected}
+    sample = str(uuid4())
+    assert venue.request(route + '?sampleId=' + sample, role=f'Room{room}') == {
+        'version': 1, 'roomId': room, 'session': expected, 'sampleId': sample}
     for denied in (f'Room{room % 5 + 1}', 'GameServer'):
         with venue.response(route, role=denied, status=403):
             pass
@@ -284,6 +287,10 @@ def check_venue_environment(venue):
         assert response.getheader('Cache-Control') == 'no-store'
         snapshot = json.load(response)
     assert snapshot['version'] == 1 and datetime.fromisoformat(snapshot['checkedAtUtc']).utcoffset() is not None
+    assert 'sampleId' not in snapshot
+    sample = str(uuid4())
+    current = venue.request(route + '?sampleId=' + sample)
+    assert current['sampleId'] == sample and current['rooms'] == snapshot['rooms']
     assert snapshot['rooms'] == [venue.request(f'/api/rooms/{room}/hardware-environment', role=f'Room{room}') for room in ROOMS]
     return [row['session'] for row in snapshot['rooms']]
 

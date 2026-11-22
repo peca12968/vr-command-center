@@ -8,8 +8,16 @@ public record RoomHardwareSignal(Guid EventId, long EventSequence, long StreamSe
 public record RoomHardwareSeat(Guid PlayerId, Guid AdmissionId, [property: JsonRequired] int Seat);
 public record VenueHardwareRoom(int RoomId, Guid SessionId, long SessionSequence, RoomHardwareSeat[] Bindings);
 public record VenueHardwareBindings(int Version, SessionMode Mode, VenueHardwareRoom[] Rooms);
-public record CurrentRoomHardwareEnvironment(int Version, int RoomId, RoomHardwareEnvironment? Session);
-public record VenueHardwareEnvironment(int Version, DateTimeOffset CheckedAtUtc, CurrentRoomHardwareEnvironment[] Rooms);
+public record CurrentRoomHardwareEnvironment(int Version, int RoomId, RoomHardwareEnvironment? Session)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? SampleId { get; init; }
+}
+public record VenueHardwareEnvironment(int Version, DateTimeOffset CheckedAtUtc, CurrentRoomHardwareEnvironment[] Rooms)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? SampleId { get; init; }
+}
 public record RoomHardwareEnvironment(int Version, Guid SessionId, int RoomId, SessionState State,
     long ThroughSequence, long PhaseSinceSequence, long EnvironmentSinceSequence, EnvironmentSettings? Environment);
 

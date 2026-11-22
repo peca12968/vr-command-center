@@ -166,10 +166,10 @@ app.MapWorldRoutes();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/me", (HttpContext context) => Actor(context));
 app.MapGet("/api/rooms", (SessionManager manager, HttpContext context) => manager.Rooms(Actor(context)));
-app.MapGet("/api/rooms/{roomId:int}/hardware-environment", (int roomId, SessionManager manager, HttpContext context) =>
+app.MapGet("/api/rooms/{roomId:int}/hardware-environment", (int roomId, Guid? sampleId, SessionManager manager, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";
-    return manager.ReadCurrentHardwareEnvironment(roomId, Actor(context));
+    return manager.ReadCurrentHardwareEnvironment(roomId, Actor(context)) with { SampleId = sampleId };
 });
 if (controlHttps is not null)
 {
@@ -318,10 +318,10 @@ app.MapGet("/api/venue/phase", (SessionManager manager, HttpContext context) =>
     context.Response.Headers.CacheControl = "no-store";
     return manager.ReadVenuePhase(Actor(context));
 });
-app.MapGet("/api/venue/hardware-environment", (SessionManager manager, HttpContext context) =>
+app.MapGet("/api/venue/hardware-environment", (Guid? sampleId, SessionManager manager, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";
-    return manager.ReadVenueHardwareEnvironment(Actor(context));
+    return manager.ReadVenueHardwareEnvironment(Actor(context)) with { SampleId = sampleId };
 });
 app.MapGet("/api/venue/hardware-bindings", (SessionManager manager, HttpContext context) =>
 {

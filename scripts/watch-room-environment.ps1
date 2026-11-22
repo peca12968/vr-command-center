@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory, ParameterSetName='LocalRoom')][Parameter(Mandatory, ParameterSetName='LocalVenue')][ValidateNotNullOrEmpty()][string]$UnixSocket,
     [Parameter(Mandatory, ParameterSetName='NetworkRoom')][Parameter(Mandatory, ParameterSetName='LocalRoom')][ValidateRange(1,5)][int]$RoomId,
     [Parameter(Mandatory, ParameterSetName='NetworkVenue')][Parameter(Mandatory, ParameterSetName='LocalVenue')][switch]$AllRooms,
-    [ValidateRange(1,2147483647)][int]$Samples
+    [ValidateRange(1,2147483647)][int]$Samples,
+    [switch]$RequireCurrentRead
 )
 
 $ErrorActionPreference = 'Stop'
@@ -93,7 +94,15 @@ for ($count = 1; ; $count++) {
     $rooms = $null
     $checked = $null
     try {
+        if ($RequireCurrentRead) {
+            $sampleId = [guid]::NewGuid().ToString('D')
+            $request.Uri = [uri]::new($ManagementApi, "${path}?sampleId=$sampleId")
+        }
         $page = Invoke-RestMethod @request
+        if ($RequireCurrentRead -and ($page.sampleId -isnot [string] -or $page.sampleId -cne $sampleId)) {
+            $reason = 'sample-id-mismatch'
+            throw 'Response does not match the current environment read.'
+        }
         $reason = 'invalid-snapshot'
         if ($venueMode) {
             if (-not (Test-PositiveInteger $page.version) -or $page.version -ne 1 -or

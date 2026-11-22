@@ -11,6 +11,56 @@ SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/watch-room-environment.p
 
 @unittest.skipUnless(shutil.which('pwsh'), 'PowerShell 7 required')
 class EnvironmentWatchTests(unittest.TestCase):
+    def test_only_the_current_response_can_restore_climate_after_idle_or_disconnect(self):
+        command = r"""
+$script:sample = 0
+$seen = [Collections.Generic.HashSet[guid]]::new()
+function Start-Sleep {}
+function Invoke-RestMethod($Uri) {
+    if (-not ($Uri.Query -cmatch '^\?sampleId=([0-9a-f-]{36})$') -or -not $seen.Add([guid]$Matches[1])) {
+        throw 'Missing or repeated sample identifier.'
+    }
+    $id = $Matches[1]
+    $script:sample++
+    if ($script:sample -eq 3) { throw 'connection lost' }
+    if ($script:sample -eq 4) { return $script:first }
+    $rows = @(foreach ($room in 1..5) {
+        $s = if ($script:sample -ne 2) {
+            [pscustomobject]@{version=1;roomId=$room;sessionId="12345678-0000-4444-8888-00000000000$room";state='Running'
+                throughSequence=10;phaseSinceSequence=4;environmentSinceSequence=5
+                environment=[pscustomobject]@{mode='VR';weather='Storm';timeOfDay='Night';lightning=$true}}
+        }
+        [pscustomobject]@{version=1;roomId=$room;session=$s}
+    })
+    $page = if ($env:VRC_TEST_SCOPE -eq 'room') { $rows[2] }
+        else { [pscustomobject]@{version=1;checkedAtUtc=[DateTimeOffset]::UtcNow;rooms=$rows} }
+    if ($script:sample -ne 5) { $page | Add-Member -NotePropertyName sampleId -NotePropertyValue $id }
+    if ($script:sample -eq 1) { $script:first = $page }
+    $page
+}
+$scope = if ($env:VRC_TEST_SCOPE -eq 'room') { @{RoomId=3} } else { @{AllRooms=$true} }
+& $env:VRC_WATCH_TEST -ManagementApi http://127.0.0.1 @scope -RequireCurrentRead -Samples 6
+"""
+        for scope in ('room', 'venue'):
+            with self.subTest(scope=scope):
+                result = subprocess.run(['pwsh', '-NoProfile', '-NonInteractive', '-Command', command],
+                                        capture_output=True, text=True, timeout=15,
+                                        env={**os.environ, 'VRC_WATCH_TEST': str(SCRIPT), 'VRC_TEST_SCOPE': scope,
+                                             'VR_COMMAND_ROOM_KEY': 'room-test', 'VR_COMMAND_MASTER_KEY': 'venue-test'})
+                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                pages = [json.loads(line) for line in result.stdout.splitlines()]
+                self.assertEqual([p['reason'] for p in pages],
+                                 [None, None, 'management-unreachable', 'sample-id-mismatch', 'sample-id-mismatch', None])
+                for page, state in zip(pages, ['Running', 'Idle', 'Unavailable', 'Unavailable', 'Unavailable', 'Running'], strict=True):
+                    rows = page['rooms'] if scope == 'venue' else [page]
+                    self.assertEqual(len(rows), 5 if scope == 'venue' else 1)
+                    for row in rows:
+                        self.assertEqual(row['status'], state)
+                        if state == 'Running':
+                            self.assertIs(row['session']['environment']['lightning'], True)
+                        else:
+                            self.assertIsNone(row['session'])
+
     def test_resume_requires_the_original_climate_until_its_revision_changes(self):
         command = r"""
 $script:sample = 0

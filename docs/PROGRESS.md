@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-22 無人值守啟動與五房天氣回覆核對
+
+本機的網域、私人、公用網路設定檔均啟用防火牆入站通知。以開發目錄的 Windows 遊戲啟動入口實查，查核回傳 2，在建立 `VrCommand.exe` 程序前結束。13 項桌面啟動相關測試通過。遇到相同條件時，背景開發繼續採用離線或本機 IPC 測試。
+
+單房及五房環境監看可加上 `-RequireCurrentRead`，用每次讀取的識別碼比對管理服務回覆。四項監看器測試通過，其中以模擬回覆驗證斷線後收到前次識別碼或缺少識別碼都會清空當次環境設定，新的有效回覆可恢復。解壓後的場館包另以 Windows 本機 IPC 驗證五房監看，包括獨立房天氣、暫停、管理服務停止與重啟、合併場換天氣及結束，共記錄十個狀態。此輪實體設備數為零。[五房狀態紀錄](../artifacts/environment-current-read-031300/samples.json) · [安裝檔查核](../artifacts/environment-current-read-031300/install.json)
+
 ## 2026-11-22 核對主控台下載快照與受阻開場返回操作
 
 GitHub 的 [be47cdbe 瀏覽器測試](https://github.com/peca12968/vr-command-center/actions/runs/44991455274) 在環境批次下載比對失敗。[4294c229 的測試](https://github.com/peca12968/vr-command-center/actions/runs/44990975017) 則在合併場受阻快照返回開場時失敗。
