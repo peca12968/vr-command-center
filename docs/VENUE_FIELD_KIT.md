@@ -153,6 +153,8 @@ Quest 3 的 MR 部署會在電腦上先核對票券房號與三個地面標記�
 .\scripts\deploy-quest.ps1 -CheckSeatUsb -DeviceMap .\device-map.json -SeatUsbSummary
 ```
 
+在已連線的席位旁查看 ADB 型號提示。若顯示「其他型號」，可依房號、席號核對這副頭盔；「型號未確認」表示清單沒有提供可辨識的單一型號。安裝時會從選定頭盔再讀取實際型號。
+
 某席在 Windows 已出現、但 ADB 尚無法對應時，該列會附上 Windows 能核對到該席的檔案傳輸介面、USB 偵錯介面或驅動程式問題。若 ADB 已列出裝置但缺少有效的連線編號，或有其他項目使用同一編號，摘要會指出房號與席號。只有連線編號可唯一使用的席位才計入已連線台數。
 
 若頭盔能傳檔卻沒出現偵錯提示，可先看摘要列出的檔案傳輸與 USB 偵錯介面數量。Windows 回報偵錯介面異常時，摘要會列出裝置管理員的問題代碼。代碼 22 表示裝置已停用，28 表示驅動程式尚未安裝。有座位表時，可在對應的房號和席號旁查看該裝置的代碼。 [Microsoft 裝置管理員問題代碼](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/device-manager-problem-codes)

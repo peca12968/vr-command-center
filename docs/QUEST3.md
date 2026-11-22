@@ -46,6 +46,8 @@ Windows 已看到某席的頭盔，但 ADB 未列出它或服務清單無法讀�
 pwsh -NoProfile -NonInteractive -File .\scripts\check-quest-usb.ps1
 ```
 
+若有可唯一對應且已連線的 USB 裝置，摘要會依現有 ADB 清單分列「Quest 3」、「其他型號」及「無法辨識」。使用座位對應檔時，各席也會顯示型號提示，方便在安裝前找到接錯的頭盔。JSON 的 `adb.connectedModelHints` 提供三類台數；只有已辨識的席位才附上 `modelHint`。型號欄位缺少、空白或重複時歸入「無法辨識」。部署時仍會向選定頭盔讀取實際型號。
+
 多機工作站可加上 `-ExpectedDevices 5 -Summary` 閱讀繁中摘要。台數填本次接到該電腦的 Meta USB 裝置數，可指定 1 至 25。省略 `-Summary` 時，JSON 的 `group` 會列出 Windows USB 主裝置數、能唯一對應到 ADB 的台數及尚未對應數。兩份清單都可讀、主裝置總數符合預期、且每一台都能以唯一序號對到 ADB 的 `device` 狀態時，`allExpectedInDeviceState` 才為真。無法取得任一份清單時，比對欄位為 `null`。實際 Quest 型號、APK 版本與 OpenXR 啟動狀態須由部署步驟核對。
 
 | 狀態 | 觀察結果 |

@@ -10,7 +10,8 @@ function ConvertFrom-QuestAdbDeviceRows([string[]]$Lines, [StringComparer]$Compa
         }
         $serial = $Matches[1]
         $state = $Matches[2]
-        $fields = @($Matches[3] -csplit '[ \t]+' | Where-Object { $_ -clike 'transport_id:*' })
+        $metadata = $Matches[3] -csplit '[ \t]+'
+        $fields = @($metadata | Where-Object { $_ -clike 'transport_id:*' })
         $transport = 0L
         foreach ($field in $fields) {
             $number = 0L
@@ -23,7 +24,12 @@ function ConvertFrom-QuestAdbDeviceRows([string[]]$Lines, [StringComparer]$Compa
         if ($serial -ceq '(no serial number)') { $unidentified++; continue }
         if ($devices.ContainsKey($serial)) { $state = 'ambiguous' }
         elseif ($state -ceq 'device' -and $transport -eq 0) { $state = 'transport-unavailable' }
-        $devices[$serial] = @{ Status = $state; TransportId = $transport }
+        $device = @{ Status = $state; TransportId = $transport }
+        $model = @($metadata | Where-Object { $_ -clike 'model:*' })
+        if ($model.Count -eq 1 -and $model[0] -cmatch '\Amodel:[A-Za-z0-9._-]{1,128}\z') {
+            $device.ModelHint = if ($model[0] -ceq 'model:Quest_3') { 'quest-3' } else { 'other-model' }
+        }
+        $devices[$serial] = $device
     }
     foreach ($device in $devices.Values) {
         if ($device.Status -ceq 'device' -and $duplicates.Contains($device.TransportId)) { $device.Status = 'transport-ambiguous' }

@@ -127,6 +127,30 @@ try {
         self.assertEqual(result['adb']['unmatchedEntries'], 1)
         self.assertEqual(result['status'], self.diagnose([root, mtp], None)['status'])
 
+    def test_model_hints_are_bound_to_unique_connected_usb_seats(self):
+        seats = [dict(roomId=r, seat=s, serial=f'fixture-serial{r}{s}') for r in range(1, 6) for s in range(1, 6)]
+        nodes = [node(USB_ROOT + item['serial'][-2:], [ADB_DESCRIPTOR]) for item in seats]
+        observations = {
+            (1, 2): 'device model:Quest_3S', (2, 5): 'device model:Quest_3 model:Quest_3',
+            (3, 3): 'device', (4, 4): 'unauthorized model:Quest_3', (5, 1): 'device model:',
+            (5, 2): 'device model:PRIVATE-LABEL', (5, 5): 'device model:Quest_3',
+        }
+        rows = [f"{row['serial']} {observations.get((row['roomId'], row['seat']), 'device model:Quest_3')} transport_id:{i}"
+                for i, row in enumerate(seats, 1)]
+        rows.extend(['172.16.1.87:5555 device model:Quest_3 transport_id:26',
+                     '(no serial number) unauthorized transport_id:25'])
+        report = self.diagnose(nodes, adb_reply('\n'.join(rows) + '\n'), seats=seats)
+        counts = report['adb']['connectedModelHints']
+        self.assertEqual(counts, {'quest-3': 18, 'other-model': 2, 'unknown': 3})
+        self.assertEqual(report['mapped']['connected'], 23)
+        by_seat = {(s['roomId'], s['seat']): s for s in report['mapped']['seats']}
+        for seat, metadata in observations.items():
+            expected = 'other-model' if seat in [(1, 2), (5, 2)] else None
+            self.assertEqual(by_seat[seat].get('modelHint'), expected, metadata)
+        self.assertEqual(by_seat[1, 1]['modelHint'], 'quest-3')
+        self.assertEqual(by_seat[5, 5]['state'], 'transport-ambiguous')
+        self.assertNotIn('PRIVATE-LABEL', json.dumps(report))
+
     def test_correlates_usb_states_and_never_counts_duplicate_rows_as_ready(self):
         nodes = [node(USB_ROOT, [r'USB\COMPOSITE']), node(USB_ADB, [ADB_DESCRIPTOR])]
         for state in ('device', 'unauthorized', 'offline', 'bootloader'):
@@ -193,11 +217,13 @@ try {
 
 @unittest.skipUnless(shutil.which('pwsh'), 'PowerShell is required')
 class QuestUsbGroupTests(unittest.TestCase):
-    def snapshot(self, roots, entries, expected, *, server='reachable', unobservable=False, seats=None, nodes=None):
+    def snapshot(self, roots, entries, expected, *, server='reachable', unobservable=False, seats=None, nodes=None, models=None):
         if nodes is None:
             nodes = [node(root, [ADB_DESCRIPTOR]) for root in roots] + [node(USB_PORTABLE, ['USB\\MS_COMP_MTP'])]
         fixture = dict(nodes=nodes, pnpUnavailable=unobservable, expected=expected,
                        inventory=dict(Status=server, Entries=entries, Unidentified=0), seats=seats)
+        if models is not None:
+            fixture['inventory']['ModelHints'] = models
         command = PNP_FIXTURE + '''
 . $env:VR_QUEST_USB_SCRIPT
 $inventory = ($env:VR_QUEST_USB_FIXTURE | ConvertFrom-Json -AsHashtable).inventory
@@ -213,6 +239,16 @@ Write-QuestUsbReport $report -Summary
         self.assertNotIn('172.16.1.87', result.stdout)
         snapshot, summary = result.stdout.split('\n', 1)
         return json.loads(snapshot), summary
+
+    def test_summary_names_the_seat_with_a_different_headset(self):
+        seats = [dict(roomId=i, seat=1, serial=f'fixture-serial{i}') for i in range(1, 4)]
+        report, summary = self.snapshot([USB_ROOT + str(i) for i in range(1, 4)],
+                                        {s['serial']: 'device' for s in seats}, 3, seats=seats,
+                                        models={'fixture-serial1': 'quest-3', 'fixture-serial2': 'other-model'})
+        self.assertTrue(report['group']['allExpectedInDeviceState'])
+        self.assertIn('Quest 3 有 1 台、其他型號 1 台、無法辨識 1 台', summary)
+        for room, message in [(1, 'ADB 型號提示為 Quest 3'), (2, 'ADB 回報其他型號'), (3, 'ADB 型號未確認')]:
+            self.assertIn(f'第 {room} 房第 1 席：已連線（{message}', summary)
 
     def test_mapped_seats_report_only_their_own_usb_connection(self):
         seats = [dict(roomId=room, seat=seat, serial=f'fixture-serial{room}{seat}')

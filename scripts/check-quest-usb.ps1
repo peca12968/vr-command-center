@@ -25,6 +25,7 @@ function Read-AdbReplyBytes($Stream, [int]$Count, [Diagnostics.Stopwatch]$Clock)
 function Read-AdbInventoryStream($Stream) {
     $status = 'invalid-response'
     $entries = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $models = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
     $unidentified = 0
     try {
         $stream.WriteTimeout = 1000
@@ -42,10 +43,11 @@ function Read-AdbInventoryStream($Stream) {
             $state = $entry.Value.Status
             if ($state -cnotin @('device','unauthorized','offline','transport-unavailable','transport-ambiguous')) { $state = 'other' }
             $entries[$entry.Key] = $state
+            if ($state -ceq 'device' -and $entry.Value.ModelHint) { $models[$entry.Key] = $entry.Value.ModelHint }
         }
         $status = 'reachable'
-    } catch { $entries.Clear(); $unidentified = 0 }
-    return @{ Status = $status; Entries = $entries; Unidentified = $unidentified }
+    } catch { $entries.Clear(); $models.Clear(); $unidentified = 0 }
+    return @{ Status = $status; Entries = $entries; ModelHints = $models; Unidentified = $unidentified }
 }
 
 function Read-ExistingAdbInventory([int]$Port) {
@@ -131,8 +133,15 @@ function Get-QuestUsbReport($Inventory, [int]$Expected, $MappedSeats) {
     $matched = [ordered]@{ device = 0; unauthorized = 0; offline = 0; other = 0; 'transport-unavailable' = 0; 'transport-ambiguous' = 0 }
     $unmatched = $inventory.Unidentified
     $entryCount = $inventory.Entries.Count + $inventory.Unidentified
+    $modelCounts = [ordered]@{ 'quest-3' = 0; 'other-model' = 0; unknown = 0 }
     foreach ($entry in $inventory.Entries.GetEnumerator()) {
-        if ($serials[$entry.Key] -eq 1) { $matched[$entry.Value]++ }
+        if ($serials[$entry.Key] -eq 1) {
+            $matched[$entry.Value]++
+            if ($entry.Value -ceq 'device') {
+                $hint = if ($inventory.ModelHints -and $inventory.ModelHints.ContainsKey($entry.Key)) { $inventory.ModelHints[$entry.Key] } else { 'unknown' }
+                $modelCounts[$hint]++
+            }
+        }
         else { $unmatched++ }
     }
     $status = if (-not $usb.observed) { 'windows-usb-inventory-unavailable' }
@@ -155,6 +164,7 @@ function Get-QuestUsbReport($Inventory, [int]$Expected, $MappedSeats) {
         version = 1; status = $status; windows = $usb
         adb = [ordered]@{ server = $inventory.Status; entries = $entryCount; matchingMetaUsb = $matched; unmatchedEntries = $unmatched }
     }
+    if ($matched.device -gt 0) { $report.adb.connectedModelHints = $modelCounts }
     if ($Expected -gt 0) {
         $comparable = $usb.observed -and $inventory.Status -eq 'reachable'
         $report.group = [ordered]@{
@@ -184,6 +194,9 @@ function Get-QuestUsbReport($Inventory, [int]$Expected, $MappedSeats) {
                 elseif (-not $adbAliases.Contains($id)) { 'adb-serial-case-mismatch' }
                 else { $Inventory.Entries[$id] }
             $seatReport = [ordered]@{ roomId = $row.roomId; seat = $row.seat; state = $state }
+            if ($state -ceq 'device' -and $Inventory.ModelHints -and $Inventory.ModelHints.ContainsKey($id)) {
+                $seatReport.modelHint = $Inventory.ModelHints[$id]
+            }
             if ($assigned[$id] -eq 1 -and $serials[$id] -eq 1) {
                 $codes = $problemCodesByRoot[$rootBySerial[$id]]
                 if ($codes) { $seatReport.adbProblemCodes = @($codes) }
@@ -226,6 +239,10 @@ function Write-QuestUsbReport($Report, [switch]$Summary) {
         'adb-usb-mixed-states' = '可對應的 Meta USB 裝置有不同的偵錯狀態。'
     }
     $messages[$report.status]
+    if ($report.adb.connectedModelHints) {
+        $models = $report.adb.connectedModelHints
+        "已連線裝置的 ADB 型號提示：Quest 3 有 $($models.'quest-3') 台、其他型號 $($models.'other-model') 台、無法辨識 $($models.unknown) 台。"
+    }
     if ($report.windows.portableMediaInterfaces -gt 0) {
         "Windows 已列出 $($report.windows.portableMediaInterfaces) 個檔案傳輸介面、$($report.windows.adbInterfaces) 個 USB 偵錯介面。"
     }
@@ -255,7 +272,14 @@ function Write-QuestUsbReport($Report, [switch]$Summary) {
                 '（' + (($row.windowsEvidence | ForEach-Object { $evidenceLabels[$_] }) -join '、') + '）'
             }
             $problemText = if ($row.adbProblemCodes) { ' ' + (Format-QuestUsbProblemCodes $row.adbProblemCodes) }
-            "第 $($row.roomId) 房第 $($row.seat) 席：$($seatLabels[$row.state])$detail$problemText"
+            $modelText = if ($row.state -ceq 'device') {
+                switch ($row.modelHint) {
+                    'quest-3' { '（ADB 型號提示為 Quest 3）' }
+                    'other-model' { '（ADB 回報其他型號，請核對這一席的頭盔）' }
+                    default { '（ADB 型號未確認）' }
+                }
+            }
+            "第 $($row.roomId) 房第 $($row.seat) 席：$($seatLabels[$row.state])$detail$problemText$modelText"
         }
         "指定的 $($report.mapped.seats.Count) 席中，已確認 USB 偵錯連線 $($report.mapped.connected) 席。"
     }
