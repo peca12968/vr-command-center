@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isVenueHardwareReview } from '../../src/VrCommand.Api/wwwroot/console/venue-hardware-review.js';
+import { initialReviewRoom, isVenueHardwareReview } from '../../src/VrCommand.Api/wwwroot/console/venue-hardware-review.js';
 
 function review(mode = 'Independent') {
   return { version: 1, verified: true, rehearsalComplete: true, mode, bindingManifestSha256: 'a'.repeat(64),
@@ -67,4 +67,40 @@ test('source evidence accounts for all attempted signals and accepts older summa
   ]) assert.equal(isVenueHardwareReview({ ...report, ...invalid }), false);
   assert(isVenueHardwareReview({ ...report, sourceEventsVerified: false, sourceSignalsVerified: 0 }));
   assert(isVenueHardwareReview({ ...report, sourceEventsVerified: undefined, sourceSignalsVerified: undefined }));
+});
+
+test('selects an unfinished room before one with recovered communication faults', () => {
+  const report = review('Linked');
+  assert.equal(initialReviewRoom(report.rooms), 1);
+  for (const room of report.rooms) room.communicationFaults = { management: 0, mockDevice: 0 };
+  const recovered = report.rooms[3];
+  for (const field of ['management', 'mockDevice']) {
+    recovered.communicationFaults[field] = 3;
+    assert(isVenueHardwareReview(report));
+    assert.equal(initialReviewRoom(report.rooms), 4);
+    recovered.communicationFaults[field] = 0;
+  }
+  delete recovered.communicationFaults;
+  recovered.seats[0].mockFailed = recovered.mockFailed = 1;
+  assert(isVenueHardwareReview(report));
+  assert.equal(initialReviewRoom(report.rooms), 4);
+  report.rehearsalComplete = false;
+  Object.assign(report.rooms[4], { exitCode: 1, termination: 'management-refused' });
+  assert(isVenueHardwareReview(report));
+  assert.equal(initialReviewRoom(report.rooms), 5);
+});
+
+test('requires both communication counts when supplied and no counts for a missing report', () => {
+  const report = review(), room = report.rooms[2];
+  for (const faults of [null, {}, { management: 1 }, { management: -1, mockDevice: 0 },
+    { management: 0.5, mockDevice: 0 }, { management: 0, mockDevice: 2147483648 }]) {
+    room.communicationFaults = faults;
+    assert.equal(isVenueHardwareReview(report), false);
+  }
+  Object.assign(room, { error: 'IOException', exitCode: 1, termination: null, seats: null,
+    mockFailed: null, acknowledged: null, cancelled: null, communicationFaults: { management: 0, mockDevice: 0 } });
+  report.rehearsalComplete = false;
+  assert.equal(isVenueHardwareReview(report), false);
+  room.communicationFaults = null;
+  assert(isVenueHardwareReview(report));
 });

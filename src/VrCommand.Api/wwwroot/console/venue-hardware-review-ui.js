@@ -1,4 +1,4 @@
-import { isVenueHardwareReview, terminationLabels } from './venue-hardware-review.js';
+import { initialReviewRoom, isVenueHardwareReview, terminationLabels } from './venue-hardware-review.js';
 
 const maxReviewBytes = 16 * 1024;
 const $ = id => document.getElementById('venue-hardware-review-' + id);
@@ -59,14 +59,14 @@ export function mountVenueHardwareReview(getState, master, api, download) {
       line.dataset.reviewRoom = item.roomId;
       const result = item.error ? `未產生報告（${item.error}）` : terminationLabels[item.termination];
       for (const value of [item.roomId, item.sessionId.slice(0, 8), item.exitCode === 0 ? '完成' : '未完成', result,
-        item.acknowledged ?? '—', item.cancelled ?? '—', item.mockFailed ?? '—', ''])
+        item.acknowledged ?? '—', item.cancelled ?? '—', item.mockFailed ?? '—',
+        item.communicationFaults?.management ?? '未提供', item.communicationFaults?.mockDevice ?? '未提供', ''])
         line.insertCell().textContent = value;
       line.cells[1].title = item.sessionId;
       picker.add(new Option(`房間 ${item.roomId}`, item.roomId));
     }
     matchRooms();
-    const failed = review.rooms.find(room => room.exitCode !== 0);
-    if (failed) picker.value = String(failed.roomId);
+    picker.value = String(initialReviewRoom(review.rooms));
     showSeats();
   }
 

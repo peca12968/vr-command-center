@@ -102,17 +102,31 @@ def main():
         sources.mkdir()
         write_json(sources / (identity(1) + '.json'), [])
         for mode in ('Linked', 'Independent'):
-            manifest, reports = prepare(root / mode, mode, 4)
+            manifest, reports = prepare(root / mode, mode, 4, lambda rows: rows[3].update(managementFaults=2, mockFaults=3))
             original = invoke('--verify-venue-report', manifest, '--report-directory', reports)
             reviewed = json.loads(original)
             assert reviewed['attemptIdentitiesVerified'] and reviewed['configurationsVerified']
             assert not reviewed['sourceEventsVerified'] and reviewed['sourceSignalsVerified'] == 0
             assert [room['acknowledged'] for room in reviewed['rooms']] == [2] * 5
+            assert reviewed['rehearsalComplete'] and all(room['mockFailed'] == 0 for room in reviewed['rooms'])
+            assert [room['communicationFaults'] for room in reviewed['rooms']] == [
+                {'management': 2, 'mockDevice': 3} if room == 4 else {'management': 0, 'mockDevice': 0}
+                for room in range(1, 6)]
             archive = root / (mode + '.zip')
             assert invoke('--pack-venue-report', manifest, '--report-directory', reports, '--output', archive) == original
             assert invoke('--verify-venue-zip', archive) == original
             invoke('--verify-venue-report', manifest, '--report-directory', reports, '--events-directory', sources, reject=True)
             invoke('--verify-venue-zip', archive, '--events-directory', sources, reject=True)
+            aggregate = reports / 'venue-report.json'
+            incomplete = json.loads(aggregate.read_bytes())
+            incomplete['complete'] = False
+            missing = incomplete['rooms'][3]
+            (reports / missing['report']).unlink()
+            missing.update(report=None, sha256=None, bytes=None, exitCode=1, error='IOException')
+            write_json(aggregate, incomplete)
+            partial = json.loads(invoke('--verify-venue-report', manifest, '--report-directory', reports))
+            assert not partial['rehearsalComplete'] and partial['rooms'][3]['error'] == 'IOException'
+            assert partial['rooms'][3].get('communicationFaults') is None
         manifest, reports = prepare(root / 'legacy', 'Linked', 3, duplicate_ack)
         legacy = json.loads(invoke('--verify-venue-report', manifest, '--report-directory', reports))
         assert legacy['rooms'][0]['acknowledged'] == 3 and not legacy['attemptIdentitiesVerified']

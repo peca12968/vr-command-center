@@ -1000,9 +1000,19 @@ def run(args, api_command, api_cwd):
                           'A lease conflict keeps the original room five alive and releases the four partial fleet leases')
 
                 fleet = start_fleet(folder, fleet_directory, fleet_stop)
+                prior_attachments = {}
                 for room in rooms:
                     path = '/api/sessions/' + owners[room]
-                    venue_connections[room] = accept(venue_peers[room], room, bound=True)
+                    hello = venue_peers[room].read('hello')
+                    assert hello['roomId'] == room
+                    venue_connections[room] = hello['connectionId']
+                    prior_attachments[room] = attached(room, bound=True)
+                    venue_peers[room].reply('drop' if room == 4 else 'ack')
+                path = '/api/sessions/' + owners[4]
+                venue_connections[4] = accept(venue_peers[4], 4, previous=venue_connections[4], bound=True)
+                for room in rooms:
+                    path = '/api/sessions/' + owners[room]
+                    wait(lambda:attached(room,bound=True)>prior_attachments[room], f'{mode} room {room} attached after hello')
                 fleet_delivered = {room:send_venue_batch(room, 5) for room in rooms}
                 wait(lambda:all(row['state']=='current' and row['status']['progress']['acknowledged']==5
                                 for row in venue_status(fleet_directory)), f'{mode} fleet acknowledges all 25 current bindings')
@@ -1096,6 +1106,9 @@ def run(args, api_command, api_cwd):
                 for row in summary['rooms']:
                     original = json.loads((fleet_directory/f"room-{row['roomId']:02}-report.json").read_bytes())
                     assert row['termination']==original['termination'] and row['acknowledged']==original['acknowledged']
+                    assert row['communicationFaults'] == {'management': original['managementFaults'], 'mockDevice': original['mockFaults']}
+                    if row['roomId'] == 4:
+                        assert row['communicationFaults']['mockDevice'] >= 1 and row['exitCode'] == 0
                     assert row['cancelled']==sum(len(attempt['deliveries']) for attempt in original['attempts'] if attempt['status']=='cancelled')
                     assert row['mockFailed']==0
                     assert [seat['seat'] for seat in row['seats']]==list(range(5))
@@ -1308,6 +1321,13 @@ def run(args, api_command, api_cwd):
                         aggregate = json.loads((fault_directory/'venue-report.json').read_bytes())
                         assert faulty.returncode==1 and json.loads(stdout)==aggregate and aggregate['complete'] is False
                         assert injected == {room for room, _, _ in cases}
+                        fault_review = review(fault_directory, fault_bindings/'venue-bindings.json')
+                        assert fault_review.returncode == 0, fault_review.stderr
+                        fault_summary = json.loads(fault_review.stdout)
+                        for row in fault_summary['rooms']:
+                            original = json.loads((fault_directory/f"room-{row['roomId']:02}-report.json").read_bytes())
+                            assert row['communicationFaults'] == {'management': original['managementFaults'], 'mockDevice': original['mockFaults']}
+                        save('linked-authority-fault-review.json', fault_summary)
                         for room, _, reason in cases:
                             row = aggregate['rooms'][room-1]
                             assert row['exitCode']==1 and row['error'] is None

@@ -17,7 +17,11 @@ function validRoom(row, index, configurationsVerified) {
   if (row?.roomId !== index + 1 || typeof row.sessionId !== 'string' || !id.test(row.sessionId)
       || row.sessionId === emptyId || ![0, 1].includes(row.exitCode)) return false;
   if (row.error != null) return row.exitCode === 1 && typeof row.error === 'string' && /^[a-zA-Z0-9]{1,64}$/.test(row.error)
-    && row.termination == null && row.seats == null && counts.every(key => row[key] == null);
+    && row.termination == null && row.seats == null && row.communicationFaults == null && counts.every(key => row[key] == null);
+  if (row.communicationFaults !== undefined && !['management', 'mockDevice'].every(key => {
+    const count = row.communicationFaults?.[key];
+    return Number.isInteger(count) && count >= 0 && count <= 2147483647;
+  })) return false;
   if (typeof row.termination !== 'string' || !Object.hasOwn(terminationLabels, row.termination)
       || (row.exitCode === 0 && !finished.includes(row.termination)) || !validCounts(row)) return false;
   if (!configurationsVerified) return row.seats == null;
@@ -25,6 +29,12 @@ function validRoom(row, index, configurationsVerified) {
     && row.seats.every((seat, index) => seat && Number.isInteger(seat.seat) && seat.seat >= 0 && seat.seat <= 4
       && (index === 0 || seat.seat > row.seats[index - 1].seat) && validCounts(seat))
     && counts.every(key => row.seats.reduce((sum, seat) => sum + seat[key], 0) === row[key]);
+}
+
+export function initialReviewRoom(rooms) {
+  return (rooms.find(room => room.exitCode !== 0)
+    ?? rooms.find(room => room.communicationFaults?.management > 0 || room.communicationFaults?.mockDevice > 0 || room.mockFailed > 0)
+    ?? rooms[0]).roomId;
 }
 
 function validSources(report) {

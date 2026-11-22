@@ -9,8 +9,9 @@ internal static partial class LiveHardwareGateway
         Guid SessionId, int RoomId, string Termination, int Connections, int Attachments, int ManagementFaults,
         int MockFaults, int Dropped, int Acknowledged, Attempt[] Attempts);
     private sealed record SeatRunReview(int Seat, int Acknowledged, int Cancelled, int MockFailed);
+    private sealed record CommunicationFaults(int Management, int MockDevice);
     private sealed record RoomRunReview(int RoomId, Guid SessionId, int ExitCode, string? Termination, string? Error,
-        int? Acknowledged, int? Cancelled, int? MockFailed, SeatRunReview[]? Seats);
+        int? Acknowledged, int? Cancelled, int? MockFailed, SeatRunReview[]? Seats, CommunicationFaults? CommunicationFaults);
 
     private static byte[] ReadReportBytes(string path, int maximum)
     {
@@ -92,7 +93,7 @@ internal static partial class LiveHardwareGateway
                 if (row.ExitCode != 1 || row.Error is not { Length: > 0 and <= 64 } || !row.Error.All(char.IsAsciiLetterOrDigit)
                     || row.Sha256 is not null || row.Bytes is not null)
                     throw new InvalidDataException("Unexpected room report for a room with a recorded error.");
-                return new(row.RoomId, row.SessionId, row.ExitCode, null, row.Error, null, null, null, null);
+                return new(row.RoomId, row.SessionId, row.ExitCode, null, row.Error, null, null, null, null, null);
             }
             if (row.Report != fileName || row.Error is not null) throw new InvalidDataException("Unexpected room report file name.");
             var bytes = read("reports/" + fileName, MaxRoomReportBytes);
@@ -116,7 +117,8 @@ internal static partial class LiveHardwareGateway
             if (acknowledged != room.Acknowledged) throw new InvalidDataException("Room acknowledgement count does not match.");
             var seats = config is null ? null : ReviewSeats(config, room.Attempts);
             return new(row.RoomId, row.SessionId, row.ExitCode, room.Termination, null, acknowledged, cancelled,
-                room.Attempts.Sum(attempt => attempt.Deliveries.Length) - acknowledged - cancelled, seats);
+                room.Attempts.Sum(attempt => attempt.Deliveries.Length) - acknowledged - cancelled, seats,
+                new(room.ManagementFaults, room.MockFaults));
 
             int Count(string status) => room.Attempts.Where(attempt => attempt.Status == status).Sum(attempt => attempt.Deliveries.Length);
         }
