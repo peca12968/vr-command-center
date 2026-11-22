@@ -696,7 +696,9 @@ def check_volume_exports(venue, directory):
             source.publish()
             venue.phase('Begin', 'begin')
             source.state = venue.request(route)
-            for _ in range(frames - 2):
+            for sequence in range(2, frames):
+                if label == 'long' and sequence == 7200:
+                    configure_weather(venue, [source], 'Linked')
                 source.publish()
             venue.phase('End', 'end')
             source.state = venue.request(route)

@@ -88,10 +88,12 @@ async function checkVolumeContinuity(browser, templatePath) {
         '<script type="application/json" data-player-replay-part>' + JSON.stringify(part) + '</script>');
     };
     const path = resolve(directory, 'first.html');
-    await writeFile(path, volume(10, first.packets));
+    const suspended = p => ({ ...p, suspended: true, frame: { ...p.frame, phase: 'Paused' } });
+    const storm = p => ({ ...p, weather: 'Storm', lightning: true, frame: { ...p.frame, night: true, visibility: 'Storm' } });
+    await writeFile(path, volume(10, [storm(first.packets[0]), first.packets[1], suspended(first.packets[2])]));
     const packet = (sequence, elapsedMilliseconds, tick, players) => ({ ...first.packets[0], sequence, elapsedMilliseconds,
       frame: { ...first.packets[0].frame, tick, players }, events: [] });
-    const nextPackets = [packet(13, 900, 12, [other]), packet(14, 1100, 13, [other, player]), packet(15, 1300, 14, [player])];
+    const nextPackets = [packet(13, 900, 12, [other]), packet(14, 1100, 13, [other, player]), suspended(packet(15, 1300, 14, [player]))].map(storm);
     const field = name => page.locator('#player-replay-' + name);
     const camera = () => page.locator('#replay-canvas').getAttribute('data-camera');
     const choose = async (start, packets) => {
@@ -112,14 +114,22 @@ async function checkVolumeContinuity(browser, templatePath) {
     }
     await choose(13, nextPackets);
     assert.match(await field('frame').innerText(), /第 13 格/);
+    assert.equal(await camera(), initialCamera);
+    assert.ok(await field('environment-field').isVisible(), 'Show the storm that starts on the first frame of the next volume');
+    assert.match(await field('environment').locator('option[value="0"]').innerText(), /第 13 格.*暴風雨.*夜晚.*雷電開啟/);
+    assert.match(await field('transition').locator('option[value="0"]').innerText(), /遊戲來源恢復/);
+    await field('next').click();
+    await field('environment').selectOption('0');
+    assert.match(await field('frame').innerText(), /第 13 格/);
     assert.equal(await field('room').inputValue(), '5');
     assert.equal(await field('follow').inputValue(), player.id);
-    assert.equal(await camera(), initialCamera);
     await field('follow-next').click();
     assert.match(await field('frame').innerText(), /第 14 格/);
     assert.equal(await field('follow-status').innerText(), '');
     const followingCamera = await camera();
-    await choose(16, [16, 17, 18].map(n => packet(n, n * 100, n, [other])));
+    await choose(16, [16, 17, 18].map(n => suspended(storm(packet(n, n * 100, n, [other])))));
+    assert.ok(await field('environment-field').isHidden());
+    assert.ok(await field('transition-field').isHidden(), 'Continuing the same source pause must not report a second pause');
     assert.match(await field('frame').innerText(), /第 16 格/);
     assert.equal(await field('follow').inputValue(), '');
     assert.match(await field('follow-status').innerText(), /沒有在本冊出現/);

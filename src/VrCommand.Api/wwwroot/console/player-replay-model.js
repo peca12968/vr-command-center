@@ -160,10 +160,10 @@ export function playerReplayEventFrames(packets, playerIds = null, roomId = null
   return frames;
 }
 
-export function sourceTransitions(packets) {
+export function sourceTransitions(packets, previousTail = null) {
   const rows = [];
   for (const [index, packet] of packets.entries()) {
-    const previous = packets[index - 1];
+    const previous = index === 0 ? previousTail : packets[index - 1];
     if (sourcePaused(packet) && !sourcePaused(previous)) rows.push({ index, suspended: true });
     if (previous?.suspended === true && packet.suspended !== true && packet.frame.phase === 'Running')
       rows.push({ index, suspended: false });

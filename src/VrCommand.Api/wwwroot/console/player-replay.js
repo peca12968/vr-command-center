@@ -17,6 +17,9 @@ const phaseNames = { Preparing: '準備中', Running: '執行中', Paused: '已�
 function weatherText(packet) {
   return [weatherNames[packet.weather], packet.frame.night ? '夜晚' : '白天', packet.lightning ? '雷電開啟' : '雷電關閉'].join(' · ');
 }
+function sameEnvironment(left, right) {
+  return left.weather === right.weather && left.frame.night === right.frame.night && left.lightning === right.lightning;
+}
 let replay, scene, index = 0, cursor = 0, lastTime = 0, animation = 0, epoch = 0;
 let speed = 1;
 let restartAt = null;
@@ -208,9 +211,10 @@ async function openReplay(files, embeddedInfo = null, continuing = false) {
       throw new Error('分冊標示與實際畫格範圍不符。');
     if (continuing && !samePlayerReplaySource(candidate, replay))
       throw new Error('下一冊必須來自同一場錄製與相同房間範圍。');
-    if (continuing) {
-      const last = replay.packets.at(-1), first = candidate.packets[0];
-      if (first.elapsedMilliseconds < last.elapsedMilliseconds || first.frame.tick < last.frame.tick)
+    const previousTail = continuing ? replay.packets.at(-1) : null;
+    if (previousTail) {
+      const first = candidate.packets[0];
+      if (first.elapsedMilliseconds < previousTail.elapsedMilliseconds || first.frame.tick < previousTail.frame.tick)
         throw new Error('下一冊的錄製時間或任務刻數早於本冊末格，請重新取得分冊。');
     }
     if (!scene) {
@@ -251,20 +255,21 @@ async function openReplay(files, embeddedInfo = null, continuing = false) {
     const source = candidate.header.origin === 'GameServer' ? '遊戲伺服器' : '模擬';
     const scope = candidate.roomId === undefined ? '' : ` · 僅房間 ${candidate.roomId}`;
     $('source').textContent = `${candidate.missionName} · ${source}${scope} · 原畫格 ${candidate.startFrame}–${candidate.endFrame}`;
-    const transitions = sourceTransitions(candidate.packets);
+    const transitions = sourceTransitions(candidate.packets, previousTail);
     $('transition').replaceChildren(new Option('跳到畫格', ''), ...transitions.map(({ index, suspended }) =>
       new Option(`第 ${candidate.packets[index].sequence} 格 · ${suspended ? '遊戲來源暫停' : '遊戲來源恢復'}`, index)));
     $('transition-field').hidden = transitions.length === 0;
     const environmentOptions = [];
+    const changedAtStart = previousTail && !sameEnvironment(previousTail, candidate.packets[0]);
     for (const [i, packet] of candidate.packets.entries()) {
       const previous = candidate.packets[i - 1];
-      if (previous && packet.weather === previous.weather && packet.frame.night === previous.frame.night
-          && packet.lightning === previous.lightning) continue;
+      if (previous && sameEnvironment(previous, packet)) continue;
       const elapsed = clipSeconds(packet.elapsedMilliseconds - candidate.packets[0].elapsedMilliseconds);
-      environmentOptions.push(new Option(`${elapsed} 秒 · 第 ${packet.sequence} 格 · ${weatherText(packet)}`, i));
+      const boundary = i === 0 && changedAtStart ? '換冊時變更 · ' : '';
+      environmentOptions.push(new Option(`${elapsed} 秒 · 第 ${packet.sequence} 格 · ${boundary}${weatherText(packet)}`, i));
     }
     $('environment').replaceChildren(new Option('跳到畫格', ''), ...environmentOptions);
-    $('environment-field').hidden = environmentOptions.length < 2;
+    $('environment-field').hidden = environmentOptions.length < 2 && !changedAtStart;
     timeline.max = candidate.packets.length - 1;
     $('view').hidden = false;
     scene.resize();

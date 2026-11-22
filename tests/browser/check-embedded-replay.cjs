@@ -29,6 +29,10 @@ async function main(directory, reportPath) {
       assert.match(await field('frame').innerText(), new RegExp('第 ' + first + ' 格'));
       assert.equal(await field('room').locator('option').count(), full ? 6 : 1);
       assert.equal(await field('room').inputValue(), full ? 'all' : '5');
+      if (reportPath && !full) {
+        assert.equal(await field('weather').innerText(), first === 1 ? '晴朗 · 白天 · 雷電關閉' : '暴風雨 · 夜晚 · 雷電開啟');
+        assert.ok(await field('environment-field').isHidden(), 'A separately opened volume has no previous weather to compare');
+      }
       assert.ok(Number(await page.locator('#replay-canvas').getAttribute('data-triangles')) > 0);
       if (parts > 1) {
         const offset = Number(await field('segment').locator('option').nth(2).getAttribute('value'));
@@ -79,6 +83,14 @@ async function main(directory, reportPath) {
         assert.equal(page.url(), url);
         assert.notEqual(await page.title(), 'Unexpected navigation');
         assert.equal(await field('volume-label').innerText(), '已到最後一冊。');
+        if (!full) {
+          assert.ok(await field('environment-field').isVisible());
+          assert.match(await field('environment').locator('option[value="0"]').innerText(), /第 7200 格 · 換冊時變更 · 暴風雨 · 夜晚 · 雷電開啟/);
+          await field('next').click();
+          await field('environment').selectOption('0');
+          assert.match(await field('frame').innerText(), /第 7200 格/);
+          assert.equal(await field('room').inputValue(), '5');
+        }
         await field('number').fill(String(next.last - 1));
         await field('number').press('Enter');
         await field('play').click();
