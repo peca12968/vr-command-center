@@ -128,41 +128,89 @@ public sealed partial class WorldRecordings
         }
     }
 
+    private sealed class ReplayPartTooLargeException() : InvalidOperationException("Player replay exceeds 8 MiB.") { }
+    private const int PlayerReplayFramesPerFile = 300;
+    private const int PlayerReplayFilesPerSet = 24;
+
     public byte[] ExportPlayerReplay(Guid id, Guid clipId, int? roomId, OperatorIdentity actor, CancellationToken cancellation)
+        => PlayerReplayParts(id, clipId, roomId, actor, cancellation, split: false).Single().Data;
+
+    public IEnumerable<(byte[] Data, string Suffix)> PlayerReplayParts(Guid id, Guid clipId, int? roomId,
+        OperatorIdentity actor, CancellationToken cancellation, bool split = true)
     {
-        const int maxFrames = 300;
-        const int maxBytes = 8 * 1024 * 1024;
         var recording = ReplayClipRecording(id, actor, write: true);
         if (!recording.Complete) throw new InvalidOperationException("Seal the recording before exporting a player replay.");
         var header = recording.Header;
         if (roomId.HasValue && !header.roomIds.Contains(roomId.Value))
             throw new ArgumentException("Select a room within this recording.");
         var session = id.ToString("D");
+        ReplayClip clip;
+        lock (gate)
+        {
+            var saved = FindClip(session, clipId.ToString("D"), Guid.Parse(header.streamId));
+            if (saved is null || saved.Deleted) throw new KeyNotFoundException("No shared clip for this recording.");
+            clip = saved;
+        }
+        if (!split && clip.EndFrame - clip.StartFrame >= PlayerReplayFramesPerFile)
+            throw new InvalidOperationException("Player replay is limited to 300 saved frames.");
+        if (clip.EndFrame - clip.StartFrame >= PlayerReplayFilesPerSet * PlayerReplayFramesPerFile)
+            throw new InvalidOperationException("每份回放 ZIP 最多 7,200 格，請縮小片段範圍。");
+        Dictionary<string, int>? propRooms = null;
+        if (roomId is int room)
+        {
+            propRooms = header.props.ToDictionary(prop => prop.id, prop => prop.roomId, StringComparer.Ordinal);
+            header.roomIds = [room];
+            header.props = header.props.Where(prop => prop.roomId == room).ToArray();
+        }
+        return ReadParts();
+
+        IEnumerable<(byte[] Data, string Suffix)> ReadParts()
+        {
+            long first = clip.StartFrame;
+            int files = 0, bytes = 0;
+            while (first < clip.EndFrame)
+            {
+                var remaining = clip.EndFrame - first + 1;
+                var count = (int)Math.Min(remaining, PlayerReplayFramesPerFile);
+                byte[] data;
+                while (true)
+                {
+                    cancellation.ThrowIfCancellationRequested();
+                    if (remaining - count == 1 && count > 2) count--; // Each file needs at least two frames.
+                    try
+                    {
+                        data = WritePlayerReplayRange(id, actor, recording, clip, first, first + count - 1, roomId, propRooms, cancellation);
+                        break;
+                    }
+                    catch (ReplayPartTooLargeException) when (split && count > 2) { count = Math.Max(2, count / 2); }
+                }
+                if (++files > PlayerReplayFilesPerSet || (bytes += data.Length) > 64 * 1024 * 1024)
+                    throw new InvalidOperationException("片段超過播放器一次可開啟的 24 份檔案或 64 MiB，請縮小片段範圍。");
+                long last = first + count - 1;
+                yield return (data, first == clip.StartFrame && last == clip.EndFrame ? "" : FormattableString.Invariant($"-frames-{first:D6}-{last:D6}"));
+                if (last == clip.EndFrame) yield break;
+                first = Math.Min(last + 1, clip.EndFrame - 1);
+            }
+        }
+    }
+
+    private byte[] WritePlayerReplayRange(Guid id, OperatorIdentity actor, WorldRecordingInfo recording,
+        ReplayClip clip, long first, long last, int? roomId, Dictionary<string, int>? propRooms, CancellationToken cancellation)
+    {
+        const int maxBytes = 8 * 1024 * 1024;
+        var header = recording.Header;
         using var output = new MemoryStream();
         using var json = new Utf8JsonWriter(output);
         lock (gate)
         {
-            var clip = FindClip(session, clipId.ToString("D"), Guid.Parse(recording.Header.streamId));
-            if (clip is null || clip.Deleted) throw new KeyNotFoundException("No shared clip for this recording.");
-            if (clip.EndFrame - clip.StartFrame >= maxFrames)
-                throw new InvalidOperationException("Player replay is limited to 300 saved frames.");
-
-            Dictionary<string, int>? propRooms = null;
-            RecordedEnemy[] previousEnemies = [];
-            if (roomId is int room)
-            {
-                propRooms = header.props.ToDictionary(prop => prop.id, prop => prop.roomId, StringComparer.Ordinal);
-                previousEnemies = Frame(id, clip.StartFrame - 1, actor)?.Packet.frame.enemies ?? [];
-                header.roomIds = [room];
-                header.props = header.props.Where(prop => prop.roomId == room).ToArray();
-            }
+            RecordedEnemy[] previousEnemies = roomId.HasValue ? Frame(id, first - 1, actor)?.Packet.frame.enemies ?? [] : [];
             json.WriteStartObject();
             json.WriteNumber("playerReplayVersion", roomId.HasValue ? 2 : 1);
             if (roomId.HasValue) json.WriteNumber("roomId", roomId.Value);
             json.WriteString("missionName", recording.MissionName);
             json.WriteString("clipName", clip.Name);
-            json.WriteNumber("startFrame", clip.StartFrame);
-            json.WriteNumber("endFrame", clip.EndFrame);
+            json.WriteNumber("startFrame", first);
+            json.WriteNumber("endFrame", last);
             json.WritePropertyName("header");
             JsonSerializer.Serialize(json, header, WorldJson.Options);
             json.WriteStartArray("packets");
@@ -171,9 +219,9 @@ public sealed partial class WorldRecordings
             using var command = Command("""
                 SELECT packet, statistics
                 FROM world_frames WHERE session=$session AND sequence BETWEEN $first AND $last ORDER BY sequence
-                """, ("$session", session), ("$first", clip.StartFrame), ("$last", clip.EndFrame));
+                """, ("$session", id.ToString("D")), ("$first", first), ("$last", last));
             using var rows = command.ExecuteReader();
-            var expected = clip.StartFrame;
+            var expected = first;
             while (rows.Read())
             {
                 cancellation.ThrowIfCancellationRequested();
@@ -203,9 +251,9 @@ public sealed partial class WorldRecordings
                     JsonSerializer.Serialize(json, packet, WorldJson.Options);
                 }
                 json.Flush();
-                if (output.Length > maxBytes - 2) throw new InvalidOperationException("Player replay exceeds 8 MiB.");
+                if (output.Length > maxBytes - 2) throw new ReplayPartTooLargeException();
             }
-            if (expected - 1 != clip.EndFrame) throw new InvalidOperationException("Replay clip has a missing saved frame.");
+            if (expected - 1 != last) throw new InvalidOperationException("Replay clip has a missing saved frame.");
             json.WriteEndArray();
             if (eventRooms.Count > 0)
             {
@@ -215,7 +263,7 @@ public sealed partial class WorldRecordings
         }
         json.WriteEndObject();
         json.Flush();
-        if (output.Length > maxBytes) throw new InvalidOperationException("Player replay exceeds 8 MiB.");
+        if (output.Length > maxBytes) throw new ReplayPartTooLargeException();
         return output.ToArray();
     }
 

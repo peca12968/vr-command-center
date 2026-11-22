@@ -187,7 +187,7 @@ public static class WorldRoutes
             {
                 context.Response.Headers.CacheControl = "no-store";
                 var cancellation = context.RequestAborted;
-                var replay = store.ExportPlayerReplay(id, clip, roomId, Actor(context), cancellation);
+                var parts = store.PlayerReplayParts(id, clip, roomId, Actor(context), cancellation);
                 var player = environment.WebRootFileProvider.GetFileInfo(OfflinePlayerPath);
                 if (!player.Exists || player.IsDirectory || player.Length is < 1 or > 2 * 1024 * 1024)
                     return Results.NotFound(new { error = "此管理包未提供離線播放器。" });
@@ -199,8 +199,11 @@ public static class WorldRoutes
                     using (var entry = FieldEvidence.Entry(archive, OfflinePlayerName).Open())
                     using (var input = player.CreateReadStream())
                         await input.CopyToAsync(entry, cancellation);
-                    using (var entry = FieldEvidence.Entry(archive, stem + ".json").Open())
-                        await entry.WriteAsync(replay, cancellation);
+                    foreach (var part in parts)
+                    {
+                        using var entry = FieldEvidence.Entry(archive, stem + part.Suffix + ".json").Open();
+                        await entry.WriteAsync(part.Data, cancellation);
+                    }
                 }
                 return Results.File(output.ToArray(), "application/zip", stem + ".zip");
             });

@@ -330,14 +330,16 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       window.fetch = async (...args) => {
         const response = await original(...args);
         if (!String(args[0]).includes('/world/watch') || !response.ok) return response;
+        // The saved capture origin belongs to the recording, including every status update.
+        const captured = window.worldClockMode === 'unknown' ? '' : new Date(Date.now() + (window.worldClockMode === 'old' ? -60000 : 60000)).toISOString();
         let buffer = ''; const decoder = new TextDecoder(), encoder = new TextEncoder();
         const body = response.body.pipeThrough(new TransformStream({ transform(bytes, controller) {
           buffer += decoder.decode(bytes, { stream: true }); let end;
           while ((end = buffer.indexOf('\n\n')) >= 0) {
             let block = buffer.slice(0, end); buffer = buffer.slice(end + 2);
-            if (/^event: (header|status)\n/.test(block)) {
+            if (/^event: (header|status|complete|saved-end)\n/.test(block)) {
               const value = JSON.parse(block.split('\ndata: ')[1]);
-              value.header.captureStartedAtUtc = window.worldClockMode === 'unknown' ? '' : new Date(Date.now() + (window.worldClockMode === 'old' ? -60000 : 60000)).toISOString();
+              value.header.captureStartedAtUtc = captured;
               block = block.split('\ndata: ')[0] + '\ndata: ' + JSON.stringify(value);
             }
             controller.enqueue(encoder.encode(block + '\n\n'));

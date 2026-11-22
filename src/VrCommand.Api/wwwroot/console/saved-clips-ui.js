@@ -1,4 +1,4 @@
-import { MAX_REPLAY_BYTES, MAX_REPLAY_FRAMES, readPlayerReplay } from './player-replay-model.js';
+import { MAX_REPLAY_BYTES, MAX_REPLAY_FRAMES, MAX_REPLAY_FILES, MAX_REPLAY_SET_BYTES, readPlayerReplay } from './player-replay-model.js';
 
 const $ = id => document.getElementById('saved-clip-' + id);
 const isId = value => typeof value === 'string' && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(value);
@@ -33,11 +33,12 @@ export function mountSavedClips(request, canWrite, load, download) {
     $('refresh').disabled = !scope || !!work || !!pending;
     $('save').disabled = !idle || !draft || !!work || !!pending;
     $('remove').disabled = !idle || !row || !!work || !!pending;
-    $('export').disabled = !idle || !row || !!work || !!pending || !scope.complete
-      || row.endFrame > scope.throughFrame || row.endFrame - row.startFrame >= MAX_REPLAY_FRAMES;
-    exportRoom.disabled = $('export').disabled;
+    const exportable = idle && row && !work && !pending && scope.complete && row.endFrame <= scope.throughFrame;
+    const frames = row ? row.endFrame - row.startFrame + 1 : 0;
+    $('export').disabled = !exportable || frames > MAX_REPLAY_FRAMES;
     exportZip.hidden = offlinePlayer.hidden;
-    exportZip.disabled = exportZip.hidden || $('export').disabled;
+    exportZip.disabled = exportZip.hidden || !exportable || frames > MAX_REPLAY_FRAMES * MAX_REPLAY_FILES;
+    exportRoom.disabled = $('export').disabled && exportZip.disabled;
     $('retry').hidden = !pending || !!work;
   }
   function options(preferred = select.value) {
@@ -106,13 +107,14 @@ export function mountSavedClips(request, canWrite, load, download) {
     const own = work = new AbortController();
     controls();
     try {
-      const response = await request(path, AbortSignal.any([own.signal, AbortSignal.timeout(15000)]));
+      const segmented = zip && clip.endFrame - clip.startFrame >= MAX_REPLAY_FRAMES;
+      const response = await request(path, AbortSignal.any([own.signal, AbortSignal.timeout(segmented ? 90000 : 15000)]));
       if (response.status !== 200 || response.headers.get('content-type')?.split(';')[0].trim() !== (zip ? 'application/zip' : 'application/json'))
         throw new Error('無法讀取片段檔案。');
       if (zip && !response.headers.get('content-disposition')?.split(';').some(part => part.trim() === 'filename=' + filename))
         throw new Error('下載回覆的回放 ZIP 名稱不符。');
       const file = await response.blob();
-      if (!file.size || file.size > (zip ? 11 * 1024 * 1024 : MAX_REPLAY_BYTES)) throw new Error('回放檔案大小不符。');
+      if (!file.size || file.size > (zip ? MAX_REPLAY_SET_BYTES + 3 * 1024 * 1024 : MAX_REPLAY_BYTES)) throw new Error('回放檔案大小不符。');
       if (!zip) {
         const replay = readPlayerReplay(JSON.parse(await file.text()));
         if (replay.header.sessionId !== sessionId || replay.header.streamId !== streamId
