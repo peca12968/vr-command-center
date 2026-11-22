@@ -39,6 +39,10 @@
         <output id="player-replay-follow-status" role="status"></output>
       </div>
       <label>時間軸<input id="replay-timeline" type="range" min="0" value="0" step="1"></label>
+      <form id="player-replay-seek" class="replay-transport">
+        <label><span>片段時間（秒）</span><input id="player-replay-seconds" type="number" inputmode="decimal" min="0" step="0.001" required></label>
+        <button type="submit" class="quiet">跳到時間</button>
+      </form>
       <form id="player-replay-jump" class="replay-transport">
         <label><span>畫格序號</span><input id="player-replay-number" type="number" inputmode="numeric" min="1" step="1" required></label>
         <button type="submit" class="quiet">跳到畫格</button>

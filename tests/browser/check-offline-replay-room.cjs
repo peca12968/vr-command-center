@@ -45,6 +45,62 @@ async function main() {
     assert.equal(await control('event-count').innerText(), '1 個事件畫格');
     await control('event-next').click();
     assert.match(await control('frame').innerText(), /第 12 格/);
+    const seek = async value => {
+      await control('seconds').fill(value);
+      await control('seek').getByRole('button').click();
+    };
+    const timed = fixture();
+    timed.clipName = '不等間距的時間定位';
+    timed.endFrame = 14;
+    timed.packets = [30001, 30103, 30103, 32222, 33337].map((elapsedMilliseconds, index) => ({
+      ...structuredClone(timed.packets[1]), sequence: 10 + index, elapsedMilliseconds
+    }));
+    await control('file').setInputFiles({ name: 'timed.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(timed)) });
+    await control('message').filter({ hasText: '已載入 5 格' }).waitFor();
+    assert.equal(await control('seconds').getAttribute('max'), '3.336');
+    await control('room').selectOption('5');
+    await control('follow').selectOption(timed.packets[0].frame.players[0].id);
+    await seek('0');
+    assert.match(await control('frame').innerText(), /第 10 格/);
+    await control('play').click();
+    await seek('0.102');
+    assert.match(await control('frame').innerText(), /第 12 格/);
+    assert.equal(await control('play').innerText(), '播放');
+    await seek('2.220');
+    assert.match(await control('frame').innerText(), /第 12 格/);
+    assert.match(await control('time').innerText(), /2\.22 \/ 3\.336/);
+    await control('play').evaluate(async button => {
+      button.click();
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      button.click();
+    });
+    assert.match(await control('frame').innerText(), /第 13 格/);
+    await seek('2.221');
+    assert.match(await control('frame').innerText(), /第 13 格/);
+    assert.match(await control('time').innerText(), /2\.221 \/ 3\.336/);
+    for (const value of ['3.337', '-0.001', '0.0005', '']) {
+      await seek(value);
+      assert.equal(await control('seconds').evaluate(input => input.validity.valid), false);
+      assert.match(await control('frame').innerText(), /第 13 格/);
+    }
+    await seek('3.336');
+    assert.match(await control('frame').innerText(), /第 14 格/);
+    assert.equal(await control('room').inputValue(), '5');
+    assert.equal(await control('follow').inputValue(), timed.packets[0].frame.players[0].id);
+    const instant = structuredClone(timed);
+    instant.clipName = '同一毫秒的片段';
+    for (const packet of instant.packets) packet.elapsedMilliseconds = 777;
+    await control('file').setInputFiles({ name: 'instant.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(instant)) });
+    await control('title').filter({ hasText: instant.clipName }).waitFor();
+    assert.equal(await control('seconds').getAttribute('max'), '0');
+    await seek('0');
+    assert.match(await control('frame').innerText(), /第 14 格/);
+    await control('back').click();
+    assert.match(await control('frame').innerText(), /第 13 格/);
+    await load();
+    assert.equal(await control('seconds').inputValue(), '');
+    assert.equal(await control('seconds').getAttribute('max'), '0.4');
+    await control('room').selectOption('1'); await control('event-next').click();
     assert.match(await control('event-frame').innerText(), /1 筆/);
     await control('room').selectOption('5');
     await control('event-back').click();
@@ -86,10 +142,12 @@ async function main() {
       }
       await control('room').selectOption('all');
       assert.match(await control('event-frame').innerText(), /玩家受傷 2 筆/);
+      await seek(await control('seconds').getAttribute('max'));
+      assert.ok(await control('next').isDisabled());
     }
     assert.deepEqual(errors, []);
     assert.deepEqual(network, []);
-    console.log('PASS: offline five-room event navigation, shared frame counts, departed player, empty room and scoped reload');
+    console.log('PASS: offline five-room event navigation, departed player, scoped reload and millisecond time seeking with irregular and duplicate timestamps');
   } finally { await browser.close(); }
 }
 

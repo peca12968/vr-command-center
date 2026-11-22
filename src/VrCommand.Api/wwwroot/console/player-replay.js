@@ -7,6 +7,7 @@ const timeline = document.getElementById('replay-timeline');
 const canvas = document.getElementById('replay-canvas');
 const loop = $('loop');
 const frameNumber = $('number');
+const seconds = $('seconds');
 const eventKind = $('event-kind');
 const room = $('room'), follow = $('follow'), followStatus = $('follow-status');
 for (const [kind, label] of Object.entries(eventNames)) eventKind.add(new Option(label, kind));
@@ -91,14 +92,15 @@ function updateFollow(frame) {
   if (followStatus.textContent !== status) followStatus.textContent = status;
 }
 
-function show(next, continuous = false) {
+function show(next, continuous = false, position) {
   const { packets } = replay;
   const packet = packets[next];
+  const elapsed = position ?? packet.elapsedMilliseconds;
   updateFollow(packet.frame);
   scene.show(packet.frame, packets[next - 1]?.frame, packet.events.filter(event => event.hasRay),
     { weather: packet.weather, lightning: packet.lightning }, continuous);
   index = next;
-  if (!continuous) cursor = packet.elapsedMilliseconds;
+  if (!continuous) cursor = elapsed;
   timeline.value = index;
   $('back').disabled = index === 0;
   $('next').disabled = index === packets.length - 1;
@@ -109,13 +111,17 @@ function show(next, continuous = false) {
   $('weather').textContent = [weatherNames[packet.weather], packet.frame.night ? '夜晚' : '白天',
     packet.lightning ? '雷電開啟' : '雷電關閉'].join(' · ');
   const first = packets[0].elapsedMilliseconds;
-  $('time').textContent = `片段 ${((packet.elapsedMilliseconds - first) / 1000).toFixed(2)} / ${((packets.at(-1).elapsedMilliseconds - first) / 1000).toFixed(2)} 秒`;
+  $('time').textContent = `片段 ${clipSeconds(elapsed - first)} / ${clipSeconds(packets.at(-1).elapsedMilliseconds - first)} 秒`;
   showFrameEvents();
 }
 
-function openFrame(next) {
+function clipSeconds(milliseconds) {
+  return (milliseconds / 1000).toFixed(3).replace(/0$/, '');
+}
+
+function openFrame(next, position) {
   pause();
-  if (replay && Number.isInteger(next) && next >= 0 && next < replay.packets.length) show(next);
+  if (replay && Number.isInteger(next) && next >= 0 && next < replay.packets.length) show(next, false, position);
 }
 
 $('file').addEventListener('change', async () => {
@@ -127,6 +133,7 @@ $('file').addEventListener('change', async () => {
   loop.checked = false;
   eventKind.value = '';
   frameNumber.value = '';
+  seconds.value = '';
   $('file').value = '';
   $('view').hidden = true;
   scene?.reset();
@@ -149,6 +156,7 @@ $('file').addEventListener('change', async () => {
     replay = candidate;
     frameNumber.min = candidate.startFrame;
     frameNumber.max = candidate.endFrame;
+    seconds.max = (candidate.packets.at(-1).elapsedMilliseconds - candidate.packets[0].elapsedMilliseconds) / 1000;
     $('title').textContent = candidate.clipName;
     const source = candidate.header.origin === 'GameServer' ? '遊戲伺服器' : '模擬';
     const scope = candidate.roomId === undefined ? '' : ` · 僅房間 ${candidate.roomId}`;
@@ -216,6 +224,15 @@ $('jump').addEventListener('submit', event => {
   if (!replay || !Number.isSafeInteger(sequence) || sequence < replay.startFrame || sequence > replay.endFrame) return;
   openFrame(sequence - replay.startFrame);
   frameNumber.focus();
+});
+$('seek').addEventListener('submit', event => {
+  event.preventDefault();
+  if (!replay || !seconds.validity.valid) return;
+  const packets = replay.packets;
+  const target = packets[0].elapsedMilliseconds + Math.round(seconds.valueAsNumber * 1000);
+  const after = packets.findIndex(packet => packet.elapsedMilliseconds > target);
+  openFrame(after === -1 ? packets.length - 1 : after - 1, target);
+  seconds.focus();
 });
 loop.addEventListener('change', () => { if (!loop.checked && restartAt !== null) pause(); });
 timeline.addEventListener('input', () => openFrame(Number(timeline.value)));
