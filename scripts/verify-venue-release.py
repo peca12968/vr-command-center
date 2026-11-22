@@ -421,7 +421,7 @@ def write_field_kit(destination, control, server, player, apk, report, hardware=
                 copy_verified(archive, path, 'Quest/' + path.name, report['quest'][key])
             scripts = Path(__file__).resolve().parent
             for name in ('deploy-quest.ps1', 'quest-adb-process.ps1', 'check-quest-usb.ps1',
-                         'check-field-install.ps1'):
+                         'check-field-install.ps1', 'check-lan-udp.ps1'):
                 archive.write(scripts / name, 'scripts/' + name)
             firewall = scripts / 'check-windows-firewall-notifications.ps1'
             copy_verified(archive, firewall, 'scripts/' + firewall.name, guard['scriptSha256'])

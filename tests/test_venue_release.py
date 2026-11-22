@@ -196,6 +196,8 @@ class VenueReleaseTests(unittest.TestCase):
             self.assertEqual(archive.read('Quest/sample.apk'), apk.read_bytes())
             self.assertEqual(archive.read('scripts/check-windows-firewall-notifications.ps1'),
                              (Path(release.__file__).parent / 'check-windows-firewall-notifications.ps1').read_bytes())
+            self.assertEqual(archive.read('scripts/check-lan-udp.ps1'),
+                             Path(release.__file__).with_name('check-lan-udp.ps1').read_bytes())
         before = release.digest(destination)
         with self.assertRaisesRegex(ValueError, 'new field kit ZIP path'):
             package()

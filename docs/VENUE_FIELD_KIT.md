@@ -31,6 +31,36 @@ dotnet .\VRCommand-HardwareSimulator\VrCommand.HardwareSimulator.dll `
 
 硬體廠商可用房控憑證讀取 `GET /api/sessions/{sessionId}/rooms/{roomId}/hardware-environment`。請指定該房目前的場次 ID 與房號。回覆的 `environment` 在執行中提供 VR／MR 模式、天氣、日夜與雷電設定；準備、暫停、結束時為 `null`。恢復連線後重新讀取，並核對 `phaseSinceSequence` 和 `environmentSinceSequence`。此回覆描述管理台設定，實體輸出與確認方式由廠商介面決定。
 
+### 開場前測試兩台電腦的遊戲連線
+
+在兩台電腦解壓同一份場館包，開啟 PowerShell，切換至解壓目錄。以下用伺服器 `192.168.1.10`、玩家 `192.168.1.20`、遊戲埠 `7777` 示範，請代入實際位址與埠。金鑰及輸出檔放在包外，使用新檔名。
+
+1. 在伺服器產生本次金鑰，以私人方式複製到玩家電腦的使用者目錄。
+
+   ```powershell
+   .\scripts\check-lan-udp.ps1 -NewKey -KeyFile "$env:USERPROFILE\vr-lan.key"
+   ```
+
+2. 在伺服器執行下列命令。顯示 `listening` 後，在 60 秒內開始下一步。工具會在開啟網路埠前檢查防火牆設定，有提示風險時會自行結束。
+
+   ```powershell
+   .\scripts\check-lan-udp.ps1 -Mode Listen -KeyFile "$env:USERPROFILE\vr-lan.key" -LocalAddress 192.168.1.10 -PeerAddress 192.168.1.20 -Port 7777 -Seconds 60 | Tee-Object "$env:USERPROFILE\vr-listener.ndjson"
+   ```
+
+3. 在玩家電腦送出探測。
+
+   ```powershell
+   .\scripts\check-lan-udp.ps1 -Mode Probe -KeyFile "$env:USERPROFILE\vr-lan.key" -LocalAddress 192.168.1.20 -PeerAddress 192.168.1.10 -Port 7777 | Tee-Object "$env:USERPROFILE\vr-probe.json"
+   ```
+
+4. 等兩端程序結束，把兩份報告放到同一個使用者目錄，再執行離線配對。看到 `stage: pair-verified` 及 `complete: true`，表示本次兩端位址、埠及五次往返樣本相符。其他房間及其他玩家來源要各自測量。
+
+   ```powershell
+   .\scripts\check-lan-udp.ps1 -ListenerReport "$env:USERPROFILE\vr-listener.ndjson" -ProbeReport "$env:USERPROFILE\vr-probe.json"
+   ```
+
+### 頭盔接入
+
 若使用 VIVE 的 Windows PC VR 連線方式，可在解壓根目錄執行下列檢查。請使用包外的新報告檔名。這一步讀取本機 OpenXR 設定與執行環境檔案；指定型號的頭盔畫面與左右控制器須在場館實測。
 
 ```powershell
