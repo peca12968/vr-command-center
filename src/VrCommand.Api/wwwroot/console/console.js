@@ -2676,6 +2676,7 @@ function mergeMissionDraft(base, local, latest) {
 }
 function fillDraft(draft, keepProps = false) {
   placement.clearTrial(); clearMissionComparison();
+  closeTemplateComparison();
   propMove.reset();
   $('draft-name').value = draft.name; $('draft-briefing').value = draft.briefing; $('draft-duration').value = draft.durationSeconds;
   // Text controls normalize line endings. Keep the source text until that field is edited.
@@ -2690,6 +2691,8 @@ function fillDraft(draft, keepProps = false) {
 }
 function clearMissionTemplate(keepFile = false) {
   templateEpoch++; checkedTemplate = null;
+  closeTemplateComparison();
+  $('template-comparison').hidden = true;
   if (!keepFile) {
     $('mission-template-file').value = '';
     $('check-mission-template').disabled = true;
@@ -2705,6 +2708,7 @@ async function checkMissionTemplate(file, epoch) {
   if (result?.format !== missionTemplateFormat || result.version !== 1 || !readableMissionDefinition(draft))
     throw new MissionVersionMismatch('任務範本回應內容不完整或格式有誤，已保留目前草稿。');
   checkedTemplate = draft;
+  $('template-comparison').hidden = false;
   $('mission-template-status').textContent = `「${draft.name}」 · ${draft.environment.mode} · ${draft.durationSeconds} 秒 · ${venueClimateText(draft.environment)} · ${missionEnemyText(draft.enemies)} · ${draft.props.length} 件物件。可載入為新草稿。`;
 }
 function useMissionTemplate() {
@@ -2754,7 +2758,16 @@ async function compareMissionVersion(id) {
   const revision = await api(`/missions/${id}/version`);
   if (epoch !== state.epoch || series !== state.history?.seriesId || id !== $('mission-version').value) return;
   requireMissionVersion(revision, id, series, selected.number);
-  const saved = revision.mission.definition, draft = draftDefinition(), rows = [];
+  const saved = revision.mission.definition;
+  const rows = missionDifferenceRows(saved, draftDefinition());
+  comparedVersion = revision;
+  $('mission-comparison-summary').textContent = `「${saved.name}」第 ${revision.number} 版 · ${rows.length ? `${rows.length} 項差異` : '與目前草稿相同'}`;
+  $('mission-comparison-rows').replaceChildren(...rows);
+  $('mission-comparison-table').hidden = rows.length === 0;
+  $('mission-comparison').hidden = false;
+}
+function missionDifferenceRows(saved, draft) {
+  const rows = [];
   function add(label, before, after) {
     if (before === after) return;
     const row = element('tr'), title = element('th', label);
@@ -2776,11 +2789,13 @@ async function compareMissionVersion(id) {
     if (!matchesMissionProp(original, edited, matchesSavedCoordinate))
       add(`物件 ${index + 1}`, propText(original), propText(edited));
   }
-  comparedVersion = revision;
-  $('mission-comparison-summary').textContent = `「${saved.name}」第 ${revision.number} 版 · ${rows.length ? `${rows.length} 項差異` : '與目前草稿相同'}`;
-  $('mission-comparison-rows').replaceChildren(...rows);
-  $('mission-comparison-table').hidden = rows.length === 0;
-  $('mission-comparison').hidden = false;
+  return rows;
+}
+function closeTemplateComparison() {
+  $('template-comparison').open = false;
+  $('template-comparison-rows').replaceChildren();
+  $('template-comparison-status').textContent = '';
+  $('template-comparison-table').hidden = true;
 }
 function restoreParent() {
   if (!comparedVersion) return null;
@@ -2808,7 +2823,11 @@ function renderProps(updateInspector = true) {
   if (prop) { $('prop-asset').value = prop.assetId; for (const axis of ['x', 'y', 'z']) $('prop-' + axis).value = prop.position[axis]; $('prop-yaw').value = prop.yawDegrees; }
 }
 function editable() { return master() && !state.busy && !state.pending; }
-function dirtyDraft() { state.draftChanged = true; clearMissionComparison(); draftStatus(); placement.scheduleDraft(); }
+function dirtyDraft() {
+  state.draftChanged = true; clearMissionComparison();
+  if ($('template-comparison').open) closeTemplateComparison();
+  draftStatus(); placement.scheduleDraft();
+}
 let propGesture = null;
 let propCopies = [];
 const maxProps = 500;
@@ -3169,6 +3188,13 @@ $('check-mission-template').addEventListener('click', () => {
   run(() => checkMissionTemplate(file, epoch));
 });
 $('use-mission-template').addEventListener('click', useMissionTemplate);
+$('template-comparison').addEventListener('toggle', () => {
+  if (!$('template-comparison').open || !checkedTemplate || !master()) return;
+  const rows = missionDifferenceRows(checkedTemplate, draftDefinition());
+  $('template-comparison-rows').replaceChildren(...rows);
+  $('template-comparison-table').hidden = rows.length === 0;
+  $('template-comparison-status').textContent = rows.length ? `${rows.length} 項差異，物件按清單順序比較。` : '範本與目前草稿相同。';
+});
 $('mission-version').addEventListener('change', clearMissionComparison);
 $('compare-version').addEventListener('click', () => {
   const id = $('mission-version').value;
