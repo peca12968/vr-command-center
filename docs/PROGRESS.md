@@ -1,5 +1,9 @@
 # 開發進度
 
+## 2026-11-22 Quest 單席部署核對頭盔分配
+
+舊場館包的單席 Quest 預檢在第 5 房第 2 席回報成功，同一份回應卻列出該席是 VIVE。已用解壓版管理服務建立五房合併及五房獨立的模擬場次，各登記 15 個 Quest 席與 10 個 VIVE 席，簽發原場票券後經本機 IPC 重驗。新版在兩種模式都拒絕該 VIVE 席，第 5 房第 3 席的 Quest 預檢均通過。在模擬裝置的安裝前與安裝後讀回 VIVE 分配時，工具都保留了原玩家連線檔。新版場館包核對 1,297 檔。Windows 此次列出 0 台 Meta USB 裝置，頭盔端仍待驗收。[修正前](../artifacts/quest-seat-preflight-20261122/before.json) · [修正後](../artifacts/quest-seat-preflight-20261122/after.json) · [部署操作](QUEST3.md) · [場館包](../artifacts/quest-seat-preflight-20261122/VRCommand-Venue-QuestSeat.zip)
+
 ## 2026-11-22 載入備份前比對場景配置
 
 控制台 0.31.297 可在載入草稿備份前列出欄位和物件差異。使用解壓版管理服務和兩個 Chromium 頁面，從第一頁下載草稿，在第二頁確認同一個油桶的 X 座標為範本 1.375 公尺、目前草稿 1 公尺。將座標調成相同後差異歸零，再加入沙包會顯示新增的物件。換成損壞檔案時收起舊比較並保留手上的配置。重新整理、登入後載回備份，可取回油桶的位置，原任務仍為第 1 版。既有版本合併、歷史比較、配置精度與復原檢查通過。場館包核對 1,297 檔。[操作說明](MISSION_VERSIONS.md) · [雙頁面驗證](../artifacts/template-comparison-031297/reload.log) · [場館包](../artifacts/template-comparison-031297/VRCommand-Venue-0.31.297.zip)

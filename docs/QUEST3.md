@@ -1,5 +1,7 @@
 # Quest 3 接入與工具鏈
 
+混用 Quest 3 與 VIVE 的場館，可在接上頭盔前，先用場館包的 `deploy-quest.ps1 -VenueBundle ... -RoomId ... -Seat ... -ManagementApi ... -CheckOnly` 核對單席。對 VR 或 VR／MR 混合房間包，工具會向主控讀取該席的頭盔配置；若登記為 VIVE，預檢即停止。省略 `-ManagementApi` 時只能離線檢查檔案。正式部署也會在安裝 APK 前、核對已安裝 APK 後，以及啟用連線設定前再次檢查當時的配置。
+
 單席 VR／MR 的連線檔須填寫頭盔可達的遊戲伺服器 IP。部署、部署預檢、單席追蹤核對及票券更新會先檢查此位址。若原場次已公布 `127.0.0.1`，請在新場次公布遊戲伺服器的場館 IP，再由主控配票。同一來源公布後的位址固定。主控在自己電腦上使用的 `-ManagementApi` 可繼續指向本機。
 
 目前 Quest 開發 APK 為 `0.50.12`／77，61,046,094 bytes，SHA-256 `f2ff7f1ce8cd9a89864a8a6f245d168d64457869cb1e812d9582399eef098873`。2026-11-17 重新核對同一份 APK 的 7 個 ARM64 ELF、SDK 32／35、v2 簽章及內附 AndroidManifest 的 VR 啟動與 MR 透視宣告。已用新版報告通過獨立與合併場的 VR／MR 離線部署前檢查。 [APK](../artifacts/quest/VrCommand.apk) · [發行報告](../artifacts/quest-native-elf-20261117/venue-release.json)

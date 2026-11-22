@@ -2842,6 +2842,57 @@ else:
         self.assert_rejected(self.run_bundle(files, '-Serial', 'fixture'), 'Specify -RoomId and -Seat')
         self.assert_rejected(self.run_bundle(files, '-RoomId', '5', '-Seat', '2'), 'Specify -Serial')
 
+    def test_quest_seat_assignment_is_checked_at_preflight_and_device_write_boundaries(self):
+        files, _ = self.vr_bundle('Linked')
+        release, report, fixture = self.release_report()
+        adb = self.root / 'mock-adb.ps1'
+        adb.write_text(ADB_FIXTURE, encoding='utf-8')
+        remote = self.root / 'remote'
+        remote.mkdir()
+        connection = remote / 'vr-connection.json'
+        connection.write_bytes(b'previous connection')
+        log = self.root / 'adb.log'
+        env = {**os.environ, 'QUEST_TEST_ROOT': str(self.root), 'VR_COMMAND_MASTER_KEY': 'fixture',
+               'QUEST_TEST_RELEASE_HASH': report['quest']['sha256'],
+               'QUEST_DEPLOY_SCRIPT': str(ROOT / 'scripts/deploy-quest.ps1')}
+        wrapper = self.root / 'receipt.ps1'
+        wrapper.write_text(r"""
+function Invoke-WebRequest($Uri, $Method, $ContentType, $Headers, $Body, [switch]$NoProxy,
+                          $MaximumRedirection, $TimeoutSec, [switch]$SkipHttpErrorCheck) {
+    if ($Uri.AbsolutePath -cne '/api/vr-deployment/venue-check') { throw 'Unexpected request' }
+    $strict = ($Body | ConvertFrom-Json).requireLiveSource -eq $true
+    $path = Join-Path $env:QUEST_TEST_ROOT 'adb.log'
+    $installed = (Test-Path $path) -and (Select-String -Quiet -Path $path -SimpleMatch ' install -r ')
+    $mismatch = switch ($env:CHECK_MISMATCH) {
+        'preview' { $true }
+        'before-install' { $strict }
+        'after-install' { $installed }
+    }
+    $seats = @(foreach ($room in 1..5) { foreach ($seat in 0..4) {
+        @{roomId=$room; seat=$seat; status='matched'; headset=if ($room -eq 5 -and $seat -eq 1 -and $mismatch) { 'ViveXr' } else { 'Quest3' }}
+    } })
+    $receipt = @{ topology='Linked'; allMatched=$true; seats=$seats }
+    if ($strict) { $receipt.liveSourceVerified = $true }
+    @{ StatusCode=200; Content=($receipt | ConvertTo-Json -Depth 4) }
+}
+& $env:QUEST_DEPLOY_SCRIPT @args
+""", encoding='utf-8')
+        for phase in ('preview', 'before-install', 'after-install'):
+            with self.subTest(phase=phase):
+                log.unlink(missing_ok=True)
+                flags = ['-RoomId', '5', '-Seat', '2', '-ManagementApi', 'http://127.0.0.1',
+                         '-ApkPath', fixture['VR_QUEST_FLEET_APK'], '-ReleaseReport', str(release), '-AdbPath', str(adb)]
+                flags.extend(['-CheckOnly'] if phase == 'preview' else ['-Serial', 'fixture'])
+                result = self.run_bundle(files, *flags, script=wrapper, environment={**env, 'CHECK_MISMATCH': phase})
+                self.assert_rejected(result, 'not assigned to a Quest 3 player')
+                self.assertEqual(log.exists(), phase != 'preview')
+                commands = log.read_text(encoding='utf-8') if log.exists() else ''
+                self.assertEqual(' install -r ' in commands, phase == 'after-install')
+                self.assertNotIn(' push ', commands)
+                self.assertNotIn(' force-stop ', commands)
+                self.assertNotIn(' am start ', commands)
+                self.assertEqual(connection.read_bytes(), b'previous connection')
+
     def test_single_bundle_seat_checks_local_release_without_adb(self):
         files, _ = self.vr_bundle('Linked')
         apk = self.root / 'game.apk'

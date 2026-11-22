@@ -570,13 +570,16 @@ function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$Selecte
         SessionIds = @($sessions | ForEach-Object { $_.ToString('D') } | Sort-Object) }
 }
 
-function Confirm-VenueReadback($Venue, [switch]$RequireLiveSource, [switch]$AllowLoopback) {
+function Confirm-VenueReadback($Venue, [switch]$RequireLiveSource, [switch]$AllowLoopback, [string]$QuestSeatKey) {
     if ($ManagementApi) {
         if ($Venue.Report.mode -cin @('VR','Mixed')) {
             $seats = @(Confirm-VenueWithManagement $ManagementApi $Venue.Report.topology $Venue.LiveRooms $Venue.PublishedEndpoints `
                 -Mode $Venue.Report.mode -RequireLiveSource:$RequireLiveSource -AllowLoopback:$AllowLoopback)
             foreach ($row in $seats) { $Venue.SeatHeadsets["$($row.roomId)/$($row.seat + 1)"] = $row.headset }
             $Venue.Report.quest3Seats = @($seats | Where-Object headset -CEQ 'Quest3').Count
+            if ($QuestSeatKey -and $Venue.SeatHeadsets[$QuestSeatKey] -cne 'Quest3') {
+                throw 'The selected seat is not assigned to a Quest 3 player.'
+            }
         } else {
             if (-not $Venue.Report.alignmentPinsVerified) { throw 'The live venue check requires all 25 connection files to carry locked MR alignment hashes.' }
             Confirm-VenueWithManagement $ManagementApi $Venue.Report.topology $Venue.LiveRooms $Venue.PublishedEndpoints `
@@ -2125,11 +2128,7 @@ function Set-QuestConnection([string[]]$Target, $Config, $Ticket, $Alignment, [s
             -RequiredAlignment $requiredAlignment -OriginalDeviceSerial $OriginalDeviceSerial -BeforeActivation {
                 if ($LiveVenue) {
                     $Deployment.Step = 'verify-live-venue-before-stop'
-                    Confirm-VenueReadback $LiveVenue -RequireLiveSource
-                    $seatKey = "$($Ticket.RoomId)/$($Ticket.Seat + 1)"
-                    if ($LiveVenue.Report.mode -cin @('VR','Mixed') -and $LiveVenue.SeatHeadsets[$seatKey] -cne 'Quest3') {
-                        throw 'The selected seat is not assigned to a Quest 3 player.'
-                    }
+                    Confirm-VenueReadback $LiveVenue -RequireLiveSource -QuestSeatKey "$($Ticket.RoomId)/$($Ticket.Seat + 1)"
                 }
                 if ($LiveSeat) { Confirm-QuestPlayerReadback $LiveSeat }
                 $Deployment.Step = 'check-expiry-before-stop'
@@ -2515,7 +2514,8 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
     if ($requiresLive -and $RoomId -and -not $CheckOnly -and -not $ManagementApi) {
         throw 'Deploying a VR or mixed bundle seat requires -ManagementApi for a current signed seat and endpoint check.'
     }
-    Confirm-VenueReadback $venue
+    $questSeatKey = if ($RoomId) { "$RoomId/$Seat" }
+    Confirm-VenueReadback $venue -QuestSeatKey $questSeatKey
     if (-not $RoomId) {
         $venue.Report | ConvertTo-Json -Depth 4 -Compress
         return
@@ -2525,9 +2525,6 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
     $alignment = $venue.Selected.Alignment
     $isMixedReality = $null -ne $alignment
     $alignmentHash = $alignment.Hash
-    if ($requiresLive -and -not $CheckOnly -and $venue.SeatHeadsets["$RoomId/$Seat"] -cne 'Quest3') {
-        throw 'The selected seat is not assigned to a Quest 3 player.'
-    }
 } else {
     $connectionFile = Read-DeploymentJson $ClientConfig $(if ($ManagementApi) { 2048 } else { 4096 }) 'player connection'
     $config = $connectionFile.Document
@@ -2583,10 +2580,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Could not identify the selected Android device. On Windows, check USB and ADB with scripts/check-quest-usb.ps1.' }
     $model = ([string]$model).Trim()
     if ($model -ne 'Quest 3') { throw 'Selected device is not a Meta Quest 3. No app was installed.' }
-    if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') { Confirm-VenueReadback $venue -RequireLiveSource }
     if ($release -and -not $UseInstalledApk) {
         $stagedApk = New-VerifiedQuestApk $apk $release.sha256
         $apk = $stagedApk
+    }
+    if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') {
+        Confirm-VenueReadback $venue -RequireLiveSource -QuestSeatKey $questSeatKey
     }
     if ($liveSeat) { Confirm-QuestPlayerReadback $liveSeat }
     if (-not $UseInstalledApk) {
@@ -2596,7 +2595,9 @@ try {
     if ($release -and (Get-QuestApkStatus $deviceTarget $release.sha256) -cne 'ready') {
         throw 'Installed Quest APK could not be verified against the release report.'
     }
-    if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') { Confirm-VenueReadback $venue -RequireLiveSource }
+    if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') {
+        Confirm-VenueReadback $venue -RequireLiveSource -QuestSeatKey $questSeatKey
+    }
     Set-QuestConnection $deviceTarget $config $ticket $alignment -UsePassthrough:$Passthrough -RequestMixedReality:$isMixedReality `
         -LiveVenue $(if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') { $venue }) -LiveSeat $liveSeat -Deployment $deployment `
         -OriginalDeviceSerial $originalDeviceSerial
