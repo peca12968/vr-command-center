@@ -2157,11 +2157,11 @@ function matchesMissionDefinition(actual, original, coordinatesMatch = (saved, e
     && ['mode', 'weather', 'timeOfDay', 'lightning'].every(field => actual.environment?.[field] === original.environment[field])
     && ['count', 'behavior', 'autoAttack'].every(field => actual.enemies?.[field] === original.enemies[field])
     && Array.isArray(actual.props) && actual.props.length === original.props.length
-    && original.props.every((prop, index) => {
-      const saved = actual.props[index];
-      return saved?.assetId === prop.assetId && coordinatesMatch(saved.yawDegrees, prop.yawDegrees)
-        && ['x', 'y', 'z'].every(axis => coordinatesMatch(saved.position?.[axis], prop.position[axis]));
-    });
+    && original.props.every((prop, index) => matchesMissionProp(actual.props[index], prop, coordinatesMatch));
+}
+function matchesMissionProp(saved, draft, coordinatesMatch) {
+  return saved && draft && saved.assetId === draft.assetId && coordinatesMatch(saved.yawDegrees, draft.yawDegrees)
+    && ['x', 'y', 'z'].every(axis => coordinatesMatch(saved.position?.[axis], draft.position[axis]));
 }
 // The API stores positions and angles as Single and may return a shorter decimal spelling.
 function matchesSavedCoordinate(saved, expected) {
@@ -2696,8 +2696,11 @@ async function compareMissionVersion(id) {
   add('天氣、時段、閃電', venueClimateText(saved.environment), venueClimateText(draft.environment));
   add('敵軍設定', missionEnemyText(saved.enemies), missionEnemyText(draft.enemies));
   const propText = prop => prop ? `${prop.assetId} · (${prop.position.x}, ${prop.position.y}, ${prop.position.z}) m · ${prop.yawDegrees}°` : '（無物件）';
-  for (let index = 0; index < Math.max(saved.props.length, draft.props.length); index++)
-    add(`物件 ${index + 1}`, propText(saved.props[index]), propText(draft.props[index]));
+  for (let index = 0; index < Math.max(saved.props.length, draft.props.length); index++) {
+    const original = saved.props[index], edited = draft.props[index];
+    if (!matchesMissionProp(original, edited, matchesSavedCoordinate))
+      add(`物件 ${index + 1}`, propText(original), propText(edited));
+  }
   comparedVersion = revision;
   $('mission-comparison-summary').textContent = `「${saved.name}」第 ${revision.number} 版 · ${rows.length ? `${rows.length} 項差異` : '與目前草稿相同'}`;
   $('mission-comparison-rows').replaceChildren(...rows);
