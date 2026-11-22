@@ -2807,7 +2807,18 @@ function addProp(assetId) {
   if (state.props.length >= maxProps) { notify('最多可放置 500 個物件。', true); return; }
   editProp(() => { state.props.push({ assetId, position: { x: 0, y: 0, z: 0 }, yawDegrees: 0 }); state.prop = state.props.length - 1; });
 }
-function moveProp(x, z) { const prop = state.props[state.prop]; if (prop && editable()) { prop.position.x = Math.round(Math.max(-10, Math.min(10, x)) * 2) / 2; prop.position.z = Math.round(Math.max(-10, Math.min(10, z)) * 2) / 2; renderProps(false); $('prop-x').value = prop.position.x; $('prop-z').value = prop.position.z; dirtyDraft(); } }
+function mapCoordinate(value) { return Math.max(-10, Math.min(10, value)); }
+function dragCoordinate(value) { return Math.round(mapCoordinate(value) * 2) / 2; }
+function moveProp(x, z) {
+  const prop = state.props[state.prop];
+  if (!prop || !editable() || (prop.position.x === x && prop.position.z === z)) return;
+  prop.position.x = x;
+  prop.position.z = z;
+  renderProps(false);
+  $('prop-x').value = x;
+  $('prop-z').value = z;
+  dirtyDraft();
+}
 let dragging = false, offset = { x: 0, z: 0 };
 function mapPoint(event) { const point = $('layout-map').createSVGPoint(); point.x = event.clientX; point.y = event.clientY; const local = point.matrixTransform($('layout-map').getScreenCTM().inverse()); return { x: local.x, z: -local.y }; }
 $('layout-map').addEventListener('pointerdown', event => {
@@ -2818,7 +2829,11 @@ $('layout-map').addEventListener('pointerdown', event => {
   offset = { x: prop.position.x - point.x, z: prop.position.z - point.z }; dragging = true;
   $('layout-map').setPointerCapture(event.pointerId); renderProps(); $('layout-map').focus();
 });
-$('layout-map').addEventListener('pointermove', event => { if (dragging) { const point = mapPoint(event); moveProp(point.x + offset.x, point.z + offset.z); } });
+$('layout-map').addEventListener('pointermove', event => {
+  if (!dragging) return;
+  const point = mapPoint(event);
+  moveProp(dragCoordinate(point.x + offset.x), dragCoordinate(point.z + offset.z));
+});
 for (const type of ['pointerup', 'pointercancel', 'lostpointercapture', 'blur']) $('layout-map').addEventListener(type, finishPropGesture);
 $('layout-map').addEventListener('keyup', event => { if (event.key.startsWith('Arrow')) finishPropGesture(); });
 window.addEventListener('blur', finishPropGesture);
@@ -2832,7 +2847,11 @@ $('layout-map').addEventListener('keydown', event => {
   const prop = state.props[state.prop];
   if (!prop || !editable()) return;
   const directions = { ArrowLeft: [-.5, 0], ArrowRight: [.5, 0], ArrowUp: [0, .5], ArrowDown: [0, -.5] }, delta = directions[event.key];
-  if (delta && !event.ctrlKey && !event.metaKey && !event.altKey) { event.preventDefault(); $('layout-map').focus(); beginPropGesture(); moveProp(prop.position.x + delta[0], prop.position.z + delta[1]); }
+  if (delta && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    event.preventDefault(); $('layout-map').focus(); beginPropGesture();
+    const { x, z } = prop.position;
+    moveProp(delta[0] ? mapCoordinate(x + delta[0]) : x, delta[1] ? mapCoordinate(z + delta[1]) : z);
+  }
 });
 $('undo-prop').addEventListener('click', () => travelProps(true));
 $('redo-prop').addEventListener('click', () => travelProps(false));

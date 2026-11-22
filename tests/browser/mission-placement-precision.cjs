@@ -52,13 +52,32 @@ module.exports = async function missionPlacementPrecision({ context, api, tokens
     // The elevated barrel is valid in a draft. Place it on the floor for the playable revision.
     await field('prop-y', 0);
     assert.equal(await compare(), 1);
+    const map = input('layout-map');
+    await field('prop-x', 9.875);
+    await map.press('ArrowRight');
+    assert.equal(await input('prop-x').inputValue(), '10');
+    assert.equal(await input('prop-z').inputValue(), String(saved.position.z), 'Horizontal movement must preserve Z');
+    const atEdge = await input('prop-history-status').textContent();
+    await map.press('ArrowRight');
+    assert.equal(await input('prop-history-status').textContent(), atEdge);
+    await input('undo-prop').click();
+    assert.equal(await input('prop-x').inputValue(), '9.875');
+    await field('prop-x', 1.125);
+    await map.press('ArrowLeft');
+    assert.equal(await input('prop-x').inputValue(), '0.625');
+    await map.press('ArrowUp');
+    assert.equal(await input('prop-z').inputValue(), String(saved.position.z + 0.5));
+    assert.equal(await input('prop-x').inputValue(), '0.625', 'Vertical movement must preserve X');
+    await input('undo-prop').click();
+    assert.equal(await input('prop-z').inputValue(), String(saved.position.z));
+    await input('redo-prop').click();
     await input('save-revision').click();
     await page.waitForFunction(original => document.querySelector('#mission-version').value !== original
       && document.querySelector('#draft-status').textContent.startsWith('已儲存於'), id);
     const playable = await input('mission-version').inputValue();
-    assert.deepEqual((await api('/missions/' + playable)).definition.props[0], {
-      ...saved, position: { ...saved.position, y: 0 }
-    });
+    const revised = (await api('/missions/' + playable)).definition.props[0];
+    assert.equal(Math.fround(revised.position.z), Math.fround(saved.position.z + 0.5));
+    assert.deepEqual(revised, { ...saved, position: { x: 0.625, y: 0, z: revised.position.z } });
     assert.deepEqual((await api('/missions/' + id)).definition.props[0], saved);
     assert.equal(await compare(), 0);
     await input('launch-compared-version').click();
