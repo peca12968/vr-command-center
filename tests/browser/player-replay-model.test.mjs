@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { playerReplayEventFrames, playerReplayPlayers, readPlayerReplay, sourcePaused, sourceTransitions } from '../../src/VrCommand.Api/wwwroot/console/player-replay-model.js';
+import { playerReplayEventFrames, playerReplayPlayers, readPlayerReplay, readPlayerReplaySet, sourcePaused, sourceTransitions } from '../../src/VrCommand.Api/wwwroot/console/player-replay-model.js';
 
 const point = { x: 0, y: 0, z: 0 };
 const actor = '71100000-0000-0000-0000-000000000000';
@@ -21,6 +21,44 @@ function replay(version, rooms) {
 test('keeps original contiguous timing in both full and room player files', () => {
   for (const file of [replay(1, [1, 2, 3, 4, 5]), replay(2, [3])])
     assert.equal(readPlayerReplay(file), file);
+});
+
+test('joins verified player clips by recording, projection and original frame order', () => {
+  for (const first of [replay(1, [1, 2, 3, 4, 5]), replay(2, [3])]) {
+    const following = structuredClone(first);
+    following.startFrame = 11;
+    following.endFrame = 12;
+    following.clipName = '後段';
+    following.packets = [structuredClone(first.packets[1]), { ...structuredClone(first.packets[1]), sequence: 12 }];
+    following.header = Object.fromEntries(Object.entries(following.header).reverse());
+    const result = readPlayerReplaySet([following, first]);
+    assert.deepEqual(result.replay.packets.map(p => p.sequence), [10, 11, 12]);
+    assert.deepEqual(result.segments.map(s => s.clipName), ['Clip', '後段']);
+    for (const change of [
+      file => { file.header.streamId = actor; },
+      file => { file.header.props[0].yaw = 25; },
+      file => { file.packets[0].frame.night = true; },
+      file => { file.startFrame += 3; file.endFrame += 3; file.packets.forEach(p => p.sequence += 3); },
+      file => { file.startFrame++; file.endFrame++; file.packets.forEach(p => { p.sequence++; p.frame.tick = 0; }); },
+      file => { file.startFrame++; file.endFrame++; file.packets.forEach(p => { p.sequence++; p.elapsedMilliseconds = 0; }); }
+    ]) {
+      const other = structuredClone(following);
+      change(other);
+      assert.throws(() => readPlayerReplaySet([first, other]));
+    }
+  }
+  assert.throws(() => readPlayerReplaySet([replay(1, [3]), replay(2, [3])]), /房間範圍/);
+});
+
+test('retains a departed player event room once across overlapping exports', () => {
+  const first = replay(1, [1, 2, 3, 4, 5]);
+  const id = first.header.streamId;
+  first.packets[1].events = [{ eventId: id, playerId: actor, kind: 'PlayerDamaged', hasRay: false }];
+  const other = { ...structuredClone(first), eventRooms: { [id]: 5 } };
+  const { replay: joined } = readPlayerReplaySet([first, other]);
+  assert.deepEqual(playerReplayEventFrames(joined.packets, new Set(), 5, joined.eventRooms), [{ index: 1, counts: { PlayerDamaged: 1 } }]);
+  first.eventRooms = { [id]: 1 };
+  assert.throws(() => readPlayerReplaySet([first, other]), /房號不同/);
 });
 
 test('indexes only known saved events by their original frame in both file formats', () => {

@@ -13,13 +13,14 @@
   <header class="masthead"><div><p class="eyebrow">VR COMMAND / REPLAY</p><h1>玩家任務回放</h1></div></header>
   <main>
     <section class="panel" aria-label="載入回放">
-      <label>場館提供的回放檔<input id="player-replay-file" type="file" accept=".json,application/json"></label>
+      <label>場館提供的回放檔（可多選同場連續片段）<input id="player-replay-file" type="file" accept=".json,application/json" multiple></label>
       <p class="hint">檔案只在此瀏覽器開啟，不會上傳至管理服務。</p>
       <p id="player-replay-message" role="status">請選擇回放檔。</p>
     </section>
     <section id="player-replay-view" class="panel" aria-label="回放畫面" hidden>
       <h2 id="player-replay-title"></h2>
       <p id="player-replay-source" class="muted"></p>
+      <label id="player-replay-segment-field" hidden>跳到片段起點<select id="player-replay-segment"></select></label>
       <div id="replay-viewport">
         <canvas id="replay-canvas" tabindex="0" aria-label="回放 3D 場景，可拖曳旋轉、方向鍵平移及滾輪縮放"></canvas>
         <div class="replay-overlay"><span id="player-replay-weather"></span><span id="player-replay-frame"></span></div>

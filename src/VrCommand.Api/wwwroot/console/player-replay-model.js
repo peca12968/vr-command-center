@@ -3,6 +3,8 @@ import { eventNames } from './world-event-names.js';
 
 export const MAX_REPLAY_BYTES = 8 * 1024 * 1024;
 export const MAX_REPLAY_FRAMES = 300;
+export const MAX_REPLAY_FILES = 24;
+export const MAX_REPLAY_SET_BYTES = 64 * 1024 * 1024;
 const phase = ['Preparing', 'Running', 'Paused', 'Ended'];
 const weather = ['Clear', 'Rain', 'Fog', 'Storm'];
 const guid = value => typeof value === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value);
@@ -18,11 +20,15 @@ function require(value, message = '無法辨識回放檔，請使用場館匯出
 }
 
 export function readPlayerReplay(data) {
+  return validateReplay(data, MAX_REPLAY_FRAMES);
+}
+
+function validateReplay(data, maxFrames) {
   const { header, packets, startFrame, endFrame, playerReplayVersion, roomId } = data ?? {};
   const scoped = playerReplayVersion === 2;
   require((scoped || playerReplayVersion === 1) && text(data.missionName, 120) && text(data.clipName, 60)
     && integer(startFrame, 1) && integer(endFrame, startFrame + 1)
-    && list(packets, MAX_REPLAY_FRAMES) && packets.length === endFrame - startFrame + 1);
+    && list(packets, maxFrames) && packets.length === endFrame - startFrame + 1);
   require(header?.schemaVersion === 1 && guid(header.sessionId) && guid(header.streamId)
     && ['GameServer', 'Simulation'].includes(header.origin) && header.rulesVersion === '0.8.0'
     && [0, 1].includes(header.environmentVersion) && list(header.roomIds, 5)
@@ -79,6 +85,41 @@ export function readPlayerReplay(data) {
   }
   require(unusedEvents.size === 0);
   return data;
+}
+
+function sameJson(left, right) {
+  if (left === right) return true;
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object' || Array.isArray(left) !== Array.isArray(right)) return false;
+  const keys = Object.keys(left);
+  return keys.length === Object.keys(right).length && keys.every(key => Object.hasOwn(right, key) && sameJson(left[key], right[key]));
+}
+
+export function readPlayerReplaySet(documents) {
+  require(documents.length && documents.length <= MAX_REPLAY_FILES, '請一次選擇 1 至 24 份回放檔。');
+  const clips = documents.map(readPlayerReplay).sort((a, b) => a.startFrame - b.startFrame || a.endFrame - b.endFrame);
+  const first = clips[0];
+  const segments = clips.map(({ clipName, startFrame, endFrame }) => ({ clipName, startFrame, endFrame }));
+  if (clips.length === 1) return { replay: first, segments };
+  const packets = [], eventRooms = {};
+  for (const clip of clips) {
+    require(clip.playerReplayVersion === first.playerReplayVersion && clip.roomId === first.roomId &&
+      sameJson(clip.header, first.header), '請選擇同一場錄製、相同房間範圍的回放檔。');
+    const next = first.startFrame + packets.length;
+    require(clip.startFrame <= next, `缺少第 ${next} 至 ${clip.startFrame - 1} 格，請一併選取涵蓋這段的回放檔。`);
+    for (const packet of clip.packets) {
+      const saved = packets[packet.sequence - first.startFrame];
+      if (saved) require(sameJson(saved, packet), `片段的第 ${packet.sequence} 格內容不同，請重新取得原錄製匯出檔。`);
+      else packets.push(packet);
+    }
+    for (const [id, room] of Object.entries(clip.eventRooms ?? {})) {
+      require(!Object.hasOwn(eventRooms, id) || eventRooms[id] === room, '片段對同一事件記載的房號不同。');
+      eventRooms[id] = room;
+    }
+  }
+  const replay = { ...first, packets, endFrame: packets.at(-1).sequence };
+  if (Object.keys(eventRooms).length) replay.eventRooms = eventRooms;
+  // Recheck the timeline and event ownership across boundaries as one recording.
+  return { replay: validateReplay(replay, MAX_REPLAY_FRAMES * MAX_REPLAY_FILES), segments };
 }
 
 export function sourcePaused(packet) {

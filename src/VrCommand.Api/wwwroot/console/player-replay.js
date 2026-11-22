@@ -1,4 +1,4 @@
-import { MAX_REPLAY_BYTES, playerReplayEventFrames, playerReplayPlayers, readPlayerReplay, sourcePaused, sourceTransitions } from './player-replay-model.js';
+import { MAX_REPLAY_BYTES, MAX_REPLAY_FILES, MAX_REPLAY_SET_BYTES, playerReplayEventFrames, playerReplayPlayers, readPlayerReplaySet, sourcePaused, sourceTransitions } from './player-replay-model.js';
 import { recordedClock } from './mission-clock.js';
 import { eventNames } from './world-event-names.js';
 
@@ -135,8 +135,8 @@ function openFrame(next, position) {
 }
 
 $('file').addEventListener('change', async () => {
-  const file = $('file').files[0];
-  if (!file) return;
+  const files = Array.from($('file').files);
+  if (!files.length) return;
   const own = ++epoch;
   pause();
   replay = null;
@@ -149,9 +149,16 @@ $('file').addEventListener('change', async () => {
   scene?.reset();
   message('正在讀取本機回放檔。');
   try {
-    if (file.size > MAX_REPLAY_BYTES) throw new Error('回放檔超過 8 MiB。');
-    const candidate = readPlayerReplay(JSON.parse(await file.text()));
-    if (own !== epoch) return;
+    if (files.length > MAX_REPLAY_FILES) throw new Error('請一次選擇最多 24 份回放檔。');
+    if (files.some(file => file.size > MAX_REPLAY_BYTES)) throw new Error('回放檔超過 8 MiB。');
+    if (files.reduce((size, file) => size + file.size, 0) > MAX_REPLAY_SET_BYTES) throw new Error('所選片段合計超過 64 MiB，請分批開啟。');
+    const documents = [];
+    for (const file of files) {
+      const text = await file.text();
+      if (own !== epoch) return;
+      documents.push(JSON.parse(text));
+    }
+    const { replay: candidate, segments } = readPlayerReplaySet(documents);
     if (!scene) {
       const { ReplayScene } = await import('./replay-scene.js');
       if (own !== epoch) return;
@@ -167,7 +174,10 @@ $('file').addEventListener('change', async () => {
     frameNumber.min = candidate.startFrame;
     frameNumber.max = candidate.endFrame;
     seconds.max = (candidate.packets.at(-1).elapsedMilliseconds - candidate.packets[0].elapsedMilliseconds) / 1000;
-    $('title').textContent = candidate.clipName;
+    $('title').textContent = segments.length === 1 ? candidate.clipName : `${candidate.missionName} · ${segments.length} 段連播`;
+    $('segment').replaceChildren(new Option('選擇片段', ''), ...segments.map(segment =>
+      new Option(`${segment.clipName} · 第 ${segment.startFrame}–${segment.endFrame} 格`, segment.startFrame - candidate.startFrame)));
+    $('segment-field').hidden = segments.length === 1;
     const source = candidate.header.origin === 'GameServer' ? '遊戲伺服器' : '模擬';
     const scope = candidate.roomId === undefined ? '' : ` · 僅房間 ${candidate.roomId}`;
     $('source').textContent = `${candidate.missionName} · ${source}${scope} · 原畫格 ${candidate.startFrame}–${candidate.endFrame}`;
@@ -256,7 +266,7 @@ $('seek').addEventListener('submit', event => {
 });
 loop.addEventListener('change', () => { if (!loop.checked && restartAt !== null) pause(); });
 timeline.addEventListener('input', () => openFrame(Number(timeline.value)));
-for (const select of [$('transition'), $('environment')]) {
+for (const select of [$('transition'), $('environment'), $('segment')]) {
   select.addEventListener('change', () => {
     if (select.value !== '') openFrame(Number(select.value));
     select.value = '';

@@ -158,6 +158,37 @@ async function main() {
     assert.equal(await control('seconds').inputValue(), '');
     assert.ok(await control('environment-field').isHidden());
     assert.equal(await control('seconds').getAttribute('max'), '0.4');
+    const long = fixture();
+    const frame = long.packets[0];
+    const batch = Array.from({ length: 310 }, (_, i) => ({
+      ...frame, frame: { ...frame.frame, tick: i }, sequence: 100 + i, elapsedMilliseconds: 6000 + 50 * i
+    }));
+    const part = (name, start, end) => ({ ...long, clipName: name, startFrame: batch[start].sequence,
+      endFrame: batch[end].sequence, packets: batch.slice(start, end + 1) });
+    const firstPart = part('上半場', 0, 155), lastPart = part('下半場', 155, 309);
+    const chooseParts = (...parts) => control('file').setInputFiles(parts.map((data, i) =>
+      ({ name: `clip-${i}.json`, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(data)) })));
+    await chooseParts(lastPart, firstPart);
+    await control('message').filter({ hasText: '已載入 310 格' }).waitFor();
+    assert.deepEqual(await control('segment').locator('option').allTextContents(),
+      ['選擇片段', '上半場 · 第 100–255 格', '下半場 · 第 255–409 格']);
+    await control('room').selectOption('1');
+    await control('follow').selectOption(frame.frame.players[0].id);
+    await control('segment').selectOption('155');
+    assert.match(await control('frame').innerText(), /第 255 格/);
+    await control('back').click();
+    await control('play').click();
+    await page.waitForFunction(() => Number(document.getElementById('replay-timeline').value) >= 156);
+    await control('play').click();
+    assert.equal(await control('follow').inputValue(), frame.frame.players[0].id);
+    assert.equal(await control('room').inputValue(), '1');
+    await seek('15.450');
+    assert.match(await control('frame').innerText(), /第 409 格/);
+    await chooseParts(part('起點', 0, 2), lastPart);
+    await control('message').filter({ hasText: '缺少第 103 至 254 格' }).waitFor();
+    assert.ok(await control('view').isHidden());
+    await load();
+    assert.ok(await control('segment-field').isHidden());
     await control('room').selectOption('1'); await control('event-next').click();
     assert.match(await control('event-frame').innerText(), /1 筆/);
     await control('room').selectOption('5');
@@ -225,6 +256,24 @@ async function main() {
         assert.equal(await control('weather').innerText(), '晴朗 · 白天 · 雷電關閉');
       }
       console.log('PASS: opening all six API exports, selecting environment changes and restoring the initial weather');
+    }
+    if (process.argv[5]) {
+      const partFile = (scope, name) => resolve(process.argv[5], scope + '-' + name + '.json');
+      for (const scope of ['full', 'room']) {
+        await control('file').setInputFiles([partFile(scope, 'last'), partFile(scope, 'first')]);
+        await control('message').filter({ hasText: '已載入 310 格' }).waitFor();
+        await control('segment').selectOption('159');
+        assert.match(await control('frame').innerText(), /第 160 格/);
+        await control('next').click();
+        assert.match(await control('frame').innerText(), /第 161 格/);
+        assert.equal(await control('room').locator('option').count(), scope === 'full' ? 6 : 1);
+        await seek(await control('seconds').getAttribute('max'));
+        assert.match(await control('frame').innerText(), /第 310 格/);
+      }
+      await control('file').setInputFiles([partFile('full', 'first'), partFile('room', 'last')]);
+      await control('message').filter({ hasText: '相同房間範圍' }).waitFor();
+      assert.ok(await control('view').isHidden());
+      console.log('PASS: consecutive sealed exports in full venue and room scope; mixed scopes refused');
     }
     assert.deepEqual(errors, []);
     assert.deepEqual(network, []);
