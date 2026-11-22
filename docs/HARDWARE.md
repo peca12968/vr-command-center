@@ -1,5 +1,27 @@
 # 硬體介接準備
 
+## 房間環境狀態
+
+管理包 0.31.275 提供 `GET /api/sessions/{sessionId}/rooms/{roomId}/hardware-environment`。房間轉接器可用本房憑證讀取主控目前指定的 VR／MR 模式、天氣、日夜與雷電設定。五房合併時，各房讀到同一場次設定；獨立開場時，每房使用自己的場次 ID。
+
+在管理電腦上，以下範例使用本房的 `$sessionId`、`$roomId` 及既有的 Bearer `$headers`。跨機時請使用場館設定的 HTTPS 管理位址。
+
+```powershell
+$url = "http://127.0.0.1:5081/api/sessions/$sessionId/rooms/$roomId/hardware-environment"
+$snapshot = Invoke-RestMethod -Uri $url -Headers $headers
+$snapshot | Select-Object sessionId, roomId, state, phaseSinceSequence, environmentSinceSequence, environment
+```
+
+| 欄位 | 轉接器判讀方式 |
+| --- | --- |
+| `version`、`sessionId`、`roomId` | 介面版本為 1。每次讀取都核對場次及房號。 |
+| `state`、`phaseSinceSequence` | 階段及進入該階段的場次序號。繼續執行時，即使天氣相同，階段序號也會前進。 |
+| `environmentSinceSequence` | 初始任務設定的序號為 1，後續為最近一次套用環境命令的序號。 |
+| `throughSequence` | 此次讀值涵蓋的場次序號，包含其他場次活動。 |
+| `environment` | Running 時包含 `mode`、`weather`、`timeOfDay`、`lightning`。Preparing、Paused、Ended 時為 `null`。 |
+
+重連時直接讀取最新值即可；兩次取樣之間可能發生多次變更。`lightning` 表示任務允許雷電，單次閃光的時刻需另行同步。確認頭盔所見畫面請使用場景觀測；確認實體設備已套用則需要廠商回報。轉接器失聯時，應依廠商的停止與逾時規格處理。
+
 ## 即時戰鬥回饋介面
 
 Windows 管理包 0.31.27 提供 `GET /api/sessions/{sessionId}/rooms/{roomId}/hardware-feedback`。主控可選場次內任一房，房控憑證限本房。這個介面提供 `ShotFired` 與 `PlayerDamaged` 兩種已接受的遊戲事件，供房間轉接器開發與驗證。傳回事件、回報、玩家及當次入場識別，以及從零起算的席位、損傷量和接受時間。`combatOrigin` 保留原戰鬥來源。

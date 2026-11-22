@@ -35,6 +35,13 @@ try
         new(8, EnemyBehavior.Hold, true), [new("sandbag", new(1, 0, 2), 90)]);
     var store = new MissionStore(directory);
     var mission = store.Create(draft);
+    if (args.SequenceEqual(["--room-hardware"]))
+    {
+        HardwareFeedbackChecks.Run(Check, mission);
+        HardwareFeedbackChecks.Live(Check, mission);
+        Console.WriteLine($"{checks} room hardware checks passed.");
+        return;
+    }
     var restored = new MissionStore(directory).Get(mission.Id);
     Check(restored.Definition.Name == draft.Name && restored.Definition.Props.Length == 1,
         "Mission survives store restart with environment and props");

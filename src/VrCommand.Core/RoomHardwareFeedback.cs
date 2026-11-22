@@ -8,6 +8,8 @@ public record RoomHardwareSignal(Guid EventId, long EventSequence, long StreamSe
 public record RoomHardwareSeat(Guid PlayerId, Guid AdmissionId, [property: JsonRequired] int Seat);
 public record VenueHardwareRoom(int RoomId, Guid SessionId, long SessionSequence, RoomHardwareSeat[] Bindings);
 public record VenueHardwareBindings(int Version, SessionMode Mode, VenueHardwareRoom[] Rooms);
+public record RoomHardwareEnvironment(int Version, Guid SessionId, int RoomId, SessionState State,
+    long ThroughSequence, long PhaseSinceSequence, long EnvironmentSinceSequence, EnvironmentSettings? Environment);
 
 public record RoomHardwareFeedback(int Version, Guid SessionId, int RoomId, Guid? StreamId, CombatOrigin? CombatOrigin,
     SessionState State, long ThroughSequence, long? RunningSinceSequence, DateTimeOffset CheckedAtUtc,
@@ -39,6 +41,19 @@ public sealed partial class SessionManager
 
     private static RoomHardwareSeat[] HardwareSeats(SessionView session, int roomId) => session.Players.Where(player => player.RoomId == roomId)
         .OrderBy(player => player.Seat).Select(player => new RoomHardwareSeat(player.Id, player.AdmissionId, player.Seat)).ToArray();
+
+    public RoomHardwareEnvironment ReadHardwareEnvironment(Guid id, int roomId, OperatorIdentity actor)
+    {
+        lock (gate)
+        {
+            var history = Find(id);
+            var session = history.View;
+            AccessPolicy.Player(actor, session, roomId);
+            if (!session.RoomIds.Contains(roomId)) throw new ArgumentException("Room is outside this session.");
+            return new(1, id, roomId, session.State, session.Sequence, history.PhaseSinceSequence,
+                history.EnvironmentSinceSequence, session.State == SessionState.Running ? session.Environment : null);
+        }
+    }
 
     public RoomHardwareFeedback ReadHardwareFeedback(Guid id, int roomId, long? after, OperatorIdentity actor, bool includeBindings = false)
     {

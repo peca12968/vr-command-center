@@ -27,7 +27,7 @@ class Venue:
         self.socket_path = directory / 'api.sock'
         self.address = unix_address(self.socket_path)
         self.command, self.cwd, _ = api_command(args)
-        self.tokens = {role: secrets.token_hex(32) for role in ('Master', 'GameServer', 'Room1', 'Room5')}
+        self.tokens = {role: secrets.token_hex(32) for role in ('Master', 'GameServer', *(f'Room{room}' for room in ROOMS))}
         keys = directory / 'keys.json'
         keys.write_text(json.dumps({'OperatorKeys': self.tokens}), encoding='utf-8')
         keep = {'systemroot', 'systemdrive', 'windir', 'temp', 'tmp', 'userprofile', 'localappdata'}
@@ -262,6 +262,19 @@ def configure_weather(venue, sources, mode):
     return expected
 
 
+def check_room_environment(venue, session, room, phase_sequence, environment_sequence):
+    route = f"/api/sessions/{session['id']}/rooms/{room}/hardware-environment"
+    with venue.response(route, role=f'Room{room}') as response:
+        assert response.getheader('Cache-Control') == 'no-store'
+        snapshot = json.load(response)
+    assert snapshot == {'version': 1, 'sessionId': session['id'], 'roomId': room, 'state': session['state'],
+                        'throughSequence': session['sequence'], 'phaseSinceSequence': phase_sequence,
+                        'environmentSinceSequence': environment_sequence,
+                        'environment': session['environment'] if session['state'] == 'Running' else None}
+    assert venue.request(route) == snapshot
+    return snapshot
+
+
 def recorded_weather(packet):
     return {'weather': packet['weather'], 'timeOfDay': 'Night' if packet['frame']['night'] else 'Day',
             'lightning': packet['lightning']}
@@ -338,8 +351,16 @@ def check_mode(venue, mode):
         assert begun['requireFullTracking'] and {row['sessionId'] for row in begun['sessions']} == {s['id'] for s in sessions}
         weather = configure_weather(venue, sources, mode)
         live_weather = {}
+        hardware = {}
         for source in sources:
             assert source.state['state'] == 'Running'
+            phase = next(row['appliedAtSequence'] for row in begun['sessions'] if row['sessionId'] == source.state['id'])
+            for room in source.session['roomIds']:
+                hardware[room] = check_room_environment(venue, source.state, room, phase, source.state['sequence'])
+                route = source.route + f'/rooms/{room}/hardware-environment'
+                for denied in (f'Room{room % 5 + 1}', 'GameServer'):
+                    with venue.response(route, role=denied, status=403):
+                        pass
             for player in source.state['players']:
                 check_ticket(venue, source.state, player, tickets[player['id']])
             source.publish(damage=True)
@@ -349,6 +370,8 @@ def check_mode(venue, mode):
                 assert kind == 'frame' and snapshot['packet']['sequence'] == 3
                 actual = recorded_weather(snapshot['packet'])
                 assert actual == weather[source.session['id']]
+                for room in source.session['roomIds']:
+                    assert all(hardware[room]['environment'][key] == value for key, value in actual.items())
                 live_weather.update({room: actual for room in source.session['roomIds']})
 
         observed = next(source for source in sources if 5 in source.session['roomIds'])
@@ -412,7 +435,7 @@ def check_mode(venue, mode):
                 'frames': sum(source.sequence for source in sources), 'closureRoute': closure_route, 'closure': closure,
                 'roomFiveWorld': observed.world, 'roomFiveLive': visible, 'saved': saved, 'rosters': rosters,
                 'headsetRoster': dict(headsets), 'ticketsRevalidatedInRunning': len(tickets),
-                'deviceChange': device_change, 'roomWeather': live_weather}
+                'deviceChange': device_change, 'roomWeather': live_weather, 'hardwareEnvironment': hardware}
 
 
 def check_departed_clip(venue):
@@ -479,6 +502,39 @@ def check_after_restart(venue, result):
     return clips
 
 
+def check_environment_pause(venue, previous):
+    mission = venue.request(previous['roomFiveWorld'].removesuffix('/world'))['mission']
+    session = venue.request('/api/sessions', method='POST', status=201,
+                            body={'missionId': mission['id'], 'mode': 'Independent', 'roomIds': [1]})
+    route = '/api/sessions/' + session['id']
+    check_room_environment(venue, session, 1, 1, 1)
+    with venue.response(route + '/rooms/2/hardware-environment', status=400):
+        pass
+    venue.request(route + '/players', method='POST', body={'playerId': str(uuid4()), 'roomId': 1,
+                                                          'name': 'Room receiver rehearsal', 'headset': 'Quest3'})
+    def command(action, **fields):
+        return venue.request(route + '/commands', method='POST',
+                             body=dict(action=action, commandId=str(uuid4()), **fields))['appliedAtSequence']
+    begun = command('Begin')
+    check_room_environment(venue, venue.request(route), 1, begun, 1)
+    climate = dict(mission['definition']['environment'], weather='Rain', timeOfDay='Night', lightning=False)
+    changed = command('SetEnvironment', environment=climate)
+    check_room_environment(venue, venue.request(route), 1, begun, changed)
+    paused = command('Pause')
+    return check_room_environment(venue, venue.request(route), 1, paused, changed), climate
+
+
+def check_environment_resume(venue, paused, climate):
+    route = '/api/sessions/' + paused['sessionId']
+    changed = paused['environmentSinceSequence']
+    assert check_room_environment(venue, venue.request(route), 1, paused['phaseSinceSequence'], changed) == paused
+    for action, state in [('Resume', 'Running'), ('End', 'Ended')]:
+        receipt = venue.request(route + '/commands', method='POST', body={'action': action, 'commandId': str(uuid4())})
+        snapshot = check_room_environment(venue, venue.request(route), 1, receipt['appliedAtSequence'], changed)
+        assert snapshot['state'] == state and snapshot['environment'] == (climate if state == 'Running' else None)
+    assert venue.request('/api/sessions') == []
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--api-exe', required=True, type=Path, help='Extracted management package Runtime/VrCommand.Api.exe')
@@ -502,13 +558,20 @@ def main():
             for result in results:
                 clips.update(check_after_restart(venue, result))
             assert set(clips) == {'linked', *(f'room-{room}' for room in ROOMS)}
+            paused, climate = check_environment_pause(venue, results[0])
+        with venue.start():
+            check_environment_resume(venue, paused, climate)
         summary = {'verified': [{field: result[field] for field in ('mode', 'seats', 'recordings', 'combatEvents', 'frames',
-                                                                     'headsetRoster', 'ticketsRevalidatedInRunning', 'deviceChange', 'roomWeather')}
+                                                                     'headsetRoster', 'ticketsRevalidatedInRunning', 'deviceChange',
+                                                                     'roomWeather', 'hardwareEnvironment')}
                                 for result in results], 'apiSha256': hashlib.sha256(args.api_exe.read_bytes()).hexdigest(),
                    'transport': 'Windows AF_UNIX', 'restarted': True, 'tcpListeners': 0, 'udpEndpoints': 0, 'activeSessions': 0,
                    'scope': 'Synthetic tracked poses and combat using packaged management API, real WebSocket and SSE'}
     summary['verifiedDepartedEventRooms'] = len(departed_clip['eventRooms'])
+    summary['assemblySha256'] = {name: hashlib.sha256(args.api_exe.with_name(name).read_bytes()).hexdigest()
+                                 for name in ('VrCommand.Api.dll', 'VrCommand.Core.dll')}
     summary['environmentExports'] = sorted(clips)
+    summary['roomEnvironmentRestartedWhilePaused'] = True
     if args.environment_clips:
         args.environment_clips.mkdir()
         for name, clip in clips.items():

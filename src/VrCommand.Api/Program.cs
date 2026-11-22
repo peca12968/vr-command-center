@@ -301,6 +301,11 @@ app.MapGet("/api/sessions/{id:guid}/rooms/{roomId:int}/hardware-feedback", (Guid
     context.Response.Headers.CacheControl = "no-store";
     return manager.ReadHardwareFeedback(id, roomId, after, Actor(context), includeBindings == true);
 });
+app.MapGet("/api/sessions/{id:guid}/rooms/{roomId:int}/hardware-environment", (Guid id, int roomId, SessionManager manager, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    return manager.ReadHardwareEnvironment(id, roomId, Actor(context));
+});
 app.MapPost("/api/sessions/{id:guid}/commands", (Guid id, ControlCommand command, WorldRecordings worlds, HttpContext context) =>
     worlds.ExecuteCommand(id, command, Actor(context)));
 app.MapGet("/api/venue/phase", (SessionManager manager, HttpContext context) =>

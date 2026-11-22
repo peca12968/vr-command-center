@@ -28,7 +28,15 @@ internal static class HardwareFeedbackChecks
             return report;
         }
         RoomHardwareFeedback Read(long? after = null) => manager.ReadHardwareFeedback(id, 1, after, one);
+        RoomHardwareEnvironment Climate() => manager.ReadHardwareEnvironment(id, 1, one);
+        var initialClimate = Climate();
+        check(initialClimate is { Version: 1, State: SessionState.Preparing, Environment: null, RoomId: 1 }
+            && initialClimate.SessionId == id, "Room environment is inactive before Begin");
         var preparing = Read(); var begin = Command(ControlAction.Begin);
+        var runningClimate = Climate();
+        check(runningClimate.Environment == mission.Definition.Environment && runningClimate.PhaseSinceSequence == begin
+            && runningClimate.EnvironmentSinceSequence == initialClimate.EnvironmentSinceSequence,
+            "Begin exposes the saved mission environment under the new phase");
         check(preparing is { State: SessionState.Preparing, ResetReason: "attached", Signals.Length: 0 }, "A hardware observer attaches at the head without consuming earlier events");
         var expected = Shot(alpha, begin); Shot(bravo, begin);
         var recorded = manager.Events(id, begin);
@@ -48,9 +56,16 @@ internal static class HardwareFeedbackChecks
         try { Read(long.MaxValue); throw new Exception("Expected cursor rejection"); }
         catch (ArgumentException) { check(true, "A cursor ahead of accepted history cannot rebase silently"); }
         var paused = Command(ControlAction.Pause);
+        check(Climate() is { State: SessionState.Paused, Environment: null } && Climate().PhaseSinceSequence == paused,
+            "Pause withdraws the active room environment");
         Shot(alpha, begin);
         check(Read(begin) is { State: SessionState.Paused, RunningSinceSequence: null, ResetReason: "inactive", Signals.Length: 0 }, "Pause discards feedback even if late combat was valid for the ledger");
         var resume = Command(ControlAction.Resume); Shot(alpha, begin); var fresh = Shot(alpha, resume);
+        var reattached = new SessionManager(store, clock).ReadHardwareEnvironment(id, 1, one);
+        check(reattached == Climate() && reattached.PhaseSinceSequence == resume
+            && reattached.EnvironmentSinceSequence == runningClimate.EnvironmentSinceSequence
+            && reattached.Environment == runningClimate.Environment,
+            "A reattached room reader sees the resumed phase even when the environment is unchanged");
         clock.Now = manager.Events(id, resume)[^1].RecordedAtUtc;
         var resumed = Read(paused);
         check(resumed.RunningSinceSequence == resume && resumed.Signals.Single().ReportId == fresh, "Resume excludes a newly accepted report from the earlier Running phase");

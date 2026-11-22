@@ -29,6 +29,8 @@ dotnet .\VRCommand-HardwareSimulator\VrCommand.HardwareSimulator.dll `
   --input .\VRCommand-HardwareSimulator\example.json --output ..\hardware-rehearsal.json
 ```
 
+硬體廠商可用房控憑證讀取 `GET /api/sessions/{sessionId}/rooms/{roomId}/hardware-environment`。請指定該房目前的場次 ID 與房號。回覆的 `environment` 在執行中提供 VR／MR 模式、天氣、日夜與雷電設定；準備、暫停、結束時為 `null`。恢復連線後重新讀取，並核對 `phaseSinceSequence` 和 `environmentSinceSequence`。此回覆描述管理台設定，實體輸出與確認方式由廠商介面決定。
+
 若使用 VIVE 的 Windows PC VR 連線方式，可在解壓根目錄執行下列檢查。請使用包外的新報告檔名。這一步讀取本機 OpenXR 設定與執行環境檔案；指定型號的頭盔畫面與左右控制器須在場館實測。
 
 ```powershell
