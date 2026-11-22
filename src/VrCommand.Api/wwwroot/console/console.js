@@ -2521,12 +2521,18 @@ function missionSearchQuery() { return $('mission-search').value.trim().toLowerC
 function matchesMissionSearch(row, query) {
   return !query || [row.mission.definition.name, row.mission.definition.briefing].some(text => text.toLowerCase().includes(query));
 }
-function editMissionOptions(selected) {
+function editMissionOptions(selected, searchEdited = false) {
   const query = missionSearchQuery();
   const matches = state.catalog.filter(row => matchesMissionSearch(row, query));
   const entries = matches.map(row => [row.mission.id, `${row.mission.definition.name} · 第 ${row.number} 版`]);
+  const select = $('edit-mission'), preferred = selected ?? select.value;
+  // A refresh can rename the selected series out of the search while other results remain.
+  const needsChoice = !searchEdited && (preferred ? !matches.some(row => row.mission.id === preferred)
+    : select.selectedOptions[0]?.disabled);
   const empty = query ? '沒有符合的任務' : '尚無儲存任務';
-  fillOptions('edit-mission', entries.length ? entries : [['', empty]], selected);
+  if (needsChoice || !entries.length) entries.unshift(['', entries.length ? '請重新選取任務' : empty]);
+  fillOptions('edit-mission', entries, needsChoice ? '' : preferred);
+  if (needsChoice) select.options[0].disabled = true;
   $('mission-search-status').hidden = !query;
   $('mission-search-status').textContent = query ? `找到 ${matches.length} 項任務，共 ${state.catalog.length} 項` : '';
 }
@@ -3015,9 +3021,10 @@ $('reload-clock').addEventListener('click', loadClock);
 $('clock-auto-end').addEventListener('change', () => { state.clockSequence = state.session?.sequence; });
 submit('mission-form', saveMission);
 $('mission-search').addEventListener('input', () => {
-  editMissionOptions();
+  editMissionOptions(undefined, true);
   applyPermissions();
 });
+$('edit-mission').addEventListener('change', applyPermissions);
 $('launch-selected-mission').addEventListener('click', () => {
   pinLaunchVersion(state.catalog.find(row => row.mission.id === $('edit-mission').value));
 });
@@ -3079,7 +3086,6 @@ $('more-versions').addEventListener('click', () => run(async () => {
     for (const row of newest.versions) versions.set(row.number, row);
     const selected = state.catalog.find(row => row.seriesId === edit?.seriesId);
     missionOptions(undefined, selected?.mission.id);
-    if (selected && !matchesMissionSearch(selected, missionSearchQuery())) $('edit-mission').selectedIndex = -1;
   }
   // A concurrent burst of revisions can leave a gap between the newest page and the pages already read.
   let oldest = newest.headNumber;

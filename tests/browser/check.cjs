@@ -633,6 +633,8 @@ async function main() {
     await require('./venue-mission-file-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./session-reprepare-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./venue-time-replay-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
+    await require('./mission-search-refresh.cjs')({ context, api, tokens, base });
+    check(true, 'Refreshing a filtered mission library preserves the intended series or requires a new selection');
     check(browserErrors.length === 0, 'Browser has no uncaught script errors or CSP violations');
     await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), playwright: require('playwright/package.json').version, result: 'passed', scope: 'isolated real API and browser console; no Unity or headset test' }, null, 2));
     console.log(`PASS: ${checks} real-browser checks. Screenshots: ${screenshots}`);

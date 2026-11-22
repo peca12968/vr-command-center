@@ -45,11 +45,11 @@ def main():
                         str(publication/'wwwroot/console/player-replay-offline.html'),
                         str(source/'src/VrCommand.Api/wwwroot/console')],stdout=log,stderr=subprocess.STDOUT,check=True)
     frameworks=runtime_config(publication)
-    if 'v0.31.279' not in (publication/'wwwroot/console/index.html').read_text(encoding='utf-8'):raise ValueError('Expected console 0.31.279 in the actual publication')
+    if 'v0.31.280' not in (publication/'wwwroot/console/index.html').read_text(encoding='utf-8'):raise ValueError('Expected console 0.31.280 in the actual publication')
     if set(frameworks.values())!={args.runtime_version}:raise ValueError('Published runtime differs from the requested patch')
     for name,value in hashes.items():
         if digest(ROOT/name)!=value:raise ValueError('Repository source changed during publication: '+name)
-    receipt={'schemaVersion':1,'target':'win-x64','apiVersion':'0.31.0','consoleVersion':'0.31.279','completedAtUtc':datetime.now(timezone.utc).isoformat(),'runtimeFrameworks':frameworks,
+    receipt={'schemaVersion':1,'target':'win-x64','apiVersion':'0.31.0','consoleVersion':'0.31.280','completedAtUtc':datetime.now(timezone.utc).isoformat(),'runtimeFrameworks':frameworks,
         'baseCommit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),'sourceFiles':hashes,
         'isolatedLocks':{name:{'originalSha256':hashes[name],'publishedSha256':digest(source/name)} for name in locks},
         'files':{v.relative_to(publication).as_posix():digest(v) for v in sorted(publication.rglob('*')) if v.is_file()},
