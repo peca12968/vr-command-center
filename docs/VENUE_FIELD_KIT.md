@@ -12,6 +12,8 @@
 | Quest 3 | `Quest` 內的 APK 與原始建置回條，以及 `scripts` 內的 USB 診斷和部署工具。 |
 | 硬體排演工作站（選配） | `VRCommand-HardwareSimulator` 內的模擬器、範例及操作說明。發行報告的 `hardwareSimulator` 欄記載隨包版本。 |
 
+中央環境設備的轉接電腦可提供 `VR_COMMAND_MASTER_KEY`，執行 `.\scripts\watch-room-environment.ps1 -ManagementApi https://venue.example:5081 -AllRooms`，將網址換成場館管理位址。每行 JSON 都含房號 1 至 5。各房在 `Running` 期間提供天氣、日夜與雷電設定；服務中斷會輸出五房 `Unavailable`。房控電腦使用下方的單房模式。
+
 驗收環境設備時，可在主控台「五房硬體模擬排演報告」按「下載目前五房環境設定」。檔案列出同一次取樣的五房場次、階段與生效中的天氣、日夜和雷電設定，可與設備端紀錄對時核對。
 
 單房轉接工作站可設定該房的環境變數 `VR_COMMAND_ROOM_KEY`，執行 `.\scripts\watch-room-environment.ps1 -ManagementApi https://venue.example:5081 -RoomId 3`。將網址與房號替換為現場值。每筆 JSON 包含取樣時間與房間狀態；只有 `Running` 會帶生效中的環境。若讀取中斷，工具會輸出 `Unavailable`，連線恢復後重新讀取該房的目前值。可加上 `-Samples 1` 單次查詢。

@@ -88,6 +88,7 @@ jobs:
       - run: python -m unittest discover -s tests -p test_desktop_external.py
       - run: python -m unittest discover -s tests -p test_quest_deploy.py
       - run: python -m unittest discover -s tests -p test_prepare_vr_session.py
+      - run: python -m unittest discover -s tests -p test_room_environment_watch.py
         shell: pwsh
       - run: python -m unittest discover -s tests -p test_quest_usb.py
         shell: pwsh

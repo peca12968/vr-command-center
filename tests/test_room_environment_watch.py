@@ -11,6 +11,57 @@ SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/watch-room-environment.p
 
 @unittest.skipUnless(shutil.which('pwsh'), 'PowerShell 7 required')
 class EnvironmentWatchTests(unittest.TestCase):
+    def test_venue_publishes_five_rooms_together_and_recovers_from_bad_snapshots(self):
+        command = r"""
+$script:sample = 0
+function Start-Sleep {}
+function Invoke-RestMethod {
+    param($Uri,$Headers)
+    if ($Uri.AbsolutePath -cne '/api/venue/hardware-environment' -or $Headers.Authorization -cne 'Bearer venue-test') {
+        throw 'Unexpected request'
+    }
+    $script:sample++
+    if ($script:sample -eq 4) { throw 'connection dropped' }
+    $rows = @(foreach ($room in 1..5) {
+        $id = if ($script:sample -ge 7) { "12345678-0000-4444-8888-00000000000$room" } else { '12345678-0000-4444-8888-000000000009' }
+        $s = [pscustomobject]@{ version=1;roomId=$room;sessionId=$id;throughSequence=8;phaseSinceSequence=4;environmentSinceSequence=6
+            state='Running';environment=[pscustomobject]@{mode='VR';weather='Storm';timeOfDay='Night';lightning=$true} }
+        switch ($script:sample) {
+            2 { if ($room -eq 5) { $s.roomId = 1 } else { $s.throughSequence=99 } }
+            3 { $s.throughSequence=9; $s.state='Paused'; $s.phaseSinceSequence=9; $s.environment=$null }
+            5 { $s.throughSequence=8 }
+            6 { $s.throughSequence=12; $s.phaseSinceSequence=10; if ($room -eq 5) { $s.environment.weather='Fog' } }
+            { $_ -ge 7 } { $s.throughSequence=1; $s.phaseSinceSequence=1; $s.environmentSinceSequence=1
+                $s.state='Preparing'; $s.environment=$null; if($room -eq 5) { $s=$null } }
+        }
+        [pscustomobject]@{version=1;roomId=$room;session=$s}
+    })
+    $time = if ($script:sample -eq 7) { [datetime]::new(2026,11,22) } else { '2026-11-22T01:00:00.1234567Z' }
+    [pscustomobject]@{version=1;checkedAtUtc=$time;rooms=$rows}
+}
+& $env:VRC_WATCH_TEST -ManagementApi 'http://127.0.0.1' -AllRooms -Samples 8
+"""
+        result = subprocess.run(['pwsh', '-NoProfile', '-NonInteractive', '-Command', command],
+                                capture_output=True, text=True, timeout=15, env={**os.environ, 'VRC_WATCH_TEST': str(SCRIPT),
+                                'VR_COMMAND_ROOM_KEY': 'wrong-role-test', 'VR_COMMAND_MASTER_KEY': 'venue-test'})
+        self.assertEqual(0, result.returncode, result.stderr)
+        pages = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual([None, 'invalid-snapshot', None, 'management-unreachable', 'invalid-snapshot',
+                          'invalid-snapshot', 'invalid-snapshot', None], [p['reason'] for p in pages])
+        for page in pages:
+            self.assertEqual(list(range(1, 6)), [r['roomId'] for r in page['rooms']])
+            if page['reason']:
+                self.assertEqual('Unavailable', page['status'])
+                self.assertIsNone(page['checkedAtUtc'])
+                self.assertTrue(all(r['status'] == 'Unavailable' and r['session'] is None for r in page['rooms']))
+            else:
+                self.assertEqual('Available', page['status'])
+                self.assertEqual('2026-11-22T01:00:00.1234567+00:00', page['checkedAtUtc'])
+        self.assertTrue(all(r['session']['environment']['lightning'] is True for r in pages[0]['rooms']))
+        self.assertTrue(all(r['status'] == 'Paused' and r['session']['environment'] is None for r in pages[2]['rooms']))
+        self.assertEqual(['Preparing'] * 4 + ['Idle'], [r['status'] for r in pages[-1]['rooms']])
+        self.assertNotIn('venue-test', result.stdout + result.stderr)
+
     def test_bad_samples_clear_state_and_a_new_session_can_restart_at_sequence_one(self):
         command = r"""
 $script:sample = 0

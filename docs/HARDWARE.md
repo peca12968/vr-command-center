@@ -2,6 +2,14 @@
 
 ## 房間環境狀態
 
+中央轉接器可用同一支工具持續讀取五房。提供程序環境變數 `VR_COMMAND_MASTER_KEY`，再執行下列命令。每行是一整批資料，`checkedAtUtc` 是管理服務取得這五房快照的時間，`observedAtUtc` 是轉接器完成讀取的時間。
+
+```powershell
+.\scripts\watch-room-environment.ps1 -ManagementApi https://venue.example:5081 -AllRooms
+```
+
+收到 `Available` 時，以 `rooms` 中各房的 `status` 及 `session.environment` 更新模擬設備。只有 `Running` 帶有效設定。收到 `Unavailable` 時，五列都會清空設定；設備端可依廠商的逾時規格處理。缺房、房號重複、同場各房設定矛盾或同一房原場次的序號倒退，都會使整次取樣失效。監看器下次讀回完整有效快照就會恢復，換場後使用新場次自己的序號。若監看程序本身停止，轉接器須自行處理輸入中斷。加上 `-Samples 1` 可以只取樣一次。
+
 場館包內的 `scripts/watch-room-environment.ps1` 可直接作為廠商開發期間的房間監看工具。先在程序環境中提供該房的 `VR_COMMAND_ROOM_KEY`，執行下列命令。每次讀取後等待一秒，逐行輸出 JSON，可直接交給轉接程式讀取。省略 `-Samples` 時會持續到按 Ctrl+C。
 
 ```powershell
