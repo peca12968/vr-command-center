@@ -1152,8 +1152,12 @@ function Read-QuestDeviceSerial([string[]]$Target, [switch]$Required) {
 }
 
 function Confirm-QuestDeviceSerial([string[]]$Target, [string]$ExpectedSerial) {
-    if ($ExpectedSerial -and (Read-QuestDeviceSerial $Target) -ine $ExpectedSerial) {
-        throw 'Could not confirm the original Quest device identity. Deployment stopped.'
+    if (-not $ExpectedSerial) { return }
+    $actual = Read-QuestDeviceSerial $Target
+    if ($actual -ine $ExpectedSerial) {
+        $failure = [IO.IOException]::new('Could not confirm the original Quest device identity. Deployment stopped.')
+        $failure.Data['deviceIdentityStatus'] = if ($actual) { 'device-identity-changed' } else { 'device-identity-unavailable' }
+        throw $failure
     }
 }
 
@@ -1487,13 +1491,15 @@ function Read-MappedQuestPreflight([object[]]$Map, [int]$VersionCode, [string]$E
     return @{ Inventory = $inventory; Devices = $devices; Serials = $reportedSerials }
 }
 
-function Install-MappedQuestApk($Row, $Inventory, $Release, [string]$StagedApk, $Device, $Operation, [switch]$Upgrade) {
+function Install-MappedQuestApk($Row, $Inventory, $Release, [string]$StagedApk, $Device, $Operation, [switch]$Upgrade, [string]$OriginalDeviceSerial) {
     $Operation.Step = if ($Upgrade) { 'upgrade-apk' } else { 'install-apk' }
     $target = @('-t', [string]$Inventory[$Row.serial].TransportId)
+    Confirm-QuestDeviceSerial $target $OriginalDeviceSerial
     Install-QuestReleaseApk $target $StagedApk -Upgrade:$Upgrade
     if ($Upgrade) { $Device.upgradedApk = $true }
     else { $Device.installedApk = $true }
     $Operation.Step = 'verify-installed-apk'
+    Confirm-QuestDeviceSerial $target $OriginalDeviceSerial
     return Get-MappedQuestStatus $Row $Inventory $Release.versionCode $Release.sha256
 }
 
@@ -1773,7 +1779,7 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
                     if ($connection.Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) {
                         $device.status = 'ticket-expired'; return $report
                     }
-                    $current = Install-MappedQuestApk $row $inventory $Release $StagedApk $device $deployment
+                    $current = Install-MappedQuestApk $row $inventory $Release $StagedApk $device $deployment -OriginalDeviceSerial $reportedSerial
                 }
                 if ($current.status -cne 'ready') { throw 'The installed Quest app could not be verified for this release.' }
                 $device.versionCode = $current.versionCode
@@ -1802,7 +1808,7 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
                 }
             }
             Set-QuestConnection $target $connection.Ticket.Config $connection.Ticket $connection.Alignment `
-                -RequestMixedReality:($null -ne $connection.Alignment) -Deployment $deployment -LiveVenue $Venue -BeforeLaunch $saveLaunch
+                -RequestMixedReality:($null -ne $connection.Alignment) -Deployment $deployment -LiveVenue $Venue -BeforeLaunch $saveLaunch -OriginalDeviceSerial $reportedSerial
             $device.filesVerified = $true
             $device.status = 'launch-requested'
             $device.Remove('failedStep')
@@ -1816,6 +1822,7 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, $Rel
                 elseif ($_.Exception -is [IO.InvalidDataException]) { 'file-verification-failed' }
                 else { 'deployment-failed' }
             $device.failedStep = $deployment.Step
+            if ($_.Exception.Data['deviceIdentityStatus']) { $device.deviceIdentityStatus = $_.Exception.Data['deviceIdentityStatus'] }
             if ($_.Exception -is [TimeoutException]) { $device.adbTimedOut = $true }
             if ($deployment.Step -ceq 'observe-openxr') {
                 $device.filesVerified = $true
@@ -1974,8 +1981,8 @@ function Update-QuestPlayerTicket($ConnectionFile, $Ticket, $Target) {
 
 function Set-QuestConnection([string[]]$Target, $Config, $Ticket, $Alignment, [switch]$UsePassthrough, [switch]$RequestMixedReality,
     [hashtable]$Deployment = @{}, $LiveVenue, $LiveSeat, [scriptblock]$BeforeLaunch, [string]$OriginalDeviceSerial) {
-    Confirm-QuestDeviceSerial $Target $OriginalDeviceSerial
     $Deployment.Step = 'resolve-launcher'
+    Confirm-QuestDeviceSerial $Target $OriginalDeviceSerial
     $activity = Get-QuestLauncherActivity $Target
     $nonce = if ($RequireOpenXR) { [Guid]::NewGuid().ToString('N') }
     $Deployment.Step = 'prepare-device'
@@ -2022,8 +2029,8 @@ function Set-QuestConnection([string[]]$Target, $Config, $Ticket, $Alignment, [s
                 if ($LiveSeat) { Confirm-QuestPlayerReadback $LiveSeat }
                 $Deployment.Step = 'check-expiry-before-stop'
                 if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired before activation. Download a fresh connection file.' }
-                Confirm-QuestDeviceSerial $Target $OriginalDeviceSerial
                 $Deployment.Step = 'stop-game'
+                Confirm-QuestDeviceSerial $Target $OriginalDeviceSerial
                 Invoke-QuestAdb ($Target + @('shell', 'am', 'force-stop', 'com.vrcommand.quest')) | Out-Null
                 if ($LASTEXITCODE -ne 0) { throw 'Quest app could not be stopped before activating configuration.' }
             }

@@ -3400,6 +3400,61 @@ else:
         self.assertNotRegex(calls, r' (?:push|uninstall|shell am) ')
         self.assertNotRegex(result.stdout, r'fixture-\d+|HARDWARE-SERIAL|joinTicket')
 
+    def test_mapped_seats_detect_reused_transport_during_install_and_config(self):
+        files, configs = self.vr_bundle('Independent')
+        bundle = self.write_bundle(files)
+        mapping, document = self.device_map()
+        rows = sorted((row for row in document['seats'] if row['seat'] == 1), key=lambda row: row['roomId'])
+        mapping.write_text(json.dumps({'version': 1, 'seats': rows}), encoding='utf-8')
+        release, _, release_env = self.release_report()
+        command = ['pwsh', '-NoProfile', '-NonInteractive', '-File', str(ROOT / 'tests/fixtures/mock-quest-management.ps1'),
+                   str(ROOT / 'scripts/deploy-quest.ps1'), '-VenueBundle', str(bundle), '-DeviceMap', str(mapping),
+                   '-AllowPartialMap', '-DeployMappedSeats', '-ReleaseReport', str(release), '-InstallMissing',
+                   '-ApkPath', release_env['VR_QUEST_FLEET_APK'], '-AdbPath', str(ROOT / 'tests/fixtures/mock-quest-fleet.ps1'),
+                   '-ManagementApi', 'http://127.0.0.1:1']
+        serial = rows[2]['serial']
+        for fault, step in [('swap-before-install', 'install-apk'), ('swap-after-install', 'verify-installed-apk'),
+                            ('swap-after-staging', 'stop-game')]:
+            with self.subTest(fault=fault):
+                fleet = self.root / fault
+                device = fleet / serial
+                device.mkdir(parents=True)
+                active = device / 'vr-connection.json'
+                active.write_bytes(b'previous connection')
+                saved = fleet / 'report.json'
+                env = {**os.environ, **release_env, 'VR_COMMAND_MASTER_KEY': 'fixture-master',
+                       'VR_QUEST_FLEET_FIXTURE': str(fleet), 'VR_QUEST_FLEET_FRESH': serial,
+                       'VR_QUEST_FLEET_FAULTS': json.dumps({serial: fault})}
+                run = subprocess.run([*command, '-SaveDeploymentReport', str(saved)], env=env,
+                                     capture_output=True, encoding='utf-8', timeout=90)
+                self.assertEqual(1, run.returncode, run.stderr)
+                report = json.loads(run.stdout)
+                self.assertEqual(report, json.loads(saved.read_bytes()))
+                self.assertFalse(report['complete'])
+                self.assertEqual(['launch-requested'] * 2 + ['deployment-failed'] + ['not-attempted'] * 2,
+                                 [row['status'] for row in report['devices']])
+                failed = report['devices'][2]
+                self.assertEqual((3, 1, step, 'device-identity-changed'),
+                                 (failed['roomId'], failed['seat'], failed['failedStep'], failed['deviceIdentityStatus']))
+                self.assertEqual(b'previous connection', active.read_bytes())
+                commands = [line for line in (fleet / 'adb.log').read_text().splitlines() if line.startswith('-s ' + serial + ' ')]
+                self.assertEqual(fault != 'swap-before-install', any(' install ' in line for line in commands))
+                self.assertEqual(fault == 'swap-after-staging', any(' push ' in line for line in commands))
+                self.assertFalse(any(' shell am ' in line or ' shell rm ' in line for line in commands))
+                self.assertNotIn('HARDWARE-SERIAL', run.stdout + run.stderr)
+                if fault == 'swap-after-staging':
+                    log = fleet / 'adb.log'
+                    log.unlink()
+                    again = subprocess.run([*command, '-RetryIncomplete', str(saved)], env={**env, 'VR_QUEST_FLEET_FAULTS': '{}'},
+                                           capture_output=True, encoding='utf-8', timeout=90)
+                    self.assertEqual(0, again.returncode, again.stderr)
+                    completed = json.loads(again.stdout)
+                    self.assertTrue(completed['complete'])
+                    self.assertEqual(report['devices'][:2], completed['devices'][:2])
+                    self.assertEqual([row['serial'] for row in rows[2:]],
+                                     [line.split()[1] for line in log.read_text().splitlines() if ' shell am start ' in line])
+                    self.assertEqual(configs[3]['room-03-seat-01.json'], json.loads(active.read_bytes()))
+
     def test_install_missing_quest_apks_during_mapped_deployment_and_retry(self):
         files, configs = self.vr_bundle('Independent')
         bundle = self.write_bundle(files)
@@ -4241,7 +4296,9 @@ else:
         if fault == 'disconnect-after-staging':
             self.assertFalse((fleet / 'replacement-device.log').exists(), 'No commands may be sent to a replacement ADB transport')
             transport_commands = (fleet / 'transport.log').read_text(encoding='utf-8').splitlines()
-            self.assertIn('-t 104 shell am force-stop com.vrcommand.quest', transport_commands)
+            self.assertNotIn('-t 104 shell am force-stop com.vrcommand.quest', transport_commands)
+            self.assertEqual('-t 104 shell getprop ro.serialno', transport_commands[-1])
+            self.assertEqual('device-identity-unavailable', report['devices'][3]['deviceIdentityStatus'])
             self.assertFalse(any(line.startswith('-t 104 shell am start ') for line in transport_commands))
         self.assertEqual(('deployment', False, True), (report['phase'], report['complete'], report['managementVerified']))
         self.assertEqual(['launch-requested'] * 3 + [expected_status] + ['not-attempted'] * (count - 4),
@@ -4270,8 +4327,13 @@ else:
             self.assertEqual(seats[1][f'room-01-seat-{seat:02}.json']['joinTicket'], actual['joinTicket'])
         commands = (fleet / 'adb.log').read_text(encoding='utf-8').splitlines()
         first_write = next(index for index, line in enumerate(commands) if 'shell mkdir -p' in line)
-        self.assertEqual(3 * count + 3 + (2 * count + 2 if check_release else 0), first_write)
-        self.assertEqual(count + 4, sum(line.endswith(' shell getprop ro.serialno') for line in commands))
+        self.assertEqual(3 * count + 5 + (2 * count + 2 if check_release else 0), first_write)
+        self.assertEqual(count + 3, sum(line.endswith(' shell getprop ro.serialno') for line in commands[:first_write]))
+        for seat in range(1, 4):
+            own = [line for line in commands if line.startswith(f'-s fixture-{seat:02} ')]
+            launch = next(i for i, line in enumerate(own) if ' shell am start ' in line)
+            self.assertTrue(own[launch - 1].endswith(' shell getprop ro.serialno'))
+            self.assertTrue(own[launch + 1].endswith(' shell getprop ro.serialno'))
         if check_release:
             self.assertEqual([True] * 3 + [None] * (count - 3), [row.get('apkVerified') for row in report['devices']])
             self.assertEqual(1, report['apkVerificationVersion'])

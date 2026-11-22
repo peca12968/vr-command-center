@@ -533,6 +533,8 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.z
 
 正式部署在各席開始寫入前會再讀一次裝置序號。若和預檢結果不同，該席會標記為 `device-identity-changed`。若讀取失敗則標記為 `device-identity-unavailable`。兩種情況都會在該席寫入前停止。這些檢查適用於完整與部分裝置清單，現場仍須依實體標籤核對房號及席位。
 
+部署途中也會在安裝缺少的 APK、切換連線與校正檔、停止或啟動遊戲等操作時重新比對原頭盔。若中途換機或無法讀取原序號，該席保留 `failedStep`，並以 `deviceIdentityStatus` 說明原因。已完成席位的紀錄可供續跑，後續席位會標記為 `not-attempted`。請先接回原頭盔；若在安裝或啟動指令送出後中斷，先確認原頭盔上的實際狀態。
+
 同一輪預檢與部署中的檔案驗證、寫入、停啟遊戲及 OpenXR 檢查，會固定使用該席從 `adb devices -l` 取得的連線識別。缺少有效識別或多個裝置共用識別時，預檢分別回報 `transport-unavailable` 或 `transport-ambiguous`。若原連線在寫入途中中斷，該步驟會失敗，暫存檔可能留在原頭盔。下一輪重試會為原裝置重新取得連線識別。ADB 服務的重啟須先讓本輪部署結束，再開始重試。 [ADB 依連線識別選取裝置](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/docs/user/adb.1.md)
 
 正式部署使用管理包 0.31.104 或更新版。每席寫入前，服務會重新核對整份原部署 ZIP 的 25 個入場、端點及各來源最近五秒內的有效遊戲畫格。VR、MR 及混合部署都適用，部分清單仍使用同一份五房 ZIP 驗證。任一來源失效時，目前席位回報 `venue-check-failed`，後續席位標記為 `not-attempted`。已送出啟動的席位保留原結果。純預檢仍可用來核對檔案、端點與名冊。

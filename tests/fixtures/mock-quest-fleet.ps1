@@ -80,6 +80,11 @@ if ($args[2] -cne 'shell') { exit 98 }
 switch -CaseSensitive ($args[3]) {
     'getprop' {
         if ($args[4] -ceq 'ro.serialno') {
+            if (($fault -ceq 'swap-after-install' -and [IO.File]::Exists($installedApk)) -or
+                ($fault -ceq 'swap-after-staging' -and (Get-ChildItem -LiteralPath $device -Filter 'vr-connection-*.tmp' -ErrorAction SilentlyContinue)) -or
+                ($fault -ceq 'swap-before-install' -and [IO.File]::Exists((Join-Path $root "before-install-$serial")))) {
+                'HARDWARE-SERIAL-REPLACEMENT'; exit 0
+            }
             if ($fault -ceq 'identity-timeout') { throw [TimeoutException]::new('ADB shell command timed out.') }
             if ($fault -ceq 'identity-missing') { exit 0 }
             if ($fault -ceq 'identity-invalid') { 'unknown'; exit 0 }
@@ -104,6 +109,11 @@ switch -CaseSensitive ($args[3]) {
             $appMissing = $true
         }
         if (($args[4..9] -join ' ') -ceq 'list packages -u --user current com.vrcommand.quest') {
+            if ($fault -ceq 'swap-before-install') {
+                $query = $args -join ' '
+                $calls = @(Get-Content -LiteralPath (Join-Path $root 'adb.log') | Where-Object { $_ -ceq $query })
+                if ($calls.Count -ge 2) { [IO.File]::WriteAllText((Join-Path $root "before-install-$serial"), 'swapped') }
+            }
             if (-not $appMissing -or $fault -ceq 'package-disabled') { 'package:com.vrcommand.quest' }
             exit 0
         }
