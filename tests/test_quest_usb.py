@@ -155,6 +155,20 @@ try {
         self.assertEqual(self.diagnose([], ready)['status'], 'meta-usb-not-enumerated')
         self.assertEqual(self.diagnose([], ready, unobservable=True)['status'], 'windows-usb-inventory-unavailable')
 
+    def test_only_a_unique_usable_transport_counts_as_connected(self):
+        nodes = [node(USB_ROOT, [ADB_DESCRIPTOR])]
+        for fields, other, state in [
+                ('', '', 'transport-unavailable'),
+                ('transport_id:9223372036854775808', '', 'transport-unavailable'),
+                ('transport_id:4 transport_id:5', '', 'transport-unavailable'),
+                ('transport_id:4', '(no serial number) no permissions transport_id:4', 'transport-ambiguous'),
+                ('transport_id:4', 'unassigned offline transport_id:4 transport_id:7', 'transport-ambiguous'),
+                ('transport_id:9223372036854775807', 'unassigned device transport_id:7', 'device')]:
+            with self.subTest(fields=fields, other=other):
+                report = self.diagnose(nodes, adb_reply(f'fixture-serial device {fields}\n{other}\n'))
+                self.assertEqual(report['status'], 'adb-usb-' + state)
+                self.assertEqual(report['adb']['matchingMetaUsb']['device'], int(state == 'device'))
+
 
 @unittest.skipUnless(shutil.which('pwsh'), 'PowerShell is required')
 class QuestUsbGroupTests(unittest.TestCase):
@@ -219,6 +233,19 @@ Write-QuestUsbReport $report -Summary
             self.assertIn('檔案傳輸介面', next(line for line in summary.splitlines() if '第 1 房第 1 席' in line))
             self.assertIn('驅動程式有問題', next(line for line in summary.splitlines() if '第 2 房第 1 席' in line))
             self.assertFalse(report['mapped']['allInDeviceState'])
+
+    def test_transport_problems_identify_the_two_affected_seats_in_a_full_venue(self):
+        seats = [dict(roomId=room, seat=seat, serial=f'fixture-serial{room}{seat}')
+                 for room in range(1, 6) for seat in range(1, 6)]
+        entries = {row['serial']: 'device' for row in seats}
+        entries.update({'fixture-serial31': 'transport-unavailable', 'fixture-serial55': 'transport-ambiguous'})
+        roots = [USB_ROOT + row['serial'][-2:] for row in seats]
+        report, summary = self.snapshot(roots, entries, 25, seats=seats)
+        self.assertEqual(report['mapped']['connected'], 23)
+        self.assertFalse(report['mapped']['allInDeviceState'])
+        self.assertFalse(report['group']['allExpectedInDeviceState'])
+        self.assertIn('第 3 房第 1 席：缺少可用的 ADB 連線編號', summary)
+        self.assertIn('第 5 房第 5 席：ADB 連線編號重複', summary)
 
     def test_ambiguous_missing_and_wireless_seats(self):
         serials = ['fixture-serial1', 'FIXTURE-SERIAL1', 'fixture-serial', '172.16.1.87:5555', 'fixture-serial2']

@@ -52,6 +52,8 @@ pwsh -NoProfile -NonInteractive -File .\scripts\check-quest-usb.ps1
 | `adb-usb-partial-inventory` | Windows 列出的 Meta USB 主裝置中，僅有部分能與 ADB 清單唯一對應。 |
 | `adb-usb-unauthorized`／`adb-usb-offline` | ADB 清單中和 Meta USB 序號相符的裝置仍待授權，或處於離線。 |
 | `adb-usb-other` | 相同序號出現不支援的 ADB 狀態或重複項目。 |
+| `adb-usb-transport-unavailable` | ADB 已列出頭盔，但缺少唯一有效的連線編號。該席無法部署。 |
+| `adb-usb-transport-ambiguous` | 另一項 ADB 連線紀錄使用相同編號。即使另一項離線或缺少序號，部署工具也會拒絕使用此連線。 |
 | `adb-usb-device`／`adb-usb-mixed-states` | 已比對的裝置處於 `device`，或有多種狀態。以 `adb.matchingMetaUsb` 查看每種狀態的數量，再由部署工具核對實際型號。 |
 
 退出碼 0 表示已輸出快照。`adb.unmatchedEntries` 包含其他 Android 裝置、無序號項目，以及無法和 USB 序號比對的無線連線。若狀態為 `unauthorized`，依 Meta 指引在頭盔內確認本機的 USB 偵錯授權。 [Meta 實機設定](https://developers.meta.com/vr/documentation/android-apps/enable-developer-mode/) · [Android Debug Bridge](https://developer.android.com/tools/adb)

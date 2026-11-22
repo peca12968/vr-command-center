@@ -1,3 +1,36 @@
+function ConvertFrom-QuestAdbDeviceRows([string[]]$Lines, [StringComparer]$Comparer) {
+    $devices = [Collections.Generic.Dictionary[string,object]]::new($Comparer)
+    $seen = [Collections.Generic.HashSet[long]]::new()
+    $duplicates = [Collections.Generic.HashSet[long]]::new()
+    $unidentified = 0
+    foreach ($line in $Lines) {
+        if ($line -eq '') { continue }
+        if ($line -cnotmatch '\A(\(no serial number\)|\S+)[ \t]+(\S+)(?:[ \t]+([^\r\n]*))?\z') {
+            throw 'Invalid ADB inventory row.'
+        }
+        $serial = $Matches[1]
+        $state = $Matches[2]
+        $fields = @($Matches[3] -csplit '[ \t]+' | Where-Object { $_ -clike 'transport_id:*' })
+        $transport = 0L
+        foreach ($field in $fields) {
+            $number = 0L
+            if ($field -cmatch '\Atransport_id:([1-9][0-9]{0,18})\z' -and [long]::TryParse($Matches[1], [ref]$number)) {
+                # Even an unselectable row can claim a transport used by another headset.
+                if (-not $seen.Add($number)) { [void]$duplicates.Add($number) }
+                if ($fields.Count -eq 1) { $transport = $number }
+            }
+        }
+        if ($serial -ceq '(no serial number)') { $unidentified++; continue }
+        if ($devices.ContainsKey($serial)) { $state = 'ambiguous' }
+        elseif ($state -ceq 'device' -and $transport -eq 0) { $state = 'transport-unavailable' }
+        $devices[$serial] = @{ Status = $state; TransportId = $transport }
+    }
+    foreach ($device in $devices.Values) {
+        if ($device.Status -ceq 'device' -and $duplicates.Contains($device.TransportId)) { $device.Status = 'transport-ambiguous' }
+    }
+    return @{ Devices = $devices; Unidentified = $unidentified }
+}
+
 function Invoke-QuestAdbProcess([string]$Executable, [string[]]$Arguments, [int]$TimeoutMilliseconds, [string]$Operation) {
     $start = [Diagnostics.ProcessStartInfo]::new()
     $start.FileName = $Executable

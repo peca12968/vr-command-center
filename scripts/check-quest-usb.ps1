@@ -6,6 +6,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'quest-adb-process.ps1')
 
 function Read-AdbReplyBytes($Stream, [int]$Count, [Diagnostics.Stopwatch]$Clock) {
     $buffer = [byte[]]::new($Count)
@@ -35,14 +36,12 @@ function Read-AdbInventoryStream($Stream) {
         $length = $encoding.GetString((Read-AdbReplyBytes $stream 4 $clock))
         if ($length -notmatch '\A[0-9a-f]{4}\z') { throw 'Invalid ADB response length.' }
         $reply = $encoding.GetString((Read-AdbReplyBytes $stream ([Convert]::ToInt32($length, 16)) $clock))
-        foreach ($line in $reply -split '\r?\n') {
-            if ($line -eq '') { continue }
-            if ($line -cnotmatch '\A(\(no serial number\)|\S+)[ \t]+(\S+)(?:[ \t]+[^\r\n]*)?\z') { throw 'Invalid ADB inventory row.' }
-            $serial = $Matches[1]
-            $state = $Matches[2]
-            if ($serial -ceq '(no serial number)') { $unidentified++; continue }
-            if ($entries.ContainsKey($serial) -or $state -cnotin @('device','unauthorized','offline')) { $state = 'other' }
-            $entries[$serial] = $state
+        $inventory = ConvertFrom-QuestAdbDeviceRows ($reply -split '\r?\n') ([StringComparer]::OrdinalIgnoreCase)
+        $unidentified = $inventory.Unidentified
+        foreach ($entry in $inventory.Devices.GetEnumerator()) {
+            $state = $entry.Value.Status
+            if ($state -cnotin @('device','unauthorized','offline','transport-unavailable','transport-ambiguous')) { $state = 'other' }
+            $entries[$entry.Key] = $state
         }
         $status = 'reachable'
     } catch { $entries.Clear(); $unidentified = 0 }
@@ -118,7 +117,7 @@ function Get-QuestUsbReport($Inventory, [int]$Expected, $MappedSeats) {
         }
     }
 
-    $matched = [ordered]@{ device = 0; unauthorized = 0; offline = 0; other = 0 }
+    $matched = [ordered]@{ device = 0; unauthorized = 0; offline = 0; other = 0; 'transport-unavailable' = 0; 'transport-ambiguous' = 0 }
     $unmatched = $inventory.Unidentified
     $entryCount = $inventory.Entries.Count + $inventory.Unidentified
     foreach ($entry in $inventory.Entries.GetEnumerator()) {
@@ -204,6 +203,8 @@ function Write-QuestUsbReport($Report, [switch]$Summary) {
         'adb-usb-unauthorized' = '可對應的 Meta USB 裝置正在等待頭盔端授權。'
         'adb-usb-offline' = '可對應的 Meta USB 裝置目前在 ADB 中顯示離線。'
         'adb-usb-other' = 'ADB 清單含有重複或無法辨識狀態的裝置。'
+        'adb-usb-transport-unavailable' = 'ADB 已列出裝置，但缺少可用的連線編號。'
+        'adb-usb-transport-ambiguous' = 'ADB 清單中有其他項目使用同一個連線編號。'
         'adb-usb-mixed-states' = '可對應的 Meta USB 裝置有不同的偵錯狀態。'
     }
     $messages[$report.status]
@@ -216,6 +217,8 @@ function Write-QuestUsbReport($Report, [switch]$Summary) {
             'ambiguous-usb' = '多台 Windows 裝置符合此座位'
             'adb-inventory-unavailable' = '無法取得 ADB 清單'
             'adb-not-listed' = 'Windows 已看到，ADB 尚未列出'
+            'transport-unavailable' = '缺少可用的 ADB 連線編號'
+            'transport-ambiguous' = 'ADB 連線編號重複'
             device = '已連線'; unauthorized = '待頭盔授權'; offline = '離線'; other = '偵錯狀態無法確認'
         }
         $evidenceLabels = @{
@@ -236,7 +239,7 @@ function Write-QuestUsbReport($Report, [switch]$Summary) {
         if ($null -ne $g.metaUsbRoots) { "Windows 列出 $($g.metaUsbRoots) 台 Meta USB 裝置。" }
         if ($null -ne $g.matchedRoots) {
             $counts = $report.adb.matchingMetaUsb
-            "ADB 對應 $($g.matchedRoots) 台，其中已連線 $($counts.device)、待授權 $($counts.unauthorized)、離線 $($counts.offline)、其他 $($counts.other)。Windows 清單中另有 $($g.unmatchedUsbRoots) 台無法對應。"
+            "ADB 對應 $($g.matchedRoots) 台，其中已連線 $($counts.device)、待授權 $($counts.unauthorized)、離線 $($counts.offline)、連線編號無效 $($counts.'transport-unavailable')、編號重複 $($counts.'transport-ambiguous')、其他 $($counts.other)。Windows 清單中另有 $($g.unmatchedUsbRoots) 台無法對應。"
         } else { '目前無法比對兩份裝置清單。' }
         if ($g.allExpectedInDeviceState -eq $true) { '已核對預期台數及 USB 偵錯連線。' }
         elseif ($g.allExpectedInDeviceState -eq $false) { '目前台數或偵錯狀態與預期不符。' }

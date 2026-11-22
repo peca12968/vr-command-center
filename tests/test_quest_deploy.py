@@ -74,6 +74,8 @@ if ($args[0] -eq 'devices') {
         switch ($env:QUEST_TEST_FAIL) {
             'missing-transport' { 'fixture   device' }
             'duplicate-transport' { 'fixture   device transport_id:42' }
+            'conflicting-fields' { 'fixture device transport_id:41'; 'spare offline transport_id:41 transport_id:43' }
+            'unidentified-conflict' { '(no serial number) no permissions transport_id:41'; 'fixture device transport_id:41' }
             'multiple-authorized' { 'fixture   device transport_id:41'; 'spare   device transport_id:43' }
             default { 'fixture   device product:quest3 model:Quest_3 transport_id:41' }
         }
@@ -471,6 +473,8 @@ class QuestDeployTests(unittest.TestCase):
         for fault, message in (
             ('missing-transport', 'ADB state: transport-unavailable'),
             ('duplicate-transport', 'ADB state: transport-ambiguous'),
+            ('conflicting-fields', 'ADB state: transport-ambiguous'),
+            ('unidentified-conflict', 'ADB state: transport-ambiguous'),
             ('multiple-authorized', 'specify -Serial explicitly'),
         ):
             with self.subTest(fault=fault):

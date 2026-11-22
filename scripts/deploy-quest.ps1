@@ -981,25 +981,9 @@ function Confirm-TrackedSeats($Venue, [object[]]$Map, [switch]$IncludeAllHeadset
 function Get-QuestDeviceInventory {
     $lines = @(Invoke-QuestAdb @('devices', '-l'))
     if ($LASTEXITCODE -ne 0) { throw 'Could not list authorized Android devices.' }
-    $inventory = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::Ordinal)
-    $seenTransports = [Collections.Generic.HashSet[long]]::new()
-    $duplicateTransports = [Collections.Generic.HashSet[long]]::new()
-    foreach ($line in $lines) {
-        if ($line -ceq 'List of devices attached' -or $line -cnotmatch '\A(\S+)[ \t]+(\S+)(?:[ \t]+(.*))?\z') { continue }
-        $key = $Matches[1]; $status = $Matches[2]
-        $transportId = 0L
-        $fields = @($Matches[3] -csplit '[ \t]+' | Where-Object { $_ -clike 'transport_id:*' })
-        if ($fields.Count -eq 1 -and $fields[0] -cmatch '\Atransport_id:([1-9][0-9]{0,18})\z' -and
-            [long]::TryParse($Matches[1], [ref]$transportId)) {
-            if (-not $seenTransports.Add($transportId)) { [void]$duplicateTransports.Add($transportId) }
-        } elseif ($status -ceq 'device') { $status = 'transport-unavailable' }
-        if ($inventory.ContainsKey($key)) { $status = 'ambiguous' }
-        $inventory[$key] = @{ Status = $status; TransportId = $transportId }
-    }
-    foreach ($device in $inventory.Values) {
-        if ($device.Status -ceq 'device' -and $duplicateTransports.Contains($device.TransportId)) { $device.Status = 'transport-ambiguous' }
-    }
-    return ,$inventory
+    $rows = @($lines | Where-Object { $_ -cne 'List of devices attached' })
+    $inventory = ConvertFrom-QuestAdbDeviceRows $rows ([StringComparer]::Ordinal)
+    return ,$inventory.Devices
 }
 
 function Get-SingleQuestTarget([string]$RequestedSerial) {
