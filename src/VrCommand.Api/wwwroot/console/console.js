@@ -3089,12 +3089,18 @@ $('export-venue-environment').addEventListener('click', () => {
   if (!master() || state.pending) return;
   const epoch = state.epoch, view = operationsViewEpoch;
   void run(async () => {
-    const data = await api('/venue/hardware-environment');
+    const sampleId = uuid();
+    const data = await api('/venue/hardware-environment?sampleId=' + sampleId);
     if (state.epoch !== epoch || operationsViewEpoch !== view || !master()) return;
+    if (data?.sampleId !== sampleId) {
+      notify('無法確認這是本次讀取的五房環境設定。請重新下載。', true);
+      return;
+    }
     if (data?.version !== 1 || !Number.isFinite(Date.parse(data.checkedAtUtc))
       || data.rooms?.length !== venueMissionRooms.length || !venueMissionRooms.every((id, index) => data.rooms[index]?.roomId === id))
       throw new Error('Unexpected venue environment response');
     download('vr-command-venue-environment.json', new Blob([JSON.stringify(data, null, 2) + '\n'], { type: 'application/json' }));
+    notify('已下載本次讀取的五房環境設定。');
   }, true);
 });
 $('venue-begin-size').addEventListener('change', applyVenuePermissions);
