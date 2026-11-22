@@ -103,11 +103,13 @@ switch ($args[2]) {
         if ($env:QUEST_TEST_ALTER_ALIGNMENT) {
             [IO.File]::WriteAllText($env:QUEST_TEST_ALTER_ALIGNMENT, '{}')
         }
+        if ($env:QUEST_TEST_FAIL -eq 'install-rejected') { 'Failure [INSTALL_FAILED_ALREADY_EXISTS]'; exit 0 }
+        if ($env:QUEST_TEST_FAIL -eq 'install-incomplete') { 'Performing Streamed Install'; exit 0 }
+        if ($env:QUEST_TEST_FAIL -eq 'install-late-failure') { 'Success'; 'Failure [INSTALL_FAILED_ABORTED]'; exit 0 }
         if ($args[3] -ceq '-R') {
-            if ($env:QUEST_TEST_FAIL -eq 'install-rejected') { 'Failure [INSTALL_FAILED_ALREADY_EXISTS]'; exit 0 }
             [IO.File]::WriteAllText($installedApp, 'installed')
-            'Success'
         }
+        'Success'
         exit 0
     }
     'push' {
@@ -599,6 +601,22 @@ class QuestDeployTests(unittest.TestCase):
                         self.assertNotIn(key, result.stdout + result.stderr)
                         self.assertNotIn(ticket, result.stdout + result.stderr)
 
+    def test_single_seat_rejected_install_preserves_the_current_connection(self):
+        apk = self.root / 'artifacts/quest/VrCommand.apk'
+        apk.parent.mkdir(parents=True)
+        apk.write_bytes(b'mock APK')
+        active = self.remote / 'vr-connection.json'
+        active.write_bytes(b'previous connection')
+        for fault in ('install-rejected', 'install-incomplete', 'install-late-failure'):
+            with self.subTest(fault=fault):
+                self.commands.unlink(missing_ok=True)
+                result = self.run_script('-Serial', 'fixture', failure=fault)
+                self.assert_rejected(result, 'installation did not return Success')
+                self.assertEqual(b'previous connection', active.read_bytes())
+                commands = self.commands.read_text(encoding='utf-8').splitlines()
+                self.assertIn(' install -r ', commands[-1])
+                self.assertFalse(any(' push ' in line or ' shell am start ' in line for line in commands))
+
     def test_single_seat_checks_local_release_and_installed_apk_before_activation(self):
         apk = self.root / 'selected release.apk'
         apk.write_bytes(b'mock APK')
@@ -624,7 +642,7 @@ class QuestDeployTests(unittest.TestCase):
         self.assertEqual(7, len(commands))
         self.assertEqual(['devices -l', '-t 41 shell getprop ro.serialno', '-t 41 shell getprop ro.product.model',
                           '-t 41 shell getprop ro.serialno'], commands[:4])
-        staged = commands[4].split(' install -r ', 1)[1]
+        staged = commands[4].split(' install -r --user current --pkg com.vrcommand.quest ', 1)[1]
         self.assertNotEqual(str(apk), staged)
         self.assertFalse(Path(staged).exists())
         self.assertTrue(commands[-1].endswith('sha256sum /data/app/fixture/base.apk'))

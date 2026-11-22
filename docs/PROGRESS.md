@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-22 Quest 3 單席安裝回覆與玩家連線設定
+
+重現單席部署在 Android 回覆安裝失敗或只輸出進度時，工具仍以成功結束。單席安裝現使用與首次安裝、批次升級相同的回覆檢查，指定目前 Android 使用者與遊戲套件。以解壓版和模擬裝置驗證安裝遭拒、缺少成功回覆及成功文字後出現失敗的三種情況。三者均在寫入前停止，原玩家設定逐位元組保留。成功案例完成 APK 讀回、設定發布與模擬啟動核對。9 項部署測試通過。 [部署操作](QUEST3.md#首次安裝與啟動檢查) · [解壓版模擬結果](../artifacts/quest-install-result-031294/packaged-deployment.json)
+
+此次 Windows 唯讀清單列出 0 台 Meta USB 裝置，頭盔實機仍待測。新場館包保留控制台 0.31.294 與 Quest APK 0.50.12，已核對全部 1,296 檔及本機 APK 雜湊。 [場館包](../artifacts/quest-install-result-031294/VRCommand-Venue-QuestInstall.zip) · [解壓核對](../artifacts/quest-install-result-031294/install.json)
+
 ## 2026-11-22 依任務活動時間定位玩家回放
 
 控制台 0.31.294 及單檔播放器可在匯出的錄製範圍內依任務活動秒數定位。使用同一份已封存 Windows 合併場的全場與第 4 房匯出檔，核對兩份原檔雜湊後，在離線瀏覽器驗證 6.50、6.55、6.65、6.80 秒各自跳到第 90、91、99、100 格，期間 HTTP 請求為零。瀏覽器迴歸另驗證兩個取樣點之間的時間、重複刻數、超出片段、跟隨玩家及舊版錄製，12 項回放模型測試通過。 [玩家操作](WORLD_RECORDING.md) · [原錄製核對結果](../artifacts/replay-clock-031294/archived-frames.json)

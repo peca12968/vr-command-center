@@ -1103,7 +1103,7 @@ function New-VerifiedQuestApk([string]$Path, [string]$ExpectedHash) {
 function Install-QuestReleaseApk([string[]]$Target, [string]$Path, [switch]$Upgrade) {
     $option = if ($Upgrade) { '-r' } else { '-R' }
     $output = @(Invoke-QuestAdb ($Target + @('install', $option, '--user', 'current', '--pkg', 'com.vrcommand.quest', $Path)) 2>$null)
-    if ($LASTEXITCODE -ne 0 -or $output -cnotcontains 'Success') { throw 'Quest APK installation did not return Success.' }
+    if ($LASTEXITCODE -ne 0 -or $output[-1] -cne 'Success') { throw 'Quest APK installation did not return Success.' }
 }
 
 function Get-QuestUpgradeStatus([string[]]$Target, [string]$PreviousHash) {
@@ -2504,9 +2504,8 @@ try {
     if ($liveSeat) { Confirm-QuestPlayerReadback $liveSeat }
     if (-not $UseInstalledApk) {
         Confirm-QuestDeviceSerial $deviceTarget $originalDeviceSerial
-        if ($RequireOpenXR) { Invoke-QuestAdb ($deviceTarget + @('install', '-r', $apk)) *> $null }
-        else { Invoke-QuestAdb ($deviceTarget + @('install', '-r', $apk)) }
-        if ($LASTEXITCODE -ne 0) { throw 'APK installation failed.' }
+        Install-QuestReleaseApk $deviceTarget $apk -Upgrade
+        if (-not $RequireOpenXR) { 'Success' }
     }
     if ($release -and (Get-QuestApkStatus $deviceTarget $release.sha256) -cne 'ready') {
         throw 'Installed Quest APK could not be verified against the release report.'
