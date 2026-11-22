@@ -60,8 +60,8 @@ function Read-RoomSample($Page, [int]$ExpectedRoom) {
         phaseSinceSequence = $session.phaseSinceSequence; environmentSinceSequence = $session.environmentSinceSequence; environment = $climate }
 }
 
-function Confirm-RoomContinuity($Previous, $Current) {
-    if (-not $Current -or -not $Previous -or $Current.sessionId -ne $Previous.sessionId) { return }
+function Get-RoomContinuity($Previous, $Current) {
+    if (-not $Current -or -not $Previous -or $Current.sessionId -ne $Previous.sessionId) { return $Current }
     if ($Current.throughSequence -lt $Previous.throughSequence) { throw 'Room sequence moved backwards.' }
     foreach ($field in 'phaseSinceSequence','environmentSinceSequence') {
         if ($Current[$field] -ne $Previous[$field] -and $Current[$field] -le $Previous.throughSequence) {
@@ -71,11 +71,18 @@ function Confirm-RoomContinuity($Previous, $Current) {
     if ($Current.phaseSinceSequence -eq $Previous.phaseSinceSequence -and $Current.state -cne $Previous.state) {
         throw 'Room phase changed without a new phase sequence.'
     }
-    if ($Current.environment -and $Previous.environment -and $Current.environmentSinceSequence -eq $Previous.environmentSinceSequence) {
+    if ($Previous.environment -and $Current.environmentSinceSequence -eq $Previous.environmentSinceSequence) {
+        # Paused output stays empty. Remember the last settings for this revision only in the monitor.
+        if (-not $Current.environment) {
+            $history = @{} + $Current
+            $history.environment = $Previous.environment
+            return $history
+        }
         foreach ($field in 'mode','weather','timeOfDay','lightning') {
             if ($Current.environment[$field] -cne $Previous.environment[$field]) { throw 'Room environment changed without a new sequence.' }
         }
     }
+    return $Current
 }
 
 $lastAccepted = @{}
@@ -99,9 +106,10 @@ for ($count = 1; ; $count++) {
             }
             $timestamp = [DateTimeOffset]$time
             $sessions = @{}
+            $nextAccepted = @{}
             $rooms = @(foreach ($room in 1..5) {
                 $current = Read-RoomSample $page.rooms[$room - 1] $room
-                Confirm-RoomContinuity $lastAccepted[$room] $current
+                $nextAccepted[$room] = Get-RoomContinuity $lastAccepted[$room] $current
                 if ($current) {
                     $signature = ConvertTo-Json $current -Compress -Depth 3
                     if ($sessions.ContainsKey($current.sessionId) -and $sessions[$current.sessionId] -cne $signature) {
@@ -112,12 +120,11 @@ for ($count = 1; ; $count++) {
                 [ordered]@{ roomId = $room; status = if ($null -eq $current) { 'Idle' } else { $current.state }; session = $current }
             })
             $checked = $timestamp.ToUniversalTime().ToString('o')
-            foreach ($row in $rooms) { $lastAccepted[$row.roomId] = $row.session }
+            $lastAccepted = $nextAccepted
             $status = 'Available'
         } else {
             $session = Read-RoomSample $page $RoomId
-            Confirm-RoomContinuity $lastAccepted[$RoomId] $session
-            $lastAccepted[$RoomId] = $session
+            $lastAccepted[$RoomId] = Get-RoomContinuity $lastAccepted[$RoomId] $session
             $status = if ($null -eq $session) { 'Idle' } else { $session.state }
         }
         $reason = $null

@@ -11,6 +11,46 @@ SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/watch-room-environment.p
 
 @unittest.skipUnless(shutil.which('pwsh'), 'PowerShell 7 required')
 class EnvironmentWatchTests(unittest.TestCase):
+    def test_resume_requires_the_original_climate_until_its_revision_changes(self):
+        command = r"""
+$script:sample = 0
+function Start-Sleep {}
+function Invoke-RestMethod {
+    $script:sample++
+    $rows = @(foreach ($room in 1..5) {
+        $s = [pscustomobject]@{ version=1; roomId=$room; sessionId="12345678-0000-4444-8888-00000000000$room"
+            throughSequence=$script:sample+10; phaseSinceSequence=5; environmentSinceSequence=4
+            state='Running'; environment=[pscustomobject]@{mode='VR';weather='Clear';timeOfDay='Day';lightning=$false} }
+        if ($room -eq 3) {
+            if ($script:sample -in 2,5,6) { $s.state='Paused'; $s.environment=$null }
+            $s.phaseSinceSequence = @(5,12,13,13,15,15,17)[$script:sample-1]
+            if ($script:sample -ge 6) { $s.environmentSinceSequence=16 }
+            if ($script:sample -in 3,7) { $s.environment.weather='Storm'; $s.environment.lightning=$true }
+        }
+        [pscustomobject]@{version=1;roomId=$room;session=$s}
+    })
+    if ($env:VRC_TEST_SCOPE -eq 'room') { return $rows[2] }
+    [pscustomobject]@{version=1;checkedAtUtc=[DateTimeOffset]::UtcNow;rooms=$rows}
+}
+$scope = if ($env:VRC_TEST_SCOPE -eq 'room') { @{RoomId=3} } else { @{AllRooms=$true} }
+& $env:VRC_WATCH_TEST -ManagementApi http://127.0.0.1 @scope -Samples 7
+"""
+        for scope in ('room', 'venue'):
+            with self.subTest(scope=scope):
+                result = subprocess.run(['pwsh', '-NoProfile', '-NonInteractive', '-Command', command],
+                                        capture_output=True, text=True, timeout=15, check=True,
+                                        env={**os.environ, 'VRC_WATCH_TEST': str(SCRIPT), 'VRC_TEST_SCOPE': scope,
+                                             'VR_COMMAND_ROOM_KEY': 'test', 'VR_COMMAND_MASTER_KEY': 'test'})
+                pages = [json.loads(line) for line in result.stdout.splitlines()]
+                self.assertEqual([p['reason'] for p in pages], [None, None, 'invalid-snapshot', None, None, None, None])
+                if scope == 'venue':
+                    self.assertTrue(all(r['status'] == 'Unavailable' and r['session'] is None for r in pages[2]['rooms']))
+                    pages = [p['rooms'][2] for p in pages]
+                self.assertEqual([p['session']['environment']['weather'] if p['status'] == 'Running' else p['status']
+                                  for p in pages], ['Clear', 'Paused', 'Unavailable', 'Clear', 'Paused', 'Paused', 'Storm'])
+                self.assertTrue(all(p['session'] is None or p['session']['environment'] is None
+                                    for p in pages if p['status'] != 'Running'))
+
     def test_venue_publishes_five_rooms_together_and_recovers_from_bad_snapshots(self):
         command = r"""
 $script:sample = 0

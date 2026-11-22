@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-22 暫停後恢復五房環境與開場畫面驗證
+
+房間環境監看器現在跨暫停保留已讀取的設定版本。以解壓版管理服務經本機 IPC 實測，第 1 房單獨結束時，第 4 房繼續回報霧天；服務中斷時五房都清空，重新連線後各自恢復。另在轉接器的讀取端模擬一次錯誤回覆，把恢復後的暴風雨寫成同版本的霧天。五房整批回報不可用，下次讀回正確設定即恢復。單房及五房測試也驗證暫停期間採用新設定版本的情形。場館包核對 1,297 檔，實體設備輸出待廠商介接。[整合說明](HARDWARE.md) · [12 步取樣](../artifacts/venue-env-mr-start-20261122/resume-injected.json) · [場館包](../artifacts/venue-env-mr-start-20261122/VRCommand-Venue-EnvironmentResume.zip)
+
+兩次 GitHub 測試停在同一項 MR 開場文字核對。本機重現時，第 4 房正確列出第 2、5 席等待追蹤，其餘四房等候，全館開場停用。舊預期漏了畫面中的 MR 模式及校正鎖定狀態。更新 MR 與 VR 開場文字核對後，解壓版控制台通過完整 MR 開場案例的 47 項瀏覽器檢查，以及獨立 VR 兩房的 4 項專項檢查。追蹤畫格來自模擬來源。[原 GitHub 失敗](https://github.com/peca12968/vr-command-center/actions/runs/44989042450) · [MR 驗證](../artifacts/venue-env-mr-start-20261122/after.log) · [VR 驗證](../artifacts/venue-env-mr-start-20261122/vr-after.log)
+
 ## 2026-11-22 Quest 單席部署核對頭盔分配
 
 舊場館包的單席 Quest 預檢在第 5 房第 2 席回報成功，同一份回應卻列出該席是 VIVE。已用解壓版管理服務建立五房合併及五房獨立的模擬場次，各登記 15 個 Quest 席與 10 個 VIVE 席，簽發原場票券後經本機 IPC 重驗。新版在兩種模式都拒絕該 VIVE 席，第 5 房第 3 席的 Quest 預檢均通過。在模擬裝置的安裝前與安裝後讀回 VIVE 分配時，工具都保留了原玩家連線檔。新版場館包核對 1,297 檔。Windows 此次列出 0 台 Meta USB 裝置，頭盔端仍待驗收。[修正前](../artifacts/quest-seat-preflight-20261122/before.json) · [修正後](../artifacts/quest-seat-preflight-20261122/after.json) · [部署操作](QUEST3.md) · [場館包](../artifacts/quest-seat-preflight-20261122/VRCommand-Venue-QuestSeat.zip)

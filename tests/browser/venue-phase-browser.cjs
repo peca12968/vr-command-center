@@ -423,8 +423,9 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       await beginRoom(1).getAttribute('data-begin-state') === 'Ready' && await beginRoom(2).getAttribute('data-begin-state') === 'EmptyRoster');
     check(declinedBegin.code === 'venue-begin-not-ready' && declinedBegin.roomIds.join() === '2' && await beginButton.isDisabled(),
       'A missing roster and source in one room blocks the whole Begin batch in both HTTP and Chromium');
-    check(await beginRoomText(1) === '房間 1 · 1 席姿態就緒 · 錄製來源 Simulation'
-      && await beginRoomText(2) === '房間 2 · 名冊尚無玩家' && await page.locator('[data-begin-room]').count() === 2,
+    assert.equal(await beginRoomText(1), '房間 1 · 1 席姿態就緒 · VR · 錄製來源 Simulation');
+    assert.equal(await beginRoomText(2), '房間 2 · 名冊尚無玩家 · VR');
+    check(await page.locator('[data-begin-room]').count() === 2,
       'The master sees only the target rooms and can distinguish a ready VR room from an empty independent roster');
     await beginRoom(1).getByRole('button', { name: '查看房間 1 名冊' }).click();
     await page.waitForFunction(() => document.activeElement.id === 'roster-title');
