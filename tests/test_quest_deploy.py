@@ -10,6 +10,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import struct
 import subprocess
@@ -27,6 +28,13 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
 
 CAPTURE_FIXTURE = ROOT / 'tests/fixtures/run-quest-capture.py'
+
+
+def powershell_error_message(stderr):
+    # ConciseView wraps the exception across gutter lines at the host's width.
+    plain = re.sub(r'\x1b\[[0-9;]*m', '', stderr)
+    lines = [line.strip() for line in re.findall(r'^\s*\| ([^\r\n]+)', plain, re.MULTILINE)]
+    return ' '.join(line for line in lines if line.strip('~')) if lines else plain
 
 
 @contextmanager
@@ -418,7 +426,7 @@ class QuestDeployTests(unittest.TestCase):
 
     def assert_rejected(self, result, message):
         self.assertNotEqual(0, result.returncode)
-        self.assertIn(message, result.stderr)
+        self.assertIn(message, powershell_error_message(result.stderr), result.stderr)
         ticket = json.loads(self.config.read_text(encoding='utf-8-sig'))['joinTicket']
         if ticket.startswith('v2.'):
             self.assertNotIn(ticket, result.stdout + result.stderr)
@@ -2271,7 +2279,7 @@ else:
 
     def assert_rejected(self, result, message):
         self.assertNotEqual(0, result.returncode)
-        self.assertIn(message, result.stderr)
+        self.assertIn(message, powershell_error_message(result.stderr), result.stderr)
         self.assertEqual('', result.stdout)
         self.assertNotIn('v2.', result.stderr)
 
