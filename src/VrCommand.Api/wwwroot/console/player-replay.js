@@ -1,4 +1,4 @@
-import { MAX_REPLAY_BYTES, MAX_REPLAY_FILES, MAX_REPLAY_SET_BYTES, playerReplayEventFrames, playerReplayPlayers, readPlayerReplaySet, sourcePaused, sourceTransitions } from './player-replay-model.js';
+import { MAX_REPLAY_BYTES, MAX_REPLAY_FILES, MAX_REPLAY_SET_BYTES, playerReplayEventFrames, playerReplayPlayers, readPlayerReplaySet, samePlayerReplaySource, sourcePaused, sourceTransitions } from './player-replay-model.js';
 import { recordedClock } from './mission-clock.js';
 import { eventNames } from './world-event-names.js';
 
@@ -22,6 +22,7 @@ let restartAt = null;
 let eventFrames = [], matchingEvents = [];
 let replayPlayers = [];
 let followedFrames = [];
+let currentVolume = null;
 
 function message(text, error = false) {
   $('message').textContent = text;
@@ -134,20 +135,50 @@ function openFrame(next, position) {
   if (replay && Number.isInteger(next) && next >= 0 && next < replay.packets.length) show(next, false, position);
 }
 
-async function openReplay(files) {
+function volumeInfo(value) {
+  const match = /^([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}):(\d+):(\d+):(\d+)$/.exec(value ?? '');
+  if (!match) throw new Error('請選擇由場館匯出的回放分冊網頁。');
+  const [first, last, end] = match.slice(2).map(Number);
+  if (![first, last, end].every(Number.isSafeInteger) || first < 1 || last <= first || end < last)
+    throw new Error('回放分冊的畫格範圍無效。');
+  return { clip: match[1], first, last, end };
+}
+
+async function readVolumeFile(file) {
+  if (file.size > MAX_REPLAY_SET_BYTES + 2 * 1024 * 1024 + 8192) throw new Error('回放網頁超過分冊容量。');
+  const html = await file.text();
+  const marker = /<span hidden id="replay-volume" data-volume="([^"<>]{1,110})"><\/span>/.exec(html);
+  const volume = volumeInfo(marker?.[1]);
+  const files = [];
+  // Extract data only. The selected HTML never becomes a document or executes scripts.
+  for (const part of html.matchAll(/<script type="application\/json" data-player-replay-part>([^<]+)<\/script>/g)) {
+    if (files.length === MAX_REPLAY_FILES) throw new Error('分冊內的片段超過 24 份。');
+    files.push(new Blob([part[1]]));
+  }
+  return { files, volume };
+}
+
+async function openReplay(files, embeddedInfo = null, continuing = false) {
   if (!files.length) return;
   const own = ++epoch;
   pause();
-  replay = null;
-  loop.checked = false;
-  eventKind.value = '';
-  frameNumber.value = '';
-  seconds.value = '';
+  if (!continuing) {
+    replay = null;
+    currentVolume = null;
+    $('view').hidden = true;
+    scene?.reset();
+  }
   $('file').value = '';
-  $('view').hidden = true;
-  scene?.reset();
+  $('volume-file').value = '';
   message('正在讀取本機回放檔。');
   try {
+    let volume = null;
+    if (continuing) {
+      ({ files, volume } = await readVolumeFile(files[0]));
+      if (own !== epoch) return;
+      if (!currentVolume || volume.clip !== currentVolume.clip || volume.end !== currentVolume.end ||
+          volume.first !== currentVolume.last + 1) throw new Error('請選擇同一片段、從下一格開始的分冊。');
+    } else if (embeddedInfo !== null) volume = volumeInfo(embeddedInfo);
     if (files.length > MAX_REPLAY_FILES) throw new Error('請一次選擇最多 24 份回放檔。');
     if (files.some(file => file.size > MAX_REPLAY_BYTES)) throw new Error('回放檔超過 8 MiB。');
     if (files.reduce((size, file) => size + file.size, 0) > MAX_REPLAY_SET_BYTES) throw new Error('所選片段合計超過 64 MiB，請分批開啟。');
@@ -158,18 +189,36 @@ async function openReplay(files) {
       documents.push(JSON.parse(text));
     }
     const { replay: candidate, segments } = readPlayerReplaySet(documents);
+    if (volume && (candidate.startFrame !== volume.first || candidate.endFrame !== volume.last))
+      throw new Error('分冊標示與實際畫格範圍不符。');
+    if (continuing && !samePlayerReplaySource(candidate, replay))
+      throw new Error('下一冊必須來自同一場錄製與相同房間範圍。');
     if (!scene) {
       const { ReplayScene } = await import('./replay-scene.js');
       if (own !== epoch) return;
       scene = new ReplayScene(canvas, key => { if (!follow.value) scene.select(key); }, clearFollow);
     }
+    const previousRoom = continuing ? room.value : null;
+    pause();
+    loop.checked = false;
+    eventKind.value = '';
+    frameNumber.value = '';
+    seconds.value = '';
     scene.load(candidate.header);
     const rooms = candidate.header.roomIds;
     room.replaceChildren(...rooms.map(id => new Option('房間 ' + id, id)));
     if (rooms.length > 1) room.prepend(new Option('全場俯視', 'all', true, true));
+    if (previousRoom !== null) room.value = previousRoom;
     replayPlayers = playerReplayPlayers(candidate.packets);
     showFollowOptions();
     replay = candidate;
+    currentVolume = volume;
+    $('continuation').hidden = !volume;
+    if (volume) {
+      $('volume-file').hidden = volume.last === volume.end;
+      $('volume-label').textContent = volume.last === volume.end ? '已到最後一冊。'
+        : `開啟下一冊（從第 ${volume.last + 1} 格開始）`;
+    }
     frameNumber.min = candidate.startFrame;
     frameNumber.max = candidate.endFrame;
     seconds.max = (candidate.packets.at(-1).elapsedMilliseconds - candidate.packets[0].elapsedMilliseconds) / 1000;
@@ -203,19 +252,22 @@ async function openReplay(files) {
     message(`已載入 ${candidate.packets.length} 格。`);
   } catch (error) {
     if (own !== epoch) return;
-    replay = null;
-    $('view').hidden = true;
-    scene?.reset();
+    if (!continuing) {
+      replay = null;
+      $('view').hidden = true;
+      scene?.reset();
+    }
     message(error instanceof SyntaxError ? '無法讀取 JSON 回放檔。' : error.message, true);
   }
 }
 
 $('file').addEventListener('change', () => openReplay(Array.from($('file').files)));
+$('volume-file').addEventListener('change', () => openReplay(Array.from($('volume-file').files), null, true));
 const embedded = Array.from(document.querySelectorAll('script[type="application/json"][data-player-replay-part]'));
 if (embedded.length) {
   const parts = embedded.map(element => new Blob([element.textContent]));
   embedded.forEach(element => element.remove());
-  void openReplay(parts);
+  void openReplay(parts, document.getElementById('replay-volume')?.dataset.volume ?? null);
 }
 
 function advance(now) {

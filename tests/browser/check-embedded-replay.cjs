@@ -16,7 +16,7 @@ async function main(directory, reportPath) {
   const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   try {
     const context = await browser.newContext({ offline: true });
-    for (const { name, full, first, last, parts } of files) {
+    for (const [i, { name, full, first, last, parts }] of files.entries()) {
       const page = await context.newPage();
       const url = pathToFileURL(resolve(directory, name + '.html')).href;
       const unexpected = [];
@@ -44,6 +44,39 @@ async function main(directory, reportPath) {
       await field('play').click();
       await field('frame').filter({ hasText: `第 ${last} 格` }).waitFor();
       assert.ok(await field('next').isDisabled());
+      if (reportPath && files[i + 1]?.first === last + 1 && files[i + 1].full === full) {
+        const chooser = field('volume-file');
+        assert.match(await field('volume-label').innerText(), new RegExp('第 ' + (last + 1) + ' 格'));
+        if (full) await field('room').selectOption('4');
+        await chooser.setInputFiles(resolve(directory, name + '.html'));
+        await field('message').filter({ hasText: '同一片段、從下一格開始' }).waitFor();
+        assert.match(await field('frame').innerText(), new RegExp('第 ' + last + ' 格'));
+        const next = files[i + 1];
+        const bytes = await readFile(resolve(directory, next.name + '.html'));
+        if (!full) {
+          await chooser.setInputFiles(resolve(directory, 'room4.html'));
+          await field('message').filter({ hasText: '同一場錄製與相同房間範圍' }).waitFor();
+          assert.match(await field('frame').innerText(), new RegExp('第 ' + last + ' 格'));
+          const otherSource = bytes.toString().replace(/("streamId"\s*:\s*")[0-9a-f-]{36}/g,
+            (_, prefix) => prefix + '00000000-0000-4000-8000-000000000001');
+          assert.notEqual(otherSource, bytes.toString());
+          await chooser.setInputFiles({ name: 'other.html', mimeType: 'text/html', buffer: Buffer.from(otherSource) });
+          await field('message').filter({ hasText: '同一場錄製與相同房間範圍' }).waitFor();
+          assert.match(await field('frame').innerText(), new RegExp('第 ' + last + ' 格'));
+        }
+        await chooser.setInputFiles({ name: '重新命名.html', mimeType: 'text/html',
+          buffer: Buffer.concat([bytes, Buffer.from('<script>document.title="Unexpected navigation"</script>')]) });
+        await field('frame').filter({ hasText: `第 ${next.first} 格` }).waitFor();
+        assert.equal(await field('room').inputValue(), full ? '4' : '5');
+        assert.ok(await chooser.isHidden());
+        assert.equal(page.url(), url);
+        assert.notEqual(await page.title(), 'Unexpected navigation');
+        assert.equal(await field('volume-label').innerText(), '已到最後一冊。');
+        await field('number').fill(String(next.last - 1));
+        await field('number').press('Enter');
+        await field('play').click();
+        await field('frame').filter({ hasText: `第 ${next.last} 格` }).waitFor();
+      } else if (!reportPath) assert.ok(await field('continuation').isHidden());
       assert.deepEqual(unexpected, []);
       await page.close();
       console.log(`${name}: opened offline at frame ${first} and played to frame ${last}`);

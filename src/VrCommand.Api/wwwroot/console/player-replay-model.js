@@ -94,6 +94,11 @@ function sameJson(left, right) {
   return keys.length === Object.keys(right).length && keys.every(key => Object.hasOwn(right, key) && sameJson(left[key], right[key]));
 }
 
+export function samePlayerReplaySource(left, right) {
+  return left.playerReplayVersion === right.playerReplayVersion && left.roomId === right.roomId &&
+    sameJson(left.header, right.header);
+}
+
 export function readPlayerReplaySet(documents) {
   require(documents.length && documents.length <= MAX_REPLAY_FILES, '請一次選擇 1 至 24 份回放檔。');
   const clips = documents.map(readPlayerReplay).sort((a, b) => a.startFrame - b.startFrame || a.endFrame - b.endFrame);
@@ -102,8 +107,7 @@ export function readPlayerReplaySet(documents) {
   if (clips.length === 1) return { replay: first, segments };
   const packets = [], eventRooms = {};
   for (const clip of clips) {
-    require(clip.playerReplayVersion === first.playerReplayVersion && clip.roomId === first.roomId &&
-      sameJson(clip.header, first.header), '請選擇同一場錄製、相同房間範圍的回放檔。');
+    require(samePlayerReplaySource(clip, first), '請選擇同一場錄製、相同房間範圍的回放檔。');
     const next = first.startFrame + packets.length;
     require(clip.startFrame <= next, `缺少第 ${next} 至 ${clip.startFrame - 1} 格，請一併選取涵蓋這段的回放檔。`);
     for (const packet of clip.packets) {

@@ -706,6 +706,8 @@ def check_volume_exports(venue, directory):
         assert len(ranges) > 1 and venue.request(source.world + '/clips') == before
         if label == 'long':
             assert ranges[0][:3] == [1, 7199, 24] and ranges[1][:2] == [7200, 7201]
+            with venue.response(url + f'?fromFrame={ranges[1][0]}&roomId=4') as response:
+                (directory / 'room4.html').write_bytes(response.read())
         else:
             assert ranges[0][2] < 24, 'Dense recording must split on bytes before the file count'
         results[label] = {'sessionId': session['id'], 'clip': clip, 'ranges': ranges}

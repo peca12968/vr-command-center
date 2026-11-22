@@ -224,7 +224,7 @@ public static class WorldRoutes
                 if (offset < 0) throw new InvalidOperationException("請更新此管理包內的離線播放器。");
                 var output = new MemoryStream();
                 output.Write(Encoding.UTF8.GetBytes(template[..offset]));
-                long last = 0;
+                long last = 0, clipEnd = 0;
                 foreach (var part in parts)
                 {
                     // The JSON writer escapes HTML delimiters. Fail closed if its encoding ever changes.
@@ -233,6 +233,12 @@ public static class WorldRoutes
                     output.Write(part.Data);
                     output.Write("</script>"u8);
                     last = part.LastFrame;
+                    clipEnd = part.ClipEnd;
+                }
+                if (fromFrame.HasValue)
+                {
+                    var volume = FormattableString.Invariant($"<span hidden id=\"replay-volume\" data-volume=\"{clip:D}:{fromFrame.Value}:{last}:{clipEnd}\"></span>");
+                    output.Write(Encoding.UTF8.GetBytes(volume));
                 }
                 output.Write(Encoding.UTF8.GetBytes(template[(offset + marker.Length)..]));
                 output.Position = 0;
