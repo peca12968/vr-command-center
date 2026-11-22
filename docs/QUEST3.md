@@ -380,7 +380,7 @@ embedded package `com.vrcommand.simulation` 現為 0.11.0。Runtime asmdef 已�
    python scripts/prepare-vr-session.py --server-address 192.168.1.100 --room 1 --players 2
    ```
 
-   把範例 IP 換成頭盔能連到的桌面 LAN IP。助手只在空閒房間新建自己的 Independent 場次，保留 `Preparing`，輸出場次 ID 與 `data/vr-connections/<場次ID>/` 路徑。`server.json` 含 GameServer 憑證，只留在桌面；`player-1.json`／`player-2.json` 各含自己的五分鐘票券，不含控制台憑證。
+   把範例 IP 換成頭盔能連到的桌面 LAN IPv4。工具會先檢查位址，再向管理服務申請空閒房間。全部玩家取得票券後，才會一次交付 `data/vr-connections/<場次ID>/`，並回報 `Preparing`。若中途配票失敗，工具會要求結束該次場次。`server.json` 含 GameServer 憑證，只留在伺服器電腦；各 `player-*.json` 只發給對應玩家。
 3. 啟動桌面伺服器（請替換 GUID 路徑）：
 
    ```powershell

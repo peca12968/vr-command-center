@@ -2592,7 +2592,6 @@ try {
     if (-not $UseInstalledApk) {
         Confirm-QuestDeviceSerial $deviceTarget $originalDeviceSerial
         Install-QuestReleaseApk $deviceTarget $apk -Upgrade
-        if (-not $RequireOpenXR) { 'Success' }
     }
     if ($release -and (Get-QuestApkStatus $deviceTarget $release.sha256) -cne 'ready') {
         throw 'Installed Quest APK could not be verified against the release report.'
@@ -2615,4 +2614,7 @@ if ($RequireOpenXR) {
         venueReleaseReportSha256 = $release.reportSha256 } | ConvertTo-Json -Compress
 } elseif ($UseInstalledApk) {
     Write-Host 'Verified installed Quest client launched. Ticket expiry and server admission still apply.'
-} else { Write-Host 'Quest client installed and launched. Ticket expiry and server admission still apply.' }
+} else {
+    'Success'
+    Write-Host 'Quest client installed and launched. Ticket expiry and server admission still apply.'
+}

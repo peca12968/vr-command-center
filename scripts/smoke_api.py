@@ -832,7 +832,7 @@ try:
                     and summary["players"][0]["health"] == 80, "Standalone Quest3-record demo creates a simulated combat archive")
             require(all(room["sessionId"] is None for room in request("GET", "/api/rooms")), "Combat demo releases only its own session on completion")
             provision = subprocess.run([sys.executable, str(ROOT / "scripts/prepare-vr-session.py"), "--base-url", base_url,
-                                       "--key-file", str(key_file), "--server-address", "127.0.0.1", "--output", str(test_directory / "connections")],
+                                       "--key-file", str(key_file), "--server-address", "192.0.2.10", "--output", str(test_directory / "connections")],
                                       capture_output=True, text=True, encoding="utf-8", timeout=30)
             if provision.returncode != 0:
                 raise AssertionError("VR session provisioning failed: " + provision.stderr)
@@ -840,6 +840,9 @@ try:
             config_directory = Path(plan["directory"])
             server_config = json.loads((config_directory / "server.json").read_text())
             client_config = json.loads((config_directory / "player-1.json").read_text())
+            require(server_config["address"] == client_config["address"] == "192.0.2.10"
+                    and server_config["listenAddress"] == "0.0.0.0",
+                    "The provisioned server and Quest players use the selected venue destination")
             require(server_config["gameServerKey"] == tokens["GameServer"] and "gameServerKey" not in client_config
                     and not any(key in json.dumps(client_config) for key in tokens.values()),
                     "Provisioning keeps control/server credentials out of headset connection files")

@@ -87,6 +87,7 @@ jobs:
       - run: python -m py_compile scripts/check-desktop-readiness.py
       - run: python -m unittest discover -s tests -p test_desktop_external.py
       - run: python -m unittest discover -s tests -p test_quest_deploy.py
+      - run: python -m unittest discover -s tests -p test_prepare_vr_session.py
         shell: pwsh
       - run: python -m unittest discover -s tests -p test_quest_usb.py
         shell: pwsh

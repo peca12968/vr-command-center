@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-22 Quest 原型房間配票與單席啟動確認
+
+建立單房 Quest 原型場次時，工具會先檢查伺服器的場館 IPv4，再向管理服務申請房間。伺服器設定與各席連線檔使用同一個場館端點。所有席位取得票券後，工具才一次發布整個目錄。以解壓版管理服務經本機 IPC 簽發並核對第 1 房 5 張原票；在第 2 房發到第 3 席時模擬中斷，第 2 房已釋出且沒有交付檔案，第 1 房仍沿用原場次。回送位址在第一個管理請求前被拒絕。[操作方式](QUEST3.md#區域網路原型操作) · [本機驗證](../artifacts/quest-room-provision-20261122/installed-checks.json)
+
+單席部署現在完成啟動確認後才顯示成功。舊版在 Android 拒絕啟動的三種情況均提前輸出成功；GitHub 也記錄了 APK 安裝後及連線檔暫存後來源過期的兩項失敗。使用新版解壓工具、模擬頭盔及本機 IPC 重跑這兩項原測試，均通過。場館包已核對 1,297 檔，Quest 3 實機仍待驗證。[原 GitHub 測試](https://github.com/peca12968/vr-command-center/actions/runs/44986251471) · [場館包](../artifacts/quest-room-provision-20261122/VRCommand-Venue-QuestLaunch.zip) · [檔案核對](../artifacts/quest-room-provision-20261122/install.json)
+
 ## 2026-11-22 Quest 單席遊戲端點
 
 Quest 單席 VR／MR 部署、票券更新及追蹤預檢會先核對遊戲位址。頭盔無法用伺服器的回送位址入場。若管理服務已將該房的遊戲端點公布為回送位址，單席 Quest 核對會回傳 `endpoint-mismatch`。Windows 同機 VR 的通用連線檔核對仍可接受該位址。[Quest 接入說明](QUEST3.md)

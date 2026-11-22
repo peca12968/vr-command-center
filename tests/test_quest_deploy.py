@@ -832,6 +832,7 @@ class QuestDeployTests(unittest.TestCase):
                 self.commands.unlink(missing_ok=True)
                 result = self.run_script('-Serial', 'fixture', failure=failure)
                 self.assert_rejected(result, 'did not confirm that the Quest launcher activity started')
+                self.assertEqual('', result.stdout)
                 commands = self.commands.read_text(encoding='utf-8')
                 self.assertIn(' am start -W ', commands)
                 self.assertNotIn(' --es com.vrcommand.quest.OPENXR_PROBE ', commands)
@@ -839,6 +840,7 @@ class QuestDeployTests(unittest.TestCase):
         result = self.run_script('-Serial', 'fixture', failure='launch-short')
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn('Quest client installed and launched.', result.stdout)
+        self.assertEqual(['Success'], result.stdout.splitlines()[:1])
 
     def run_smoke(self, serial='fixture', failure='', *, resume=False, require_openxr=False, version_code=72,
                   adb_options=None, environment=None):
