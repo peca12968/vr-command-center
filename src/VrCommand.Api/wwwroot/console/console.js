@@ -2554,8 +2554,23 @@ class MissionVersionMismatch extends Error {
   constructor(message = '任務版本核對不符，已保留目前草稿。') { super(message); }
 }
 function requireMissionVersion(revision, id, seriesId, number) {
-  if (!revision?.mission || revision.mission.id !== id || revision.seriesId !== seriesId || revision.number !== number)
+  if (!revision?.mission || revision.mission.id !== id || revision.seriesId !== seriesId || revision.number !== number
+    || !readableMissionDefinition(revision.mission.definition))
     throw new MissionVersionMismatch();
+}
+function readableMissionDefinition(draft) {
+  const env = draft?.environment, enemies = draft?.enemies;
+  const coordinate = value => Number.isFinite(value) && Number.isFinite(Math.fround(value));
+  return typeof draft?.name === 'string' && draft.name.length > 0 && draft.name.length <= 100
+    && typeof draft.briefing === 'string' && draft.briefing.length <= 10000
+    && Number.isInteger(draft.durationSeconds) && draft.durationSeconds >= 60 && draft.durationSeconds <= 14400
+    && ['VR', 'MR'].includes(env?.mode) && typeof env.weather === 'string' && Object.hasOwn(weatherNames, env.weather)
+    && ['Day', 'Night'].includes(env.timeOfDay) && typeof env.lightning === 'boolean'
+    && Number.isInteger(enemies?.count) && enemies.count >= 0 && enemies.count <= 100
+    && typeof enemies.behavior === 'string' && Object.hasOwn(behaviorNames, enemies.behavior) && typeof enemies.autoAttack === 'boolean'
+    && Array.isArray(draft.props) && draft.props.length <= 500 && draft.props.every(prop => typeof prop?.assetId === 'string'
+      && prop.assetId.length > 0 && prop.assetId.length <= 100
+      && coordinate(prop.yawDegrees) && ['x', 'y', 'z'].every(axis => coordinate(prop.position?.[axis])));
 }
 function requireMissionHistory(history, seriesId, minimum) {
   if (history?.seriesId !== seriesId || typeof history.headId !== 'string' || !history.headId
@@ -2642,12 +2657,10 @@ async function checkMissionTemplate(file, epoch) {
   const result = await api('/mission-templates/check-file', 'POST', file);
   if (epoch !== templateEpoch || $('missions-view').hidden) return;
   const draft = result?.definition;
-  if (result?.format !== missionTemplateFormat || result.version !== 1 || typeof draft?.name !== 'string'
-      || typeof draft.briefing !== 'string' || !Number.isInteger(draft.durationSeconds)
-      || !draft.environment || !draft.enemies || !Array.isArray(draft.props) || draft.props.some(prop => !prop?.position))
-    throw new Error('Unexpected mission template response.');
+  if (result?.format !== missionTemplateFormat || result.version !== 1 || !readableMissionDefinition(draft))
+    throw new MissionVersionMismatch('任務範本回應內容不完整或格式有誤，已保留目前草稿。');
   checkedTemplate = draft;
-  $('mission-template-status').textContent = `「${draft.name}」 · ${draft.environment.mode} · ${draft.durationSeconds} 秒 · ${draft.props.length} 件物件。可載入為新草稿。`;
+  $('mission-template-status').textContent = `「${draft.name}」 · ${draft.environment.mode} · ${draft.durationSeconds} 秒 · ${venueClimateText(draft.environment)} · ${missionEnemyText(draft.enemies)} · ${draft.props.length} 件物件。可載入為新草稿。`;
 }
 function useMissionTemplate() {
   if (!editable() || !checkedTemplate || !confirmDraftDiscard('載入任務範本')) return;

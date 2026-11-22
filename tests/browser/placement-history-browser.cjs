@@ -3,6 +3,7 @@ const fs = require('node:fs/promises');
 
 module.exports = async ({ context, api, tokens, base, mission, screenshots, check }) => {
   await require('./mission-placement-precision.cjs')({ context, api, tokens, base });
+  await require('./mission-definition-load.cjs')({ context, api, tokens, base });
   const page = await context.newPage(), errors = [];
   page.on('pageerror', error => errors.push(error.message));
   const props = [{ assetId: 'sandbag', position: { x: 1, y: 0, z: 3 }, yawDegrees: 45 },
