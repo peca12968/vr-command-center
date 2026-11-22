@@ -88,7 +88,6 @@ function Read-EndpointFile([string]$Path) {
 }
 
 function Read-UtcTime($Value) {
-    if ($Value -is [DateTime] -and $Value.Kind -eq [DateTimeKind]::Utc) { return [DateTimeOffset]$Value }
     if ($Value -isnot [string] -or $Value -cnotmatch '\A\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,7})?(?:Z|\+00:00)\z') {
         throw 'Use an explicit UTC timestamp.'
     }
@@ -105,6 +104,14 @@ function Read-CompleteReport([string]$Path, [string]$Role) {
     } finally { $file.Dispose() }
     if ($lines.Count -ne 1 -and !($Role -ceq 'listen' -and $lines.Count -eq 2)) { throw 'Invalid report lines.' }
     $report = ConvertFrom-Json -InputObject $lines[-1]
+    # PowerShell 7 can convert a JSON timestamp to local DateTime, losing its original offset.
+    # Recover the literal so the explicit UTC and freshness checks apply to the writer's timestamp.
+    $stamp = $report.PSObject.Properties['completedAtUtc']
+    if ($PSVersionTable.PSVersion.Major -ge 7 -and $stamp -and $stamp.Value -is [DateTime]) {
+        $document = [System.Text.Json.JsonDocument]::Parse([string]$lines[-1])
+        try { $stamp.Value = $document.RootElement.GetProperty($stamp.Name).GetString() }
+        finally { $document.Dispose() }
+    }
     if (!(Test-ReportInteger $report.version) -or $report.version -ne 1 -or $report.stage -cne 'finished' -or $report.mode -cne $Role -or
         $report.scope -cne 'authenticated-udp-only' -or $report.complete -isnot [bool] -or !$report.complete -or
         !(Test-ReportInteger $report.requested) -or $report.requested -notin 1..20 -or

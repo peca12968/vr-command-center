@@ -642,6 +642,30 @@ class LanPreflightFixtures(unittest.TestCase):
 
 
 class LanPreflightOfflineTests(LanPreflightFixtures):
+    def test_pair_binding_uses_the_original_explicit_utc_timestamp(self):
+        common = dict(version=1, stage='finished', complete=True, scope='authenticated-udp-only', port=7777,
+                      requested=1, matched=1, exchangeSha256='a' * 64)
+        listener, probe = self.root / 'listener.json', self.root / 'probe.json'
+        probe.write_text(json.dumps(dict(common, mode='probe', localAddress='127.0.0.2', peerAddress=LOOPBACK,
+                                         samples=[dict(sample=1, roundTripMs=1)])), encoding='utf-8')
+        options = ['-ListenerReport', listener, '-ProbeReport', probe, '-ExpectedServerAddress', LOOPBACK,
+                   '-ExpectedGamePort', 7777, '-ExpectedPeerAddresses', '127.0.0.2',
+                   '-BindingObservedAtUtc', '2026-01-01T00:30:00Z', '-FailureReason']
+        for stamp, reason in [('2026-01-01T00:00:00+00:00', None), ('2026-01-01T00:29:59.9999999Z', None),
+                              ('2025-12-31T23:59:59.9999999Z', 'expired'), ('2026-01-01T00:30:00Z', 'clock-ahead'),
+                              ('2026-01-01T01:00:00+01:00', 'invalid-report'), ('2026-01-01T00:00:00', 'invalid-report')]:
+            with self.subTest(stamp=stamp):
+                listener.write_text(json.dumps(dict(common, mode='listen', localAddress=LOOPBACK, peerAddress='127.0.0.2',
+                                                    samples=[], completedAtUtc=stamp)), encoding='utf-8')
+                result = self.run_script(*options)
+                receipt = json.loads(result.stdout)
+                if reason is None:
+                    self.assertEqual(result.returncode, 0, receipt)
+                    self.assertTrue(receipt['endpointVerified'])
+                else:
+                    self.assertEqual(result.returncode, 1, receipt)
+                    self.assertEqual(receipt['reason'], reason)
+
     def test_key_is_created_once_and_errors_hide_private_values(self):
         original = self.key.read_bytes()
         self.assertEqual(len(base64.b64decode(original, validate=True)), 32)
@@ -874,14 +898,16 @@ class LanPreflightTests(LanPreflightFixtures):
         generated = self.root / 'prepared-network.json'
         prepared = prepare_network(original, guarded_preview, inventory, generated)
         self.assertEqual(0, prepared.returncode, prepared.stderr)
-        self.assertEqual(json.loads(plan.read_bytes()), json.loads(generated.read_bytes()))
-        bound = self.venue_check(generated, 'bound.json', '--batch', self.root / 'readiness.json',
+        expected = json.loads(plan.read_bytes())
+        expected['endpoints'][0].update({key: guarded[key] for key in ('sessionId', 'missionId', 'sessionSequence')})
+        self.assertEqual(expected, json.loads(generated.read_bytes()))
+        bound = self.venue_check(generated, 'bound.json', '--pairs', manual, '--batch', batch,
                                  '--launcher-preview', guarded_preview, '--launch-plan', original)
         self.assertEqual({'plan': original.name, 'preview': guarded_preview.name, 'complete': True, 'mode': 'Linked',
                           'planSha256': hashlib.sha256(original.read_bytes()).hexdigest(),
                           'previewSha256': hashlib.sha256(guarded_preview.read_bytes()).hexdigest(),
                           'groups': [{'roomIds': rooms, 'issues': []}]}, bound['launchBinding'])
-        again = self.venue_check(plan, 'rechecked.json', '--batch', self.root / 'bound.json',
+        again = self.venue_check(generated, 'rechecked.json', '--batch', self.root / 'bound.json',
                                  '--launcher-preview', guarded_preview, '--launch-plan', original)
         self.assertEqual(bound['launchBinding'], again['launchBinding'])
         verify = [sys.executable, str(ROOT / 'scripts/start-verified-venue.py'), '--verify-only',
@@ -917,7 +943,7 @@ class LanPreflightTests(LanPreflightFixtures):
         raw_release = release.read_bytes()
         pinned = self.venue_json('release-preview.json', dict(json.loads(guarded_preview.read_bytes()),
             serverManifestSha256=digest, venueReleaseReportSha256=hashlib.sha256(raw_release).hexdigest()))
-        self.venue_check(generated, 'release-bound.json', '--batch', self.root / 'readiness.json',
+        self.venue_check(generated, 'release-bound.json', '--pairs', manual, '--batch', batch,
                          '--launcher-preview', pinned, '--launch-plan', original)
         args.readiness = self.root / 'release-bound.json'
         guard.reset_mock()
@@ -1383,7 +1409,9 @@ class LanPreflightTests(LanPreflightFixtures):
         generated = self.root / 'prepared-network.json'
         prepared = prepare_network(launch, preview, inventory, generated, '--players-per-room', 1)
         self.assertEqual(0, prepared.returncode, prepared.stderr)
-        self.assertEqual(plan_value, json.loads(generated.read_bytes()))
+        endpoints = [{key: row[key] for key in ('roomIds', 'address', 'port', 'sessionId', 'missionId', 'sessionSequence')}
+                     for row in preview_value['servers']]
+        self.assertEqual({**plan_value, 'endpoints': endpoints}, json.loads(generated.read_bytes()))
         report = self.venue_check(generated, 'readiness.json', '--pairs', manifest, '--launcher-preview', preview, '--launch-plan', launch)
         self.assertEqual((5, 5), (report['expectedSources'], report['verifiedSources']))
         self.assertTrue(report['complete'])
