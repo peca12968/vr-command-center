@@ -968,6 +968,8 @@ python .\scripts\capture-quest-field-log.py --adb $adb `
 
 場次結束後，`capture-report.json` 依房號、席位及場次列出完整日誌、`logcatPid` 和 SHA-256。各席結案後會一次發布完整報告。任一席失敗時，整批回傳退出碼 1，已完成的日誌與可用的 `.partial` 各自保留。
 
+主控收到整個擷取目錄後，可執行 `capture-quest-field-log.py --check-capture`，搭配原連線 ZIP 和裝置表，在本機逐席核對。少一份日誌時，報告會列出該席的 `log-missing`，並繼續檢查其餘席位。檔案內容或原玩家身分不符時顯示 `log-invalid`。 [場館包收件範例](VENUE_FIELD_KIT.md#收集與核對五房-quest-玩家紀錄)
+
 若部署時使用發行報告核對 APK，可加 `--deployment-report .\quest-deployment.json`，指定同一份 ZIP、同一份裝置清單的完整部署結果。工具會逐席比對原入場，並在開始、就緒、等候期間及發布完整日誌前核對原頭盔。若裝置與原部署不同，該席停止擷取並保留 `.partial`。擷取報告只增加原部署報告的 SHA-256，裝置序號留在原私人裝置清單。 [核對發行 APK](#核對頭盔內已安裝的發行-apk)
 
 ### 部署中斷時先擷取已啟動的席位

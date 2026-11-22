@@ -170,3 +170,22 @@ $env:VR_COMMAND_UNATTENDED = '1'
 $env:VR_COMMAND_UNATTENDED = '1'
 .\scripts\deploy-quest.ps1 -PrepareQuestApks -DeviceMap .\device-map.json -CheckOnly
 ```
+
+### 收集與核對五房 Quest 玩家紀錄
+
+各席遊戲啟動後，在能連到頭盔的電腦上執行下列命令。使用 Python 3.12、PowerShell 7、當次部署的連線 ZIP 與裝置表，以及已存在的私人資料夾。請填入實際 ADB 路徑。工具會建立新的擷取目錄，等待各席的最終結果與斷線紀錄。若 Windows 防火牆查核拒絕啟動 ADB，可先核對已經收回的檔案。
+
+```powershell
+$env:VR_COMMAND_UNATTENDED = '1'
+$tools = '.\scripts'
+$plan = @('--venue-bundle', '..\private\connections.zip', '--device-map', '..\private\device-map.json')
+python -B "$tools\capture-quest-field-log.py" @plan --adb 'C:\Android\platform-tools\adb.exe' --output-directory ..\private\capture
+```
+
+收件後，把整個擷取目錄交給主控。主控可以在沒有 ADB 或頭盔的電腦上，逐席核對日誌長度、SHA-256、遊戲程序、連線埠和最終玩家入場識別。若原擷取有指定部署報告或部分座位，核對時使用相同的 `--deployment-report` 和相關選項。對補擷取批次也請附上原來的 `--retry-incomplete` 報告。
+
+```powershell
+python -B "$tools\capture-quest-field-log.py" @plan --check-capture ..\private\capture\capture-report.json
+```
+
+`verifiedSeats` 是本次核對成功的席數。缺檔、檔案不符或擷取尚未完成時，工具回傳退出碼 1，逐席列出結果。舊報告若沒有連線 ZIP 及裝置表的指紋，`captureBindingVerified` 會顯示 `false`。伺服器端戰績與實機體驗另外驗收。

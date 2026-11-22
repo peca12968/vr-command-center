@@ -423,12 +423,12 @@ def write_field_kit(destination, control, server, player, apk, report, hardware=
             scripts = Path(__file__).resolve().parent
             if probe is not None:
                 copy_verified(archive, probe, 'Quest/Diagnostics/' + quest_probe.APK_NAME, quest_probe.APK_SHA256)
-                for name in ('install-quest-udp-probe.py', 'probe-quest-udp.py', 'probe-quest-venue.py', 'quest_adb.py'):
+                for name in ('install-quest-udp-probe.py', 'probe-quest-udp.py', 'probe-quest-venue.py'):
                     archive.write(scripts / name, 'scripts/' + name)
             for name in ('deploy-quest.ps1', 'quest-adb-process.ps1', 'check-quest-usb.ps1',
                          'check-field-install.ps1', 'check-lan-udp.ps1', 'prepare-venue-network-plan.py',
                          'check-venue-udp-preflight.py', 'start-verified-venue.py', 'windows_firewall.py',
-                         'verify-field-results.py', 'analyze-world-journal.py'):
+                         'capture-quest-field-log.py', 'quest_adb.py', 'verify-field-results.py', 'analyze-world-journal.py'):
                 archive.write(scripts / name, 'scripts/' + name)
             firewall = scripts / 'check-windows-firewall-notifications.ps1'
             copy_verified(archive, firewall, 'scripts/' + firewall.name, guard['scriptSha256'])

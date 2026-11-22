@@ -202,8 +202,12 @@ class VenueReleaseTests(unittest.TestCase):
             extracted = self.root / 'field'
             archive.extractall(extracted)
         scripts = extracted / 'scripts'
-        for name in ('windows_firewall.py', 'analyze-world-journal.py'):
+        for name in ('windows_firewall.py', 'analyze-world-journal.py', 'capture-quest-field-log.py', 'quest_adb.py'):
             self.assertEqual((scripts / name).read_bytes(), Path(release.__file__).with_name(name).read_bytes())
+        capture = subprocess.run([sys.executable, '-E', '-s', '-B', str(scripts / 'capture-quest-field-log.py'), '--help'],
+                                 cwd=self.root, capture_output=True, text=True, timeout=15)
+        self.assertEqual(0, capture.returncode, capture.stderr)
+        self.assertIn('--check-capture', capture.stdout)
         # Run from the installation, with no source checkout on the import path.
         for name in ('prepare-venue-network-plan.py', 'check-venue-udp-preflight.py', 'start-verified-venue.py'):
             with self.subTest(entry=name):

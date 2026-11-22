@@ -58,6 +58,14 @@ def report_capture_status(pid, *, stage='capture-ready', **seat):
     print(json.dumps({'stage': stage, 'logcatPid': pid, **seat}), file=sys.stderr, flush=True)
 
 
+def check_admission(log, pid, port, admission):
+    _, result = field.quest_client_result(log, pid, port)
+    field.require(type(result) is dict and type(result.get('version')) is int and result['version'] == 1
+                  and type(result.get('roomId')) is int
+                  and all(result.get(key) == value for key, value in admission.items()),
+                  'Final result differs from the original player admission')
+
+
 async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready, openxr=None, *,
                        on_final=None, on_disconnected=None, device_identity=None, venue_device=None):
     async def confirm_source(verify_device=True):
@@ -127,11 +135,7 @@ async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready
             if final_seen and message == 'VR_CLIENT_DISCONNECTED':
                 log.seek(0)
                 captured = field.limited_read(log)
-                _, result = field.quest_client_result(captured.decode('utf-8'), pid, port)
-                field.require(type(result) is dict and type(result.get('version')) is int and result['version'] == 1
-                              and type(result.get('roomId')) is int
-                              and all(result.get(key) == value for key, value in admission.items()),
-                              'Final result differs from the original player admission')
+                check_admission(captured.decode('utf-8'), pid, port, admission)
                 await confirm_source(verify_device=False)
                 return {'version': 1, 'complete': True, 'logcatPid': pid, 'port': port, 'roomId': admission['roomId'], 'bytes': size,
                         'sha256': hashlib.sha256(captured).hexdigest(), 'scope': 'quest-logcat-only'}
@@ -239,7 +243,7 @@ def capture_binding(plan, salt):
             'mapSha256': field.quest_deployment_map_fingerprint(salt, device_map)}
 
 
-def retry_capture_plan(plan, report_path):
+def retry_capture_plan(plan, report_path, *, collected=None):
     report = field.read_quest_capture_report(report_path, plan['topology'])
     field.require(report.get('deploymentSha256') == plan.get('deploymentSha256'),
                   'Retry with the same original Quest deployment report as the first capture')
@@ -249,7 +253,11 @@ def retry_capture_plan(plan, report_path):
     if binding is None:
         field.require('deploymentSha256' in report,
                       'The prior Quest capture lacks an original ZIP and device map binding; start a new capture')
-        binding = capture_binding(plan, uuid.uuid4().hex)
+        if collected is None:
+            binding = capture_binding(plan, uuid.uuid4().hex)
+        elif 'captureBinding' in collected:
+            # The retry was the first report to record a salt. Recompute its binding against the full map.
+            binding = capture_binding(plan, collected['captureBinding']['salt'])
     else:
         field.require(binding == capture_binding(plan, binding['salt']),
                       'Retry with the original venue ZIP and Quest device map for the first capture')
@@ -327,6 +335,46 @@ def bind_deployment(plan, path, *, completed_only=False, after=None):
     return {**plan, 'deploymentSha256': hashlib.sha256(raw).hexdigest(),
             **({'partialDeployment': True} if completed_only else {}),
             'seats': bound_seats[skip:]}
+
+
+def check_collected_logs(plan, path, report):
+    binding = report.get('captureBinding')
+    if binding is not None or plan.get('captureBinding') is not None:
+        field.require(binding is not None and binding == (plan.get('captureBinding') or capture_binding(plan, binding['salt'])),
+                      'Capture does not match the original ZIP and device map')
+    field.require(all(report.get(key) == plan.get(key) for key in ('deploymentSha256', 'partialDeployment')),
+                  'Use the original deployment report and capture options')
+    planned = {(s['roomId'], s['seat']): s for s in plan['seats']}
+    field.require(planned.keys() == {(s['roomId'], s['seat']) for s in report['seats']},
+                  'Capture does not cover the selected seats')
+    directory = path.resolve(strict=True).parent
+    rows = []
+    for row in report['seats']:
+        source = planned[row['roomId'], row['seat']]
+        field.require(all(row[key] == source[key] for key in ('sessionId', 'port')),
+                      'Capture report does not match the original session and game port')
+        status = 'capture-incomplete'
+        if row['complete']:
+            file = directory / row['log']
+            try:
+                if file.resolve(strict=True) != file or not file.is_file():
+                    raise OSError('Expected the adjacent original log')
+                _, log, pid, _ = field.quest_capture_log(None, file, row['logcatPid'], None, row['bytes'], row['sha256'])
+                admission = {key: source[key] for key in ('sessionId', 'roomId', 'playerId', 'admissionId')}
+                check_admission(log, pid, row['port'], admission)
+                if source.get('openXR'):
+                    field.verify_quest_openxr_log(log, pid, source['openXR'])
+                status = 'verified'
+            except FileNotFoundError:
+                status = 'log-missing'
+            except (OSError, RuntimeError):
+                status = 'log-unreadable'
+            except (ValueError, RecursionError):
+                status = 'log-invalid'
+        rows.append({'roomId': row['roomId'], 'seat': row['seat'], 'status': status})
+    verified = sum(row['status'] == 'verified' for row in rows)
+    return {'scope': 'offline-quest-log-check', 'topology': plan['topology'], 'complete': verified == len(rows),
+            'captureBindingVerified': binding is not None, 'expectedSeats': len(rows), 'verifiedSeats': verified, 'seats': rows}
 
 
 async def capture_venue(adb, plan, directory, seconds):
@@ -421,7 +469,7 @@ def main():
     from windows_firewall import require_silent_windows_launch
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--adb', required=True, type=Path, help='Path to the installed ADB executable')
+    parser.add_argument('--adb', type=Path, help='Path to the installed ADB executable for device capture')
     parser.add_argument('--serial', help='ADB serial of the already launched Quest')
     parser.add_argument('--connection-file', type=Path, help='Original player connection JSON for this admission')
     parser.add_argument('--output', type=Path, help='New output log path in a private directory')
@@ -435,7 +483,9 @@ def main():
     parser.add_argument('--after-deployment-report', type=Path, help='Capture only seats launched since this preceding deployment report')
     parser.add_argument('--allow-partial-map', action='store_true', help='Capture only the explicitly mapped Quest seats')
     parser.add_argument('--retry-incomplete', type=Path, help='Read only the failed seats from this original venue capture report')
-    parser.add_argument('--output-directory', type=Path, help='New private directory for venue captures and the report')
+    venue_action = parser.add_mutually_exclusive_group()
+    venue_action.add_argument('--output-directory', type=Path, help='New private directory for venue captures and the report')
+    venue_action.add_argument('--check-capture', type=Path, help='Check a saved venue capture report and its original logs offline')
     parser.add_argument('--seconds', type=int, default=1800, help='Total capture deadline, 1 through 7200 seconds')
     args = parser.parse_args()
 
@@ -447,10 +497,11 @@ def main():
 
     try:
         field.integer(args.seconds, 1, 7200)
-        field.require(args.adb.is_file(), 'Provide the installed ADB executable')
-        adb = [str(args.adb.resolve())]
+        if not args.check_capture:
+            field.require(args.adb is not None and args.adb.is_file(), 'Provide the installed ADB executable')
+            adb = [str(args.adb.resolve())]
         single = (args.serial, args.connection_file, args.output)
-        venue = (args.venue_bundle, args.device_map, args.output_directory)
+        venue = (args.venue_bundle, args.device_map, args.output_directory or args.check_capture)
         field.require(not args.capture_deployed_seats or args.deployment_report,
                       'Use --capture-deployed-seats with the original incomplete --deployment-report')
         field.require(not args.after_deployment_report or args.deployment_report,
@@ -459,15 +510,19 @@ def main():
                       'Provide both --quest-launch-report and --quest-launch-release for single-seat capture')
         if any(venue) or args.allow_partial_map or args.retry_incomplete or args.deployment_report:
             field.require(all(venue) and not any(single) and args.quest_launch_report is None,
-                          'Use a venue ZIP, device map and output directory together without single-seat options')
+                          'Use a venue ZIP, device map and output directory or capture report together without single-seat options')
             plan = venue_plan(args.venue_bundle, args.device_map, args.allow_partial_map)
             if args.deployment_report:
                 plan = bind_deployment(plan, args.deployment_report, completed_only=args.capture_deployed_seats,
                                        after=args.after_deployment_report)
+            collected = field.read_quest_capture_report(args.check_capture, plan['topology']) if args.check_capture else None
             if args.retry_incomplete:
-                plan = retry_capture_plan(plan, args.retry_incomplete)
-            check_adb_startup()
-            report = asyncio.run(capture_venue(adb, plan, args.output_directory, args.seconds))
+                plan = retry_capture_plan(plan, args.retry_incomplete, collected=collected)
+            if args.check_capture:
+                report = check_collected_logs(plan, args.check_capture, collected)
+            else:
+                check_adb_startup()
+                report = asyncio.run(capture_venue(adb, plan, args.output_directory, args.seconds))
         else:
             field.require(all(single), 'Use a serial, connection file and output log together')
             field.require(re.fullmatch(r'[A-Za-z0-9\[][A-Za-z0-9._:%\[\]-]{0,127}', args.serial), 'Use a valid explicit ADB serial')

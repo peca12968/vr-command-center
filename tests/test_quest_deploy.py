@@ -2214,6 +2214,45 @@ else:
         for private in (configs[1]['room-01-seat-01.json']['joinTicket'], 'fixture-01', str(self.root)):
             self.assertNotIn(private, stdout + ''.join(lines) + json.dumps(report))
 
+    def test_offline_capture_readback_identifies_missing_and_substituted_seat_logs(self):
+        files, _ = self.vr_bundle('Linked')
+        mapping, document = self.device_map()
+        rows = [r for r in document['seats'] if r['seat'] == 1]
+        mapping.write_text(json.dumps(dict(document, seats=rows)), encoding='utf-8')
+        self.mock_capture_devices(rows, 'Linked')
+        output = self.root / 'logs'
+        cmd = self.capture_command(files, mapping, output, '--allow-partial-map')
+        captured = subprocess.run(cmd, cwd=self.root, capture_output=True, timeout=45)
+        self.assertEqual(captured.returncode, 0, captured.stderr)
+        report = output / 'capture-report.json'
+        offline = [sys.executable, '-B', ROOT / 'scripts/capture-quest-field-log.py', '--venue-bundle',
+                   cmd[cmd.index('--venue-bundle') + 1], '--device-map', mapping, '--allow-partial-map', '--check-capture', report]
+        def readback():
+            return subprocess.run(offline, cwd=self.root, capture_output=True, encoding='utf-8', timeout=25)
+        ok = readback()
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+        self.assertEqual(json.loads(ok.stdout)['verifiedSeats'], 5)
+        saved = json.loads(report.read_bytes())
+        a, b, c, d, e = saved['seats']
+        (output / a['log']).write_bytes((output / b['log']).read_bytes())
+        a.update(bytes=b['bytes'], sha256=b['sha256'])
+        (output / c['log']).unlink()
+        with (output / d['log']).open('ab') as stream:
+            stream.write(b'changed')
+        e.clear()
+        e.update(roomId=5, seat=1, sessionId=b['sessionId'], port=b['port'], complete=False, reason='fixture')
+        saved.update(complete=False, capturedSeats=4)
+        saved['completedDeviceFingerprints'] = [s for s in saved['completedDeviceFingerprints'] if s['roomId'] != 5]
+        report.write_text(json.dumps(saved), encoding='utf-8')
+        invalid = readback()
+        self.assertEqual(invalid.returncode, 1, invalid.stderr)
+        self.assertEqual([s['status'] for s in json.loads(invalid.stdout)['seats']],
+                         ['log-invalid', 'verified', 'log-missing', 'log-invalid', 'capture-incomplete'])
+        rows[0]['serial'] = 'replacement'
+        mapping.write_text(json.dumps(dict(document, seats=rows)), encoding='utf-8')
+        mismatch = readback()
+        self.assert_rejected(mismatch, 'original ZIP and device map')
+
     def test_venue_capture_only_announces_ready_when_disconnected_seat_rejoins(self):
         files, _ = self.vr_bundle('Linked')
         mapping, document = self.device_map()

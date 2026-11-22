@@ -5033,6 +5033,10 @@ class FieldResultsTests(unittest.TestCase):
                 retry = capture_tool.retry_capture_plan(plan, legacy_path)
                 self.assertEqual(plan['seats'][:1], retry['seats'])
                 self.assertEqual(plan['venueSha256'], retry['captureBinding']['venueSha256'])
+                reopened = capture_tool.retry_capture_plan(plan, legacy_path, collected={'captureBinding': retry['captureBinding']})
+                self.assertEqual(reopened, retry)
+                legacy = capture_tool.retry_capture_plan(plan, legacy_path, collected={})
+                self.assertIsNone(legacy['captureBinding'])
                 path.write_text(json.dumps({key: value for key, value in manifest.items() if key != 'questDeployments'}), encoding='utf-8')
                 with self.assertRaisesRegex(field.EvidenceError, 'original Quest deployment reports referenced'):
                     field.verify_venue(path)
