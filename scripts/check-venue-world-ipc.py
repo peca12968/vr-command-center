@@ -97,6 +97,8 @@ class Venue:
 
     def phase(self, action, target, status=200, **fields):
         rows = self.request('/api/venue/phase')[target]
+        if 'roomIds' in fields:
+            rows = [row for row in rows if set(row['roomIds']).intersection(fields['roomIds'])]
         targets = [{key: row[key] for key in ('sessionId', 'phaseSinceSequence', 'sessionSequence',
                    'environmentSinceSequence') if key in row} for row in rows]
         assert targets, action
@@ -123,7 +125,7 @@ class Publisher:
         self.tick = 0
         captured = datetime.now(timezone.utc).isoformat(timespec='microseconds').replace('+00:00', '0+00:00')
         header = {'sessionId': session['id'], 'streamId': self.stream_id, 'origin': 'GameServer',
-                  'roomIds': session['roomIds'], 'captureStartedAtUtc': captured}
+                  'roomIds': session['roomIds'], 'captureStartedAtUtc': captured, 'environmentVersion': 1}
         if session['environment']['mode'] == 'MR':
             header['calibration'] = 'quest-room-mr-v1'
         self.send(type='header', payload=header)
@@ -172,7 +174,8 @@ class Publisher:
                   'elapsedMilliseconds': 0 if self.sequence == 1 else int((time.monotonic() - self.started) * 1000),
                   'weather': environment['weather'], 'lightning': environment['lightning'],
                   'throughCombatSequence': self.combat, 'events': events, 'frame': {'phase': state['state'],
-                  'night': environment['timeOfDay'] == 'Night', 'visibility': environment['weather'], 'tick': self.tick,
+                  'night': environment['timeOfDay'] == 'Night',
+                  'visibility': environment['weather'] if environment['weather'] in ('Fog', 'Storm') else 'Clear', 'tick': self.tick,
                   'throughSequence': self.combat, 'players': players, 'enemies': list(self.enemies.values())}}
         assert self.send(type='frame', payload=packet)['acceptedSequence'] == self.sequence
 
@@ -235,6 +238,33 @@ def replace_headset_before_start(venue, route, old, headset):
     with venue.response(player_route + '/join-ticket', method='POST', admission=old['admissionId'], status=409):
         pass
     return current
+
+
+def configure_weather(venue, sources, mode):
+    storm = {'weather': 'Storm', 'timeOfDay': 'Night', 'lightning': True}
+    receipt = venue.phase('SetEnvironment', 'environment', environment=storm)
+    expected = {source.session['id']: storm for source in sources}
+    sequences = {row['sessionId']: row['appliedAtSequence'] for row in receipt['sessions']}
+    if mode == 'Independent':
+        for rooms, weather in [([1, 2], {'weather': 'Rain', 'timeOfDay': 'Day', 'lightning': False}),
+                               ([4], {'weather': 'Fog', 'timeOfDay': 'Night', 'lightning': False})]:
+            receipt = venue.phase('SetEnvironment', 'environment', roomIds=rooms, environment=weather)
+            selected = {source.session['id'] for source in sources if source.session['roomIds'][0] in rooms}
+            assert {row['sessionId'] for row in receipt['sessions']} == selected
+            for row in receipt['sessions']:
+                expected[row['sessionId']] = weather
+                sequences[row['sessionId']] = row['appliedAtSequence']
+    for source in sources:
+        source.state = venue.request(source.route)
+        key = source.session['id']
+        assert source.state['sequence'] == sequences[key]
+        assert all(source.state['environment'][field] == value for field, value in expected[key].items())
+    return expected
+
+
+def recorded_weather(packet):
+    return {'weather': packet['weather'], 'timeOfDay': 'Night' if packet['frame']['night'] else 'Day',
+            'lightning': packet['lightning']}
 
 
 def check_mode(venue, mode):
@@ -306,13 +336,20 @@ def check_mode(venue, mode):
             source.publish()
         begun = venue.phase('Begin', 'begin', requireFullTracking=True)
         assert begun['requireFullTracking'] and {row['sessionId'] for row in begun['sessions']} == {s['id'] for s in sessions}
-        venue.phase('SetEnvironment', 'environment', environment={'weather': 'Storm', 'timeOfDay': 'Night', 'lightning': True})
+        weather = configure_weather(venue, sources, mode)
+        live_weather = {}
         for source in sources:
-            source.state = venue.request(source.route)
             assert source.state['state'] == 'Running'
             for player in source.state['players']:
                 check_ticket(venue, source.state, player, tickets[player['id']])
             source.publish(damage=True)
+            with venue.response(source.world + '/watch') as observer:
+                assert next_event(observer)[0] == 'header'
+                kind, snapshot = next_event(observer)
+                assert kind == 'frame' and snapshot['packet']['sequence'] == 3
+                actual = recorded_weather(snapshot['packet'])
+                assert actual == weather[source.session['id']]
+                live_weather.update({room: actual for room in source.session['roomIds']})
 
         observed = next(source for source in sources if 5 in source.session['roomIds'])
         with venue.response(observed.world + '/watch') as master:
@@ -357,6 +394,8 @@ def check_mode(venue, mode):
             assert row['trackingBegin']['requestId'] == begun['requestId']
             assert frame['streamId'] == original.stream_id and frame['worldSequence'] == 2
             frames = [venue.request(original.world + f'/frames/{sequence}') for sequence in range(1, 5)]
+            initial = {'weather': 'Clear', 'timeOfDay': 'Day', 'lightning': False}
+            assert [recorded_weather(item['packet']) for item in frames] == [initial] * 2 + [weather[row['sessionId']]] * 2
             exact = frames[1]['packet']
             applied = next(entry['appliedAtSequence'] for entry in begun['sessions'] if entry['sessionId'] == row['sessionId'])
             assert row['trackingBegin']['appliedAtSequence'] == applied and exact['observedSequence'] == applied - 1
@@ -373,7 +412,7 @@ def check_mode(venue, mode):
                 'frames': sum(source.sequence for source in sources), 'closureRoute': closure_route, 'closure': closure,
                 'roomFiveWorld': observed.world, 'roomFiveLive': visible, 'saved': saved, 'rosters': rosters,
                 'headsetRoster': dict(headsets), 'ticketsRevalidatedInRunning': len(tickets),
-                'deviceChange': device_change}
+                'deviceChange': device_change, 'roomWeather': live_weather}
 
 
 def check_departed_clip(venue):
@@ -412,6 +451,7 @@ def check_departed_clip(venue):
 
 
 def check_after_restart(venue, result):
+    clips = {}
     assert venue.request('/api/sessions') == []
     assert venue.request(result['closureRoute']) == result['closure']
     for route, expected in result['rosters'].items():
@@ -423,10 +463,20 @@ def check_after_restart(venue, result):
             for sequence, frame in enumerate(frames, 1):
                 assert next_event(replay) == ('frame', frame) and venue.request(world + f'/frames/{sequence}') == frame
             assert next_event(replay) == ('saved-end', info) and replay.readline() == b''
+        header = info['header']
+        rooms = header['roomIds']
+        name = 'linked' if len(rooms) == 5 else f'room-{rooms[0]}'
+        clip = world + '/clips/' + str(uuid4())
+        venue.request(clip, method='PUT', body={'name': name, 'streamId': header['streamId'], 'startFrame': 1, 'endFrame': 4})
+        exported = venue.request(clip + '/player-replay.json')
+        assert exported['header']['roomIds'] == rooms and exported['header']['environmentVersion'] == 1
+        assert exported['packets'] == [frame['packet'] for frame in frames]
+        clips[name] = exported
     with venue.response(result['roomFiveWorld'] + '/watch?mode=replay&fromFrame=3&throughFrame=3&observerRoomId=5', role='Room5') as replay:
         assert next_event(replay)[0] == 'header'
         assert next_event(replay) == ('frame', result['roomFiveLive'])
         assert next_event(replay)[0] == 'saved-end' and replay.readline() == b''
+    return clips
 
 
 def main():
@@ -435,6 +485,7 @@ def main():
     parser.add_argument('--work-root', required=True, type=Path, help='Short existing Windows folder for temporary isolated data')
     parser.add_argument('--report', type=Path, help='New path for a JSON verification report')
     parser.add_argument('--departed-clip', type=Path, help='New output file for the verified synthetic player clip')
+    parser.add_argument('--environment-clips', type=Path, help='New directory for the six verified replay exports')
     args = parser.parse_args()
     if os.name != 'nt':
         parser.error('This fixture uses Windows AF_UNIX')
@@ -447,14 +498,21 @@ def main():
             results = [check_mode(venue, mode) for mode in ('Linked', 'Independent')]
             departed_clip = check_departed_clip(venue)
         with venue.start():
+            clips = {}
             for result in results:
-                check_after_restart(venue, result)
+                clips.update(check_after_restart(venue, result))
+            assert set(clips) == {'linked', *(f'room-{room}' for room in ROOMS)}
         summary = {'verified': [{field: result[field] for field in ('mode', 'seats', 'recordings', 'combatEvents', 'frames',
-                                                                     'headsetRoster', 'ticketsRevalidatedInRunning', 'deviceChange')}
+                                                                     'headsetRoster', 'ticketsRevalidatedInRunning', 'deviceChange', 'roomWeather')}
                                 for result in results], 'apiSha256': hashlib.sha256(args.api_exe.read_bytes()).hexdigest(),
                    'transport': 'Windows AF_UNIX', 'restarted': True, 'tcpListeners': 0, 'udpEndpoints': 0, 'activeSessions': 0,
                    'scope': 'Synthetic tracked poses and combat using packaged management API, real WebSocket and SSE'}
     summary['verifiedDepartedEventRooms'] = len(departed_clip['eventRooms'])
+    summary['environmentExports'] = sorted(clips)
+    if args.environment_clips:
+        args.environment_clips.mkdir()
+        for name, clip in clips.items():
+            (args.environment_clips / (name + '.json')).write_text(json.dumps(clip), encoding='utf-8')
     if args.departed_clip:
         with args.departed_clip.open('x', encoding='utf-8') as output:
             json.dump(departed_clip, output)

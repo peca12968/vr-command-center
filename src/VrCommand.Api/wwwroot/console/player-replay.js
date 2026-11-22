@@ -14,6 +14,9 @@ for (const [kind, label] of Object.entries(eventNames)) eventKind.add(new Option
 const loopPauseMilliseconds = 300;
 const weatherNames = { Clear: '晴朗', Rain: '下雨', Fog: '濃霧', Storm: '暴風雨' };
 const phaseNames = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
+function weatherText(packet) {
+  return [weatherNames[packet.weather], packet.frame.night ? '夜晚' : '白天', packet.lightning ? '雷電開啟' : '雷電關閉'].join(' · ');
+}
 let replay, scene, index = 0, cursor = 0, lastTime = 0, animation = 0, epoch = 0;
 let restartAt = null;
 let eventFrames = [], matchingEvents = [];
@@ -108,8 +111,7 @@ function show(next, continuous = false, position) {
   const clock = recordedClock(replay.header, packet.frame.tick);
   $('clock').textContent = clock;
   $('clock').hidden = !clock;
-  $('weather').textContent = [weatherNames[packet.weather], packet.frame.night ? '夜晚' : '白天',
-    packet.lightning ? '雷電開啟' : '雷電關閉'].join(' · ');
+  $('weather').textContent = weatherText(packet);
   const first = packets[0].elapsedMilliseconds;
   $('time').textContent = `片段 ${clipSeconds(elapsed - first)} / ${clipSeconds(packets.at(-1).elapsedMilliseconds - first)} 秒`;
   showFrameEvents();
@@ -165,6 +167,16 @@ $('file').addEventListener('change', async () => {
     $('transition').replaceChildren(new Option('跳到畫格', ''), ...transitions.map(({ index, suspended }) =>
       new Option(`第 ${candidate.packets[index].sequence} 格 · ${suspended ? '遊戲來源暫停' : '遊戲來源恢復'}`, index)));
     $('transition-field').hidden = transitions.length === 0;
+    const environmentOptions = [];
+    for (const [i, packet] of candidate.packets.entries()) {
+      const previous = candidate.packets[i - 1];
+      if (previous && packet.weather === previous.weather && packet.frame.night === previous.frame.night
+          && packet.lightning === previous.lightning) continue;
+      const elapsed = clipSeconds(packet.elapsedMilliseconds - candidate.packets[0].elapsedMilliseconds);
+      environmentOptions.push(new Option(`${elapsed} 秒 · 第 ${packet.sequence} 格 · ${weatherText(packet)}`, i));
+    }
+    $('environment').replaceChildren(new Option('跳到畫格', ''), ...environmentOptions);
+    $('environment-field').hidden = environmentOptions.length < 2;
     timeline.max = candidate.packets.length - 1;
     $('view').hidden = false;
     scene.resize();
@@ -236,10 +248,12 @@ $('seek').addEventListener('submit', event => {
 });
 loop.addEventListener('change', () => { if (!loop.checked && restartAt !== null) pause(); });
 timeline.addEventListener('input', () => openFrame(Number(timeline.value)));
-$('transition').addEventListener('change', event => {
-  if (event.target.value !== '') openFrame(Number(event.target.value));
-  event.target.value = '';
-});
+for (const select of [$('transition'), $('environment')]) {
+  select.addEventListener('change', () => {
+    if (select.value !== '') openFrame(Number(select.value));
+    select.value = '';
+  });
+}
 room.addEventListener('change', () => {
   if (!replay) return;
   clearFollow();

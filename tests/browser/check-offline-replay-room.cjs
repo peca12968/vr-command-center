@@ -39,6 +39,7 @@ async function main() {
       await control('message').filter({ hasText: '已載入 3 格' }).waitFor();
     };
     await load();
+    assert.ok(await control('environment-field').isHidden());
     assert.equal(await control('event-count').innerText(), '2 個事件畫格');
     await control('event-kind').selectOption('ShotHit');
     await control('room').selectOption('1');
@@ -55,11 +56,31 @@ async function main() {
     timed.packets = [30001, 30103, 30103, 32222, 33337].map((elapsedMilliseconds, index) => ({
       ...structuredClone(timed.packets[1]), sequence: 10 + index, elapsedMilliseconds
     }));
+    for (const [index, packet] of timed.packets.entries()) {
+      if (index >= 1) packet.weather = 'Rain';
+      packet.frame.night = index >= 2;
+      packet.lightning = index >= 3;
+    }
     await control('file').setInputFiles({ name: 'timed.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(timed)) });
     await control('message').filter({ hasText: '已載入 5 格' }).waitFor();
     assert.equal(await control('seconds').getAttribute('max'), '3.336');
     await control('room').selectOption('5');
     await control('follow').selectOption(timed.packets[0].frame.players[0].id);
+    const weatherMenu = control('environment');
+    assert.deepEqual(await weatherMenu.locator('option').allTextContents(), [
+      '跳到畫格', '0.00 秒 · 第 10 格 · 晴朗 · 白天 · 雷電關閉', '0.102 秒 · 第 11 格 · 下雨 · 白天 · 雷電關閉',
+      '0.102 秒 · 第 12 格 · 下雨 · 夜晚 · 雷電關閉', '2.221 秒 · 第 13 格 · 下雨 · 夜晚 · 雷電開啟'
+    ]);
+    await control('play').click();
+    for (const index of [2, 1, 3, 0]) {
+      const option = await weatherMenu.locator(`option[value="${index}"]`).innerText();
+      await weatherMenu.selectOption(String(index));
+      assert.ok((await control('frame').innerText()).includes(`第 ${10 + index} 格`));
+      assert.ok(option.endsWith(await control('weather').innerText()));
+      assert.equal(await control('play').innerText(), '播放');
+      assert.equal(await control('room').inputValue(), '5');
+      assert.equal(await control('follow').inputValue(), timed.packets[0].frame.players[0].id);
+    }
     await seek('0');
     assert.match(await control('frame').innerText(), /第 10 格/);
     await control('play').click();
@@ -99,6 +120,7 @@ async function main() {
     assert.match(await control('frame').innerText(), /第 13 格/);
     await load();
     assert.equal(await control('seconds').inputValue(), '');
+    assert.ok(await control('environment-field').isHidden());
     assert.equal(await control('seconds').getAttribute('max'), '0.4');
     await control('room').selectOption('1'); await control('event-next').click();
     assert.match(await control('event-frame').innerText(), /1 筆/);
@@ -144,6 +166,29 @@ async function main() {
       assert.match(await control('event-frame').innerText(), /玩家受傷 2 筆/);
       await seek(await control('seconds').getAttribute('max'));
       assert.ok(await control('next').isDisabled());
+    }
+    if (process.argv[4]) {
+      const conditions = [
+        ['linked', '暴風雨 · 夜晚 · 雷電開啟', 640],
+        ['room-1', '下雨 · 白天 · 雷電關閉', 64], ['room-2', '下雨 · 白天 · 雷電關閉', 64],
+        ['room-3', '暴風雨 · 夜晚 · 雷電開啟', 128], ['room-4', '濃霧 · 夜晚 · 雷電關閉', 0],
+        ['room-5', '暴風雨 · 夜晚 · 雷電開啟', 128]
+      ];
+      const canvas = page.locator('#replay-canvas');
+      for (const [name, label, rain] of conditions) {
+        await control('file').setInputFiles(resolve(process.argv[4], name + '.json'));
+        await control('title').filter({ hasText: name }).waitFor();
+        assert.equal(await weatherMenu.locator('option').count(), 3);
+        assert.equal(await control('weather').innerText(), '晴朗 · 白天 · 雷電關閉');
+        assert.equal(await canvas.getAttribute('data-rain-count'), '0');
+        await weatherMenu.selectOption('2');
+        assert.match(await control('frame').innerText(), /第 3 格/);
+        assert.equal(await control('weather').innerText(), label);
+        assert.equal(await canvas.getAttribute('data-rain-count'), String(rain));
+        await weatherMenu.selectOption('0');
+        assert.equal(await control('weather').innerText(), '晴朗 · 白天 · 雷電關閉');
+      }
+      console.log('PASS: opening all six API exports, selecting environment changes and restoring the initial weather');
     }
     assert.deepEqual(errors, []);
     assert.deepEqual(network, []);
