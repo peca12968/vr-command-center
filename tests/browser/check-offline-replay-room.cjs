@@ -46,6 +46,42 @@ async function main() {
     assert.equal(await control('event-count').innerText(), '1 個事件畫格');
     await control('event-next').click();
     assert.match(await control('frame').innerText(), /第 12 格/);
+    const gap = fixture();
+    gap.clipName = '玩家再次入鏡';
+    gap.endFrame = 15;
+    gap.packets = [1, 0, 1, 1, 0, 1].map((source, index) => {
+      const packet = structuredClone(gap.packets[source]);
+      packet.frame.tick = packet.sequence = 10 + index;
+      packet.elapsedMilliseconds = [0, 100, 200, 200, 200, 8000][index];
+      return packet;
+    });
+    await control('file').setInputFiles({ name: 'gap.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(gap)) });
+    await control('title').filter({ hasText: gap.clipName }).waitFor();
+    await control('room').selectOption('1');
+    const followed = gap.packets[1].frame.players[0].id;
+    await control('follow').selectOption(followed);
+    assert.ok(await control('follow-back').isHidden());
+    await control('follow-next').evaluate(button => {
+      document.getElementById('player-replay-play').click();
+      button.click();
+    });
+    assert.equal(await control('play').innerText(), '播放');
+    assert.match(await control('frame').innerText(), /第 11 格/);
+    assert.ok(await control('follow-next').isHidden());
+    await control('next').click();
+    assert.ok(await control('follow-back').isVisible() && await control('follow-next').isVisible());
+    await control('follow-next').click();
+    assert.match(await control('frame').innerText(), /第 14 格/);
+    await control('back').click();
+    await control('follow-back').click();
+    assert.match(await control('frame').innerText(), /第 11 格/);
+    assert.equal(await control('follow').inputValue(), followed);
+    assert.equal(await control('room').inputValue(), '1');
+    await control('number').fill('15');
+    await control('jump').getByRole('button').click();
+    assert.ok(await control('follow-next').isHidden() && await control('follow-back').isVisible());
+    await control('room').selectOption('5');
+    assert.ok(await control('follow-next').isHidden() && await control('follow-back').isHidden());
     const seek = async value => {
       await control('seconds').fill(value);
       await control('seek').getByRole('button').click();
@@ -192,7 +228,7 @@ async function main() {
     }
     assert.deepEqual(errors, []);
     assert.deepEqual(network, []);
-    console.log('PASS: offline five-room event navigation, departed player, scoped reload and millisecond time seeking with irregular and duplicate timestamps');
+    console.log('PASS: offline five-room events, nearest recorded player appearances, scoped reload and millisecond time seeking with irregular and duplicate timestamps');
   } finally { await browser.close(); }
 }
 

@@ -21,6 +21,7 @@ let replay, scene, index = 0, cursor = 0, lastTime = 0, animation = 0, epoch = 0
 let restartAt = null;
 let eventFrames = [], matchingEvents = [];
 let replayPlayers = [];
+let followedFrames = [];
 
 function message(text, error = false) {
   $('message').textContent = text;
@@ -62,6 +63,8 @@ function filterEvents() {
 function clearFollow() {
   if (!follow.value) return;
   follow.value = '';
+  followedFrames = [];
+  updateFollow(index);
   followStatus.textContent = '';
   scene.follow = false;
   scene.select('');
@@ -73,6 +76,8 @@ function showFollowOptions() {
   follow.replaceChildren(new Option('不跟隨', ''), ...options.map(({ id, roomId, number }) =>
     new Option(`房間 ${roomId} · 玩家 ${number}`, id)));
   follow.disabled = options.length === 0;
+  followedFrames = [];
+  updateFollow(index);
   followStatus.textContent = options.length ? '' : '這個範圍沒有玩家。';
 }
 
@@ -85,10 +90,13 @@ function updateRoomEvents() {
   filterEvents();
 }
 
-function updateFollow(frame) {
+function updateFollow(position) {
+  const present = followedFrames.includes(position);
+  const missing = followedFrames.length > 0 && !present;
+  $('follow-back').hidden = !missing || followedFrames[0] >= position;
+  $('follow-next').hidden = !missing || followedFrames.at(-1) <= position;
   const id = follow.value;
   if (!id) return;
-  const present = frame.players.some(player => player.id === id && (room.value === 'all' || player.roomId === Number(room.value)));
   scene.selected = present ? 'p:' + id : '';
   scene.follow = present;
   const status = present ? '' : '這一格沒有原角色，鏡頭停留在目前位置。';
@@ -99,7 +107,7 @@ function show(next, continuous = false, position) {
   const { packets } = replay;
   const packet = packets[next];
   const elapsed = position ?? packet.elapsedMilliseconds;
-  updateFollow(packet.frame);
+  updateFollow(next);
   scene.show(packet.frame, packets[next - 1]?.frame, packet.events.filter(event => event.hasRay),
     { weather: packet.weather, lightning: packet.lightning }, continuous);
   index = next;
@@ -263,14 +271,23 @@ room.addEventListener('change', () => {
 });
 follow.addEventListener('change', () => {
   if (!replay) return;
+  followedFrames = [];
+  if (follow.value) {
+    for (const [i, packet] of replay.packets.entries()) {
+      if (packet.frame.players.some(player => player.id === follow.value && (room.value === 'all' || player.roomId === Number(room.value))))
+        followedFrames.push(i);
+    }
+  }
+  updateFollow(index);
   if (!follow.value) {
     scene.follow = false;
     scene.select('');
     followStatus.textContent = '';
     return;
   }
-  updateFollow(replay.packets[index].frame);
   if (scene.follow) scene.radius = Math.min(scene.radius, scene.fitRadius(7));
   scene.draw();
 });
+$('follow-back').addEventListener('click', () => openFrame(followedFrames.findLast(i => i < index)));
+$('follow-next').addEventListener('click', () => openFrame(followedFrames.find(i => i > index)));
 document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
