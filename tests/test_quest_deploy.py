@@ -2,7 +2,7 @@ import asyncio
 import base64
 from contextlib import contextmanager, redirect_stderr
 import copy
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import importlib.util
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -1819,6 +1819,42 @@ if ($PSCmdlet.ParameterSetName -eq 'Venue') {''', 1), encoding='utf-8')
         return subprocess.run(['pwsh','-NoProfile','-NonInteractive','-File',str(script),
                                '-VenueBundle',str(bundle),*flags], capture_output=True, encoding='utf-8', timeout=20, env=environment)
 
+    def test_offline_windows_station_receipt_binds_current_file_and_seat(self):
+        original = self.config(3, 1, self.session_ids[2], 7777)
+        raw = json.dumps(original).encode()
+        file = self.root / 'renamed.json'
+        receipt = self.root / 'staged.json'
+        row = {'station': 'PC-B', 'roomId': 3, 'seat': 2, 'file': 'pc-PC-B-room-03-seat-02.json',
+               'endpoint': '192.168.1.10:7777', 'expiresAtUtc': datetime.fromtimestamp(self.expiry, timezone.utc).isoformat(),
+               'connectionSha256': hashlib.sha256(raw).hexdigest()}
+        report = {'version': 1, 'topology': 'Independent', 'managementVerified': True, 'liveSourceVerified': True}
+
+        def check(content=raw, station='pc-b', seats=None, **fields):
+            receipt.write_text(json.dumps({**report, 'seats': [row] if seats is None else seats, **fields}), encoding='utf-8')
+            file.write_bytes(content)
+            return subprocess.run(['pwsh', '-NoProfile', '-NonInteractive', '-File', ROOT / 'scripts/deploy-quest.ps1',
+                                   '-WindowsStageReceipt', receipt, '-ClientConfig', file, '-Station', station],
+                                  capture_output=True, encoding='utf-8', timeout=15)
+
+        accepted = check()
+        self.assertEqual(0, accepted.returncode, accepted.stderr)
+        result = json.loads(accepted.stdout)
+        self.assertEqual(('PC-B', 3, 2, True), tuple(result[k] for k in ('station', 'roomId', 'seat', 'connectionFileMatched')))
+        self.assertNotIn(original['joinTicket'], accepted.stdout + accepted.stderr)
+        self.assert_rejected(check(station='PC-C'), 'station is missing')
+        previous = self.config(3, 1, uuid.uuid4(), 7777)
+        self.assert_rejected(check(content=json.dumps(previous).encode()), 'does not match')
+        self.assert_rejected(check(content=raw + b'\n'), 'does not match')
+        self.assert_rejected(check(seats=[row, {**row, 'station': 'pc-b'}]), 'only once')
+        self.assert_rejected(check(seats=[{k: v for k, v in row.items() if k != 'connectionSha256'}]), 'fresh staging receipt')
+        self.assert_rejected(check(liveSourceVerified='true'), 'successful staging receipt')
+        for change in ({'seat': 1}, {'endpoint': '127.0.0.1:7777'}, {'expiresAtUtc': '2000-01-01T00:00:00Z'}):
+            with self.subTest(change=change):
+                self.assert_rejected(check(seats=[{**row, **change}]), 'seat details disagree')
+        expired = json.dumps(self.config(3, 1, self.session_ids[2], 7777, expiry=int(time.time()) - 1)).encode()
+        self.assert_rejected(check(content=expired, seats=[{**row, 'connectionSha256': hashlib.sha256(expired).hexdigest()}]),
+                             'ticket has expired')
+
     def mixed_bundle(self):
         files, _ = self.vr_bundle('Independent')
         mr, _ = self.bundle('Independent')
@@ -1974,6 +2010,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Venue') {''', 1), encoding='utf-8')
                     with zipfile.ZipFile(io.BytesIO(files[f'room-{room:02}-connections.zip'])) as original:
                         raw = original.read(f'room-{room:02}-seat-{seat:02}.json')
                     self.assertEqual(raw, before[row['file']])
+                    self.assertEqual(hashlib.sha256(raw).hexdigest(), row['connectionSha256'])
                     self.assertEqual(raw, base64.b64decode(body['rooms'][room-1]['connectionFiles'][seat-1]))
                 self.assertNotIn(key, result.stdout + result.stderr)
                 self.assertNotIn('joinTicket', result.stdout)

@@ -1,6 +1,6 @@
 [CmdletBinding(DefaultParameterSetName='Player')]
 param(
-    [Parameter(Mandatory, ParameterSetName='Player')][Parameter(Mandatory, ParameterSetName='Refresh')][Parameter(Mandatory, ParameterSetName='PlayerTracking')][string]$ClientConfig,
+    [Parameter(Mandatory, ParameterSetName='Player')][Parameter(Mandatory, ParameterSetName='Refresh')][Parameter(Mandatory, ParameterSetName='PlayerTracking')][Parameter(Mandatory, ParameterSetName='WindowsReceipt')][string]$ClientConfig,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Refresh')][Parameter(ParameterSetName='Smoke')][string]$Serial,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Refresh')][Parameter(ParameterSetName='Smoke')][Parameter(ParameterSetName='PrepareApks')][ValidateNotNullOrEmpty()][string]$AdbPath,
     [Parameter(Mandatory, ParameterSetName='Smoke')][switch]$SmokeTest,
@@ -42,7 +42,9 @@ param(
     [Parameter(ParameterSetName='Bundle')][switch]$AllHeadsets,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Refresh')][Parameter(ParameterSetName='Venue')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Windows')][Parameter(Mandatory, ParameterSetName='PlayerTracking')][ValidateNotNullOrEmpty()][string]$ManagementApi,
     [Parameter(Mandatory, ParameterSetName='Windows')][ValidateNotNullOrEmpty()][string]$WindowsSeatMap,
-    [Parameter(Mandatory, ParameterSetName='Windows')][ValidateNotNullOrEmpty()][string]$WindowsOutputDirectory
+    [Parameter(Mandatory, ParameterSetName='Windows')][ValidateNotNullOrEmpty()][string]$WindowsOutputDirectory,
+    [Parameter(Mandatory, ParameterSetName='WindowsReceipt')][string]$WindowsStageReceipt,
+    [Parameter(Mandatory, ParameterSetName='WindowsReceipt')][ValidatePattern('\A[A-Za-z0-9][A-Za-z0-9-]{0,31}\z')][string]$Station
 )
 $ErrorActionPreference = 'Stop'
 # Handle ADB exit codes here so both Windows PowerShell and PowerShell report the failing step.
@@ -584,11 +586,16 @@ function Confirm-WindowsVenueSeats($Venue, $Seats) {
     }
 }
 
-function Export-WindowsVenueSeats {
-    $map = (Read-DeploymentJson $WindowsSeatMap 16384 'Windows seat map').Document
+function Confirm-WindowsSeatMap($map, [switch]$Receipt) {
+    $rootFields = @('version','seats')
+    $seatFields = @('roomId','seat','station')
+    if ($Receipt) {
+        $rootFields += 'topology','managementVerified','liveSourceVerified'
+        $seatFields += 'file','endpoint','expiresAtUtc','connectionSha256'
+    }
     if (-not (Test-JsonInteger $map.version) -or $map.version -ne 1 -or $map.seats -isnot [array] -or
         $map.seats.Count -lt 1 -or $map.seats.Count -gt 25 -or
-        @($map.PSObject.Properties.Name | Where-Object { $_ -cnotin @('version','seats') }).Count) {
+        @($map.PSObject.Properties.Name | Where-Object { $_ -cnotin $rootFields }).Count) {
         throw 'Use a version 1 Windows seat map with 1 to 25 seats.'
     }
     $seats = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
@@ -597,13 +604,47 @@ function Export-WindowsVenueSeats {
         if (-not (Test-JsonInteger $row.roomId) -or $row.roomId -notin 1..5 -or
             -not (Test-JsonInteger $row.seat) -or $row.seat -notin 1..5 -or
             $row.station -isnot [string] -or $row.station -cnotmatch '\A[A-Za-z0-9][A-Za-z0-9-]{0,31}\z' -or
-            @($row.PSObject.Properties.Name | Where-Object { $_ -cnotin @('roomId','seat','station') }).Count) {
+            @($row.PSObject.Properties.Name | Where-Object { $_ -cnotin $seatFields }).Count) {
             throw 'Each Windows seat needs roomId, seat and a station label of up to 32 ASCII letters, digits or hyphens.'
         }
         if (-not $seats.Add("$($row.roomId)/$($row.seat)") -or -not $stations.Add($row.station)) {
             throw 'Each Windows seat and station must appear only once.'
         }
     }
+}
+
+function Confirm-WindowsSeatDelivery {
+    $receipt = (Read-DeploymentJson $WindowsStageReceipt 32768 'Windows staging receipt').Document
+    Confirm-WindowsSeatMap $receipt -Receipt
+    if ($receipt.topology -cnotin @('Linked','Independent') -or
+        $receipt.managementVerified -isnot [bool] -or -not $receipt.managementVerified -or
+        $receipt.liveSourceVerified -isnot [bool] -or -not $receipt.liveSourceVerified) {
+        throw 'Use the successful staging receipt from the venue operator.'
+    }
+    $row = $receipt.seats | Where-Object { [string]::Equals($_.station, $Station, [StringComparison]::OrdinalIgnoreCase) }
+    if (-not $row) { throw 'This station is missing from the staging receipt.' }
+    if ($row.connectionSha256 -isnot [string] -or $row.connectionSha256 -cnotmatch '\A[a-f0-9]{64}\z') {
+        throw 'Ask the venue operator for a fresh staging receipt with connection file hashes.'
+    }
+    $config = Read-DeploymentJson $ClientConfig 2048 'Windows player connection'
+    if ((Get-QuestSha256 $config.Bytes) -cne $row.connectionSha256) {
+        throw 'The received connection file does not match the file staged for this station.'
+    }
+    $ticket = Read-PlayerConfig $config.Document
+    $endpoint = [string]$config.Document.address + ':' + $config.Document.port
+    $expectedFile = 'pc-{0}-room-{1:00}-seat-{2:00}.json' -f $row.station,$row.roomId,$row.seat
+    if ($ticket.AlignmentHash -or $ticket.RoomId -ne $row.roomId -or $ticket.Seat + 1 -ne $row.seat -or
+        $endpoint -cne $row.endpoint -or $expectedFile -cne $row.file -or
+        $ticket.ExpiresAtUtc -ne [DateTimeOffset]$row.expiresAtUtc) {
+        throw 'The staging receipt and the Windows VR player seat details disagree.'
+    }
+    [ordered]@{ station = $row.station; roomId = $row.roomId; seat = $row.seat; endpoint = $endpoint
+        expiresAtUtc = $ticket.ExpiresAtUtc.ToString('o'); connectionFileMatched = $true } | ConvertTo-Json -Compress
+}
+
+function Export-WindowsVenueSeats {
+    $map = (Read-DeploymentJson $WindowsSeatMap 16384 'Windows seat map').Document
+    Confirm-WindowsSeatMap $map
 
     $provider = $null
     $drive = $null
@@ -648,7 +689,8 @@ function Export-WindowsVenueSeats {
     [ordered]@{ version = 1; topology = $venue.Report.topology; managementVerified = $true; liveSourceVerified = $true; seats = @(
         foreach ($row in $selected) {
             [ordered]@{ roomId = $row.RoomId; seat = $row.Seat; station = $row.Station; file = $row.File
-                endpoint = $row.Ticket.Endpoint; expiresAtUtc = $row.Ticket.ExpiresAtUtc.ToString('o') }
+                endpoint = $row.Ticket.Endpoint; expiresAtUtc = $row.Ticket.ExpiresAtUtc.ToString('o')
+                connectionSha256 = Get-QuestSha256 $row.Ticket.Bytes }
         }
     ) } | ConvertTo-Json -Depth 4 -Compress
 }
@@ -2278,6 +2320,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Refresh') {
 }
 
 if ($PSCmdlet.ParameterSetName -eq 'Windows') { Export-WindowsVenueSeats; return }
+if ($PSCmdlet.ParameterSetName -eq 'WindowsReceipt') { Confirm-WindowsSeatDelivery; return }
 
 if ($PSCmdlet.ParameterSetName -eq 'PlayerTracking') {
     if (-not $VerifyPlayerTracking) { throw 'Specify -VerifyPlayerTracking to check the player seat before Begin.' }

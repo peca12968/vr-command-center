@@ -8,7 +8,7 @@
 | --- | --- |
 | 主控台 | `VRCommand-ControlServer`，由 `Start-Control.exe` 開啟，依資料夾中的 README 建立或選取管理實例。 |
 | 遊戲伺服器 | `VRCommand-GameServer`，使用包內啟動器載入場次的伺服器設定。 |
-| Windows 玩家 | `VRCommand-Player`，使用包內啟動器載入該席玩家的連線檔。 |
+| Windows 玩家 | `VRCommand-Player`，使用包內啟動器載入該席玩家的連線檔。需要核對主控派發的席位時，一併複製根目錄的 `scripts` 資料夾。 |
 | Quest 3 | `Quest` 內的 APK 與原始建置回條，以及 `scripts` 內的 USB 診斷和部署工具。 |
 | 硬體排演工作站（選配） | `VRCommand-HardwareSimulator` 內的模擬器、範例及操作說明。發行報告的 `hardwareSimulator` 欄記載隨包版本。 |
 
@@ -123,6 +123,8 @@ python -B "$tools\check-venue-udp-preflight.py" @plan @network --retry-report .\
 ```
 
 ### 頭盔接入
+
+若由主控分發 Windows 席位，請向主控取得本場匯出成功的回條。可在開啟遊戲前離線執行 `pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -WindowsStageReceipt .\windows-stage.json -Station PC-A -ClientConfig .\seat.json`。將 PC-A 換成這台電腦的標籤，並選擇實際收到的連線檔。成功時會顯示房號、席位、效期及 `connectionFileMatched`。
 
 若使用 VIVE 的 Windows PC VR 連線方式，可在解壓根目錄執行下列檢查。請使用包外的新報告檔名。這一步讀取本機 OpenXR 設定與執行環境檔案；指定型號的頭盔畫面與左右控制器須在場館實測。
 

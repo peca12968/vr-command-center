@@ -141,7 +141,8 @@ API 使用 `POST /api/sessions/{id}/rooms/{roomId}/players/{playerId}/vr-connect
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 `
   -VenueBundle .\vr-venue-connections.zip -ManagementApi http://127.0.0.1:5080 `
-  -WindowsSeatMap .\windows-seat-map.json -WindowsOutputDirectory 'F:\private\windows-seats'
+  -WindowsSeatMap .\windows-seat-map.json -WindowsOutputDirectory 'F:\private\windows-seats' `
+  > 'F:\private\windows-stage.json'
 ```
 
 搭配管理包 0.31.148，工具在寫入暫存目錄前及正式交付前各核對一次原包內所有票券、現行入場、遊戲端點及近期原來源畫格。核對成功後才一次交付對照表中的原 VR 連線檔，例如 `pc-PC-A-room-01-seat-02.json`。若來源在暫存期間停止更新，工具會指出受影響的房間和席位並移除這批暫存。來源恢復且原票券仍有效時，可用同一份 ZIP 重新執行。
@@ -150,7 +151,14 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 `
 
 若純 VR 原包的目的地為 `127.0.0.1`，Windows 席位匯出會保留這個位址。五房獨立與合併排演都可使用。要改成跨機遊玩，請先由遊戲伺服器公布場館網路位址，再從主控重新配票。
 
-把每份 JSON 私下交給對應電腦。玩家在該電腦用解壓後的 `Launch-Player.exe --config <該台連線檔> --launch --openxr --wait` 加入。Quest 席位可從同一份原場館 ZIP 使用 Quest 的批次部署流程。 [Windows OpenXR 啟動](WINDOWS_PLAYER_PACKAGE.md#windows-openxr-啟動) · [Quest 席位部署](QUEST3.md#部署指定的-quest-席位)
+主控確認匯出成功後，把各席連線檔私下交給對應電腦，並透過可信管道提供本場的 `windows-stage.json` 回條。工作站輸入自己的標籤及實際收到的連線檔，例如在 PC-A 執行下列命令。回條記錄每份原檔的 SHA-256，收到的檔案即使改名也能核對；選錯電腦、混入前一場的檔案、內容改動或票券過期都會中止。舊回條若缺少雜湊，請主控重新匯出。
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -WindowsStageReceipt .\windows-stage.json `
+  -Station PC-A -ClientConfig .\pc-PC-A-room-01-seat-02.json
+```
+
+核對會顯示房號、席位、端點及效期，可在離線狀態執行。回條反映主控匯出當時的名冊；玩家入場時，遊戲伺服器會再確認入場資格。確認 `connectionFileMatched` 為 `true` 後，可用解壓後的 `Launch-Player.exe --config <同一份連線檔> --launch --openxr --wait` 加入。Quest 席位可從同一份原場館 ZIP 使用 Quest 的批次部署流程。 [Windows OpenXR 啟動](WINDOWS_PLAYER_PACKAGE.md#windows-openxr-啟動) · [Quest 席位部署](QUEST3.md#部署指定的-quest-席位)
 
 下載使用各來源已公布的位址和埠。五房獨立須使用各自的端點，合併場共用同一端點。若名冊、場次或來源已變更，請重新讀取五房名冊。尚未填滿的場館可沿用單席或整房配票。
 
