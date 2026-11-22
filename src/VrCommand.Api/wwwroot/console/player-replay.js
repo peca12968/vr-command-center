@@ -72,15 +72,26 @@ function clearFollow() {
   scene.select('');
 }
 
-function showFollowOptions() {
+function indexFollowedFrames() {
+  followedFrames = [];
+  if (!follow.value) return;
+  for (const [i, packet] of replay.packets.entries()) {
+    if (packet.frame.players.some(player => player.id === follow.value && (room.value === 'all' || player.roomId === Number(room.value))))
+      followedFrames.push(i);
+  }
+}
+
+function showFollowOptions(previousPlayer = '') {
   const selectedRoom = room.value;
   const options = replayPlayers.filter(player => selectedRoom === 'all' || player.roomId === Number(selectedRoom));
   follow.replaceChildren(new Option('不跟隨', ''), ...options.map(({ id, roomId, number }) =>
     new Option(`房間 ${roomId} · 玩家 ${number}`, id)));
   follow.disabled = options.length === 0;
-  followedFrames = [];
+  if (options.some(player => player.id === previousPlayer)) follow.value = previousPlayer;
+  indexFollowedFrames();
   updateFollow(index);
-  followStatus.textContent = options.length ? '' : '這個範圍沒有玩家。';
+  if (previousPlayer && !follow.value) followStatus.textContent = '上一冊跟隨的玩家沒有在本冊出現。';
+  else if (!follow.value) followStatus.textContent = options.length ? '' : '這個範圍沒有玩家。';
 }
 
 function updateRoomEvents() {
@@ -197,12 +208,19 @@ async function openReplay(files, embeddedInfo = null, continuing = false) {
       throw new Error('分冊標示與實際畫格範圍不符。');
     if (continuing && !samePlayerReplaySource(candidate, replay))
       throw new Error('下一冊必須來自同一場錄製與相同房間範圍。');
+    if (continuing) {
+      const last = replay.packets.at(-1), first = candidate.packets[0];
+      if (first.elapsedMilliseconds < last.elapsedMilliseconds || first.frame.tick < last.frame.tick)
+        throw new Error('下一冊的錄製時間或任務刻數早於本冊末格，請重新取得分冊。');
+    }
     if (!scene) {
       const { ReplayScene } = await import('./replay-scene.js');
       if (own !== epoch) return;
       scene = new ReplayScene(canvas, key => { if (!follow.value) scene.select(key); }, clearFollow);
     }
     const previousRoom = continuing ? room.value : null;
+    const previousView = continuing ? scene.view() : null;
+    const previousPlayer = continuing ? follow.value : '';
     pause();
     loop.checked = false;
     eventKind.value = '';
@@ -214,8 +232,8 @@ async function openReplay(files, embeddedInfo = null, continuing = false) {
     if (rooms.length > 1) room.prepend(new Option('全場俯視', 'all', true, true));
     if (previousRoom !== null) room.value = previousRoom;
     replayPlayers = playerReplayPlayers(candidate.packets);
-    showFollowOptions();
     replay = candidate;
+    showFollowOptions(previousPlayer);
     currentVolume = volume;
     $('continuation').hidden = !volume;
     if (volume) {
@@ -250,7 +268,8 @@ async function openReplay(files, embeddedInfo = null, continuing = false) {
     timeline.max = candidate.packets.length - 1;
     $('view').hidden = false;
     scene.resize();
-    scene.preset('top', room.value);
+    if (previousView) scene.restoreView(previousView);
+    else scene.preset('top', room.value);
     updateRoomEvents();
     show(0);
     message(`已載入 ${candidate.packets.length} 格。`);
@@ -357,13 +376,7 @@ room.addEventListener('change', () => {
 });
 follow.addEventListener('change', () => {
   if (!replay) return;
-  followedFrames = [];
-  if (follow.value) {
-    for (const [i, packet] of replay.packets.entries()) {
-      if (packet.frame.players.some(player => player.id === follow.value && (room.value === 'all' || player.roomId === Number(room.value))))
-        followedFrames.push(i);
-    }
-  }
+  indexFollowedFrames();
   updateFollow(index);
   if (!follow.value) {
     scene.follow = false;

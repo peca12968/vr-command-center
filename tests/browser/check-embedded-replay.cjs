@@ -48,6 +48,11 @@ async function main(directory, reportPath) {
         const chooser = field('volume-file');
         assert.match(await field('volume-label').innerText(), new RegExp('第 ' + (last + 1) + ' 格'));
         if (full) await field('room').selectOption('4');
+        const canvas = page.locator('#replay-canvas');
+        const followed = full ? await field('follow').locator('option').last().getAttribute('value') : '';
+        if (full) await field('follow').selectOption(followed);
+        else await canvas.press('ArrowRight');
+        const camera = await canvas.getAttribute('data-camera');
         await chooser.setInputFiles(resolve(directory, name + '.html'));
         await field('message').filter({ hasText: '同一片段、從下一格開始' }).waitFor();
         assert.match(await field('frame').innerText(), new RegExp('第 ' + last + ' 格'));
@@ -68,6 +73,8 @@ async function main(directory, reportPath) {
           buffer: Buffer.concat([bytes, Buffer.from('<script>document.title="Unexpected navigation"</script>')]) });
         await field('frame').filter({ hasText: `第 ${next.first} 格` }).waitFor();
         assert.equal(await field('room').inputValue(), full ? '4' : '5');
+        assert.equal(await field('follow').inputValue(), followed);
+        assert.equal(await canvas.getAttribute('data-camera'), camera);
         assert.ok(await chooser.isHidden());
         assert.equal(page.url(), url);
         assert.notEqual(await page.title(), 'Unexpected navigation');

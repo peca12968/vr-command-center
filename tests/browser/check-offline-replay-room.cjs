@@ -2,6 +2,8 @@
 const assert = require('node:assert/strict');
 const { pathToFileURL } = require('node:url');
 const { resolve } = require('node:path');
+const { mkdtemp, readFile, rm, writeFile } = require('node:fs/promises');
+const { tmpdir } = require('node:os');
 const { chromium } = require('playwright');
 
 function fixture() {
@@ -72,9 +74,74 @@ async function checkSparsePlayback(browser, url) {
   } finally { await page.close(); }
 }
 
+async function checkVolumeContinuity(browser, templatePath) {
+  const page = await browser.newPage();
+  const directory = await mkdtemp(resolve(tmpdir(), 'vr-replay-volume-'));
+  try {
+    const template = await readFile(templatePath, 'utf8');
+    const first = fixture(), player = first.packets[0].frame.players[1];
+    const other = { ...player, id: '00000000-0000-0000-0000-000000000099' };
+    const volume = (start, packets) => {
+      const part = { ...first, startFrame: start, endFrame: start + packets.length - 1, packets };
+      const marker = `<span hidden id="replay-volume" data-volume="${first.header.sessionId}:${start}:${part.endFrame}:21"></span>`;
+      return template.replace('<!--player-replay-data-->', () => marker +
+        '<script type="application/json" data-player-replay-part>' + JSON.stringify(part) + '</script>');
+    };
+    const path = resolve(directory, 'first.html');
+    await writeFile(path, volume(10, first.packets));
+    const packet = (sequence, elapsedMilliseconds, tick, players) => ({ ...first.packets[0], sequence, elapsedMilliseconds,
+      frame: { ...first.packets[0].frame, tick, players }, events: [] });
+    const nextPackets = [packet(13, 900, 12, [other]), packet(14, 1100, 13, [other, player]), packet(15, 1300, 14, [player])];
+    const field = name => page.locator('#player-replay-' + name);
+    const camera = () => page.locator('#replay-canvas').getAttribute('data-camera');
+    const choose = async (start, packets) => {
+      await field('volume-file').setInputFiles({ name: 'next.html', mimeType: 'text/html', buffer: Buffer.from(volume(start, packets)) });
+      await page.waitForFunction(() => !document.querySelector('#player-replay-message').textContent.includes('正在讀取'));
+    };
+    await page.goto(pathToFileURL(path).href);
+    await field('room').selectOption('5');
+    await field('follow').selectOption(player.id);
+    const initialCamera = await camera();
+    // The viewer is on frame 10. Both checks must compare against the last frame (12).
+    for (const change of [{ elapsedMilliseconds: 899 }, { frame: { ...nextPackets[0].frame, tick: 11 } }]) {
+      await choose(13, [{ ...nextPackets[0], ...change }, ...nextPackets.slice(1)]);
+      assert.match(await field('message').innerText(), /早於本冊末格/);
+      assert.match(await field('frame').innerText(), /第 10 格/);
+      assert.equal(await camera(), initialCamera);
+      assert.equal(await field('follow').inputValue(), player.id);
+    }
+    await choose(13, nextPackets);
+    assert.match(await field('frame').innerText(), /第 13 格/);
+    assert.equal(await field('room').inputValue(), '5');
+    assert.equal(await field('follow').inputValue(), player.id);
+    assert.equal(await camera(), initialCamera);
+    await field('follow-next').click();
+    assert.match(await field('frame').innerText(), /第 14 格/);
+    assert.equal(await field('follow-status').innerText(), '');
+    const followingCamera = await camera();
+    await choose(16, [16, 17, 18].map(n => packet(n, n * 100, n, [other])));
+    assert.match(await field('frame').innerText(), /第 16 格/);
+    assert.equal(await field('follow').inputValue(), '');
+    assert.match(await field('follow-status').innerText(), /沒有在本冊出現/);
+    assert.equal(await camera(), followingCamera);
+    await page.locator('#replay-canvas').press('ArrowRight');
+    const freeCamera = await camera();
+    assert.notEqual(freeCamera, followingCamera);
+    await choose(19, [19, 20, 21].map(n => packet(n, n * 100, n, [other])));
+    assert.match(await field('frame').innerText(), /第 19 格/);
+    assert.equal(await camera(), freeCamera);
+    assert.equal(await field('volume-label').innerText(), '已到最後一冊。');
+    console.log('PASS: four consecutive volumes preserve the camera and follow the original player across a gap');
+  } finally {
+    await page.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
 async function main() {
   const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   try {
+    await checkVolumeContinuity(browser, resolve(process.argv[2]));
     await checkSparsePlayback(browser, pathToFileURL(resolve(process.argv[2])).href);
     const page = await browser.newPage();
     const errors = [], network = [];
