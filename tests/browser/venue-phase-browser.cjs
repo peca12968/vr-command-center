@@ -3,6 +3,7 @@ const { spawnSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { verifySettingDownload } = require('./venue-setting-download.cjs');
 
 module.exports = async ({ context, api, tokens, base, root, screenshots, check, captureErrors }) => {
   const page = await context.newPage();
@@ -14,6 +15,11 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
   const evidence = page.locator('#venue-phase-evidence');
   const roomPhase = room => page.locator(`[data-room-venue-phase="${room}"]`);
   const run = (id, action) => api(`/sessions/${id}/commands`, 'POST', { commandId: randomUUID(), action });
+  async function readPhaseBytes() {
+    const response = await page.request.get(base + '/api/venue/phase', { headers: { Authorization: 'Bearer ' + tokens.Master } });
+    assert.equal(response.status(), 200);
+    return response.body();
+  }
   async function rejectReplayStatistics(button, sessionId, playerId, change, label) {
     const route = url => url.pathname === `/api/sessions/${sessionId}/world/watch` && url.searchParams.get('mode') === 'replay';
     const substituted = async request => {
@@ -106,21 +112,6 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     }
     throw new Error('Expected a room confirmation from the accepted frame');
   }
-  async function verifySettingDownload(name, key, requestId) {
-    const button = page.locator(`#venue-${name}-batch-download`);
-    const response = await page.request.get(base + '/api/venue/phase', { headers: { Authorization: 'Bearer ' + tokens.Master } });
-    assert.equal(response.status(), 200);
-    const expected = await response.body();
-    assert.equal(JSON.parse(expected)[key].requestId, requestId);
-    const file = page.waitForEvent('download');
-    await button.click();
-    const downloaded = await file;
-    assert.equal(downloaded.suggestedFilename(), `vr-command-venue-${name}-${requestId}.json`);
-    const target = path.join(screenshots, downloaded.suggestedFilename());
-    await downloaded.saveAs(target);
-    check((await fs.readFile(target)).equals(expected), `The ${name} batch downloads the byte-identical original venue phase response`);
-  }
-
   try {
     assert.deepEqual(await api('/sessions'), []);
     const mission = await api('/missions', 'POST', { name: '全館暫停測試', briefing: '', durationSeconds: 180,
@@ -542,12 +533,13 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       'The environment batch confirms each room only after its own source applies the command');
     await run(preparing[1], 'Pause');
     const resumedRoomTwo = (await run(preparing[1], 'Resume')).session;
+    await verifySettingDownload(page, screenshots, 'environment', 'latestEnvironment', climateReceipt.requestId, readPhaseBytes);
+    check(true, 'The environment batch downloads the byte-identical original venue phase response after recovery');
     await publishUntil(first, changedClimate[0], () => {
       second(resumedRoomTwo);
       return Promise.all([1, 2].map(room => roomEnvironment(room).filter({ hasText: '全館環境已套用' }).isVisible())).then(rows => rows.every(Boolean));
     });
     check(true, 'Both rooms confirm their own matching environment frames');
-    await verifySettingDownload('environment', 'latestEnvironment', climateReceipt.requestId);
     async function openSetting(kind, room, id, button = page.locator(`[data-room-${kind}-frame="${room}"]`)) {
       const watched = page.waitForResponse(response => new URL(response.url()).pathname === `/api/sessions/${id}/world/watch`);
       await button.click();
@@ -687,12 +679,13 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       'Latest enemy batch counts only the room whose original source has confirmed');
     await run(preparing[1], 'Pause');
     const resumedEnemyRoom = (await run(preparing[1], 'Resume')).session;
+    await verifySettingDownload(page, screenshots, 'enemy', 'latestEnemies', enemyReceipt.requestId, readPhaseBytes);
+    check(true, 'The enemy batch downloads the byte-identical original venue phase response after recovery');
     await publishUntil(first, changedEnemies[0], () => {
       second(resumedEnemyRoom);
       return Promise.all([1, 2].map(room => roomEnemies(room).filter({ hasText: '全館敵軍策略已套用' }).isVisible())).then(rows => rows.every(Boolean));
     });
     check(true, 'Enemy policy is confirmed only by both original game sources');
-    await verifySettingDownload('enemy', 'latestEnemies', enemyReceipt.requestId);
     const patrol = await openSetting('enemies', 1, preparing[0], batchReplay(1, 'Applied'));
     await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${patrol} 格的敵軍快照` }).waitFor();
     const patrolFrame = await api(`/sessions/${preparing[0]}/world/frames/${patrol}`);

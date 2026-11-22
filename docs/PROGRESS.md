@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-22 核對主控台下載快照與受阻開場返回操作
+
+GitHub 的 [be47cdbe 瀏覽器測試](https://github.com/peca12968/vr-command-center/actions/runs/44991455274) 在環境批次下載比對失敗。[4294c229 的測試](https://github.com/peca12968/vr-command-center/actions/runs/44990975017) 則在合併場受阻快照返回開場時失敗。
+
+用 0.31.300 解壓管理包與 Chromium 保留畫面已讀的場館快照，再讓另一房暫停及恢復。兩次實際 API 回應的環境及敵軍批次 ID 各自相同，整份回應的位元組不同。兩個下載檔均與畫面原快照相同。回歸測試現在也驗證讀取失敗時撤下下載控制，恢復後交付指定的原始 API 回應，兩份下載均與該回應逐位元組相同。[下載驗證](../artifacts/phase-download-readback-031300/checks.json)
+
+合併與獨立各 25 個模擬席位，在送出開場時讓第 5 房第 2 席失去追蹤。管理服務回覆 409，從受阻畫格返回後焦點回到全館開場，原回放按鈕已隱藏且開場仍停用；頁面上同名的可見按鈕屬於名冊。回歸測試現在直接核對原回放按鈕。以上為本機 IPC 驗證，完整 GitHub 工作流程另行查核。[合併場](../artifacts/phase-download-readback-031300/Linked.log) · [獨立場](../artifacts/phase-download-readback-031300/Independent.log)
+
 ## 2026-11-22 五房開場按登記頭盔核對追蹤
 
 控制台 0.31.300 的全館開場表可逐席核對名冊登記的 Quest 3 或 VIVE XR。在追蹤開場模式，摘要依頭盔分列本階段已確認追蹤及已登記席數。切換每房 1、2 或 5 席時採用當前階段範圍。

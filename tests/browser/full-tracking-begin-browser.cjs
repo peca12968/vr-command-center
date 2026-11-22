@@ -320,7 +320,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         && JSON.stringify(await getFences()) === JSON.stringify(readyFences),
         `${mode} opens the exact refused Preparing frame for the original room and makes no write`);
       await page.locator('#world-viewport').screenshot({ path: path.join(screenshots, `refused-begin-${mode.toLowerCase()}-frame.png`) });
-      const returnToOpening = page.getByRole('button', { name: '返回全館開場檢查', exact: true });
+      const returnToOpening = page.locator('#world-return-venue-begin');
+      assert.equal(await returnToOpening.innerText(), '返回全館開場檢查');
       await returnToOpening.waitFor({ timeout: 5000 });
       await page.locator('#world-view > .section-heading').screenshot({ path: path.join(screenshots, `refused-begin-${mode.toLowerCase()}-return.png`) });
       await returnToOpening.click();
