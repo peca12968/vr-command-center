@@ -16,6 +16,8 @@ export function mountSavedClips(request, canWrite, load, download) {
   let scope = null, idle = false, draft = null, rows = [], pending = null, work = null;
   const select = $('select'), name = $('name'), exportRoom = $('export-room');
   const offlinePlayer = $('offline-player'), exportZip = $('export-zip'), exportHtml = $('export-html');
+  const volumeStart = $('volume-start'), exportVolume = $('export-volume');
+  let volumeKey = '';
   let checkedOfflinePlayer = false;
   const selected = () => rows.find(clip => clip.id === select.value);
   const route = () => `/api/sessions/${scope.sessionId}/world/clips`;
@@ -40,7 +42,18 @@ export function mountSavedClips(request, canWrite, load, download) {
     exportZip.disabled = exportZip.hidden || !exportable || frames > MAX_REPLAY_FRAMES * MAX_REPLAY_FILES;
     exportHtml.hidden = exportZip.hidden;
     exportHtml.disabled = exportZip.disabled;
-    exportRoom.disabled = $('export').disabled && exportZip.disabled;
+    $('volumes').hidden = offlinePlayer.hidden || !row || !scope?.complete;
+    const key = row ? [scope.sessionId, scope.streamId, row.id, exportRoom.value].join('/') : '';
+    if (volumeKey !== key) {
+      volumeKey = key;
+      volumeStart.min = row?.startFrame ?? 1;
+      volumeStart.max = row ? row.endFrame - 1 : '';
+      volumeStart.value = row?.startFrame ?? '';
+      volumeStart.placeholder = '';
+    }
+    volumeStart.disabled = !exportable || $('volumes').hidden;
+    exportVolume.disabled = volumeStart.disabled || !Number.isSafeInteger(volumeStart.valueAsNumber) || !volumeStart.validity.valid;
+    exportRoom.disabled = $('export').disabled && exportZip.disabled && volumeStart.disabled;
     $('retry').hidden = !pending || !!work;
   }
   function options(preferred = select.value) {
@@ -92,21 +105,27 @@ export function mountSavedClips(request, canWrite, load, download) {
   }
   $('refresh').addEventListener('click', () => sync());
   select.addEventListener('change', controls);
+  exportRoom.addEventListener('change', controls);
+  volumeStart.addEventListener('input', controls);
   $('load').addEventListener('click', () => {
     if ($('load').disabled) return;
     const clip = selected();
     load(clip);
     message(`已載入「${clip.name}」的起訖標記。`);
   });
-  async function exportClip(extension, button) {
+  async function exportClip(extension, button, first = null) {
     if (button.disabled || !canWrite()) return;
     const clip = selected(), { sessionId, streamId, roomIds } = scope;
     const room = Number(exportRoom.value) || null, expectedRooms = room === null ? roomIds : [room];
     const bundled = extension !== 'json';
     const type = { zip: 'application/zip', html: 'text/html', json: 'application/json' }[extension];
     const suffix = room === null ? '' : '-room-' + String(room).padStart(2, '0');
-    const filename = `vr-command-replay-${clip.id}${suffix}.${extension}`;
-    const path = `${route()}/${clip.id}/player-replay.${extension}${room === null ? '' : '?roomId=' + room}`;
+    const stem = `vr-command-replay-${clip.id}${suffix}`;
+    let filename = `${stem}.${extension}`, last;
+    const query = new URLSearchParams();
+    if (room !== null) query.set('roomId', room);
+    if (first !== null) query.set('fromFrame', first);
+    const path = `${route()}/${clip.id}/player-replay.${extension}${query.size ? '?' + query : ''}`;
     const own = work = new AbortController();
     controls();
     try {
@@ -114,6 +133,12 @@ export function mountSavedClips(request, canWrite, load, download) {
       const response = await request(path, AbortSignal.any([own.signal, AbortSignal.timeout(segmented ? 90000 : 15000)]));
       if (response.status !== 200 || response.headers.get('content-type')?.split(';')[0].trim() !== type)
         throw new Error('無法讀取片段檔案。');
+      if (first !== null) {
+        last = Number(response.headers.get('X-Replay-Last-Frame'));
+        if (!Number.isSafeInteger(last) || last <= first || last > clip.endFrame || last === clip.endFrame - 1
+          || last - first >= MAX_REPLAY_FRAMES * MAX_REPLAY_FILES) throw new Error('分冊回覆的畫格範圍不符。');
+        filename = `${stem}-frames-${String(first).padStart(6, '0')}-${String(last).padStart(6, '0')}.html`;
+      }
       if (bundled && !response.headers.get('content-disposition')?.split(';').some(part => part.trim() === 'filename=' + filename))
         throw new Error('下載回覆的回放檔名不符。');
       const file = await response.blob();
@@ -129,6 +154,12 @@ export function mountSavedClips(request, canWrite, load, download) {
       }
       if (work !== own) return;
       download(filename, file);
+      if (first !== null) {
+        volumeStart.value = last < clip.endFrame ? last + 1 : '';
+        volumeStart.placeholder = last === clip.endFrame ? '已到片段末格' : '';
+        message(`已下載第 ${first}–${last} 格。${last === clip.endFrame ? '已到片段末格。' : '可繼續下載下一冊。'}`);
+        return;
+      }
       message(`已下載「${clip.name}」的${room === null ? '玩家' : '房間 ' + room + ' '}回放${bundled ? ' ' + extension.toUpperCase() : '檔'}。`);
     } catch (error) {
       if (work === own) message(error.message, true);
@@ -138,6 +169,7 @@ export function mountSavedClips(request, canWrite, load, download) {
   }
   for (const [extension, button] of [['json', $('export')], ['zip', exportZip], ['html', exportHtml]])
     button.addEventListener('click', () => exportClip(extension, button));
+  exportVolume.addEventListener('click', () => exportClip('html', exportVolume, volumeStart.valueAsNumber));
   $('save').addEventListener('click', () => {
     if ($('save').disabled || !canWrite()) return;
     const title = name.value.trim();

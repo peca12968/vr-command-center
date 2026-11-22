@@ -9,6 +9,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import subprocess
 import tempfile
@@ -622,6 +623,77 @@ def check_segmented_exports(venue, directory):
     return {'sessionId': session['id'], 'clip': clip, 'ranges': summary}
 
 
+def check_volume_exports(venue, directory):
+    directory.mkdir()
+    results = {}
+    for label, frames, seats, enemies in [('long', 7201, 1, 5), ('dense', 1501, 5, 100)]:
+        mission = venue.request('/api/missions', method='POST', status=201, body={'name': label,
+            'briefing': '', 'durationSeconds': 900, 'props': [], 'environment': {'mode': 'VR', 'weather': 'Clear',
+            'timeOfDay': 'Day', 'lightning': False}, 'enemies': {'count': enemies, 'behavior': 'Hold', 'autoAttack': False}})
+        session = venue.request('/api/sessions', method='POST', status=201, body={
+            'missionId': mission['id'], 'mode': 'Linked', 'roomIds': list(ROOMS)})
+        route = '/api/sessions/' + session['id']
+        for room in ROOMS:
+            for seat in range(1, seats + 1):
+                venue.request(route + '/players', method='POST', body={'playerId': str(uuid4()), 'roomId': room,
+                              'name': f'Seat {room}-{seat}', 'headset': 'Quest3'})
+        with ExitStack() as stack:
+            source = Publisher(venue, session, stack)
+            for i in range(enemies - 5):
+                source.enemies[i + 6] = {**source.enemies[i % 5 + 1], 'id': str(uuid4())}
+            source.publish()
+            venue.phase('Begin', 'begin')
+            source.state = venue.request(route)
+            for _ in range(frames - 2):
+                source.publish()
+            venue.phase('End', 'end')
+            source.state = venue.request(route)
+            source.publish()
+            source.seal()
+        clip_id = str(uuid4())
+        clip = source.world + '/clips/' + clip_id
+        venue.request(clip, method='PUT', body={'name': label, 'streamId': source.stream_id,
+                                               'startFrame': 1, 'endFrame': frames})
+        url = clip + '/player-replay.html'
+        for query, role, status in [('', 'Master', 409), ('?fromFrame=1', 'Room1', 403),
+                                    ('?fromFrame=0', 'Master', 400), (f'?fromFrame={frames}', 'Master', 400)]:
+            with venue.response(url + query, role=role, status=status):
+                pass
+        ranges = []
+        first = 1
+        room_query = '&roomId=5' if label == 'long' else ''
+        before = venue.request(source.world + '/clips')
+        while first <= frames:
+            with venue.response(url + f'?fromFrame={first}' + room_query) as response:
+                last = int(response.headers['X-Replay-Last-Frame'])
+                suffix = '-room-05' if room_query else ''
+                assert response.headers.get_filename() == f'vr-command-replay-{clip_id}{suffix}-frames-{first:06}-{last:06}.html'
+                assert first < last <= frames and last != frames - 1 and response.headers['Cache-Control'] == 'no-store'
+                html = response.read()
+            next_frame = first
+            count = size = 0
+            for match in re.finditer(rb'<script type="application/json" data-player-replay-part>([^<]+)</script>', html):
+                part = json.loads(match[1])
+                count += 1
+                size += len(match[1])
+                assert part['header']['sessionId'] == session['id'] and part['header']['streamId'] == source.stream_id
+                assert part['header']['roomIds'] == ([5] if room_query else list(ROOMS))
+                assert part['startFrame'] == next_frame
+                assert [p['sequence'] for p in part['packets']] == list(range(next_frame, part['endFrame'] + 1))
+                next_frame = part['endFrame'] + 1
+            assert next_frame == last + 1 and 1 <= count <= 24 and size <= 64 * 1024 * 1024
+            (directory / f'{label}-{first}-{last}.html').write_bytes(html)
+            ranges.append([first, last, count, size])
+            first = next_frame
+        assert len(ranges) > 1 and venue.request(source.world + '/clips') == before
+        if label == 'long':
+            assert ranges[0][:3] == [1, 7199, 24] and ranges[1][:2] == [7200, 7201]
+        else:
+            assert ranges[0][2] < 24, 'Dense recording must split on bytes before the file count'
+        results[label] = {'sessionId': session['id'], 'clip': clip, 'ranges': ranges}
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--api-exe', required=True, type=Path, help='Extracted management package Runtime/VrCommand.Api.exe')
@@ -630,6 +702,7 @@ def main():
     parser.add_argument('--departed-clip', type=Path, help='New output file for the verified synthetic player clip')
     parser.add_argument('--environment-clips', type=Path, help='New directory for the six verified replay exports')
     parser.add_argument('--segmented-replay-exports', type=Path, help='Also export and verify a dense 301-frame player ZIP for two scopes')
+    parser.add_argument('--volume-exports', type=Path, help='Verify full coverage beyond player frame and byte limits')
     args = parser.parse_args()
     if os.name != 'nt':
         parser.error('This fixture uses Windows AF_UNIX')
@@ -650,6 +723,7 @@ def main():
         with venue.start():
             check_environment_resume(venue, paused, climate)
             segmented = check_segmented_exports(venue, args.segmented_replay_exports) if args.segmented_replay_exports else None
+            volumes = check_volume_exports(venue, args.volume_exports) if args.volume_exports else None
         summary = {'verified': [{field: result[field] for field in ('mode', 'seats', 'recordings', 'combatEvents', 'frames',
                                                                      'headsetRoster', 'ticketsRevalidatedInRunning', 'deviceChange',
                                                                      'roomWeather', 'hardwareEnvironment')}
@@ -659,6 +733,8 @@ def main():
     summary['verifiedDepartedEventRooms'] = len(departed_clip['eventRooms'])
     if segmented:
         summary['segmentedReplay'] = segmented
+    if volumes:
+        summary['replayVolumes'] = volumes
     summary['assemblySha256'] = {name: hashlib.sha256(args.api_exe.with_name(name).read_bytes()).hexdigest()
                                  for name in ('VrCommand.Api.dll', 'VrCommand.Core.dll')}
     summary['environmentExports'] = sorted(clips)

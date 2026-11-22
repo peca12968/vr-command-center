@@ -348,18 +348,29 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
         return new Response(body, { status: response.status, headers: response.headers });
       };
     });
-    await page.locator('#world-live').click(); await page.waitForFunction(() => document.querySelector('#world-freshness').textContent.includes('過期'));
+    // Reconnecting to the same source pins its full header. Verify the changed clock is
+    // rejected there, then start a separate observation for each simulated clock.
+    await page.locator('#world-live').click();
+    await page.locator('#world-message').filter({ hasText: '回應的錄製來源不同' }).waitFor();
+    async function observeClock() {
+      await page.locator('#world-recording').selectOption(cameraSession);
+      await page.locator('#world-recording').selectOption(live.header.sessionId);
+      assert.equal(await canvas.getAttribute('data-sequence'), null);
+      await page.locator('#world-live').click();
+      await page.waitForFunction(() => Number(document.querySelector('#world-canvas').dataset.sequence) > 0);
+    }
+    await observeClock(); await page.waitForFunction(() => document.querySelector('#world-freshness').textContent.includes('過期'));
     const staleSequence = Number(await canvas.getAttribute('data-sequence'));
     await page.waitForFunction(sequence => Number(document.querySelector('#world-canvas').dataset.sequence) > sequence, staleSequence);
     check((await page.locator('#world-freshness').innerText()).includes('過期'), 'Newly received historical frames remain stale according to capture time');
     await page.screenshot({ path: path.join(screenshots, 'world-old-capture.png'), fullPage: true });
-    await page.evaluate(() => { window.worldClockMode = 'unknown'; }); await page.locator('#world-live').click();
+    await page.evaluate(() => { window.worldClockMode = 'unknown'; }); await observeClock();
     await page.waitForFunction(() => document.querySelector('#world-freshness').textContent === '擷取時間未知');
     check(true, 'Legacy source without a capture clock is explicitly unknown instead of fresh');
-    await page.evaluate(() => { window.worldClockMode = 'future'; }); await page.locator('#world-live').click();
+    await page.evaluate(() => { window.worldClockMode = 'future'; }); await observeClock();
     await page.waitForFunction(() => document.querySelector('#world-freshness').textContent === '來源時鐘未同步');
     check(true, 'Future source clock is not presented as current live data');
-    await page.evaluate(() => window.restoreWorldFetch()); await page.locator('#world-live').click();
+    await page.evaluate(() => window.restoreWorldFetch()); await observeClock();
     await page.waitForFunction(() => document.querySelector('#world-freshness').textContent === '正在接收快照');
     check(true, 'Synchronized current source resumes a fresh live view after reconnecting');
     source.child.kill(); await source.finished;
@@ -962,6 +973,16 @@ with zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())) as archive:
       assert.equal(html.suggestedFilename(), stem + '.html');
       const embeddedFile = path.join(directory, stem + '.html');
       await html.saveAs(embeddedFile);
+      await page.locator('#saved-clip-volumes summary').click();
+      const startVolume = page.locator('#saved-clip-volume-start');
+      await startVolume.fill(String(originalClip.endFrame - 1));
+      const volumeDownload = page.waitForEvent('download');
+      await page.locator('#saved-clip-export-volume').click();
+      const volume = await volumeDownload;
+      assert.equal(volume.suggestedFilename(), stem + '-frames-' + String(originalClip.endFrame - 1).padStart(6, '0')
+        + '-' + String(originalClip.endFrame).padStart(6, '0') + '.html');
+      assert.equal(await startVolume.inputValue(), '');
+      assert.ok(await page.locator('#saved-clip-export-volume').isDisabled());
       const direct = await context.browser().newContext({ offline: true });
       try {
         const viewer = await direct.newPage();

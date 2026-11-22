@@ -135,8 +135,8 @@ public sealed partial class WorldRecordings
     public byte[] ExportPlayerReplay(Guid id, Guid clipId, int? roomId, OperatorIdentity actor, CancellationToken cancellation)
         => PlayerReplayParts(id, clipId, roomId, actor, cancellation, split: false).Single().Data;
 
-    public IEnumerable<(byte[] Data, string Suffix)> PlayerReplayParts(Guid id, Guid clipId, int? roomId,
-        OperatorIdentity actor, CancellationToken cancellation, bool split = true)
+    public IEnumerable<(byte[] Data, string Suffix, long LastFrame)> PlayerReplayParts(Guid id, Guid clipId, int? roomId,
+        OperatorIdentity actor, CancellationToken cancellation, bool split = true, long? fromFrame = null)
     {
         var recording = ReplayClipRecording(id, actor, write: true);
         if (!recording.Complete) throw new InvalidOperationException("Seal the recording before exporting a player replay.");
@@ -153,7 +153,9 @@ public sealed partial class WorldRecordings
         }
         if (!split && clip.EndFrame - clip.StartFrame >= PlayerReplayFramesPerFile)
             throw new InvalidOperationException("Player replay is limited to 300 saved frames.");
-        if (clip.EndFrame - clip.StartFrame >= PlayerReplayFilesPerSet * PlayerReplayFramesPerFile)
+        if (fromFrame.HasValue && (fromFrame < clip.StartFrame || fromFrame >= clip.EndFrame))
+            throw new ArgumentException("分冊起點須在保存片段內，並至少包含兩格。");
+        if (!fromFrame.HasValue && clip.EndFrame - clip.StartFrame >= PlayerReplayFilesPerSet * PlayerReplayFramesPerFile)
             throw new InvalidOperationException("每份回放 ZIP 最多 7,200 格，請縮小片段範圍。");
         Dictionary<string, int>? propRooms = null;
         if (roomId is int room)
@@ -164,12 +166,13 @@ public sealed partial class WorldRecordings
         }
         return ReadParts();
 
-        IEnumerable<(byte[] Data, string Suffix)> ReadParts()
+        IEnumerable<(byte[] Data, string Suffix, long LastFrame)> ReadParts()
         {
-            long first = clip.StartFrame;
+            long first = fromFrame ?? clip.StartFrame;
             int files = 0, bytes = 0;
             while (first < clip.EndFrame)
             {
+                if (fromFrame.HasValue && files == PlayerReplayFilesPerSet) yield break;
                 var remaining = clip.EndFrame - first + 1;
                 var count = (int)Math.Min(remaining, PlayerReplayFramesPerFile);
                 byte[] data;
@@ -184,10 +187,16 @@ public sealed partial class WorldRecordings
                     }
                     catch (ReplayPartTooLargeException) when (split && count > 2) { count = Math.Max(2, count / 2); }
                 }
+                // A pair of overlapping two-frame files may be required for the last three dense frames.
+                // Keep both in one volume so its successor can always start at the very next frame.
+                if (fromFrame.HasValue && files > 0 && remaining == 3 && count == 2) yield break;
                 if (++files > PlayerReplayFilesPerSet || (bytes += data.Length) > 64 * 1024 * 1024)
+                {
+                    if (fromFrame.HasValue) yield break;
                     throw new InvalidOperationException("片段超過播放器一次可開啟的 24 份檔案或 64 MiB，請縮小片段範圍。");
+                }
                 long last = first + count - 1;
-                yield return (data, first == clip.StartFrame && last == clip.EndFrame ? "" : FormattableString.Invariant($"-frames-{first:D6}-{last:D6}"));
+                yield return (data, first == clip.StartFrame && last == clip.EndFrame ? "" : FormattableString.Invariant($"-frames-{first:D6}-{last:D6}"), last);
                 if (last == clip.EndFrame) yield break;
                 first = Math.Min(last + 1, clip.EndFrame - 1);
             }
