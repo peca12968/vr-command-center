@@ -59,6 +59,39 @@ dotnet .\VRCommand-HardwareSimulator\VrCommand.HardwareSimulator.dll `
    .\scripts\check-lan-udp.ps1 -ListenerReport "$env:USERPROFILE\vr-listener.ndjson" -ProbeReport "$env:USERPROFILE\vr-probe.json"
    ```
 
+### 五房開場前找出需補測的座位
+
+在裝有 Python 3.12 與 PowerShell 的管理電腦解壓場館包。下例從包外的場次資料夾執行，將 `$tools` 改成解壓位置。五房獨立和合併使用同一組指令，每個場次各自保存檔案。
+
+1. 從控制台下載本場的第 4 版啟動計畫，保存為 `venue-plan.json`，並備妥遊戲伺服器啟動器用這份計畫執行 `--venue-check` 成功產生的 `venue-preview.json`。把 25 席實際使用的 IPv4 填入 `seat-addresses.json`。檔案格式為 `{"version":1,"seats":[{"roomId":1,"seat":1,"address":"192.168.1.20"}]}`，在 `seats` 中填齊五房各五席。以各自獨立的裝置驗收時，每席使用自己的位址。
+
+   ```powershell
+   $tools = 'C:\Venue\field\scripts'
+   $plan = @('--launch-plan', '.\venue-plan.json', '--launcher-preview', '.\venue-preview.json')
+   python -B "$tools\prepare-venue-network-plan.py" @plan --seat-addresses .\seat-addresses.json --require-distinct-remote-roster --output .\network.json
+   ```
+
+2. 將第一輪的雙端原始報告集中到 `first` 資料夾，每份使用不同檔名。該資料夾只放測量報告。執行下列兩行，第二行的 `pendingSeats` 會列出房號、席號與狀態。資料有缺漏時，指令回傳 1，第一行仍會寫出可供補測使用的場館報告。
+
+   ```powershell
+   $network = @('--network-plan', '.\network.json', '--require-distinct-remote-roster')
+   python -B "$tools\check-venue-udp-preflight.py" @plan @network --inbox .\first --output .\first.json
+   python -B "$tools\start-verified-venue.py" --verify-only --launch-plan .\venue-plan.json @network --readiness .\first.json
+   ```
+
+3. 例如第 5 房第 5 席需補測，下列指令會從原計畫匯出該席的 Windows 測量參數。把產生的端點檔複製到伺服器和該席電腦。沿用上一節的 Listen、Probe 指令，在兩端都以 `-EndpointFile .\r5-s5.json` 取代 `-LocalAddress`、`-PeerAddress` 和 `-Port`，保留金鑰與其餘參數。
+
+   ```powershell
+   python -B "$tools\check-venue-udp-preflight.py" @plan @network --retry-report .\first.json --windows-retest-seat 5 5 --output .\r5-s5.json
+   ```
+
+4. 將補測的兩份報告放入新的 `retry` 資料夾，保留原始檔案與位置，再合併核對。若顯示 `udp-evidence-verified` 且 `pendingSeats` 為空，代表這份場次計畫的全館 UDP 資料已核對。開場前可再執行最後一行，重查各筆測量是否仍在 30 分鐘有效期內。這些離線查核都可以在遊戲關閉時執行。
+
+   ```powershell
+   python -B "$tools\check-venue-udp-preflight.py" @plan @network --retry-report .\first.json --inbox .\retry --output .\complete.json
+   python -B "$tools\start-verified-venue.py" --verify-only --launch-plan .\venue-plan.json @network --readiness .\complete.json
+   ```
+
 ### 頭盔接入
 
 若使用 VIVE 的 Windows PC VR 連線方式，可在解壓根目錄執行下列檢查。請使用包外的新報告檔名。這一步讀取本機 OpenXR 設定與執行環境檔案；指定型號的頭盔畫面與左右控制器須在場館實測。

@@ -7,6 +7,7 @@ import shutil
 import subprocess
 from pathlib import Path
 import struct
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -198,6 +199,17 @@ class VenueReleaseTests(unittest.TestCase):
                              (Path(release.__file__).parent / 'check-windows-firewall-notifications.ps1').read_bytes())
             self.assertEqual(archive.read('scripts/check-lan-udp.ps1'),
                              Path(release.__file__).with_name('check-lan-udp.ps1').read_bytes())
+            extracted = self.root / 'field'
+            archive.extractall(extracted)
+        scripts = extracted / 'scripts'
+        for name in ('windows_firewall.py', 'analyze-world-journal.py'):
+            self.assertEqual((scripts / name).read_bytes(), Path(release.__file__).with_name(name).read_bytes())
+        # Run from the installation, with no source checkout on the import path.
+        for name in ('prepare-venue-network-plan.py', 'check-venue-udp-preflight.py', 'start-verified-venue.py'):
+            with self.subTest(entry=name):
+                result = subprocess.run([sys.executable, '-I', '-B', str(scripts / name), '--help'],
+                                        cwd=self.root, capture_output=True, text=True, timeout=15)
+                self.assertEqual(0, result.returncode, result.stderr)
         before = release.digest(destination)
         with self.assertRaisesRegex(ValueError, 'new field kit ZIP path'):
             package()
