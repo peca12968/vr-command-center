@@ -316,7 +316,7 @@ function logout() {
   venueRoster.reset();
   savedVenuePlans = null;
   $('saved-venue-mission-plans').open = false;
-  $('venue-plan-name').value = $('venue-plan-status').textContent = '';
+  $('venue-plan-name').value = $('venue-plan-search').value = $('venue-plan-status').textContent = '';
   $('saved-venue-plan').replaceChildren();
   renderIndependentReceipt();
   clearInterval(timer);
@@ -584,11 +584,14 @@ function matchesVenuePlan(actual, expected) {
 }
 function renderSavedVenuePlans(selectedId = $('saved-venue-plan').value) {
   const select = $('saved-venue-plan');
-  select.replaceChildren(new Option('選擇已保存的配置', ''), ...(savedVenuePlans ?? []).map(({ id, createdAtUtc, plan }) => {
+  const query = $('venue-plan-search').value.trim().toLowerCase();
+  const matches = (savedVenuePlans ?? []).filter(row => row.plan.name.toLowerCase().includes(query));
+  const placeholder = query && !matches.length ? '找不到符合名稱的配置' : '選擇已保存的配置';
+  select.replaceChildren(new Option(placeholder, ''), ...matches.map(({ id, createdAtUtc, plan }) => {
     const mode = plan.mode === 'Linked' ? '五房全連線' : '五房各自獨立';
     return new Option(`${plan.name} · ${mode} · ${new Date(createdAtUtc).toLocaleString('zh-TW')}`, id);
   }));
-  if (savedVenuePlans?.some(row => row.id === selectedId)) select.value = selectedId;
+  if (matches.some(row => row.id === selectedId)) select.value = selectedId;
 }
 async function refreshSavedVenuePlans() {
   if ($('refresh-venue-plans').disabled || !$('saved-venue-mission-plans').open) return;
@@ -948,8 +951,9 @@ function applyPermissions() {
   const selectedVenue = venueMissionSelection();
   $('saved-venue-mission-plans').hidden = !master();
   $('venue-plan-name').disabled = $('refresh-venue-plans').disabled = locked || !master();
+  $('venue-plan-search').disabled = locked || !master() || !savedVenuePlans?.length;
   $('save-venue-plan').disabled = locked || !master() || !selectedVenue || !$('venue-plan-name').value.trim();
-  $('saved-venue-plan').disabled = locked || !master() || !savedVenuePlans?.length;
+  $('saved-venue-plan').disabled = locked || !master() || $('saved-venue-plan').options.length < 2;
   $('preview-venue-plan').disabled = $('load-venue-plan').disabled = $('saved-venue-plan').disabled || !$('saved-venue-plan').value;
   $('launch-mission-file-panel').hidden = !master();
   $('download-venue-missions').disabled = locked || !master() || !selectedVenue;
@@ -2316,6 +2320,8 @@ async function sendPending() {
       if (!validSavedVenuePlan(response) || response.id !== pending.requestId || !matchesVenuePlan(response.plan, pending.body))
         throw new MissionVersionMismatch('無法核對五房配置的保存回條。可使用「重試確認結果」確認原配置。');
       savedVenuePlans = [response, ...(savedVenuePlans ?? []).filter(row => row.id !== response.id)];
+      if (!response.plan.name.toLowerCase().includes($('venue-plan-search').value.trim().toLowerCase()))
+        $('venue-plan-search').value = '';
       renderSavedVenuePlans(response.id);
       if (venueMissionReview?.saved) clearVenueMissionReview();
       $('venue-plan-name').value = '';
@@ -3047,6 +3053,12 @@ $('saved-venue-mission-plans').addEventListener('toggle', () => {
   if (savedVenuePlans === null) void refreshSavedVenuePlans();
 });
 $('refresh-venue-plans').addEventListener('click', refreshSavedVenuePlans);
+$('venue-plan-search').addEventListener('input', () => {
+  renderSavedVenuePlans();
+  if (venueMissionReview?.saved && venueMissionReview.saved.id !== $('saved-venue-plan').value) clearVenueMissionReview();
+  $('venue-plan-status').textContent = '';
+  applyPermissions();
+});
 $('saved-venue-plan').addEventListener('change', () => {
   if (venueMissionReview?.saved) clearVenueMissionReview();
   $('venue-plan-status').textContent = '';

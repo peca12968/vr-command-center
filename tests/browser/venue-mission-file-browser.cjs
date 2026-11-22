@@ -71,6 +71,7 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
     check((await api('/sessions')).length === 0, 'Both downloaded configuration files contain only version assignments and need no prior session');
 
     const savedPlan = await api('/venue/mission-plans', 'POST', { name: '原保存配置', mode: 'IndependentSet', missionIds: ids }, 'Master', 200, undefined, randomUUID());
+    const linkedPlan = await api('/venue/mission-plans', 'POST', { name: '夜間 Alpha 配置', mode: 'Linked', missionIds: Array(5).fill(a.id) }, 'Master', 200, undefined, randomUUID());
     const savedPanel = page.locator('#saved-venue-mission-plans');
     const savedChoice = page.locator('#saved-venue-plan');
     await mode.selectOption('Linked');
@@ -92,6 +93,21 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
     check(await mode.inputValue() === 'Linked' && await mission.inputValue() === a.id
       && JSON.stringify(await reviewRows.evaluateAll(rows => rows.map(row => row.dataset.fileMission))) === JSON.stringify(ids)
       && (await review.innerText()).includes('保存配置指定'), 'Previewing a saved plan compares all five original versions without applying them');
+    const search = page.locator('#venue-plan-search');
+    await search.fill('原保存');
+    assert.equal(await savedChoice.inputValue(), savedPlan.id);
+    assert.ok(await review.isVisible());
+    await search.fill('  aLpHa  ');
+    assert.deepEqual(await savedChoice.locator('option').evaluateAll(rows => rows.map(row => row.value)), ['', linkedPlan.id]);
+    assert.equal(await savedChoice.inputValue(), '');
+    assert.ok(await review.isHidden() && await page.locator('#load-venue-plan').isDisabled());
+    await search.fill('不存在的配置');
+    assert.equal(await savedChoice.locator('option:checked').textContent(), '找不到符合名稱的配置');
+    assert.ok(await savedChoice.isDisabled() && await page.locator('#preview-venue-plan').isDisabled());
+    assert.equal(await mode.inputValue(), 'Linked');
+    assert.equal(await mission.inputValue(), a.id);
+    await search.fill('');
+    await savedChoice.selectOption(savedPlan.id);
     await page.locator('#load-venue-plan').click();
     await page.locator('#venue-plan-status').filter({ hasText: '已載入「原保存配置」' }).waitFor();
     check(await mode.inputValue() === 'IndependentSet' && JSON.stringify(await selected()) === JSON.stringify(ids),
