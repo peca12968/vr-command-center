@@ -1672,7 +1672,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Venue') {''', 1), encoding='utf-8')
         files['venue.json'] = json.dumps(manifest).encode()
         return files, seats
 
-    def vr_bundle(self, topology, players_per_room=5):
+    def vr_bundle(self, topology, players_per_room=5, *, address=None):
         manifest, seats = self.prepare(topology)
         manifest['mode'] = 'VR'
         if players_per_room != 5:
@@ -1683,6 +1683,9 @@ if ($PSCmdlet.ParameterSetName -eq 'Venue') {''', 1), encoding='utf-8')
             room.pop('alignmentFile')
             room['ticketsZip'] = f'room-{room_id:02}-connections.zip'
             configs = dict(list(seats[room_id].items())[:players_per_room])
+            if address is not None:
+                for config in configs.values():
+                    config['address'] = address
             seats[room_id] = configs
             first = next(iter(configs.values()))
             room.update(address=first['address'], port=first['port'],
@@ -1891,6 +1894,31 @@ if ($PSCmdlet.ParameterSetName -eq 'Venue') {''', 1), encoding='utf-8')
                 self.assertNotIn('allowLoopback', requests[-1][2])
                 self.assertEqual(1, len(list(fresh.iterdir())))
                 self.assertEqual([], list(self.root.glob('.vr-windows-*')))
+
+                for topology in ('Independent', 'Linked'):
+                    state['topology'] = topology
+                    rehearsal, _ = self.vr_bundle(topology, address='127.0.0.1')
+                    destination = self.root / f'local-{topology}'
+                    start = len(requests)
+                    accepted = stage(rehearsal, [one], destination)
+                    self.assertEqual(0, accepted.returncode, accepted.stderr)
+                    self.assertEqual(2, len(requests) - start)
+                    with zipfile.ZipFile(io.BytesIO(rehearsal['room-01-connections.zip'])) as original:
+                        self.assertEqual(original.read('room-01-seat-01.json'), next(destination.iterdir()).read_bytes())
+                    self.assertTrue(requests[-1][2]['requireLiveSource'] and requests[-1][2]['allowLoopback'])
+                    quest = self.run_bundle(rehearsal, '-RoomId', '1', '-Seat', '1', '-CheckOnly')
+                    self.assert_rejected(quest, 'usable outside the server computer')
+
+                mixed_local, _ = self.mixed_bundle()
+                manifest = json.loads(mixed_local['venue.json'])
+                manifest['rooms'][0]['address'] = '127.0.0.1'
+                local_rooms, _ = self.vr_bundle('Independent', address='127.0.0.1')
+                mixed_local['venue.json'] = json.dumps(manifest).encode()
+                mixed_local['room-01-connections.zip'] = local_rooms['room-01-connections.zip']
+                start = len(requests)
+                self.assert_rejected(stage(mixed_local, [one], blocked), 'usable outside the server computer')
+                self.assertFalse(blocked.exists())
+                self.assertEqual(start, len(requests))
             finally:
                 server.shutdown()
                 thread.join(timeout=5)

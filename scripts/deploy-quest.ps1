@@ -214,7 +214,7 @@ function Read-VenueRoomTickets([string]$Path, [int]$RoomId, [Guid]$SessionId, [i
     } finally { $file.Dispose() }
 }
 
-function Read-VenueTicketStream([IO.Stream]$InputStream, [int]$RoomId, [Guid]$SessionId, [switch]$ForBundle, [int]$PlayersPerRoom = 5, [switch]$AllowExpired) {
+function Read-VenueTicketStream([IO.Stream]$InputStream, [int]$RoomId, [Guid]$SessionId, [switch]$RequireRemoteEndpoint, [int]$PlayersPerRoom = 5, [switch]$AllowExpired) {
     try { $archive = [IO.Compression.ZipArchive]::new($InputStream, [IO.Compression.ZipArchiveMode]::Read, $true) }
     catch { throw "Room $RoomId needs a valid room connection ZIP." }
     try {
@@ -244,7 +244,7 @@ function Read-VenueTicketStream([IO.Stream]$InputStream, [int]$RoomId, [Guid]$Se
                 $address.GetAddressBytes()[0] -ge 224 -or $config.port -lt 1024) {
                 throw "Room $RoomId seat $seat needs a canonical unicast IPv4 address and UDP port 1024–65535."
             }
-            if ($ForBundle -and [Net.IPAddress]::IsLoopback($address)) {
+            if ($RequireRemoteEndpoint -and [Net.IPAddress]::IsLoopback($address)) {
                 throw "Room $RoomId seat $seat needs a venue endpoint usable outside the server computer."
             }
             $ticket.Endpoint = [string]$config.address + ':' + $config.port
@@ -338,7 +338,7 @@ function Read-VenueJsonEntry($Entry, [string]$Description) {
     } catch { throw "Use a valid $Description JSON in the deployment ZIP." }
 }
 
-function Read-VenueBundle([string]$Path, [int]$SelectedRoom, [int]$SelectedSeat, [switch]$Fingerprint, [switch]$AllowExpired) {
+function Read-VenueBundle([string]$Path, [int]$SelectedRoom, [int]$SelectedSeat, [switch]$Fingerprint, [switch]$AllowExpired, [switch]$WindowsStaging) {
     try { $file = [IO.File]::OpenRead((Resolve-Path -LiteralPath $Path).ProviderPath) }
     catch { throw 'Use a readable five-room deployment ZIP from the management console.' }
     try {
@@ -363,14 +363,14 @@ function Read-VenueBundle([string]$Path, [int]$SelectedRoom, [int]$SelectedSeat,
                 $mrCount = @($manifest.rooms | Where-Object mode -CEQ 'MR').Count
                 if ($mrCount -notin 1..4 -or $entries.Count -ne (6 + $mrCount)) { throw 'The mixed ZIP needs five room bundles and exactly one alignment file per MR room.' }
             } elseif ($entries.Count -ne 11) { throw 'The deployment ZIP must contain exactly one manifest and ten room files for MR.' }
-            $venue = Read-Venue $manifest '' $entries $SelectedRoom $SelectedSeat -AllowExpired:$AllowExpired
+            $venue = Read-Venue $manifest '' $entries $SelectedRoom $SelectedSeat -AllowExpired:$AllowExpired -WindowsStaging:$WindowsStaging
             if ($Fingerprint) { $venue.BundleSha256 = $bundleHash }
             return $venue
         } finally { $archive.Dispose() }
     } finally { $file.Dispose() }
 }
 
-function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$SelectedRoom, [int]$SelectedSeat, [switch]$AllowExpired) {
+function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$SelectedRoom, [int]$SelectedSeat, [switch]$AllowExpired, [switch]$WindowsStaging) {
     $isVr = $BundleEntries -and $manifest.mode -ceq 'VR'
     $isMixed = $BundleEntries -and $manifest.mode -ceq 'Mixed'
     $manifestFields = @('version','topology','rooms')
@@ -450,7 +450,7 @@ function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$Selecte
             catch { throw "Room $id connection ZIP has an invalid size or length." }
             finally { $stream.Dispose() }
             $inner = [IO.MemoryStream]::new($bytes, $false)
-            try { $tickets = @(Read-VenueTicketStream $inner $id $session -ForBundle -PlayersPerRoom $playersPerRoom -AllowExpired:$AllowExpired) }
+            try { $tickets = @(Read-VenueTicketStream $inner $id $session -RequireRemoteEndpoint:(-not ($WindowsStaging -and $isVr)) -PlayersPerRoom $playersPerRoom -AllowExpired:$AllowExpired) }
             finally { $inner.Dispose() }
         } else {
             $alignment = Read-RoomAlignment (Get-VenueInputPath $directory $room.alignmentFile) $id
@@ -573,7 +573,7 @@ function Export-WindowsVenueSeats {
     if (-not $parent -or -not [IO.Directory]::Exists($parent) -or (Test-Path -LiteralPath $output)) {
         throw 'Use a new Windows output directory inside an existing private directory.'
     }
-    $venue = Read-VenueBundle $VenueBundle 0 0
+    $venue = Read-VenueBundle $VenueBundle 0 0 -WindowsStaging
     if ($venue.Report.mode -cnotin @('VR','Mixed')) { throw 'Windows staging requires an original VR or mixed venue bundle.' }
     foreach ($row in $map.seats) {
         $connection = $venue.Connections["$($row.roomId)/$($row.seat)"]

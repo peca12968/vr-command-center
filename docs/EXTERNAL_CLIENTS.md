@@ -148,6 +148,8 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 `
 
 選到 Quest 3、MR 房間、重複席位、過期票券或過時名冊時，整批拒絕。成功摘要列出每台電腦的檔名、端點與效期，並記錄 `liveSourceVerified: true`。純 VR 同機排演可使用 loopback，玩家只能在遊戲伺服器所在電腦使用該目的地。跨機仍須使用場館 LAN 端點。
 
+若純 VR 原包的目的地為 `127.0.0.1`，Windows 席位匯出會保留這個位址。五房獨立與合併排演都可使用。要改成跨機遊玩，請先由遊戲伺服器公布場館網路位址，再從主控重新配票。
+
 把每份 JSON 私下交給對應電腦。玩家在該電腦用解壓後的 `Launch-Player.exe --config <該台連線檔> --launch --openxr --wait` 加入。Quest 席位可從同一份原場館 ZIP 使用 Quest 的批次部署流程。 [Windows OpenXR 啟動](WINDOWS_PLAYER_PACKAGE.md#windows-openxr-啟動) · [Quest 席位部署](QUEST3.md#部署指定的-quest-席位)
 
 下載使用各來源已公布的位址和埠。五房獨立須使用各自的端點，合併場共用同一端點。若名冊、場次或來源已變更，請重新讀取五房名冊。尚未填滿的場館可沿用單席或整房配票。
