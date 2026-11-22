@@ -577,8 +577,10 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     const recent = $('world-recent');
     const canReturn = Boolean(returnLiveSource);
     const liveFrame = active && mode === 'live' && connected && received && Boolean(frame);
+    const sealedFrame = mode === 'live' && liveBoundary?.sealedEpoch === epoch
+      && liveBoundary.sourceKey === geometry && liveBoundary.sequence === frame?.packet.sequence;
     recent.hidden = mode !== 'live' && !canReturn;
-    recent.disabled = !active || (!canReturn && (!liveFrame || frame.packet.sequence <= 1));
+    recent.disabled = !active || (!canReturn && (!(liveFrame || sealedFrame) || frame.packet.sequence <= 1));
     const recentLabel = canReturn ? '返回即時觀戰' : '回看最近 10 秒';
     if (recent.textContent !== recentLabel) recent.textContent = recentLabel;
     $('world-live-event-tools').hidden = mode !== 'live';
@@ -1207,6 +1209,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
                 || frame?.packet.sequence !== lastLiveSequence || frame.packet.frame.phase !== 'Ended'
                 || data.durationMilliseconds !== frame.packet.elapsedMilliseconds)
                 throw new Error('尚未讀到即時觀戰的封存尾端。');
+              liveBoundary.sealedEpoch = request;
               info = data; connected = false;
               const selected = $('world-recording').selectedOptions[0];
               for (const row of [...recordingRows, ...pinnedRecordings]) {

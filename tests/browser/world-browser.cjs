@@ -484,8 +484,21 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       await quickPage.locator('#world-recording').selectOption(completed.sessionId);
       await quickPage.locator('#world-live').click();
       const quick = quickPage.locator('#world-recent'), quickCanvas = quickPage.locator('#world-canvas');
-      const ready = () => quickPage.waitForFunction(() => !document.querySelector('#world-recent').disabled, null, { polling: 100 });
+      const ready = () => quickPage.waitForFunction(() => document.querySelector('#world-freshness').textContent === '場次已封存'
+        && !document.querySelector('#world-recent').disabled, null, { polling: 100 });
       const watch = new RegExp(`${archiveRoute}/watch\\?mode=replay&`);
+      await ready();
+      const final = await api(archiveRoute + '/frames/' + finalFrame);
+      const invalidSeal = { ...archiveInfo, durationMilliseconds: final.packet.elapsedMilliseconds + 1 };
+      await quickPage.route(new RegExp(`${archiveRoute}/watch\\?mode=live&`), route => route.fulfill({
+        status: 200, contentType: 'text/event-stream', body:
+          `event: header\ndata: ${JSON.stringify(archiveInfo)}\n\nevent: frame\ndata: ${JSON.stringify(final)}\n\n` +
+          `event: complete\ndata: ${JSON.stringify(invalidSeal)}\n\n`
+      }), { times: 1 });
+      await quickPage.locator('#world-live').click();
+      await quickPage.locator('#world-message').filter({ hasText: '尚未讀到即時觀戰的封存尾端' }).waitFor();
+      check(await quick.isDisabled(), 'A previously verified seal cannot enable recent replay after an invalid reconnect');
+      await quickPage.locator('#world-live').click();
       await ready();
       const first = await api(archiveRoute + '/frames/1');
       await quickPage.route(watch, route => route.fulfill({ status: 200, contentType: 'text/event-stream', body:
