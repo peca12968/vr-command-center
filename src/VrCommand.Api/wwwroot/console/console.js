@@ -983,6 +983,7 @@ function applyPermissions() {
   $('more-versions').disabled = locked || !state.history?.nextBefore;
   $('launch-version').disabled = locked || !state.draftBase;
   $('save-revision').disabled = locked || !master() || !state.draftBase || state.draftBase.number !== knownHeadNumber(state.draftBase.seriesId);
+  $('merge-mission-head').disabled = locked || !master();
   for (const kind of ['environment', 'enemies']) {
     $(kind + '-fields').disabled = locked || !manages() || ended || !session;
     $(kind + '-form').querySelector('button[type=submit]').disabled = !liveSettingDrafts[kind]?.sequence;
@@ -2592,11 +2593,14 @@ async function rememberHead(history, epoch, signal) {
 }
 function draftStatus() {
   const base = state.draftBase;
+  const canMerge = master() && state.draftChanged && base && knownHeadNumber(base.seriesId) > base.number;
+  $('merge-mission-head').hidden = !canMerge;
   let text = state.draftChanged ? '尚未儲存的修改' : state.draftSavedAt ? '已儲存於 ' + time(state.draftSavedAt) : base ? '已載入草稿' : '尚未儲存的草稿';
   if (base) {
     text += ` · 基於「${base.mission.definition.name}」第 ${base.number} 版`;
     const latest = knownHeadNumber(base.seriesId);
-    if (latest > base.number) text += ` · 已有第 ${latest} 版，修訂前請載入最新版，或另存新任務`;
+    if (latest > base.number) text += canMerge ? ` · 已有第 ${latest} 版，可合併到草稿或另存新任務`
+      : ` · 已有第 ${latest} 版，修訂前請載入最新版，或另存新任務`;
   }
   $('draft-status').textContent = text;
 }
@@ -2607,16 +2611,17 @@ function renderHistory(selected) {
   if (comparedVersion && comparedVersion.mission.id !== $('mission-version').value) clearMissionComparison();
   $('history-status').textContent = history ? `已讀取 ${history.versions.length} 版 · 本次查詢最新第 ${history.headNumber} 版` : '';
 }
-function requestDraft(version, older = false) {
+function requestDraft(version, mode = 'latest') {
   if (state.busy || $('missions-view').hidden) return;
   const request = draftLoad = new AbortController();
-  void run(() => loadDraft(version, older, request.signal), true, request.signal).finally(() => {
+  void run(() => loadDraft(version, mode, request.signal), true, request.signal).finally(() => {
     if (draftLoad === request) draftLoad = null;
   });
 }
 
-async function loadDraft({ id, seriesId, number }, older, signal) {
+async function loadDraft({ id, seriesId, number }, mode, signal) {
   const epoch = state.epoch;
+  const older = mode === 'selected';
   const history = await api(`/missions/${id}/history`, 'GET', undefined, undefined, undefined, 'json', signal);
   if (signal.aborted || epoch !== state.epoch) return;
   requireMissionHistory(history, seriesId, number);
@@ -2626,13 +2631,50 @@ async function loadDraft({ id, seriesId, number }, older, signal) {
   requireMissionVersion(revision, targetId, seriesId, older ? number : history.headNumber);
   if (!await rememberHead(history, epoch, signal) || signal.aborted || epoch !== state.epoch) return;
   const mission = revision.mission;
-  const draft = mission.definition;
-  fillDraft(draft);
-  state.draftBase = revision; state.draftChanged = false; state.draftSavedAt = ''; state.history = history;
+  let draft = mission.definition, keepProps = false;
+  if (mode === 'merge') {
+    const base = state.draftBase;
+    if (base?.mission.id !== id || revision.number <= base.number || knownHeadNumber(seriesId) !== revision.number)
+      throw new MissionVersionMismatch();
+    const local = draftDefinition(), merged = mergeMissionDraft(base.mission.definition, local, draft);
+    if (merged.conflicts.length) {
+      state.history = history; renderHistory(mission.id); draftStatus();
+      notify(`雙方對「${merged.conflicts.join('、')}」的修改不同。可按「與目前草稿比較」查看第 ${revision.number} 版，或另存新任務。`, true);
+      return;
+    }
+    draft = merged.definition;
+    keepProps = draft.props === local.props;
+  }
+  fillDraft(draft, keepProps);
+  state.draftBase = revision; state.draftChanged = mode === 'merge' && !matchesMissionDefinition(mission.definition, draft, matchesSavedCoordinate);
+  state.draftSavedAt = ''; state.history = history;
   if (!history.versions.some(row => row.id === mission.id)) history.versions.push({ id: mission.id, number: revision.number, name: draft.name, createdAtUtc: mission.createdAtUtc });
   renderProps(); renderHistory(mission.id); missionOptions(undefined, history.headId); draftStatus();
+  if (mode === 'merge') notify(state.draftChanged ? `草稿已合併第 ${revision.number} 版，核對後可保存為下一版。`
+    : `目前修改已包含在第 ${revision.number} 版中。`);
 }
-function fillDraft(draft) {
+function mergeMissionDraft(base, local, latest) {
+  const conflicts = [];
+  function choose(label, original, edited, published, equal = (a, b) => a === b) {
+    if (equal(edited, published)) return edited;
+    if (equal(edited, original)) return published;
+    if (!equal(published, original)) conflicts.push(label);
+    return edited;
+  }
+  const definition = structuredClone(latest);
+  for (const [key, label] of Object.entries({ name: '任務名稱', briefing: '任務內容', durationSeconds: '任務時間' }))
+    definition[key] = choose(label, base[key], local[key], latest[key]);
+  const groups = { environment: { mode: '環境模式', weather: '天氣', timeOfDay: '日夜', lightning: '雷電' },
+    enemies: { count: '敵軍數量', behavior: '敵軍行為', autoAttack: '自動攻擊' } };
+  for (const [group, fields] of Object.entries(groups))
+    for (const [key, label] of Object.entries(fields))
+      definition[group][key] = choose(label, base[group][key], local[group][key], latest[group][key]);
+  // Props have no stable IDs. Preserve ordering and compare the entire layout at saved precision.
+  definition.props = choose('場景物件', base.props, local.props, latest.props,
+    (a, b) => a.length === b.length && a.every((prop, i) => matchesMissionProp(prop, b[i], matchesSavedCoordinate)));
+  return { definition, conflicts };
+}
+function fillDraft(draft, keepProps = false) {
   placement.clearTrial(); clearMissionComparison();
   propMove.reset();
   $('draft-name').value = draft.name; $('draft-briefing').value = draft.briefing; $('draft-duration').value = draft.durationSeconds;
@@ -2642,7 +2684,9 @@ function fillDraft(draft) {
     briefing: { value: draft.briefing, shown: $('draft-briefing').value }
   };
   setEnvironment('draft', draft.environment); setEnemies('draft', draft.enemies);
-  state.props = structuredClone(draft.props); state.prop = state.props.length ? 0 : -1; clearPropHistory();
+  if (!keepProps) {
+    state.props = structuredClone(draft.props); state.prop = state.props.length ? 0 : -1; clearPropHistory();
+  }
 }
 function clearMissionTemplate(keepFile = false) {
   templateEpoch++; checkedTemplate = null;
@@ -3101,7 +3145,7 @@ $('load-version').addEventListener('click', () => {
   const id = $('mission-version').value;
   const history = state.history, selected = history?.versions.find(row => row.id === id);
   if (selected && confirmDraftDiscard('載入選取版本'))
-    requestDraft({ id, seriesId: history.seriesId, number: selected.number }, true);
+    requestDraft({ id, seriesId: history.seriesId, number: selected.number }, 'selected');
 });
 $('export-mission-template').addEventListener('click', () => {
   const id = $('mission-version').value, epoch = state.epoch, view = templateEpoch;
@@ -3157,6 +3201,11 @@ $('more-versions').addEventListener('click', () => run(async () => {
   renderHistory(); draftStatus();
 }, true));
 $('save-revision').addEventListener('click', () => { if ($('mission-form').reportValidity()) run(() => saveMission(true)); });
+$('merge-mission-head').addEventListener('click', () => {
+  const base = state.draftBase;
+  if (editable() && state.draftChanged && base && knownHeadNumber(base.seriesId) > base.number && $('mission-form').reportValidity())
+    requestDraft({ id: base.mission.id, seriesId: base.seriesId, number: base.number }, 'merge');
+});
 function pinLaunchVersion(revision) {
   if (!revision || state.pending || state.busy) return;
   state.launchPinned = revision; missionOptions(revision.mission.id); tab('operations');
