@@ -488,6 +488,8 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
         && !document.querySelector('#world-recent').disabled, null, { polling: 100 });
       const watch = new RegExp(`${archiveRoute}/watch\\?mode=replay&`);
       await ready();
+      const originalMission = await api('/missions/' + archiveInfo.missionId + '/version');
+      await require('./observer-mission-briefing.cjs')(quickPage, originalMission);
       const final = await api(archiveRoute + '/frames/' + finalFrame);
       const invalidSeal = { ...archiveInfo, durationMilliseconds: final.packet.elapsedMilliseconds + 1 };
       await quickPage.route(new RegExp(`${archiveRoute}/watch\\?mode=live&`), route => route.fulfill({

@@ -548,6 +548,11 @@
         <section class="panel"><div id="world-live-rooms" class="world-room-quick" role="group" aria-label="目前場次的即時觀戰房間" hidden></div><label>可讀取的錄製場次<select id="world-recording"></select></label><div class="button-row"><button id="world-refresh" class="quiet">更新錄製列表</button><button id="world-older" type="button" class="quiet" hidden disabled>載入較早錄製</button><button id="world-live" disabled>即時觀戰</button><button id="world-replay" class="secondary" disabled>從頭回放</button></div><p id="world-list-status" class="hint" role="status"></p><p id="world-message" class="hint" role="status" aria-live="polite">選取已錄製的場次，開始觀戰或回放。</p></section>
         <section id="world-player" class="panel" hidden>
           <div class="section-heading"><h3 id="world-name"></h3><span id="world-status" class="badge"></span></div>
+          <details id="world-mission-details" class="layout-report" hidden>
+            <summary>本場任務簡報</summary>
+            <p id="world-mission-version" class="hint" role="status"></p>
+            <p id="world-mission-briefing" class="briefing"></p>
+          </details>
           <div id="world-room-quick" class="world-room-quick" role="group" aria-label="房間鏡頭與快照戰況" hidden></div>
           <div id="world-viewport"><canvas id="world-canvas" tabindex="0" aria-label="世界錄製 3D 觀察場景，可拖曳及點選角色"></canvas><div class="replay-overlay"><span id="world-environment"></span><span id="world-freshness"></span></div></div>
           <p id="world-enemy-policy" class="hint"></p>
@@ -667,7 +672,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.303 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.304 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

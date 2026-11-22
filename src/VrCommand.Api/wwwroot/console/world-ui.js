@@ -69,6 +69,40 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   const savedClips = mountSavedClips(response, canWriteClips, loadClip, download);
   const clipStatistics = mountWorldClipStatistics(response, download);
   const shotTrace = mountWorldShotTrace(response, readFrame, eventNames);
+  const missionDetails = $('world-mission-details');
+  let briefingSource, briefingRequest;
+  function bindBriefing(recording) {
+    const missionId = recording?.missionId, sessionId = recording?.header.sessionId;
+    if (briefingSource?.sessionId === sessionId && briefingSource?.missionId === missionId) return;
+    briefingRequest?.abort();
+    briefingSource = typeof missionId === 'string' && recordingId.test(missionId)
+      ? { sessionId, missionId, name: recording.missionName } : null;
+    missionDetails.open = false;
+    missionDetails.hidden = !briefingSource;
+    $('world-mission-version').textContent = $('world-mission-briefing').textContent = '';
+  }
+  missionDetails.addEventListener('toggle', async () => {
+    briefingRequest?.abort();
+    if (!missionDetails.open || !briefingSource) return;
+    const source = briefingSource, request = briefingRequest = new AbortController();
+    const status = $('world-mission-version'), briefing = $('world-mission-briefing');
+    briefing.textContent = '';
+    status.textContent = '正在讀取本場保存的任務版本…';
+    try {
+      const signal = AbortSignal.any([request.signal, AbortSignal.timeout(8000)]);
+      const revision = await (await response('/api/missions/' + source.missionId + '/version', signal)).json();
+      if (request.signal.aborted || briefingSource !== source || !missionDetails.open) return;
+      const definition = revision?.mission?.definition;
+      if (revision?.mission?.id !== source.missionId || definition?.name !== source.name ||
+          !Number.isSafeInteger(revision.number) || revision.number < 1 || !Number.isSafeInteger(definition.durationSeconds) ||
+          definition.durationSeconds < 1 || typeof definition.briefing !== 'string') throw new Error();
+      status.textContent = `第 ${revision.number} 版 · 計畫 ${definition.durationSeconds} 秒 · ${source.missionId}`;
+      briefing.textContent = definition.briefing || '此版本未填寫任務簡報。';
+    } catch {
+      if (!request.signal.aborted && briefingSource === source && missionDetails.open)
+        status.textContent = '無法核對本場任務簡報。收合後重新展開可再讀取。';
+    }
+  });
   function message(text, error = false) { $('world-message').textContent = text; $('world-message').classList.toggle('replay-error', error); }
   function stop() {
     epoch++; clearTimeout(liveRetryTimer); liveRetryTimer = undefined;
@@ -88,6 +122,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   }
   returnToScores.addEventListener('click', () => { if (active && getKey()) scoresReturn?.action(); });
   function reset() {
+    bindBriefing(null);
     bindScoresReturn();
     frameNumber.value = '';
     observerRoom = null;
@@ -372,6 +407,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     $('world-older').disabled = !nextRecordingBefore || !!listController;
   }
   function resetRecording() {
+    bindBriefing(null);
     bindScoresReturn();
     frameNumber.value = '';
     observerRoom = null;
@@ -1119,6 +1155,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
       selectRoom(String(observerRoom ?? roomId));
     }
     scene.resize(); $('world-name').textContent = info.missionName;
+    bindBriefing(info);
     cameras.bind(info.header.sessionId);
     cameraForm.bind(info.header.sessionId);
     message(`${info.header.origin} · ${info.header.rulesVersion} · ${info.header.assetSet === 'player-fire-v1' ? '軍事掩體／玩家及敵軍射擊效果 v1（依保存射線）' : info.header.assetSet === 'combat-effects-v1' ? '軍事掩體／敵軍射擊閃光及後座 v1（依保存射線）' : info.header.assetSet === 'armed-combatants-v1' ? '軍事掩體／敵軍雙手持槍／換彈 v1（合成姿勢）' : info.header.assetSet === 'weapon-actions-v1' ? '軍事掩體／人形敵軍／換彈動作 v1（合成手套非追蹤）' : info.header.assetSet === 'combatants-v1' ? '軍事掩體／步槍／人形敵軍 v1（命中採粗略包圍盒）' : info.header.assetSet === 'service-rifle-v1' ? '軍事掩體／玩家步槍 v1（命中／碰撞採包圍盒）' : info.header.assetSet === 'field-props-v1' ? '軍事掩體 v1（命中／碰撞採包圍盒）' : '基本幾何素材'} · ${info.header.calibration === 'quest-room-mr-v1' ? 'Quest 3 MR 錄製設定。' : 'VR 未校正。'}頭手來源請見角色資訊。${info.header.environmentVersion === 1 ? '環境聲光 v1 依保存的模擬時間重建，非原始音軌。' : '舊錄製沒有聲光效果版本，僅保留原有光霧顯示。'}`);
@@ -1395,7 +1432,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
         bindScoresReturn(target.returnToScores);
         message('正在尋找原場次錄製…');
       }
+      if (!target && info) bindBriefing(info);
       void refresh(target);
-    } else { bindScoresReturn(); returnLiveSource = null; clearClip(); bindVenueReview(null); stop(); stopList(); bindLiveRooms([], []); status(); }
+    } else { bindBriefing(null); bindScoresReturn(); returnLiveSource = null; clearClip(); bindVenueReview(null); stop(); stopList(); bindLiveRooms([], []); status(); }
   } };
 }
