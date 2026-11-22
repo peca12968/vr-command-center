@@ -1,5 +1,5 @@
 import { MAX_REPLAY_BYTES, MAX_REPLAY_FILES, MAX_REPLAY_SET_BYTES, playerReplayEventFrames, playerReplayPlayers, readPlayerReplaySet, samePlayerReplaySource, sourcePaused, sourceTransitions } from './player-replay-model.js';
-import { recordedClock } from './mission-clock.js';
+import { missionTicksPerSecond, recordedClock } from './mission-clock.js';
 import { eventNames } from './world-event-names.js';
 
 const $ = id => document.getElementById('player-replay-' + id);
@@ -8,6 +8,7 @@ const canvas = document.getElementById('replay-canvas');
 const loop = $('loop');
 const frameNumber = $('number');
 const seconds = $('seconds');
+const activitySeconds = $('activity-seconds');
 const eventKind = $('event-kind');
 const room = $('room'), follow = $('follow'), followStatus = $('follow-status');
 for (const [kind, label] of Object.entries(eventNames)) eventKind.add(new Option(label, kind));
@@ -248,6 +249,12 @@ async function openReplay(files, embeddedInfo = null, continuing = false) {
     frameNumber.min = candidate.startFrame;
     frameNumber.max = candidate.endFrame;
     seconds.max = (candidate.packets.at(-1).elapsedMilliseconds - candidate.packets[0].elapsedMilliseconds) / 1000;
+    const firstTick = candidate.packets[0].frame.tick;
+    activitySeconds.value = '';
+    activitySeconds.min = firstTick / missionTicksPerSecond;
+    activitySeconds.max = candidate.packets.at(-1).frame.tick / missionTicksPerSecond;
+    $('activity-seek').hidden = !recordedClock(candidate.header, firstTick);
+    $('activity-range').textContent = `本段 ${activitySeconds.min}–${activitySeconds.max} 秒，定位到達指定時間的第一格。`;
     $('title').textContent = segments.length === 1 ? candidate.clipName : `${candidate.missionName} · ${segments.length} 段連播`;
     $('segment').replaceChildren(new Option('選擇片段', ''), ...segments.map(segment =>
       new Option(`${segment.clipName} · 第 ${segment.startFrame}–${segment.endFrame} 格`, segment.startFrame - candidate.startFrame)));
@@ -365,6 +372,14 @@ $('seek').addEventListener('submit', event => {
   seconds.focus();
 });
 loop.addEventListener('change', () => { if (!loop.checked && restartAt !== null) pause(); });
+$('activity-seek').addEventListener('submit', event => {
+  event.preventDefault();
+  if (!replay || $('activity-seek').hidden || !activitySeconds.validity.valid) return;
+  const target = Math.round(activitySeconds.valueAsNumber * missionTicksPerSecond);
+  const next = replay.packets.findIndex(packet => packet.frame.tick >= target);
+  if (next >= 0) openFrame(next);
+  activitySeconds.focus();
+});
 timeline.addEventListener('input', () => openFrame(Number(timeline.value)));
 for (const select of [$('transition'), $('environment'), $('segment')]) {
   select.addEventListener('change', () => {

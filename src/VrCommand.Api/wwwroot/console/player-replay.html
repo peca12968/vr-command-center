@@ -52,6 +52,11 @@
         <label><span>畫格序號</span><input id="player-replay-number" type="number" inputmode="numeric" min="1" step="1" required></label>
         <button type="submit" class="quiet">跳到畫格</button>
       </form>
+      <form id="player-replay-activity-seek" class="replay-transport" hidden>
+        <label><span>任務活動時間（秒）</span><input id="player-replay-activity-seconds" type="number" inputmode="decimal" step="0.05" required aria-describedby="player-replay-activity-range"></label>
+        <button type="submit" class="quiet">跳到任務時間</button>
+        <span id="player-replay-activity-range" class="hint"></span>
+      </form>
       <label id="player-replay-transition-field" hidden>遊戲來源畫格<select id="player-replay-transition"></select></label>
       <label id="player-replay-environment-field" hidden>環境變化<select id="player-replay-environment"></select></label>
       <div class="replay-transport replay-event-tools">

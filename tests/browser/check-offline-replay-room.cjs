@@ -165,6 +165,34 @@ async function main() {
       await control('message').filter({ hasText: '已載入 3 格' }).waitFor();
     };
     await load();
+    assert.ok(await control('activity-seek').isHidden(), 'Legacy recordings have no mission clock');
+    const activityClip = structuredClone(clip);
+    Object.assign(activityClip.header, { missionClockVersion: 1, missionDurationSeconds: 60 });
+    activityClip.endFrame = 13;
+    activityClip.packets.push(structuredClone(activityClip.packets.at(-1)));
+    activityClip.packets.forEach((packet, i) => {
+      packet.sequence = 10 + i;
+      packet.elapsedMilliseconds = 1000 + 500 * i;
+      packet.frame.tick = [100, 101, 101, 110][i];
+      if (i === 2) packet.frame.phase = 'Paused';
+    });
+    await control('file').setInputFiles({ name: 'activity.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(activityClip)) });
+    await control('activity-seek').waitFor();
+    const activity = control('activity-seconds');
+    assert.equal(await activity.getAttribute('min'), '5');
+    assert.equal(await activity.getAttribute('max'), '5.5');
+    await control('room').selectOption('5');
+    await control('follow').selectOption(clip.packets[1].frame.players[0].id);
+    for (const [target, sequence] of [['5.5', 13], ['5.05', 11], ['5.10', 13], ['5', 10], ['4', 10], ['6', 10]]) {
+      await activity.fill(target);
+      await activity.press('Enter');
+      assert.match(await control('frame').innerText(), new RegExp('第 ' + sequence + ' 格'));
+      assert.equal(await control('room').inputValue(), '5');
+      assert.equal(await control('follow').inputValue(), clip.packets[1].frame.players[0].id);
+    }
+    await load();
+    assert.ok(await control('activity-seek').isHidden());
+    console.log('PASS: recorded activity time, paused duplicate ticks, sparse samples, clip boundaries and legacy files');
     assert.ok(await control('environment-field').isHidden());
     assert.equal(await control('event-count').innerText(), '2 個事件畫格');
     await control('event-kind').selectOption('ShotHit');
