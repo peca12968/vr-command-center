@@ -130,6 +130,8 @@ $report = Join-Path (Split-Path (Get-Location).Path -Parent) 'windows-openxr.jso
 Get-Content -LiteralPath $report
 ```
 
+Quest 3 的 MR 部署會在電腦上先核對票券房號與三個地面標記。A、B 在房間及頭盔追蹤座標中都須相距至少 0.5 公尺，房間標記 C 到 A–B 直線也須至少 0.5 公尺。套用 A、B 算出的平移與旋轉後，每個量測點的誤差須在 5 公分內。若預檢指出房號及標記有誤，可先核對該房 A、B、C 的標記順序並重新量測，再匯出校準資料和相應的玩家連線檔。
+
 若使用 Quest 3，在解壓目錄用 PowerShell 7 執行以下命令。第一行顯示交付包內的遊戲版本；第二行以本機預計接入五台為例，列出 Windows 裝置台數及 USB 偵錯狀態。請將 5 改成本次接到這台電腦的預期台數，可填 1 至 25。
 
 ```powershell

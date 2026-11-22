@@ -1261,6 +1261,35 @@ class QuestDeployTests(unittest.TestCase):
         self.assert_rejected(self.run_mr(), 'Use the original A, B and C')
         self.assertFalse(self.commands.exists())
 
+    def test_mr_deploy_recomputes_geometry_even_when_the_alignment_pin_matches(self):
+        for change, axis, value in (
+                ('room-baseline', 'x', -1.51), ('tracking-baseline', 'x', -1.51),
+                ('room-collinear', 'z', -2), ('tracking-mirrored', 'z', -6),
+                ('tracking-stretched', 'x', 2.051), ('tracking-residual', 'z', 2.051)):
+            with self.subTest(change=change):
+                plan = copy.deepcopy(self.alignment)
+                space, label = change.split('-')
+                index = 1 if label in ('baseline', 'stretched') else 2
+                plan['markers'][index][space][axis] = value
+                self.write(self.plan, plan)
+                self.write(self.config, {**self.player, 'roomAlignmentSha256': hashlib.sha256(self.plan.read_bytes()).hexdigest()})
+                self.assert_rejected(self.run_mr('-CheckOnly'), 'floor marker')
+        self.provision_apk()
+        self.assert_rejected(self.run_mr(), 'Room 5 floor marker C')
+        self.assertFalse(self.commands.exists())
+
+    def test_mr_preflight_accepts_rotated_translated_markers_at_tolerance(self):
+        plan = copy.deepcopy(self.alignment)
+        for marker in plan['markers']:
+            x, z = marker['room']['x'], marker['room']['z']
+            marker['tracking'] = {'x': 12 - z, 'z': 7 + x}
+        plan['markers'][2]['tracking']['x'] += 0.05
+        self.write(self.plan, plan)
+        result = self.run_mr('-CheckOnly')
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(hashlib.sha256(self.plan.read_bytes()).hexdigest(), json.loads(result.stdout)['alignmentSha256'])
+        self.assertFalse(self.commands.exists())
+
     def test_deploy_uses_exact_checked_alignment_bytes_before_launch(self):
         self.provision_apk()
         before = self.plan.read_bytes()

@@ -180,6 +180,37 @@ function Read-PlayerConfig($Config, [switch]$Installed, [switch]$AllowExpired) {
     return $ticket
 }
 
+function Confirm-QuestFloorFit($Markers, [int]$RoomId) {
+    # Match RoomFloorFit.Solve in the game and management service using the original measurements.
+    $roomA = $Markers[0].room
+    $trackingA = $Markers[0].tracking
+    $rx = [double]$Markers[1].room.x - $roomA.x
+    $rz = [double]$Markers[1].room.z - $roomA.z
+    $tx = [double]$Markers[1].tracking.x - $trackingA.x
+    $tz = [double]$Markers[1].tracking.z - $trackingA.z
+    $roomBaseline = [Math]::Sqrt($rx * $rx + $rz * $rz)
+    if ($roomBaseline -lt 0.5 -or [Math]::Sqrt($tx * $tx + $tz * $tz) -lt 0.5) {
+        throw "Room $RoomId floor markers A and B must be at least 0.5 m apart in both measurements."
+    }
+    $cx = [double]$Markers[2].room.x - $roomA.x
+    $cz = [double]$Markers[2].room.z - $roomA.z
+    if ([Math]::Abs($rx * $cz - $rz * $cx) / $roomBaseline -lt 0.5) {
+        throw "Room $RoomId floor marker C must be at least 0.5 m from the A-B line in room coordinates."
+    }
+    $yaw = [Math]::Atan2($tz, $tx) - [Math]::Atan2($rz, $rx)
+    $cos = [Math]::Cos($yaw)
+    $sin = [Math]::Sin($yaw)
+    $offsetX = [double]$roomA.x - ($cos * $trackingA.x + $sin * $trackingA.z)
+    $offsetZ = [double]$roomA.z - (-$sin * $trackingA.x + $cos * $trackingA.z)
+    foreach ($marker in $Markers) {
+        $errorX = $cos * $marker.tracking.x + $sin * $marker.tracking.z + $offsetX - $marker.room.x
+        $errorZ = -$sin * $marker.tracking.x + $cos * $marker.tracking.z + $offsetZ - $marker.room.z
+        if ([Math]::Sqrt($errorX * $errorX + $errorZ * $errorZ) -gt (0.05 + 1e-9)) {
+            throw "Room $RoomId floor marker $($marker.name) exceeds the 0.05 m alignment tolerance."
+        }
+    }
+}
+
 function Confirm-RoomAlignment($Alignment, [int]$RoomId) {
     $plan = $alignment.Document
     if (-not (Test-JsonInteger $plan.version) -or $plan.version -ne 1 -or
@@ -199,6 +230,7 @@ function Confirm-RoomAlignment($Alignment, [int]$RoomId) {
             throw 'Use the original A, B and C room alignment measurements.'
         }
     }
+    Confirm-QuestFloorFit $plan.markers $RoomId
     $sha = [Security.Cryptography.SHA256]::Create()
     try { $alignment.Hash = [BitConverter]::ToString($sha.ComputeHash($alignment.Bytes)).Replace('-', '').ToLowerInvariant() }
     finally { $sha.Dispose() }
