@@ -54,6 +54,9 @@ class NativeLaunchTests(unittest.TestCase):
             (root / 'check-windows-firewall-notifications.ps1').write_text('''
 param([string]$Executable, [switch]$Unattended)
 if ($Executable -cne $env:FIXTURE_IMAGE -or -not $Unattended -or $env:VR_COMMAND_UNATTENDED -ne '1') { exit 9 }
+$previous = Test-Path -LiteralPath 'checked.txt'
+Add-Content -LiteralPath 'checked.txt' -Value $Executable
+if ($previous) { exit ([int]$env:FIXTURE_FINAL_EXIT) }
 exit ([int]$env:FIXTURE_FIREWALL_EXIT)
 ''', encoding='utf-8')
             source = root / 'Fixture.cs'
@@ -74,12 +77,16 @@ class Fixture {
             command = [powershell, '-NoProfile', '-NonInteractive', '-File', str(root / 'start-windows-vr.ps1'),
                        '-Executable', str(image), '-Config', str(config), '-LinkMetrics', metrics]
             env = {**os.environ, 'VR_COMMAND_UNATTENDED': '0', 'FIXTURE_IMAGE': str(image)}
-            for policy_exit in (2, 0):
-                result = subprocess.run(command, cwd=root, env={**env, 'FIXTURE_FIREWALL_EXIT': str(policy_exit)},
+            for initial, final, expected in ((2, 0, 2), (0, 2, 2), (0, 0, 17)):
+                checks = root / 'checked.txt'
+                checks.unlink(missing_ok=True)
+                result = subprocess.run(command, cwd=root, env={**env, 'FIXTURE_FIREWALL_EXIT': str(initial),
+                                                               'FIXTURE_FINAL_EXIT': str(final)},
                                         capture_output=True, text=True, errors='replace', timeout=15,
                                         creationflags=subprocess.CREATE_NO_WINDOW)
-                self.assertEqual(2 if policy_exit else 17, result.returncode, result.stderr)
-                if policy_exit:
+                self.assertEqual(expected, result.returncode, result.stderr)
+                self.assertEqual(1 if initial else 2, len(checks.read_bytes().splitlines()))
+                if expected == 2:
                     self.assertFalse(witness.exists())
             self.assertEqual(['1', '--vr-config', str(config), '--vr-link-metrics', metrics],
                              witness.read_text(encoding='utf-8').splitlines())

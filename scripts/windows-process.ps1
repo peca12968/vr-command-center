@@ -16,6 +16,8 @@ function Invoke-UnattendedWindowsProcess {
         }) -join ' '
     }
 
+    & (Join-Path $PSScriptRoot 'check-windows-firewall-notifications.ps1') -Executable $start.FileName -Unattended
+    if ($LASTEXITCODE -ne 0) { return $LASTEXITCODE }
     try {
         $child = [Diagnostics.Process]::Start($start)
     } catch {
