@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-22 Quest 單席遊戲端點
+
+Quest 單席 VR／MR 部署、票券更新及追蹤預檢會先核對遊戲位址。頭盔無法用伺服器的回送位址入場。若管理服務已將該房的遊戲端點公布為回送位址，單席 Quest 核對會回傳 `endpoint-mismatch`。Windows 同機 VR 的通用連線檔核對仍可接受該位址。[Quest 接入說明](QUEST3.md)
+
+在前版與新版場館包各建立 4 個獨立測試場次，由解壓版管理服務簽發票券，經本機 IPC 提供模擬遊戲畫格，MR 另鎖定三點校正檔。前版 VR 與 MR 均接受 `127.7.0.1`；新版的管理核對與解壓版部署預檢均攔下，兩種模式均接受已公布的 `192.168.12.34`。場館包逐檔核對 1,297 檔，使用 Quest APK 0.50.12／77。此機唯讀查詢顯示 Meta USB 裝置 0 台，頭盔安裝與場館網路仍待實測。[前版結果](../artifacts/quest-seat-endpoint-20261122/baseline-checks.json) · [新版結果](../artifacts/quest-seat-endpoint-20261122/installed-checks.json) · [場館包](../artifacts/quest-seat-endpoint-20261122/VRCommand-Venue-QuestEndpoint.zip) · [檔案核對](../artifacts/quest-seat-endpoint-20261122/install.json)
+
 ## 2026-11-22 Windows 工作站收件核對
 
 主控匯出 Windows 席位時會在回條列出各席原始連線檔的 SHA-256。工作站可用本場回條及自己的標籤，離線核對實際收到的檔案、席位、端點與效期。已驗證同席的另一場票券、檔案改動、重複標籤、過期票券及缺少雜湊的舊回條都會被拒絕。[操作步驟](EXTERNAL_CLIENTS.md#依電腦分發-windows-vr-連線檔)

@@ -443,6 +443,25 @@ class QuestDeployTests(unittest.TestCase):
         apk.parent.mkdir(parents=True)
         apk.write_bytes(b'mock APK')
 
+    def test_single_quest_needs_a_remote_game_endpoint_before_contacting_devices(self):
+        self.provision_apk()
+        for address in ('127.34.0.2', '::1', '::ffff:127.0.0.1', '0.0.0.0', '::', '224.0.0.1', 'ff02::1'):
+            with self.subTest(address=address):
+                self.write(self.config, {**self.player, 'address': address})
+                self.assert_rejected(self.run_script('-CheckOnly'), 'usable outside the server computer')
+        self.write(self.config, {**self.player, 'address': 'localhost'})
+        self.assert_rejected(self.run_script('-Serial', 'fixture'), 'game server IP address')
+        self.write(self.config, {**self.player, 'address': '127.0.0.1'})
+        self.assert_rejected(self.run_script('-RefreshPlayerTicket', '-Serial', 'fixture'), 'usable outside the server computer')
+        self.assert_rejected(self.run_mr('-Serial', 'fixture'), 'usable outside the server computer')
+        self.assertFalse(self.commands.exists())
+        for address in ('192.168.1.10', 'fd00::a'):
+            with self.subTest(address=address):
+                self.write(self.config, {**self.player, 'address': address})
+                result = self.run_script('-CheckOnly')
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertEqual('VR', json.loads(result.stdout)['mode'])
+
     def test_single_quest_operations_keep_the_original_transport_on_disconnect(self):
         self.provision_apk()
         run_cases = (

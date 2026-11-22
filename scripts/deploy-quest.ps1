@@ -153,7 +153,7 @@ function Test-FloorPoint($Point, [double]$Limit) {
 
 function Test-JsonInteger($Value) { return $Value -is [int] -or $Value -is [long] }
 
-function Read-PlayerConfig($Config, [switch]$Installed, [switch]$AllowExpired) {
+function Read-PlayerConfig($Config, [switch]$Installed, [switch]$AllowExpired, [switch]$ForHeadset) {
     $fields = @('role','address','port','joinTicket','roomAlignmentSha256')
     if ($Installed) { $fields += 'questPassthrough','requestMixedReality','recordQuestLinkMetrics' }
     $unknown = @($Config.PSObject.Properties.Name | Where-Object { $_ -cnotin $fields })
@@ -161,6 +161,18 @@ function Read-PlayerConfig($Config, [switch]$Installed, [switch]$AllowExpired) {
         $Config.address -isnot [string] -or $Config.address -notmatch '\A[^\s]+\z' -or
         -not (Test-JsonInteger $Config.port) -or $Config.port -lt 1 -or $Config.port -gt 65535 -or $unknown.Count -gt 0) {
         throw 'Use a player-only connection file from the management console or prepare-vr-session.py.'
+    }
+    if ($ForHeadset) {
+        $ip = $null
+        if (-not [Net.IPAddress]::TryParse($Config.address, [ref]$ip)) {
+            throw 'Use the game server IP address on the venue network for this Quest seat.'
+        }
+        if ($ip.IsIPv4MappedToIPv6) { $ip = $ip.MapToIPv4() }
+        $ipv4 = $ip.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork
+        if ([Net.IPAddress]::IsLoopback($ip) -or $ip.Equals([Net.IPAddress]::IPv6Any) -or $ip.IsIPv6Multicast -or
+            ($ipv4 -and ($ip.GetAddressBytes()[0] -eq 0 -or $ip.GetAddressBytes()[0] -ge 224))) {
+            throw 'This Quest seat needs a venue endpoint usable outside the server computer.'
+        }
     }
     $ticket = Get-PlayerTicketDetails $Config.joinTicket -AllowExpired:($AllowExpired -or $Installed)
     if ($null -ne $Config.PSObject.Properties['roomAlignmentSha256']) {
@@ -2311,7 +2323,7 @@ if ($PSCmdlet.ParameterSetName -eq 'CapturePlan') {
 if ($PSCmdlet.ParameterSetName -eq 'Refresh') {
     if (-not $RefreshPlayerTicket) { throw 'Specify -RefreshPlayerTicket for the live ticket update.' }
     $freshFile = Read-DeploymentJson $ClientConfig $(if ($ManagementApi) { 2048 } else { 4096 }) 'new player connection'
-    $ticket = Read-PlayerConfig $freshFile.Document
+    $ticket = Read-PlayerConfig $freshFile.Document -ForHeadset
     $target = if ($ManagementApi) { Get-ManagementTarget $ManagementApi }
     $deploymentLock = Enter-QuestDeployment
     try { Update-QuestPlayerTicket $freshFile $ticket $target }
@@ -2325,7 +2337,7 @@ if ($PSCmdlet.ParameterSetName -eq 'WindowsReceipt') { Confirm-WindowsSeatDelive
 if ($PSCmdlet.ParameterSetName -eq 'PlayerTracking') {
     if (-not $VerifyPlayerTracking) { throw 'Specify -VerifyPlayerTracking to check the player seat before Begin.' }
     $connection = (Read-DeploymentJson $ClientConfig 4096 'player connection').Document
-    $ticket = Read-PlayerConfig $connection
+    $ticket = Read-PlayerConfig $connection -ForHeadset
     $target = Get-ManagementTarget $ManagementApi
     $result = if ($WaitForTrackedSeconds) {
         Wait-TrackedReadiness $WaitForTrackedSeconds $ticket.ExpiresAtUtc {
@@ -2519,7 +2531,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
 } else {
     $connectionFile = Read-DeploymentJson $ClientConfig $(if ($ManagementApi) { 2048 } else { 4096 }) 'player connection'
     $config = $connectionFile.Document
-    $ticket = Read-PlayerConfig $config
+    $ticket = Read-PlayerConfig $config -ForHeadset
     $isMixedReality = $MixedReality -or $null -ne $ticket.AlignmentHash
     if (($Passthrough -or $isMixedReality) -and -not $AlignmentFile) { throw 'Quest passthrough requires a checked room alignment JSON export.' }
     if ($AlignmentFile) {

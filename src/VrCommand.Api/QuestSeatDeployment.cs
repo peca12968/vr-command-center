@@ -1,3 +1,4 @@
+using System.Net;
 using VrCommand.Core;
 
 namespace VrCommand.Api;
@@ -25,6 +26,8 @@ internal static class QuestSeatDeployment
         if (player.Headset != HeadsetKind.Quest3) return Result("headset-mismatch");
         var mr = session.Environment.Mode == ExperienceMode.MR;
         if (mr != (files.AlignmentFile is not null)) return Result("mode-mismatch");
+        if (endpoint is not null && IPAddress.IsLoopback(IPAddress.Parse(endpoint.Address)))
+            return Result("endpoint-mismatch");
         if (!mr)
             return VrVenueTickets.CheckSeatFile(session.Id, player, new(files.ConnectionFile), endpoint, sourceLive, signer);
 

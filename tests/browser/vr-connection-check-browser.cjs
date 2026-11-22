@@ -95,13 +95,13 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     check(valid.status === 'matched' && valid.address === address && valid.port === port && Date.parse(valid.expiresAtUtc) > Date.now(),
       'The live original endpoint verifies signed VR bytes and returns only the seat, endpoint and expiry');
     const quest = { endpoint: 'quest-deployment-check' };
-    const questMatch = await call(originalBytes, quest);
+    const questLoopback = await call(originalBytes, quest);
     const wrongHeadset = await request(second, wrongSeat, quest);
     await call(originalBytes, { ...quest, role: 'Room2', expected: 403 });
     await call(originalBytes, { ...quest, admission: randomUUID(), expected: 409 });
-    check(questMatch.status === 'matched' && wrongHeadset.status === 'headset-mismatch'
+    check(questLoopback.status === 'endpoint-mismatch' && questLoopback.expiresAtUtc === null && wrongHeadset.status === 'headset-mismatch'
       && (await call(connectionBytes({ ...original, port: port + 1 }), quest)).status === 'endpoint-mismatch',
-    'The single Quest deployment check verifies the original VR destination and refuses another headset or admission');
+    'The single Quest deployment check refuses a server-local destination, another headset or another admission');
 
     await page.goto(base + '/console/'); await page.locator('#login-key').fill(tokens.Room1); await page.locator('#login-form button').click();
     await page.locator('#session-select').selectOption(session.id); await panel.waitFor();
