@@ -202,9 +202,11 @@ module.exports = async function missionReadRecovery({ context, api, tokens, base
     await api(`/missions/${concurrent.id}/revisions`, 'POST', { ...first.definition, name: '另一名稱' }, 'Master', 201, undefined, randomUUID());
     await page.locator('#more-versions').click();
     await wait(() => document.querySelector('#history-status').textContent.includes('46 版') && !document.querySelector('#mission-fields').disabled);
-    check(await page.locator('#edit-mission').inputValue() === '' && await page.locator('#launch-selected-mission').isDisabled()
+    const remaining = page.locator('#edit-mission option:enabled');
+    check(await page.locator('#edit-mission option:checked:disabled').getAttribute('value') === ''
+      && await page.locator('#load-mission').isDisabled() && await page.locator('#launch-selected-mission').isDisabled()
       && await page.locator('#mission-search').inputValue() === concurrent.definition.name
-      && await page.locator('#edit-mission option').count() === 1 && await page.locator('#edit-mission option').getAttribute('value') === decoy.id,
+      && await remaining.count() === 1 && await remaining.getAttribute('value') === decoy.id,
       'A renamed series leaving the search does not silently select a different matching mission for launch');
     await page.locator('#mission-search').fill('');
 

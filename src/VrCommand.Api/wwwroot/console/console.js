@@ -2855,14 +2855,21 @@ $('layout-map').addEventListener('keydown', event => {
   }
   const target = event.target.closest('[data-index]');
   if ((event.key === 'Enter' || event.key === ' ') && target) { event.preventDefault(); state.prop = Number(target.dataset.index); renderProps(); $('layout-map').focus(); return; }
-  const prop = state.props[state.prop];
-  if (!prop || !editable()) return;
   const directions = { ArrowLeft: [-.5, 0], ArrowRight: [.5, 0], ArrowUp: [0, .5], ArrowDown: [0, -.5] }, delta = directions[event.key];
-  if (delta && !event.ctrlKey && !event.metaKey && !event.altKey) {
-    event.preventDefault(); $('layout-map').focus(); beginPropGesture();
-    const { x, z } = prop.position;
-    moveProp(delta[0] ? mapCoordinate(x + delta[0]) : x, delta[1] ? mapCoordinate(z + delta[1]) : z);
+  if (!delta || event.ctrlKey || event.metaKey || event.altKey || !editable()) return;
+  const index = target ? Number(target.dataset.index) : state.prop;
+  const prop = state.props[index];
+  if (!prop) return;
+  event.preventDefault();
+  $('layout-map').focus();
+  if (index !== state.prop) {
+    finishPropGesture();
+    state.prop = index;
+    renderProps();
   }
+  beginPropGesture();
+  const { x, z } = prop.position;
+  moveProp(delta[0] ? mapCoordinate(x + delta[0]) : x, delta[1] ? mapCoordinate(z + delta[1]) : z);
 });
 $('undo-prop').addEventListener('click', () => travelProps(true));
 $('redo-prop').addEventListener('click', () => travelProps(false));
