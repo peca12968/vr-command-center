@@ -216,6 +216,7 @@ public sealed partial class WorldRecordings
             json.WriteStartObject();
             json.WriteNumber("playerReplayVersion", roomId.HasValue ? 2 : 1);
             if (roomId.HasValue) json.WriteNumber("roomId", roomId.Value);
+            json.WriteString("missionId", recording.MissionId);
             json.WriteString("missionName", recording.MissionName);
             json.WriteString("clipName", clip.Name);
             json.WriteNumber("startFrame", first);

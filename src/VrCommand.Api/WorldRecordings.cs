@@ -24,6 +24,7 @@ public static class WorldJson
 
 public record WorldRecordingInfo(WorldRecordingHeader Header, long AcceptedSequence, long DurationMilliseconds, bool Complete, DateTimeOffset UpdatedAtUtc, string MissionName, DateTimeOffset? CapturedAtUtc)
 {
+    public required Guid MissionId { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DebriefReceiptView? DebriefReceipts { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -48,12 +49,12 @@ public sealed partial class WorldRecordings : IDisposable
         internal static RecordingRow Read(SqliteDataReader row) =>
             new(row.GetString(0), row.GetInt64(1), row.GetInt64(2), row.GetInt64(3) != 0, row.GetString(4));
 
-        internal WorldRecordingInfo ToInfo(string missionName)
+        internal WorldRecordingInfo ToInfo(Mission mission)
         {
             var header = WorldJson.Read<WorldRecordingHeader>(Header);
             var captured = header.captureStartedAtUtc == "" ? (DateTimeOffset?)null
                 : DateTimeOffset.ParseExact(header.captureStartedAtUtc, "O", System.Globalization.CultureInfo.InvariantCulture).AddMilliseconds(Duration);
-            return new(header, Accepted, Duration, Complete, DateTimeOffset.Parse(Updated), missionName, captured);
+            return new(header, Accepted, Duration, Complete, DateTimeOffset.Parse(Updated), mission.Definition.Name, captured) { MissionId = mission.Id };
         }
     }
 
@@ -168,7 +169,7 @@ public sealed partial class WorldRecordings : IDisposable
             if (!row.Read()) throw new KeyNotFoundException("No world recording for this session.");
             recording = RecordingRow.Read(row);
         }
-        return recording.ToInfo(session.Mission.Definition.Name);
+        return recording.ToInfo(session.Mission);
     }
 
     public WorldRecordingInfo[] List(OperatorIdentity actor, CancellationToken cancellation = default)
@@ -228,7 +229,7 @@ public sealed partial class WorldRecordings : IDisposable
             {
                 cancellation.ThrowIfCancellationRequested();
                 if (recordings.TryGetValue(ids[index], out var recording))
-                    yield return recording.ToInfo(batch[index].Mission.Definition.Name);
+                    yield return recording.ToInfo(batch[index].Mission);
             }
         }
     }

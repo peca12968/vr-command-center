@@ -251,7 +251,7 @@ async function openReplay(files, embeddedInfo = null, direction = null) {
     if (rooms.length > 1) room.prepend(new Option('全場俯視', 'all', true, true));
     if (previousRoom !== null) room.value = previousRoom;
     replayPlayers = playerReplayPlayers(candidate.packets);
-    replay = candidate;
+    replay = continuing && !candidate.missionId && replay.missionId ? { ...candidate, missionId: replay.missionId } : candidate;
     showFollowOptions(previousPlayer);
     currentVolume = volume;
     $('continuation').hidden = !volume;
@@ -277,7 +277,8 @@ async function openReplay(files, embeddedInfo = null, direction = null) {
     $('segment-field').hidden = segments.length === 1;
     const source = candidate.header.origin === 'GameServer' ? '遊戲伺服器' : '模擬';
     const scope = candidate.roomId === undefined ? '' : ` · 僅房間 ${candidate.roomId}`;
-    $('source').textContent = `${candidate.missionName} · ${source}${scope} · 原畫格 ${candidate.startFrame}–${candidate.endFrame}`;
+    const revision = replay.missionId ? ` · 任務版本 ${replay.missionId}` : '';
+    $('source').textContent = `${candidate.missionName}${revision} · ${source}${scope} · 原畫格 ${candidate.startFrame}–${candidate.endFrame}`;
     const transitions = sourceTransitions(candidate.packets, previousTail);
     $('transition').replaceChildren(new Option('跳到畫格', ''), ...transitions.map(({ index, suspended }) =>
       new Option(`第 ${candidate.packets[index].sequence} 格 · ${suspended ? '遊戲來源暫停' : '遊戲來源恢復'}`, index)));

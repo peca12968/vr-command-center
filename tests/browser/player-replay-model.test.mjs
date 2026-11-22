@@ -23,6 +23,17 @@ test('keeps original contiguous timing in both full and room player files', () =
     assert.equal(readPlayerReplay(file), file);
 });
 
+test('preserves known mission versions alongside legacy files and rejects conflicting version IDs', () => {
+  for (const original of [replay(1, [1, 2, 3, 4, 5]), replay(2, [3])]) {
+    const identified = { ...original, missionId: actor };
+    assert.equal(readPlayerReplaySet([original, identified]).replay.missionId, actor);
+    assert.equal(readPlayerReplaySet([identified, original]).replay.missionId, actor);
+    assert.throws(() => readPlayerReplaySet([original, identified, { ...identified, missionId: original.header.streamId }]), /任務版本/);
+    for (const missionId of [null, '', 3, 'not-a-guid', '00000000-0000-0000-0000-000000000000'])
+      assert.throws(() => readPlayerReplay({ ...original, missionId }), /任務版本/);
+  }
+});
+
 test('joins verified player clips by recording, projection and original frame order', () => {
   for (const first of [replay(1, [1, 2, 3, 4, 5]), replay(2, [3])]) {
     const following = structuredClone(first);

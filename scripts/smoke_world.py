@@ -604,7 +604,8 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         for role, status in (("invalid", 401), ("Room5", 403), ("Room1", 403), ("GameServer", 403)):
             request(player_replay_route, role, status)
         player_replay = request(player_replay_route)
-        check(set(player_replay) == {"playerReplayVersion", "header", "missionName", "clipName", "startFrame", "endFrame", "packets"}
+        check(set(player_replay) == {"playerReplayVersion", "header", "missionId", "missionName", "clipName", "startFrame", "endFrame", "packets"}
+              and player_replay["missionId"] == info["missionId"] == request(session_route)["mission"]["id"]
               and player_replay["playerReplayVersion"] == 1 and player_replay["header"] == info["header"]
               and player_replay["clipName"] == clip["name"] and player_replay["missionName"] == info["missionName"]
               and [player_replay["startFrame"], player_replay["endFrame"]] == [2, 6]
@@ -613,6 +614,7 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         scoped_route = player_replay_route + "?roomId=5"
         scoped = request(scoped_route)
         check(scoped["playerReplayVersion"] == 2 and scoped["roomId"] == 5 and scoped["header"] == player_replay["header"]
+              and scoped["missionId"] == player_replay["missionId"]
               and [row["sequence"] for row in scoped["packets"]] == [2, 3, 4, 5, 6]
               and [row["elapsedMilliseconds"] for row in scoped["packets"]] ==
               [row["elapsedMilliseconds"] for row in player_replay["packets"]]

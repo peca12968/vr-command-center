@@ -611,6 +611,9 @@ def check_after_restart(venue, result):
         clip = world + '/clips/' + str(uuid4())
         venue.request(clip, method='PUT', body={'name': name, 'streamId': header['streamId'], 'startFrame': 1, 'endFrame': 4})
         exported = venue.request(clip + '/player-replay.json')
+        session = venue.request(world.removesuffix('/world'))
+        assert info['missionId'] == exported['missionId'] == session['mission']['id']
+        assert exported['missionName'] == session['mission']['definition']['name']
         assert exported['header']['roomIds'] == rooms and exported['header']['environmentVersion'] == 1
         assert exported['packets'] == [frame['packet'] for frame in frames]
         clips[name] = exported
@@ -709,6 +712,7 @@ def check_segmented_exports(venue, directory):
             for name in names[1:]:
                 payload = archive.read(name)
                 part = json.loads(payload)
+                assert part['missionId'] == mission['id']
                 assert part['clipName'] == 'Whole mission <五房> & "回看"'
                 embedded.append(b'<script type="application/json" data-player-replay-part>' + payload + b'</script>')
                 first, last = part['startFrame'], part['endFrame']
@@ -793,6 +797,7 @@ def check_volume_exports(venue, directory):
             count = size = 0
             for match in re.finditer(rb'<script type="application/json" data-player-replay-part>([^<]+)</script>', html):
                 part = json.loads(match[1])
+                assert part['missionId'] == mission['id']
                 count += 1
                 size += len(match[1])
                 assert part['header']['sessionId'] == session['id'] and part['header']['streamId'] == source.stream_id

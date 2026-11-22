@@ -26,6 +26,8 @@ export function readPlayerReplay(data) {
 function validateReplay(data, maxFrames) {
   const { header, packets, startFrame, endFrame, playerReplayVersion, roomId } = data ?? {};
   const scoped = playerReplayVersion === 2;
+  require(!Object.hasOwn(data ?? {}, 'missionId') || (guid(data.missionId) && data.missionId !== '00000000-0000-0000-0000-000000000000'),
+    '回放檔的任務版本識別碼無效。');
   require((scoped || playerReplayVersion === 1) && text(data.missionName, 120) && text(data.clipName, 60)
     && integer(startFrame, 1) && integer(endFrame, startFrame + 1)
     && list(packets, maxFrames) && packets.length === endFrame - startFrame + 1);
@@ -96,6 +98,7 @@ function sameJson(left, right) {
 
 export function samePlayerReplaySource(left, right) {
   return left.playerReplayVersion === right.playerReplayVersion && left.roomId === right.roomId &&
+    (!left.missionId || !right.missionId || left.missionId === right.missionId) &&
     sameJson(left.header, right.header);
 }
 
@@ -105,9 +108,10 @@ export function readPlayerReplaySet(documents) {
   const first = clips[0];
   const segments = clips.map(({ clipName, startFrame, endFrame }) => ({ clipName, startFrame, endFrame }));
   if (clips.length === 1) return { replay: first, segments };
+  const source = clips.find(clip => clip.missionId) ?? first;
   const packets = [], eventRooms = {};
   for (const clip of clips) {
-    require(samePlayerReplaySource(clip, first), '請選擇同一場錄製、相同房間範圍的回放檔。');
+    require(samePlayerReplaySource(clip, source), '請選擇同一場錄製、相同任務版本與房間範圍的回放檔。');
     const next = first.startFrame + packets.length;
     require(clip.startFrame <= next, `缺少第 ${next} 至 ${clip.startFrame - 1} 格，請一併選取涵蓋這段的回放檔。`);
     for (const packet of clip.packets) {
@@ -121,6 +125,7 @@ export function readPlayerReplaySet(documents) {
     }
   }
   const replay = { ...first, packets, endFrame: packets.at(-1).sequence };
+  if (source.missionId) replay.missionId = source.missionId;
   if (Object.keys(eventRooms).length) replay.eventRooms = eventRooms;
   // Recheck the timeline and event ownership across boundaries as one recording.
   return { replay: validateReplay(replay, MAX_REPLAY_FRAMES * MAX_REPLAY_FILES), segments };
