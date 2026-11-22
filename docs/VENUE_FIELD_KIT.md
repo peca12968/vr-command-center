@@ -14,6 +14,8 @@
 
 驗收環境設備時，可在主控台「五房硬體模擬排演報告」按「下載目前五房環境設定」。檔案列出同一次取樣的五房場次、階段與生效中的天氣、日夜和雷電設定，可與設備端紀錄對時核對。
 
+單房轉接工作站可設定該房的環境變數 `VR_COMMAND_ROOM_KEY`，執行 `.\scripts\watch-room-environment.ps1 -ManagementApi https://venue.example:5081 -RoomId 3`。將網址與房號替換為現場值。每筆 JSON 包含取樣時間與房間狀態；只有 `Running` 會帶生效中的環境。若讀取中斷，工具會輸出 `Unavailable`，連線恢復後重新讀取該房的目前值。可加上 `-Samples 1` 單次查詢。
+
 將資料夾複製到各台電腦後，可在啟動前用 PowerShell 逐檔核對。原始 ZIP 可放在 USB 隨身碟。以下範例檢查 Windows 玩家電腦，請使用交付方提供的 ZIP SHA-256，並替換兩個路徑。
 
 ```powershell

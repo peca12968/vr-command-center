@@ -202,7 +202,8 @@ class VenueReleaseTests(unittest.TestCase):
             extracted = self.root / 'field'
             archive.extractall(extracted)
         scripts = extracted / 'scripts'
-        for name in ('windows_firewall.py', 'analyze-world-journal.py', 'capture-quest-field-log.py', 'quest_adb.py'):
+        for name in ('windows_firewall.py', 'analyze-world-journal.py', 'capture-quest-field-log.py', 'quest_adb.py',
+                     'watch-room-environment.ps1'):
             self.assertEqual((scripts / name).read_bytes(), Path(release.__file__).with_name(name).read_bytes())
         capture = subprocess.run([sys.executable, '-E', '-s', '-B', str(scripts / 'capture-quest-field-log.py'), '--help'],
                                  cwd=self.root, capture_output=True, text=True, timeout=15)

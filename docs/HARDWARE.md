@@ -2,6 +2,14 @@
 
 ## 房間環境狀態
 
+場館包內的 `scripts/watch-room-environment.ps1` 可直接作為廠商開發期間的房間監看工具。先在程序環境中提供該房的 `VR_COMMAND_ROOM_KEY`，執行下列命令。每次讀取後等待一秒，逐行輸出 JSON，可直接交給轉接程式讀取。省略 `-Samples` 時會持續到按 Ctrl+C。
+
+```powershell
+.\scripts\watch-room-environment.ps1 -ManagementApi https://venue.example:5081 -RoomId 3 -Samples 10
+```
+
+每行的 `observedAtUtc` 是監看電腦完成讀取的時間。`Running` 時由 `session.environment` 讀取目前設定，重複讀到同一設定是正常現象。`Preparing` 和 `Paused` 保留場次識別及序號；結束後若房間已空出則回報 `Idle`。收到 `Unavailable` 時該次讀取沒有可用設定，`session` 為空。一般連線失敗會再取樣，權限遭拒會輸出最後一筆並以代碼 1 結束。指定取樣次數時，最後一次無可用資料也以代碼 1 結束。設備端的回覆、斷線停止策略及實際輸出由廠商介面決定。
+
 控制台 0.31.293 的主控可在「五房硬體模擬排演報告」按「下載目前五房環境設定」，取得帶有取樣時間的 JSON。場館整合程式可使用主控憑證呼叫 `GET /api/venue/hardware-environment`。管理服務在同一次讀取中取得五房狀態，`rooms` 依房號 1 至 5 排列，每列格式與下方單房介面一致。即使只有一房開場，也會保留其餘四列。空房的 `session` 為 `null`，暫停中的房間保留場次及階段，其 `environment` 為 `null`。取樣時間為 `checkedAtUtc`。這份快照描述管理服務當下提供給轉接器的設定；設備實際套用狀態須依廠商回報核對。
 
 管理包 0.31.282 起，每台房間轉接器可固定讀取 `GET /api/rooms/{roomId}/hardware-environment`。主控或該房憑證都可讀取。空房回覆中的 `session` 為 `null`。有場次時，`session` 同時包含場次 ID、階段與該次讀取的環境設定。換場或服務重啟後仍使用同一網址。
