@@ -34,6 +34,60 @@ POWERSHELL = shutil.which('powershell.exe' if os.name == 'nt' else 'pwsh')
 EDITOR_JDK = Path('F:/Tools/UnityEditors/6000.3.27f1/Editor/Data/PlaybackEngines/AndroidPlayer/OpenJDK')
 
 
+class DiagnosticInstallTests(unittest.TestCase):
+    def test_only_missing_diagnostic_is_installed_on_the_selected_quest(self):
+        spec = importlib.util.spec_from_file_location('install_probe', ROOT / 'scripts/install-quest-udp-probe.py')
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        with tempfile.TemporaryDirectory() as directory:
+            adb, apk = (Path(directory) / name for name in ('adb.exe', 'diagnostic.apk'))
+            adb.touch()
+            apk.write_bytes(b'fixture diagnostic')
+            digest = hashlib.sha256(apk.read_bytes()).hexdigest()
+            for model, installed, remote, success in (
+                    ('Quest 3', False, digest, True), ('Quest 3', True, digest, True),
+                    ('Quest 3', True, '0'*64, False), ('Other', False, digest, False)):
+                with self.subTest(model=model, installed=installed, remote=remote):
+                    installs = []
+                    def invoke(command, **options):
+                        if command[1:] == ['devices', '-l']:
+                            response = 'List of devices attached\nfixture device transport_id:31'
+                        else:
+                            self.assertEqual(command[:3], [str(adb), '-t', '31'])
+                            args = command[3:]
+                            if args == ['shell', 'getprop', 'ro.product.model']:
+                                response = model
+                            elif args == ['shell', 'pm', 'list', 'packages', installer.PACKAGE]:
+                                response = 'package:' + installer.PACKAGE if installed else ''
+                            elif args[0] == 'install':
+                                staged = Path(args[1])
+                                self.assertNotEqual(staged, apk)
+                                self.assertEqual(staged.read_bytes(), apk.read_bytes())
+                                installs.append(staged)
+                                response = 'Success'
+                            elif args == ['shell', 'pm', 'path', installer.PACKAGE]:
+                                response = 'package:/data/app/fixture/base.apk'
+                            else:
+                                self.assertEqual(args, ['shell', 'sha256sum', '/data/app/fixture/base.apk'])
+                                response = remote + '  /data/app/fixture/base.apk'
+                        return subprocess.CompletedProcess(command, 0, response.encode())
+                    with patch.object(installer, 'APK_SHA256', digest), patch('subprocess.run', side_effect=invoke) as child, \
+                            patch('windows_firewall.require_silent_windows_launch') as guard:
+                        if success:
+                            self.assertEqual(installer.install(adb, 'fixture', apk)['status'],
+                                             'already-installed' if installed else 'installed')
+                        else:
+                            with self.assertRaises(ValueError):
+                                installer.install(adb, 'fixture', apk)
+                        self.assertEqual(len(installs), int(not installed and model == 'Quest 3'))
+                        self.assertTrue(all(not path.exists() for path in installs))
+                        self.assertEqual(guard.call_count, child.call_count)
+            with patch('subprocess.run') as child:
+                with self.assertRaisesRegex(ValueError, 'differs'):
+                    installer.install(adb, 'fixture', apk)
+                child.assert_not_called()
+
+
 def java_tool(name):
     suffix = '.exe' if os.name == 'nt' else ''
     for root in (os.environ.get('VR_COMMAND_JDK'), os.environ.get('JAVA_HOME'), EDITOR_JDK if os.name == 'nt' else None):
@@ -346,6 +400,24 @@ class QuestUdpVenuePlanTests(unittest.TestCase):
         self.device_map.write_text(json.dumps(self.devices), encoding='utf-8-sig')
         self.network_plan.write_text(json.dumps(self.network), encoding='utf-8')
         return quest_venue.load_plan(self.device_map, self.network_plan)
+
+    def test_list_retest_seats_reads_incomplete_venue_offline(self):
+        self.plan()
+        self.device_map.write_text(json.dumps({'version': 1, 'seats': self.devices['seats'][:1]}))
+        inbox = self.root / 'first'
+        inbox.mkdir()
+        report = self.root / 'readiness.json'
+        readiness = quest_venue.preflight.check_venue(self.network_plan, None, [], report, inbox=inbox)
+        self.assertFalse(readiness['complete'])
+        report.write_text(json.dumps(readiness))
+        files = {path: path.read_bytes() for path in self.root.iterdir() if path.is_file()}
+        result = subprocess.run([sys.executable, '-B', quest_venue.__file__, '--list-retest-seats',
+            '--device-map', str(self.device_map), '--network-plan', str(self.network_plan), '--venue-retry-report', str(report)],
+            cwd=inbox, capture_output=True, text=True, timeout=15)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {'mode': 'Independent', 'pendingQuestSeats': [{'roomId': 5, 'seat': 5}],
+                                                    'pendingOtherSeats': 24})
+        self.assertEqual(files, {path: path.read_bytes() for path in self.root.rglob('*') if path.is_file()})
 
     def test_plan_sorts_all_25_seats_for_both_venue_modes_and_accepts_exact_partial_map(self):
         mode, groups = self.plan()

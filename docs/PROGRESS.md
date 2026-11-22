@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-22 場館包加入 Quest 3 頭盔網路診斷
+
+新版 `VRCommand-Venue-0.31.275-QuestNetwork.zip` 內含指定版本的獨立診斷 APK、單席安裝工具，以及單席與全館測量工具。安裝時核對 Meta Quest 3 型號、固定當次 ADB 連線並讀回已安裝 APK 的雜湊。場館端可在接上頭盔前重驗原始報告，列出對照表中仍需補測的房號與席號。 [場館操作](VENUE_FIELD_KIT.md#補測-quest-3-的-wi-fi-連線)
+
+完整解壓核對 1,293 個檔案，ZIP SHA-256 為 `16cf5def05db55577afcce7f1fdeb1be8927a2a0d9f3e661e26ff4e90668b5f2`。Android 工具確認診斷 APK 為 `com.vrcommand.udpprobe` 0.1.0、最低 API 32、目標 API 35、v2 簽章有效。首次封裝的 Android 工具查核逾時，按原期限重跑通過。沿用兩種拓樸的 25 席合成資料，當對照表包含缺資料的第 5 房第 5 席時，只列出該席；改為已通過的第 5 房第 1 席時，回報本表 0 席、其餘待測 1 席。17 項發行測試通過。唯讀 USB 盤點列出 0 台 Meta 裝置，頭盔安裝與實際 Wi-Fi 測量待現場驗證。
+
 ## 2026-11-22 場館包支援五房座位補測
 
 管理電腦解壓後即可依原啟動計畫與預覽整理名冊、列出待補測席位、匯出該席的 Windows 測量參數，並核對補件。場館包 `VRCommand-Venue-0.31.275-NetworkRetest.zip` 的 SHA-256 為 `df0c057b070c0bc3b86fc80a401164a1531bf5ea0458fa2e29a96d375bc21937`，完整解壓核對 1,288 個檔案。 [操作步驟](VENUE_FIELD_KIT.md#五房開場前找出需補測的座位)

@@ -214,6 +214,18 @@ class VenueReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'new field kit ZIP path'):
             package()
         self.assertEqual(release.digest(destination), before)
+        probe = self.root / 'probe.apk'
+        probe.write_bytes(b'diagnostic fixture')
+        optional_kit = self.root / 'with-probe.zip'
+        with self.assertRaisesRegex(ValueError, 'changed before field kit'):
+            release.write_field_kit(optional_kit, self.control, self.server, self.player, apk, report, probe=probe)
+        self.assertFalse(optional_kit.exists())
+        with patch.object(release.quest_probe, 'APK_SHA256', release.digest(probe)):
+            release.write_field_kit(optional_kit, self.control, self.server, self.player, apk, report, probe=probe)
+        with zipfile.ZipFile(optional_kit) as archive:
+            self.assertEqual(archive.read('Quest/Diagnostics/' + release.quest_probe.APK_NAME), probe.read_bytes())
+            for name in ('install-quest-udp-probe.py', 'probe-quest-udp.py', 'probe-quest-venue.py', 'quest_adb.py'):
+                self.assertEqual(archive.read('scripts/' + name), Path(release.__file__).with_name(name).read_bytes())
 
     @patch.object(release, 'embedded_firewall')
     def test_optional_simulator_uses_its_checked_manifest_and_guarded_mock(self, guard):

@@ -24,6 +24,7 @@ server_package = local_module('package-windows-server')
 player_package = server_package.player
 control_package = local_module('package-control-server')
 hardware_package = local_module('package-hardware-simulator')
+quest_probe = local_module('install-quest-udp-probe')
 digest = player_package.digest
 IDENTITY = ('unityVersion', 'sourceFingerprint', 'sceneNetworkId', 'playerPrefabId')
 HASH = r'[0-9a-f]{64}'
@@ -375,7 +376,7 @@ def embedded_firewall(control, server, player):
     return json.loads(checked.stdout)
 
 
-def write_field_kit(destination, control, server, player, apk, report, hardware=None):
+def write_field_kit(destination, control, server, player, apk, report, hardware=None, probe=None):
     destination = control_package.plain(destination)
     require(destination.suffix.lower() == '.zip' and not destination.exists(), 'Choose a new field kit ZIP path')
     for folder in (control, server, player, hardware):
@@ -420,6 +421,10 @@ def write_field_kit(destination, control, server, player, apk, report, hardware=
             for path, key in ((apk, 'sha256'), (apk.with_suffix('.receipt.json'), 'receiptSha256')):
                 copy_verified(archive, path, 'Quest/' + path.name, report['quest'][key])
             scripts = Path(__file__).resolve().parent
+            if probe is not None:
+                copy_verified(archive, probe, 'Quest/Diagnostics/' + quest_probe.APK_NAME, quest_probe.APK_SHA256)
+                for name in ('install-quest-udp-probe.py', 'probe-quest-udp.py', 'probe-quest-venue.py', 'quest_adb.py'):
+                    archive.write(scripts / name, 'scripts/' + name)
             for name in ('deploy-quest.ps1', 'quest-adb-process.ps1', 'check-quest-usb.ps1',
                          'check-field-install.ps1', 'check-lan-udp.ps1', 'prepare-venue-network-plan.py',
                          'check-venue-udp-preflight.py', 'start-verified-venue.py', 'windows_firewall.py',
@@ -445,6 +450,7 @@ def main():
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--field-kit', type=Path, help='Publish a new ZIP containing all verified packages and the release report')
     parser.add_argument('--hardware-simulator', type=Path, help='Verify an extracted hardware rehearsal package and include it when publishing a field kit')
+    parser.add_argument('--quest-udp-probe', type=Path, help='Verify and include the released Quest 0.1.0 network diagnostic')
     args = parser.parse_args()
     try:
         game, windows = verify_windows(args.control.absolute(), args.server.absolute(), args.player.absolute())
@@ -452,8 +458,14 @@ def main():
         report = {'verified': True, 'scope': 'offline-package-consistency', 'game': game, 'windows': windows, 'quest': quest}
         if args.hardware_simulator:
             report['hardwareSimulator'] = verify_hardware(args.hardware_simulator)
+        if args.quest_udp_probe:
+            require(digest(control_package.plain(args.quest_udp_probe)) == quest_probe.APK_SHA256,
+                    'Unexpected Quest UDP diagnostic APK for version 0.1.0')
+            report['questUdpProbe'] = {'applicationId': quest_probe.PACKAGE, 'version': '0.1.0',
+                                       'sha256': quest_probe.APK_SHA256, 'file': 'Quest/Diagnostics/' + quest_probe.APK_NAME}
         if args.field_kit:
-            write_field_kit(args.field_kit, args.control, args.server, args.player, args.quest_apk, report, args.hardware_simulator)
+            write_field_kit(args.field_kit, args.control, args.server, args.player, args.quest_apk, report,
+                            args.hardware_simulator, args.quest_udp_probe)
     except subprocess.SubprocessError as error:
         parser.exit(1, f'Venue release rejected: Android verification tool failed ({type(error).__name__}).\n')
     except (ValueError, OSError, KeyError, TypeError, AttributeError, zipfile.BadZipFile) as error:

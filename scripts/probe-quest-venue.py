@@ -355,12 +355,14 @@ def probe_venue(shell, adb, mode, groups, directory, count, timeout_ms, retry_re
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--adb', required=True, type=Path)
+    parser.add_argument('--adb', type=Path)
     parser.add_argument('--device-map', required=True, type=Path)
     parser.add_argument('--network-plan', required=True, type=Path)
     parser.add_argument('--launch-plan', type=Path, help='Original revision-guarded Windows launch plan')
     parser.add_argument('--launcher-preview', type=Path, help='Original successful Windows launcher preview')
-    parser.add_argument('--output-directory', required=True, type=Path)
+    parser.add_argument('--output-directory', type=Path)
+    parser.add_argument('--list-retest-seats', action='store_true',
+                        help='Read the incomplete venue evidence and list pending mapped Quest seats offline')
     retry = parser.add_mutually_exclusive_group()
     retry.add_argument('--retry-report', type=Path, help='Original Quest batch report to retain fresh, verified seats from')
     retry.add_argument('--venue-retry-report', type=Path,
@@ -372,10 +374,15 @@ def main():
         parser.error('Use valid probe sample and timeout bounds.')
     if (args.launch_plan is None) != (args.launcher_preview is None):
         parser.error('--launch-plan and --launcher-preview must be supplied together.')
+    if args.list_retest_seats:
+        if not args.venue_retry_report or args.adb or args.output_directory:
+            parser.error('--list-retest-seats needs --venue-retry-report without ADB or an output directory.')
+    elif args.adb is None or args.output_directory is None:
+        parser.error('Measuring requires --adb and --output-directory.')
     from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
 
     try:
-        directory = args.output_directory.resolve()
+        directory = args.venue_retry_report.resolve().parent if args.list_retest_seats else args.output_directory.resolve()
         launcher, preview = (launcher_proof(args.launch_plan, args.launcher_preview, directory)
                              if args.launch_plan is not None else (None, None))
         if args.venue_retry_report is None:
@@ -384,6 +391,11 @@ def main():
             mode, groups, pending_other_seats = load_venue_retry(
                 args.device_map, args.network_plan, args.venue_retry_report, directory / 'preflight-report.json',
                 args.launch_plan, args.launcher_preview, launcher)
+            if args.list_retest_seats:
+                seats = [{'roomId': device['roomId'], 'seat': device['seat']}
+                         for group in groups for device in group['devices']]
+                print(json.dumps({'mode': mode, 'pendingQuestSeats': seats, 'pendingOtherSeats': pending_other_seats}))
+                return 0
             if not groups:
                 print(json.dumps({'status': 'no-quest-retest', 'pendingOtherSeats': pending_other_seats}))
                 return 0

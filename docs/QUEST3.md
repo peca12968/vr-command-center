@@ -136,7 +136,9 @@ pwsh -NoProfile -NonInteractive -File .\scripts\deploy-quest.ps1 -ClientConfig .
 $adb = 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe'
 $serial = '<原 ADB 裝置序號>'
 $key = '<本次探測金鑰檔>'
-& $adb -s $serial install .\artifacts\quest-udp-probe\vr-command-quest-udp-probe-0.1.0.apk
+$env:VR_COMMAND_UNATTENDED = '1'
+python -B .\scripts\install-quest-udp-probe.py --adb $adb --serial $serial `
+  --apk .\artifacts\quest-udp-probe\vr-command-quest-udp-probe-0.1.0.apk
 python .\scripts\probe-quest-udp.py --adb $adb --serial $serial --key-file $key `
   --local-address 192.168.1.20 --peer-address 192.168.1.10 --port 7777 --count 5 `
   --report .\quest-probe-room-01.json
@@ -215,6 +217,8 @@ python .\scripts\probe-quest-venue.py --adb $adb --device-map .\device-map.json 
 ```
 
 新資料夾的 `preflight-report.json` 包含本輪補測的席位。用全館工具的 `--retry-report .\venue-readiness.json` 加上 `--batch .\quest-venue-retest\preflight-report.json`，以相同網路清單及原啟動檔重驗、合併。若仍有 Windows 缺件，可加上該批新增的雙端報告。 [全館補測](EXTERNAL_CLIENTS.md#補測未完成的全館-udp-預檢)
+
+在接上頭盔前，可以先用 `--list-retest-seats` 取代 `--adb` 和 `--output-directory`，查看目前仍須測量的 Quest 房號及席號。這個模式重新檢查原始雙端報告及有效期限。 [從場館包執行](VENUE_FIELD_KIT.md#補測-quest-3-的-wi-fi-連線)
 
 ## 追蹤恢復後的武器輸入
 

@@ -92,6 +92,32 @@ dotnet .\VRCommand-HardwareSimulator\VrCommand.HardwareSimulator.dll `
    python -B "$tools\start-verified-venue.py" --verify-only --launch-plan .\venue-plan.json @network --readiness .\complete.json
    ```
 
+### 補測 Quest 3 的 Wi-Fi 連線
+
+若發行報告有 `questUdpProbe`，這份場館包包含頭盔端網路診斷 APK。沿用上一節包外的工作目錄、`$tools` 和 `$plan`。在 `device-map.json` 填寫接到這台電腦的頭盔，例如 `{"version":1,"seats":[{"roomId":5,"seat":5,"serial":"實際裝置序號"}]}`。
+
+先查有哪些 Quest 席位需要重測。這一步只讀資料，頭盔可保持關機。`pendingQuestSeats` 列出此對照表內的房號與席號，`pendingOtherSeats` 是其他仍缺資料的席位數。
+
+```powershell
+$retry = @('--device-map', '.\device-map.json', '--network-plan', '.\network.json', '--venue-retry-report', '.\first.json')
+python -B "$tools\probe-quest-venue.py" @plan @retry --list-retest-seats
+```
+
+若列出待測頭盔，請在可連到這些已授權頭盔的遊戲伺服器電腦上執行以下指令。先為每台待測 Quest 3 安裝隨包診斷程式。安裝工具會核對頭盔型號及已安裝 APK 的雜湊，再回報結果。防火牆查核若略過啟動，可以繼續使用上方離線清單。
+
+```powershell
+$env:VR_COMMAND_UNATTENDED = '1'
+$adb = 'C:\Android\platform-tools\adb.exe'
+python -B "$tools\install-quest-udp-probe.py" --adb $adb --serial '<裝置序號>'
+python -B "$tools\probe-quest-venue.py" @plan @retry --adb $adb --output-directory .\quest-retest
+```
+
+診斷會從頭盔實際 Wi-Fi 位址向該房遊戲埠傳送測量封包。若有產生 `preflight-report.json`，用下列命令把這次結果合併回原場館報告。保留原始報告和位置，輸出使用新檔名。
+
+```powershell
+python -B "$tools\check-venue-udp-preflight.py" @plan @network --retry-report .\first.json --batch .\quest-retest\preflight-report.json --output .\after-quest.json
+```
+
 ### 頭盔接入
 
 若使用 VIVE 的 Windows PC VR 連線方式，可在解壓根目錄執行下列檢查。請使用包外的新報告檔名。這一步讀取本機 OpenXR 設定與執行環境檔案；指定型號的頭盔畫面與左右控制器須在場館實測。
