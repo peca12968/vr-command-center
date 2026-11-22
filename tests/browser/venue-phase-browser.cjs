@@ -1015,6 +1015,14 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       && download.suggestedFilename() === `vr-command-venue-reports-v1-${closure.requestId}.zip`
       && reportZip.equals(Buffer.from(await response.arrayBuffer())), 'Browser downloads the exact original batch ZIP after room reuse');
     await fs.writeFile(path.join(screenshots, 'venue-reports.zip'), reportZip);
+    const individualUrl = base + '/api/venue/closure/' + closure.requestId + '/player-reports.zip';
+    const individualStarted = page.waitForEvent('download');
+    await page.locator('#export-venue-player-reports').click();
+    const individualZip = await individualStarted;
+    const originalPlayers = await fetch(individualUrl, { headers: { Authorization: 'Bearer ' + tokens.Master } });
+    check(originalPlayers.ok && individualZip.suggestedFilename() === `vr-command-venue-player-reports-v1-${closure.requestId}.zip`
+      && (await fs.readFile(await individualZip.path())).equals(Buffer.from(await originalPlayers.arrayBuffer())),
+      'Player handouts download from the selected original End batch after room reuse');
     const reportMethods = [];
     await page.route(reportsUrl, async route => {
       reportMethods.push(route.request().method());

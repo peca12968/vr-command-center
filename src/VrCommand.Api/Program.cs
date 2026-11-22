@@ -405,6 +405,12 @@ app.MapMethods("/api/venue/closure/{id:guid}/reports.zip", [HttpMethods.Get, Htt
     var report = manager.FinalVenueReports(id, Actor(context));
     return ArchiveWithDigest(context, FinalReportCsv.EncodeVenueBundle(report, includeScores == true), $"vr-command-venue-reports-v1-{report.RequestId:D}.zip");
 });
+app.MapMethods("/api/venue/closure/{id:guid}/player-reports.zip", [HttpMethods.Get, HttpMethods.Head], (Guid id, SessionManager manager, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var report = manager.FinalVenueReports(id, Actor(context));
+    return ArchiveWithDigest(context, FinalReportCsv.EncodeVenuePlayerReports(report), $"vr-command-venue-player-reports-v1-{id:D}.zip");
+});
 app.MapGet("/api/venue/closure/{id:guid}/scores.csv", (Guid id, SessionManager manager, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";

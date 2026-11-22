@@ -81,6 +81,31 @@ public static class FinalReportCsv
                 totals.AccuracyPercent.ToString("0.##", CultureInfo.InvariantCulture));
     }
 
+    internal static byte[] EncodeVenuePlayerReports(FinalVenueReport venue)
+    {
+        var index = new StringBuilder("\uFEFF");
+        CsvReportRows.Append(index, "requestId", "sessionId", "roomId", "playerId", "playerName", "file");
+        using var output = new MemoryStream();
+        using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var session in venue.Sessions)
+            {
+                var report = session.Report;
+                foreach (var player in report.Players.OrderBy(p => p.RoomId).ThenBy(p => p.PlayerId))
+                {
+                    var file = FormattableString.Invariant($"room-{player.RoomId:00}/{FileName(report.SessionId, player.PlayerId)}");
+                    using var entry = OpenEntry(archive, file);
+                    entry.Write(Encode(report with { Players = [player] }));
+                    CsvReportRows.Append(index, venue.RequestId, report.SessionId, player.RoomId, player.PlayerId,
+                        CsvReportRows.Text(player.Name), file);
+                }
+            }
+            using var list = OpenEntry(archive, "index.csv");
+            list.Write(Encoding.UTF8.GetBytes(index.ToString()));
+        }
+        return output.ToArray();
+    }
+
     private static void WriteCsv(ZipArchive archive, FinalSessionReport report)
     {
         using var stream = OpenEntry(archive, FileName(report.SessionId, report.ReportRoomId));

@@ -1,8 +1,10 @@
 """Check five-room publication, observation and replay on Windows without IP listeners."""
 
 import argparse
+import base64
 from collections import Counter
 from contextlib import ExitStack, closing, contextmanager
+import csv
 from datetime import datetime, timezone
 import hashlib
 import io
@@ -305,6 +307,39 @@ def recorded_weather(packet):
             'lightning': packet['lightning']}
 
 
+def check_player_archive(venue, closure_route, originals):
+    route = closure_route + '/player-reports.zip'
+    batch = closure_route.rsplit('/', 1)[1]
+    for role in ('Room1', 'GameServer'):
+        with venue.response(route, role=role, status=403):
+            pass
+    with venue.response(route, method='HEAD') as response:
+        digest = response.getheader('Repr-Digest')
+        assert response.read() == b''
+    with venue.response(route) as response:
+        payload = response.read()
+        assert response.getheader('Repr-Digest') == digest
+        assert f'vr-command-venue-player-reports-v1-{batch}.zip' in response.getheader('Content-Disposition')
+    assert digest == 'sha-256=:' + base64.b64encode(hashlib.sha256(payload).digest()).decode() + ':'
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        index = list(csv.DictReader(io.StringIO(archive.read('index.csv').decode('utf-8-sig'), newline='')))
+        assert len(index) == len(originals) == len(archive.namelist()) - 1
+        assert {(row['sessionId'], row['playerId']) for row in index} == set(originals)
+        for row in index:
+            session, player = row['sessionId'], row['playerId']
+            score = originals[session, player]
+            assert row['requestId'] == batch and int(row['roomId']) == score['roomId'] and row['playerName'] == score['name']
+            assert row['file'] == f'room-{score["roomId"]:02}/vr-command-report-v1-{session}-player-{player}.csv'
+            player_csv = archive.read(row['file'])
+            with venue.response(f'/api/sessions/{session}/players/{player}/report.csv') as response:
+                assert player_csv == response.read()
+            personal, = csv.DictReader(io.StringIO(player_csv.decode('utf-8-sig'), newline=''))
+            for key in ('ammoUsed', 'shotsHit', 'kills', 'hitsReceived', 'damageTaken', 'health'):
+                assert int(personal[key]) == score[key]
+            assert float(personal['accuracyPercent']) == score['accuracyPercent']
+    return len(index)
+
+
 def check_mode(venue, mode):
     for denied in ('Room1', 'Room5', 'GameServer'):
         with venue.response('/api/venue/hardware-environment', role=denied, status=403):
@@ -442,6 +477,8 @@ def check_mode(venue, mode):
             ended = venue.phase('End', 'end')
             closure_route = '/api/venue/closure/' + ended['requestId']
             assert all(row['world'] == 'Waiting' for row in venue.request(closure_route)['batch']['sessions'])
+            with venue.response(closure_route + '/player-reports.zip', status=409):
+                pass
             for source in sources:
                 source.state = venue.request(source.route)
                 assert source.state['state'] == 'Ended'
@@ -460,6 +497,7 @@ def check_mode(venue, mode):
         assert occupant['statistics']['playerId'] == prior_seat['id'] and occupant['statistics']['name'] == prior_seat['name']
         assert {row['sessionId'] for row in closure['batch']['sessions']} == {s['id'] for s in sessions}
         saved = {}
+        original_scores = {}
         for row in closure['batch']['sessions']:
             original = next(source for source in sources if source.session['id'] == row['sessionId'])
             frame = row['trackingBegin']['frame']
@@ -475,16 +513,19 @@ def check_mode(venue, mode):
             assert len(exact['frame']['players']) == len(original.session['roomIds']) * 5
             assert all(player['connected'] and player['rig']['kind'] == 'Tracked' for player in exact['frame']['players'])
             stats = venue.request(original.route + '/statistics')['players']
+            original_scores.update({(row['sessionId'], player['playerId']): player for player in stats})
             assert {player['playerId'] for player in stats if player['damageTaken'] == 20 and player['health'] == 80
                     and player['hitsReceived'] == 1} == original.damaged
             assert len([player for player in stats if player['damageTaken']]) == len(original.session['roomIds'])
             saved[original.world] = frames
+        assert (first_session['id'], prior_seat['id']) in original_scores
+        player_reports = check_player_archive(venue, closure_route, original_scores)
         assert venue.request('/api/sessions') == []
         return {'mode': mode, 'seats': 25, 'recordings': len(sources), 'combatEvents': sum(source.combat for source in sources),
                 'frames': sum(source.sequence for source in sources), 'closureRoute': closure_route, 'closure': closure,
                 'roomFiveWorld': observed.world, 'roomFiveLive': visible, 'saved': saved, 'rosters': rosters,
                 'headsetRoster': dict(headsets), 'ticketsRevalidatedInRunning': len(tickets),
-                'deviceChange': device_change, 'roomWeather': live_weather, 'hardwareEnvironment': hardware}
+                'deviceChange': device_change, 'roomWeather': live_weather, 'hardwareEnvironment': hardware, 'playerReports': player_reports}
 
 
 def check_departed_clip(venue):
@@ -799,7 +840,7 @@ def main():
             volumes = check_volume_exports(venue, args.volume_exports) if args.volume_exports else None
         summary = {'verified': [{field: result[field] for field in ('mode', 'seats', 'recordings', 'combatEvents', 'frames',
                                                                      'headsetRoster', 'ticketsRevalidatedInRunning', 'deviceChange',
-                                                                     'roomWeather', 'hardwareEnvironment')}
+                                                                     'roomWeather', 'hardwareEnvironment', 'playerReports')}
                                 for result in results], 'apiSha256': hashlib.sha256(args.api_exe.read_bytes()).hexdigest(),
                    'transport': 'Windows AF_UNIX', 'restarted': True, 'tcpListeners': 0, 'udpEndpoints': 0, 'activeSessions': 0,
                    'scope': 'Synthetic tracked poses and combat using packaged management API, real WebSocket and SSE'}

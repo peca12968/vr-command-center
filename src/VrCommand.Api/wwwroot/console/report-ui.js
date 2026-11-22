@@ -165,6 +165,15 @@ export function mountVenueReport(current, unauthorized, save) {
     conflict: '本批仍在等待戰鬥資料封存。', invalid: '報表格式不符，可重新下載。',
     failed: '本批戰績下載失敗，可重新整理後再試。', saved: '已下載本批戰績、分房與全館合計。'
   });
+  const playerReports = mountVenueDownload(current, unauthorized, save, {
+    actions: 'venue-player-reports-actions', button: 'export-venue-player-reports', status: 'venue-player-reports-status',
+    route: 'player-reports', filename: 'player-reports', verifyArchive: true,
+    ready: session => ['Sealed', 'NoSource'].includes(session.combat),
+    waiting: rooms => `等待房間 ${rooms} 的戰鬥資料封存。`,
+    available: '', loading: '正在整理個人戰績…', conflict: '本批仍在等待戰鬥資料封存。',
+    invalid: '個人戰績 ZIP 格式不符，可重新下載。', failed: '個人戰績下載失敗，可重新整理後再試。',
+    saved: '已按房間整理個人 CSV，可在 index.csv 查找玩家。'
+  });
   const scores = mountVenueDownload(current, unauthorized, save, {
     actions: 'venue-score-actions', button: 'export-venue-scores', status: 'venue-score-status',
     route: 'scores', filename: 'scores', extension: 'csv', mediaType: 'text/csv', verifyContent: true,
@@ -204,7 +213,7 @@ export function mountVenueReport(current, unauthorized, save) {
     failed: '本批戰績回條下載失敗，可重新整理後再試。', saved: '已下載本批戰績回條，請私下保管。'
   });
   return { active: rooms.active, update(batch, totals, receipts, roomScores) {
-    reports(batch); field(batch); fieldWithReceipts(batch, null, receipts); debrief(batch);
+    reports(batch); playerReports(batch); field(batch); fieldWithReceipts(batch, null, receipts); debrief(batch);
     scores(batch, totals ? venueScoreCsv(totals) : null);
     rooms.update(batch, roomScores);
   } };
