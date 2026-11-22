@@ -68,6 +68,8 @@ function Get-QuestUsbReport($Inventory, [int]$Expected, $MappedSeats) {
     $serials = [Collections.Generic.Dictionary[string,int]]::new([StringComparer]::OrdinalIgnoreCase)
     $rootBySerial = @{}
     $evidenceByRoot = @{}
+    $problemCodes = [Collections.Generic.SortedSet[uint32]]::new()
+    $problemCodesByRoot = @{}
     try {
         $nodes = @(Get-PnpDevice -PresentOnly -ErrorAction Stop | Where-Object { $_.InstanceId -match '^USB\\VID_2833&PID_[0-9a-f]{4}(?:&|\\)' })
         $usb.observed = $true
@@ -88,6 +90,7 @@ function Get-QuestUsbReport($Inventory, [int]$Expected, $MappedSeats) {
         $compatible = @($descriptor.Data | Where-Object { $_ })
         if (-not $compatible.Count) { $usb.unknownInterfaceDescriptors++ }
         $observations = [Collections.Generic.List[string]]::new()
+        $problemCode = [uint32]0
         if ($node.Class -eq 'WPD' -or $compatible -contains 'USB\MS_COMP_MTP') {
             $usb.portableMediaInterfaces++
             $observations.Add('portable-media')
@@ -97,12 +100,13 @@ function Get-QuestUsbReport($Inventory, [int]$Expected, $MappedSeats) {
             $usb.adbInterfaces++
             $observations.Add('adb-interface')
             $problem = Get-PnpDeviceProperty -InstanceId $node.InstanceId -KeyName DEVPKEY_Device_ProblemCode -ErrorAction SilentlyContinue
-            if ($null -eq $problem.Data) {
+            if (-not [uint32]::TryParse([string]$problem.Data, [ref]$problemCode)) {
                 $usb.unknownAdbDriverStates++
                 $observations.Add('adb-driver-state-unknown')
-            } elseif ($problem.Data -ne 0) {
+            } elseif ($problemCode -gt 0) {
                 $usb.adbInterfacesWithProblems++
                 $observations.Add('adb-driver-problem')
+                [void]$problemCodes.Add($problemCode)
             }
         }
         if ($MappedSeats -and $observations.Count) {
@@ -113,10 +117,17 @@ function Get-QuestUsbReport($Inventory, [int]$Expected, $MappedSeats) {
             if ($rootId) {
                 if (-not $evidenceByRoot.ContainsKey($rootId)) { $evidenceByRoot[$rootId] = @{} }
                 foreach ($observation in $observations) { $evidenceByRoot[$rootId][$observation] = $true }
+                if ($problemCode) {
+                    if (-not $problemCodesByRoot.ContainsKey($rootId)) {
+                        $problemCodesByRoot[$rootId] = [Collections.Generic.SortedSet[uint32]]::new()
+                    }
+                    [void]$problemCodesByRoot[$rootId].Add($problemCode)
+                }
             }
         }
     }
 
+    if ($problemCodes.Count) { $usb.adbProblemCodes = @($problemCodes) }
     $matched = [ordered]@{ device = 0; unauthorized = 0; offline = 0; other = 0; 'transport-unavailable' = 0; 'transport-ambiguous' = 0 }
     $unmatched = $inventory.Unidentified
     $entryCount = $inventory.Entries.Count + $inventory.Unidentified
@@ -173,6 +184,10 @@ function Get-QuestUsbReport($Inventory, [int]$Expected, $MappedSeats) {
                 elseif (-not $adbAliases.Contains($id)) { 'adb-serial-case-mismatch' }
                 else { $Inventory.Entries[$id] }
             $seatReport = [ordered]@{ roomId = $row.roomId; seat = $row.seat; state = $state }
+            if ($assigned[$id] -eq 1 -and $serials[$id] -eq 1) {
+                $codes = $problemCodesByRoot[$rootBySerial[$id]]
+                if ($codes) { $seatReport.adbProblemCodes = @($codes) }
+            }
             if ($state -in @('adb-not-listed', 'adb-inventory-unavailable')) {
                 $seen = $evidenceByRoot[$rootBySerial[$id]]
                 if ($seen) {
@@ -211,6 +226,12 @@ function Write-QuestUsbReport($Report, [switch]$Summary) {
         'adb-usb-mixed-states' = '可對應的 Meta USB 裝置有不同的偵錯狀態。'
     }
     $messages[$report.status]
+    if ($report.windows.portableMediaInterfaces -gt 0) {
+        "Windows 已列出 $($report.windows.portableMediaInterfaces) 個檔案傳輸介面、$($report.windows.adbInterfaces) 個 USB 偵錯介面。"
+    }
+    if ($report.windows.adbProblemCodes) {
+        "Windows USB 偵錯介面問題：$(Format-QuestUsbProblemCodes $report.windows.adbProblemCodes)。"
+    }
     if ($report.mapped) {
         $seatLabels = @{
             'not-usb-serial' = '此對應值不適用於 USB 核對'
@@ -233,7 +254,8 @@ function Write-QuestUsbReport($Report, [switch]$Summary) {
             $detail = if ($row.windowsEvidence) {
                 '（' + (($row.windowsEvidence | ForEach-Object { $evidenceLabels[$_] }) -join '、') + '）'
             }
-            "第 $($row.roomId) 房第 $($row.seat) 席：$($seatLabels[$row.state])$detail"
+            $problemText = if ($row.adbProblemCodes) { ' ' + (Format-QuestUsbProblemCodes $row.adbProblemCodes) }
+            "第 $($row.roomId) 房第 $($row.seat) 席：$($seatLabels[$row.state])$detail$problemText"
         }
         "指定的 $($report.mapped.seats.Count) 席中，已確認 USB 偵錯連線 $($report.mapped.connected) 席。"
     }
@@ -248,6 +270,14 @@ function Write-QuestUsbReport($Report, [switch]$Summary) {
         if ($g.allExpectedInDeviceState -eq $true) { '已核對預期台數及 USB 偵錯連線。' }
         elseif ($g.allExpectedInDeviceState -eq $false) { '目前台數或偵錯狀態與預期不符。' }
     }
+}
+
+function Format-QuestUsbProblemCodes($Codes) {
+    $labels = @{ '10' = '裝置啟動失敗'; '22' = '裝置已停用'; '28' = '尚未安裝驅動程式' }
+    ($Codes | ForEach-Object {
+        $label = $labels[[string]$_]
+        if ($label) { "代碼 $_（$label）" } else { "代碼 $_" }
+    }) -join '、'
 }
 
 if ($MyInvocation.InvocationName -ne '.') {

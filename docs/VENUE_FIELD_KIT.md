@@ -145,6 +145,8 @@ Get-Content -LiteralPath $report
 
 某席在 Windows 已出現、但 ADB 尚無法對應時，該列會附上 Windows 能核對到該席的檔案傳輸介面、USB 偵錯介面或驅動程式問題。若 ADB 已列出裝置但缺少有效的連線編號，或有其他項目使用同一編號，摘要會指出房號與席號。只有連線編號可唯一使用的席位才計入已連線台數。
 
+若頭盔能傳檔卻沒出現偵錯提示，可先看摘要列出的檔案傳輸與 USB 偵錯介面數量。Windows 回報偵錯介面異常時，摘要會列出裝置管理員的問題代碼。代碼 22 表示裝置已停用，28 表示驅動程式尚未安裝。有座位表時，可在對應的房號和席號旁查看該裝置的代碼。 [Microsoft 裝置管理員問題代碼](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/device-manager-problem-codes)
+
 尚未接上頭盔時，可先核對解壓後的遊戲 APK。工具從腳本所在的套件讀取根目錄的 `venue-release.json` 及 `Quest` 目錄內的遊戲 APK。成功時會列出版本編號與兩份檔案的 SHA-256。此步驟可以在沒有 ADB 的電腦上完成。
 
 ```powershell

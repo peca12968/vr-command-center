@@ -255,6 +255,22 @@ Write-QuestUsbReport $report -Summary
             self.assertIn('驅動程式有問題', next(line for line in summary.splitlines() if '第 2 房第 1 席' in line))
             self.assertFalse(report['mapped']['allInDeviceState'])
 
+    def test_driver_problem_codes_follow_the_interface_parent_and_keep_the_adb_state(self):
+        seats = [dict(roomId=room, seat=1, serial=f'fixture-serial{room}') for room in range(1, 6)]
+        roots = [USB_ROOT + str(room) for room in range(1, 6)]
+        nodes = [node(root, [r'USB\COMPOSITE']) for root in roots]
+        for i, (room, code) in enumerate([(2, 28), (1, 22), (2, 10), (2, 28), (3, 0), (4, 99), (5, None)]):
+            nodes.append(node(USB_ADB + str(i), [ADB_DESCRIPTOR], parent=roots[room - 1], problem=code))
+        nodes.append(node(USB_PORTABLE, [r'USB\MS_COMP_MTP'], parent=roots[2], problem=31))
+        report, summary = self.snapshot([], {'fixture-serial1': 'offline'}, 5, nodes=nodes, seats=seats)
+        self.assertEqual(report['windows']['adbProblemCodes'], [10, 22, 28, 99])
+        self.assertEqual(report['windows']['adbInterfacesWithProblems'], 5)
+        self.assertEqual([s.get('adbProblemCodes') for s in report['mapped']['seats']], [[22], [10, 28], None, [99], None])
+        self.assertEqual(report['mapped']['seats'][0]['state'], 'offline')
+        for room, message in [(1, '代碼 22（裝置已停用）'), (2, '代碼 10（裝置啟動失敗）、代碼 28（尚未安裝驅動程式）'), (4, '代碼 99')]:
+            self.assertIn(message, next(line for line in summary.splitlines() if f'第 {room} 房第 1 席' in line))
+        self.assertIn('1 個檔案傳輸介面、7 個 USB 偵錯介面', summary)
+
     def test_transport_problems_identify_the_two_affected_seats_in_a_full_venue(self):
         seats = [dict(roomId=room, seat=seat, serial=f'fixture-serial{room}{seat}')
                  for room in range(1, 6) for seat in range(1, 6)]
@@ -302,8 +318,10 @@ Write-QuestUsbReport $report -Summary
             self.assertEqual(diagnosed.returncode, 1, diagnosed.stderr)
             missing, detected = json.loads(diagnosed.stdout)['mapped']['seats']
             self.assertNotIn('windowsEvidence', missing)
+            self.assertNotIn('adbProblemCodes', missing)
             self.assertEqual((detected['roomId'], detected['seat']), (5, 2))
             self.assertEqual(detected['windowsEvidence'], ['adb-interface', 'adb-driver-problem'])
+            self.assertEqual(detected['adbProblemCodes'], [28])
             self.assertNotIn('fixture-serial', diagnosed.stdout + diagnosed.stderr)
 
     def test_partial_inventory_including_wireless_and_ambiguous_devices(self):
