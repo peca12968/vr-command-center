@@ -23,7 +23,7 @@ param(
     [Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='CapturePlan')][switch]$AllowPartialMap,
     [Parameter(Mandatory, ParameterSetName='CapturePlan')][switch]$ReadCapturePlan,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,2147483647)][int]$ExpectedVersionCode,
-    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Smoke')][Parameter(Mandatory, ParameterSetName='PrepareApks')][ValidateNotNullOrEmpty()][string]$ReleaseReport,
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Smoke')][Parameter(ParameterSetName='PrepareApks')][ValidateNotNullOrEmpty()][string]$ReleaseReport,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Smoke')][Parameter(ParameterSetName='PrepareApks')][ValidateNotNullOrEmpty()][string]$ApkPath,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][switch]$UseInstalledApk,
     [Parameter(Mandatory, ParameterSetName='PrepareApks')][switch]$PrepareQuestApks,
@@ -1064,6 +1064,16 @@ function Get-QuestApkStatus([string[]]$Target, [string]$ExpectedHash) {
     if (-not $hash) { return 'apk-unverified' }
     if ($hash -cne $ExpectedHash) { return 'apk-hash-mismatch' }
     return 'ready'
+}
+
+function Get-LocalQuestApkPath {
+    if ($ApkPath) { return $ApkPath }
+    if (-not $isVenueKit) { return Join-Path $projectRoot 'artifacts/quest/VrCommand.apk' }
+    $games = @(if (Test-Path -LiteralPath $kitQuest -PathType Container) {
+        Get-ChildItem -LiteralPath $kitQuest -File -Filter '*.apk'
+    })
+    if ($games.Count -ne 1) { throw 'Choose one game APK with -ApkPath or extract the original Quest folder.' }
+    return $games[0].FullName
 }
 
 function Confirm-LocalQuestApk([string]$Path, [string]$ExpectedHash) {
@@ -2257,12 +2267,19 @@ if ($PSCmdlet.ParameterSetName -eq 'PlayerTracking') {
 }
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$apk = if ($ApkPath) { $ApkPath } else { Join-Path $projectRoot 'artifacts/quest/VrCommand.apk' }
+$kitReport = Join-Path $projectRoot 'venue-release.json'
+$kitQuest = Join-Path $projectRoot 'Quest'
+$isVenueKit = (Test-Path -LiteralPath $kitReport -PathType Leaf) -or (Test-Path -LiteralPath $kitQuest -PathType Container)
+# Whole-venue plan and tracking checks do not need a game release. A device map can also request a version-only check.
+$usesRelease = $PSCmdlet.ParameterSetName -ne 'Bundle' -or ($RoomId -or ($DeviceMap -and -not $ExpectedVersionCode -and -not $VerifyTrackedSeats))
+if ($isVenueKit -and $usesRelease -and -not $ReleaseReport) { $ReleaseReport = $kitReport }
 if ($PSCmdlet.ParameterSetName -eq 'PrepareApks') {
     if (-not $PrepareQuestApks) { throw 'Specify -PrepareQuestApks to prepare the mapped Quest APKs.' }
     if ($CheckOnly -and $ApkPreparationPlan) { throw 'Use -ApkPreparationPlan when applying an APK preflight plan.' }
     $map = @(Read-QuestVenueMap $null $DeviceMap -Partial)
+    if (-not $ReleaseReport) { throw 'Provide -ReleaseReport or use the extracted venue kit.' }
     $release = Read-QuestRelease $ReleaseReport
+    $apk = Get-LocalQuestApkPath
     $upgradeFrom = Read-QuestUpgradeSource $release
     $preparationPlan = if ($ApkPreparationPlan) { Read-QuestApkPreparationPlan $map $release $upgradeFrom }
     if ($CheckOnly) {
@@ -2287,18 +2304,9 @@ if ($PSCmdlet.ParameterSetName -eq 'Smoke') {
     if (-not $SmokeTest) { throw 'Specify -SmokeTest to install and check a first launch.' }
     if (-not $CheckOnly -and [string]::IsNullOrWhiteSpace($Serial)) { throw 'Specify -Serial for a Quest first launch.' }
     if ($CheckOnly -and $ResumeSmokeTest) { throw 'Use -ResumeSmokeTest only when launching the installed Quest app.' }
-    $kitReport = Join-Path $projectRoot 'venue-release.json'
-    $kitQuest = Join-Path $projectRoot 'Quest'
-    if (-not $ReleaseReport) {
-        if (-not (Test-Path -LiteralPath $kitReport -PathType Leaf)) { throw 'Provide -ReleaseReport or use the extracted venue kit.' }
-        $ReleaseReport = $kitReport
-    }
+    if (-not $ReleaseReport) { throw 'Provide -ReleaseReport or use the extracted venue kit.' }
     $release = Read-QuestRelease $ReleaseReport
-    if (-not $ApkPath -and ((Test-Path -LiteralPath $kitReport -PathType Leaf) -or (Test-Path -LiteralPath $kitQuest -PathType Container))) {
-        $games = @(Get-ChildItem -LiteralPath $kitQuest -File -Filter '*.apk')
-        if ($games.Count -ne 1) { throw 'Choose one game APK with -ApkPath or extract the original Quest folder.' }
-        $apk = $games[0].FullName
-    }
+    $apk = Get-LocalQuestApkPath
     Confirm-LocalQuestApk $apk $release.sha256
     if ($CheckOnly) {
         [ordered]@{ phase = 'quest-first-launch-preflight'; status = 'local-apk-verified'; versionCode = $release.versionCode
@@ -2398,7 +2406,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
             $deploymentLock = Enter-QuestDeployment
             $stagedApk = $null
             try {
-                if ($InstallMissing) { $stagedApk = New-VerifiedQuestApk $apk $release.sha256 }
+                if ($InstallMissing) { $stagedApk = New-VerifiedQuestApk (Get-LocalQuestApkPath) $release.sha256 }
                 $result = Invoke-MappedQuestSeats $venue $map $versionCode $release $retry $stagedApk $reportOutput
                 if ($reportOutput) { Write-QuestDeploymentReport $reportOutput $result }
             } finally {
@@ -2452,7 +2460,10 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
     }
 }
 $release = if ($ReleaseReport) { Read-QuestRelease $ReleaseReport }
-if ($release -and -not $UseInstalledApk) { Confirm-LocalQuestApk $apk $release.sha256 }
+if (-not $UseInstalledApk) {
+    $apk = Get-LocalQuestApkPath
+    if ($release) { Confirm-LocalQuestApk $apk $release.sha256 }
+}
 if ($CheckOnly) {
     $report = [ordered]@{
         roomId = $ticket.RoomId

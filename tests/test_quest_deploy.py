@@ -2715,6 +2715,47 @@ else:
         mapping, _ = self.device_map()
         self.assert_rejected(self.run_bundle(files, '-DeviceMap', str(mapping), *flags), 'Use -ApkPath only for a single-seat install')
 
+    def test_relocated_kit_binds_players_and_fleet_preparation_to_its_release(self):
+        kit = self.root / 'moved venue'
+        scripts = kit / 'scripts'
+        scripts.mkdir(parents=True)
+        for name in ('deploy-quest.ps1', 'quest-adb-process.ps1'):
+            shutil.copyfile(ROOT / 'scripts' / name, scripts / name)
+        report, _, env = self.release_report()
+        shutil.copyfile(report, kit / 'venue-release.json')
+        game = kit / 'Quest' / 'venue game.apk'
+        game.parent.mkdir()
+        shutil.copyfile(env['VR_QUEST_FLEET_APK'], game)
+        fleet = self.root / 'test devices'
+        fleet.mkdir()
+        mapping, _ = self.device_map()
+        files, configs = self.vr_bundle('Linked')
+        bundle = self.write_bundle(files)
+        player = self.root / 'player.json'
+        player.write_text(json.dumps(configs[5]['room-05-seat-02.json']), encoding='utf-8')
+
+        def run(*args):
+            return subprocess.run(['pwsh', '-NoProfile', '-NonInteractive', '-File', scripts / 'deploy-quest.ps1',
+                                   '-AdbPath', ROOT / 'tests/fixtures/mock-quest-fleet.ps1', *args],
+                                  cwd=fleet, env={**os.environ, **env, 'VR_QUEST_FLEET_FIXTURE': str(fleet)},
+                                  capture_output=True, encoding='utf-8', timeout=45)
+
+        for args in [('-ClientConfig', player), ('-VenueBundle', bundle, '-RoomId', '5', '-Seat', '2')]:
+            result = run(*args, '-CheckOnly')
+            self.assertEqual(0, result.returncode, result.stderr)
+            row = json.loads(result.stdout)
+            self.assertTrue(row['localApkVerified'])
+            self.assertEqual(row['venueReleaseReportSha256'], hashlib.sha256(report.read_bytes()).hexdigest())
+            self.assertEqual((5, 2), (row['roomId'], row['seat']))
+        game.write_bytes(b'changed after unpacking')
+        self.assert_rejected(run('-PrepareQuestApks', '-DeviceMap', mapping, '-CheckOnly'), 'SHA-256 differs')
+        self.assertFalse((fleet / 'transport.log').exists())
+        game.unlink()
+        # Inspecting mapped installed versions or the overall room plan needs no local APK.
+        for args in [('-VenueBundle', bundle), ('-VenueBundle', bundle, '-DeviceMap', mapping, '-ExpectedVersionCode', '64')]:
+            result = run(*args, '-CheckOnly')
+            self.assertEqual(0, result.returncode, result.stderr)
+
     def test_vr_bundle_previews_both_topologies_and_requires_live_check_to_write(self):
         for topology in ('Linked', 'Independent'):
             with self.subTest(topology=topology):

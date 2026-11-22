@@ -158,4 +158,15 @@ $env:VR_COMMAND_UNATTENDED = '1'
 .\scripts\deploy-quest.ps1 -SmokeTest -RequireOpenXR -Serial '<頭盔序號>'
 ```
 
-各席實際入場時使用主控台為該玩家產生的連線檔。MR 場次還需要現場校正資料。五房連線與實機操作須在場館網路驗收。
+各席實際入場時使用主控台為該玩家產生的連線檔。以下指令可在接頭盔前核對單席的 VR 連線檔、席號及包內的 APK。MR 場次還需要現場校正資料。
+
+```powershell
+.\scripts\deploy-quest.ps1 -ClientConfig .\room-01-seat-01.json -CheckOnly
+```
+
+若要在任務開始前盤點現場頭盔，接上已授權的裝置後執行下列命令。工具會讀取座位表，比對每席已安裝的遊戲與本包的版本。需要安裝時可依檢查結果進行準備。單席安裝、五房安裝準備及批次部署的 `-InstallMissing` 都會使用同一份包內遊戲檔。單獨查看整場座位規劃時，只需要場館的連線 ZIP。
+
+```powershell
+$env:VR_COMMAND_UNATTENDED = '1'
+.\scripts\deploy-quest.ps1 -PrepareQuestApks -DeviceMap .\device-map.json -CheckOnly
+```
