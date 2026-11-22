@@ -143,6 +143,8 @@ Get-Content -LiteralPath $report
 .\scripts\deploy-quest.ps1 -CheckSeatUsb -DeviceMap .\device-map.json -SeatUsbSummary
 ```
 
+某席在 Windows 已出現、但 ADB 尚無法對應時，該列會附上 Windows 能核對到該席的檔案傳輸介面、USB 偵錯介面或驅動程式問題。請依房號與席號查看；表中「已連線」表示該席已取得 USB 偵錯連線。
+
 首次安裝時，請準備已開啟開發者模式、允許本機 USB 偵錯的 Quest 3，以及 Android SDK 的 `adb.exe`。請把下列序號與 ADB 路徑替換成現場值。部署工具會查核防火牆條件、APK 雜湊及裝置型號，啟動後查核 OpenXR 顯示與輸入狀態。若防火牆查核略過啟動，可繼續使用上方的唯讀診斷。
 
 ```powershell

@@ -67,27 +67,55 @@ function Get-QuestUsbReport($Inventory, [int]$Expected, $MappedSeats) {
     }
     $roots = 0
     $serials = [Collections.Generic.Dictionary[string,int]]::new([StringComparer]::OrdinalIgnoreCase)
+    $rootBySerial = @{}
+    $evidenceByRoot = @{}
     try {
         $nodes = @(Get-PnpDevice -PresentOnly -ErrorAction Stop | Where-Object { $_.InstanceId -match '^USB\\VID_2833&PID_[0-9a-f]{4}(?:&|\\)' })
         $usb.observed = $true
     } catch { $nodes = @() }
     $usb.metaUsbNodes = $nodes.Count
     foreach ($node in $nodes) {
+        $rootId = $null
         if ($node.InstanceId -match '\AUSB\\VID_2833&PID_[0-9a-f]{4}\\([^\\]+)\z') {
             $roots++
             $instance = $Matches[1]
-            if ($instance -match '\A[a-z0-9._-]{1,128}\z') { $serials[$instance] = 1 + $serials[$instance] }
+            $rootId = $node.InstanceId
+            if ($instance -match '\A[a-z0-9._-]{1,128}\z') {
+                $serials[$instance] = 1 + $serials[$instance]
+                $rootBySerial[$instance] = $rootId
+            }
         }
         $descriptor = Get-PnpDeviceProperty -InstanceId $node.InstanceId -KeyName DEVPKEY_Device_CompatibleIds -ErrorAction SilentlyContinue
         $compatible = @($descriptor.Data | Where-Object { $_ })
         if (-not $compatible.Count) { $usb.unknownInterfaceDescriptors++ }
-        if ($node.Class -eq 'WPD' -or $compatible -contains 'USB\MS_COMP_MTP') { $usb.portableMediaInterfaces++ }
-        if ($compatible -notcontains 'USB\Class_ff&SubClass_42&Prot_01' -and
-            $compatible -notcontains 'USB\COMPAT_VID_2833&Class_ff&SubClass_42&Prot_01') { continue }
-        $usb.adbInterfaces++
-        $problem = Get-PnpDeviceProperty -InstanceId $node.InstanceId -KeyName DEVPKEY_Device_ProblemCode -ErrorAction SilentlyContinue
-        if ($null -eq $problem.Data) { $usb.unknownAdbDriverStates++ }
-        elseif ($problem.Data -ne 0) { $usb.adbInterfacesWithProblems++ }
+        $observations = [Collections.Generic.List[string]]::new()
+        if ($node.Class -eq 'WPD' -or $compatible -contains 'USB\MS_COMP_MTP') {
+            $usb.portableMediaInterfaces++
+            $observations.Add('portable-media')
+        }
+        if ($compatible -contains 'USB\Class_ff&SubClass_42&Prot_01' -or
+            $compatible -contains 'USB\COMPAT_VID_2833&Class_ff&SubClass_42&Prot_01') {
+            $usb.adbInterfaces++
+            $observations.Add('adb-interface')
+            $problem = Get-PnpDeviceProperty -InstanceId $node.InstanceId -KeyName DEVPKEY_Device_ProblemCode -ErrorAction SilentlyContinue
+            if ($null -eq $problem.Data) {
+                $usb.unknownAdbDriverStates++
+                $observations.Add('adb-driver-state-unknown')
+            } elseif ($problem.Data -ne 0) {
+                $usb.adbInterfacesWithProblems++
+                $observations.Add('adb-driver-problem')
+            }
+        }
+        if ($MappedSeats -and $observations.Count) {
+            if (-not $rootId) {
+                $parent = Get-PnpDeviceProperty -InstanceId $node.InstanceId -KeyName DEVPKEY_Device_Parent -ErrorAction SilentlyContinue
+                $rootId = $parent.Data
+            }
+            if ($rootId) {
+                if (-not $evidenceByRoot.ContainsKey($rootId)) { $evidenceByRoot[$rootId] = @{} }
+                foreach ($observation in $observations) { $evidenceByRoot[$rootId][$observation] = $true }
+            }
+        }
     }
 
     $matched = [ordered]@{ device = 0; unauthorized = 0; offline = 0; other = 0 }
@@ -142,7 +170,15 @@ function Get-QuestUsbReport($Inventory, [int]$Expected, $MappedSeats) {
                 elseif ($Inventory.Status -ne 'reachable') { 'adb-inventory-unavailable' }
                 elseif (-not $Inventory.Entries.ContainsKey($id)) { 'adb-not-listed' }
                 else { $Inventory.Entries[$id] }
-            [ordered]@{ roomId = $row.roomId; seat = $row.seat; state = $state }
+            $seatReport = [ordered]@{ roomId = $row.roomId; seat = $row.seat; state = $state }
+            if ($state -in @('adb-not-listed', 'adb-inventory-unavailable')) {
+                $seen = $evidenceByRoot[$rootBySerial[$id]]
+                if ($seen) {
+                    $seatReport.windowsEvidence = @('portable-media', 'adb-interface', 'adb-driver-problem', 'adb-driver-state-unknown' |
+                        Where-Object { $seen.ContainsKey($_) })
+                }
+            }
+            $seatReport
         })
         $ready = @($seats | Where-Object state -EQ 'device').Count
         $report.mapped = [ordered]@{ seats = $seats; connected = $ready; allInDeviceState = $ready -eq $seats.Count }
@@ -182,7 +218,16 @@ function Write-QuestUsbReport($Report, [switch]$Summary) {
             'adb-not-listed' = 'Windows 已看到，ADB 尚未列出'
             device = '已連線'; unauthorized = '待頭盔授權'; offline = '離線'; other = '偵錯狀態無法確認'
         }
-        foreach ($row in $report.mapped.seats) { "第 $($row.roomId) 房第 $($row.seat) 席：$($seatLabels[$row.state])" }
+        $evidenceLabels = @{
+            'portable-media' = '檔案傳輸介面'; 'adb-interface' = 'USB 偵錯介面'
+            'adb-driver-problem' = '驅動程式有問題'; 'adb-driver-state-unknown' = '驅動程式狀態未確認'
+        }
+        foreach ($row in $report.mapped.seats) {
+            $detail = if ($row.windowsEvidence) {
+                '（' + (($row.windowsEvidence | ForEach-Object { $evidenceLabels[$_] }) -join '、') + '）'
+            }
+            "第 $($row.roomId) 房第 $($row.seat) 席：$($seatLabels[$row.state])$detail"
+        }
         "指定的 $($report.mapped.seats.Count) 席中，已確認 USB 偵錯連線 $($report.mapped.connected) 席。"
     }
     if ($report.group) {

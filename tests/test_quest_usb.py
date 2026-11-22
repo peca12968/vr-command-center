@@ -28,13 +28,14 @@ function Get-PnpDeviceProperty([string]$InstanceId, [string]$KeyName, [string]$E
     $node = $fixture.nodes | Where-Object InstanceId -EQ $InstanceId
     if ($KeyName -eq 'DEVPKEY_Device_CompatibleIds') { [pscustomobject]@{ Data = $node.descriptors } }
     elseif ($KeyName -eq 'DEVPKEY_Device_ProblemCode') { [pscustomobject]@{ Data = $node.problem } }
+    elseif ($KeyName -eq 'DEVPKEY_Device_Parent') { [pscustomobject]@{ Data = $node.parent } }
     else { throw 'Unexpected device property request.' }
 }
 '''
 
 
-def node(instance, descriptors, *, kind='USB', problem=0):
-    return dict(InstanceId=instance, Class=kind, descriptors=descriptors, problem=problem)
+def node(instance, descriptors, *, kind='USB', problem=0, parent=None):
+    return dict(InstanceId=instance, Class=kind, descriptors=descriptors, problem=problem, parent=parent)
 
 
 def adb_reply(text):
@@ -157,8 +158,9 @@ try {
 
 @unittest.skipUnless(shutil.which('pwsh'), 'PowerShell is required')
 class QuestUsbGroupTests(unittest.TestCase):
-    def snapshot(self, roots, entries, expected, *, server='reachable', unobservable=False, seats=None):
-        nodes = [node(root, [ADB_DESCRIPTOR]) for root in roots] + [node(USB_PORTABLE, ['USB\\MS_COMP_MTP'])]
+    def snapshot(self, roots, entries, expected, *, server='reachable', unobservable=False, seats=None, nodes=None):
+        if nodes is None:
+            nodes = [node(root, [ADB_DESCRIPTOR]) for root in roots] + [node(USB_PORTABLE, ['USB\\MS_COMP_MTP'])]
         fixture = dict(nodes=nodes, pnpUnavailable=unobservable, expected=expected,
                        inventory=dict(Status=server, Entries=entries, Unidentified=0), seats=seats)
         command = PNP_FIXTURE + '''
@@ -197,6 +199,27 @@ Write-QuestUsbReport $report -Summary
         self.assertIs(mapped['mapped']['allInDeviceState'], False)
         self.assertIn('第 1 房第 1 席：待頭盔授權', summary)
 
+    def test_missing_transports_show_only_interfaces_observed_for_that_seat(self):
+        seats = [dict(roomId=room, seat=1, serial=f'fixture-serial{room}') for room in range(1, 6)]
+        roots = [USB_ROOT + str(room) for room in range(1, 6)]
+        # Common product and interface IDs; only the Windows parent identifies each physical device.
+        nodes = [node(USB_ADB, [ADB_DESCRIPTOR], parent=roots[1].lower(), problem=28),
+                 node(USB_PORTABLE, [r'USB\MS_COMP_MTP'], parent=roots[0]),
+                 node(USB_ADB + 'x', [ADB_DESCRIPTOR], parent=roots[2], problem=None),
+                 node(USB_ADB + 'y', [ADB_DESCRIPTOR], parent=roots[3].replace('5011', '5346'), problem=28),
+                 node(USB_ADB + 'z', [ADB_DESCRIPTOR], parent=None, problem=28),
+                 *(node(root, [r'USB\COMPOSITE']) for root in roots[:4]), node(roots[4], [ADB_DESCRIPTOR])]
+        for server, state in [('reachable', 'adb-not-listed'), ('unreachable', 'adb-inventory-unavailable')]:
+            report, summary = self.snapshot([], {}, 0, nodes=nodes, seats=seats, server=server)
+            rows = report['mapped']['seats']
+            self.assertEqual([row['state'] for row in rows], [state] * 5)
+            self.assertEqual([row.get('windowsEvidence') for row in rows], [
+                ['portable-media'], ['adb-interface', 'adb-driver-problem'],
+                ['adb-interface', 'adb-driver-state-unknown'], None, ['adb-interface']])
+            self.assertIn('檔案傳輸介面', next(line for line in summary.splitlines() if '第 1 房第 1 席' in line))
+            self.assertIn('驅動程式有問題', next(line for line in summary.splitlines() if '第 2 房第 1 席' in line))
+            self.assertFalse(report['mapped']['allInDeviceState'])
+
     def test_ambiguous_missing_and_wireless_seats(self):
         serials = ['fixture-serial1', 'FIXTURE-SERIAL1', 'fixture-serial', '172.16.1.87:5555', 'fixture-serial2']
         seats = [dict(roomId=1, seat=i, serial=s) for i, s in enumerate(serials, 1)]
@@ -223,6 +246,17 @@ Write-QuestUsbReport $report -Summary
             self.assertNotIn('fixture-serial', result.stdout + result.stderr)
             self.assertEqual(json.loads(result.stdout)['mapped']['seats'], [
                 dict(roomId=1, seat=3, state='usb-not-found'), dict(roomId=5, seat=2, state='usb-not-found')])
+
+            env['VR_QUEST_USB_FIXTURE'] = json.dumps(dict(nodes=[
+                node(USB_ROOT, [r'USB\COMPOSITE']), node(USB_ADB, [ADB_DESCRIPTOR], parent=USB_ROOT, problem=28)]))
+            diagnosed = subprocess.run(['pwsh', '-NonInteractive', '-NoProfile', '-Command', cmd], env=env,
+                                       capture_output=True, encoding='utf-8', timeout=15)
+            self.assertEqual(diagnosed.returncode, 1, diagnosed.stderr)
+            missing, detected = json.loads(diagnosed.stdout)['mapped']['seats']
+            self.assertNotIn('windowsEvidence', missing)
+            self.assertEqual((detected['roomId'], detected['seat']), (5, 2))
+            self.assertEqual(detected['windowsEvidence'], ['adb-interface', 'adb-driver-problem'])
+            self.assertNotIn('fixture-serial', diagnosed.stdout + diagnosed.stderr)
 
     def test_partial_inventory_including_wireless_and_ambiguous_devices(self):
         five = [USB_ROOT + str(i) for i in range(5)]
