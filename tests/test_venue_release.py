@@ -209,7 +209,8 @@ class VenueReleaseTests(unittest.TestCase):
         self.assertEqual(0, capture.returncode, capture.stderr)
         self.assertIn('--check-capture', capture.stdout)
         # Run from the installation, with no source checkout on the import path.
-        for name in ('prepare-venue-network-plan.py', 'check-venue-udp-preflight.py', 'start-verified-venue.py'):
+        for name in ('prepare-venue-network-plan.py', 'check-venue-udp-preflight.py', 'start-verified-venue.py',
+                     'prepare-venue-field-manifest.py', 'prepare-venue-stages.py'):
             with self.subTest(entry=name):
                 result = subprocess.run([sys.executable, '-I', '-B', str(scripts / name), '--help'],
                                         cwd=self.root, capture_output=True, text=True, timeout=15)

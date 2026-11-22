@@ -428,7 +428,8 @@ def write_field_kit(destination, control, server, player, apk, report, hardware=
             for name in ('deploy-quest.ps1', 'quest-adb-process.ps1', 'check-quest-usb.ps1',
                          'check-field-install.ps1', 'check-lan-udp.ps1', 'prepare-venue-network-plan.py',
                          'check-venue-udp-preflight.py', 'start-verified-venue.py', 'windows_firewall.py',
-                         'capture-quest-field-log.py', 'quest_adb.py', 'verify-field-results.py', 'analyze-world-journal.py'):
+                         'capture-quest-field-log.py', 'quest_adb.py', 'prepare-venue-field-manifest.py',
+                         'prepare-venue-stages.py', 'verify-field-results.py', 'analyze-world-journal.py'):
                 archive.write(scripts / name, 'scripts/' + name)
             firewall = scripts / 'check-windows-firewall-notifications.ps1'
             copy_verified(archive, firewall, 'scripts/' + firewall.name, guard['scriptSha256'])

@@ -191,3 +191,29 @@ python -B "$tools\capture-quest-field-log.py" @plan --check-capture ..\private\c
 ```
 
 `verifiedSeats` 是本次核對成功的席數。缺檔、檔案不符或擷取尚未完成時，工具回傳退出碼 1，逐席列出結果。舊報告若沒有連線 ZIP 及裝置表的指紋，`captureBindingVerified` 會顯示 `false`。伺服器端戰績與實機體驗另外驗收。
+
+### 混合頭盔場次的收件與驗收
+
+Windows 玩家及 Quest 玩家共用一場時，可從包內建立驗收清單。以下以五房每房五席為例。先將本次全館結束的管理 ZIP、伺服器原終止報告、原場館發行報告、Windows 座位表及玩家回傳的 ZIP，以及 Quest 原擷取、部署、裝置表和網路計畫放在工作資料夾。在套件根目錄執行 `$tools = (Resolve-Path .\scripts).Path`，再切換至工作資料夾。把範例 IP 改成實際伺服器位址，每個位址各列一次。
+
+```powershell
+python -B "$tools/prepare-venue-field-manifest.py" --venue-bundle management.zip --launcher-report venue-final.json `
+    --topology direct-lan --server-ip 192.168.1.10 --players-per-room 5 --minimum-concurrent-ms 2000 `
+    --venue-release-report venue-release.json --windows-inbox returned --windows-seat-map windows-seats.json `
+    --quest-device-map device-map.json --quest-network-plan quest-network.json `
+    --quest-capture-report capture/capture-report.json --quest-deployment-report deployment.json `
+    --require-quest-openxr --output venue.json
+python -B "$tools/verify-field-results.py" --venue-manifest venue.json --inspect-windows-inbox
+python -B "$tools/verify-field-results.py" --venue-manifest venue.json
+```
+
+收件檢查會列出 Windows 待補席位，可在補件後重跑。完整驗收會核對原場次、席位、玩家日誌及伺服器確認。範例要求每個 Quest 席位具備當次啟動的 OpenXR 紀錄。VIVE 頭盔的確切型號、實際顯示與左右控制器體驗仍須在現場確認。
+
+兩種連線模式各完成 5、10、25 席後，可將六份批次清單一起檢查。各批準備時分別指定每房 1、2、5 席，並設定本次驗收要求的 `--minimum-concurrent-ms`。以下用 2,000 毫秒示範。將路徑換成本次保留的六份清單和各自引用的原檔。
+
+```powershell
+$batches = '5-independent/venue.json','5-linked/venue.json','10-independent/venue.json','10-linked/venue.json','25-independent/venue.json','25-linked/venue.json'
+python -B "$tools/prepare-venue-stages.py" --topology direct-lan --minimum-concurrent-ms 2000 --require-quest-openxr --output stages.json @batches
+python -B "$tools/verify-field-results.py" --venue-stages stages.json --inspect-venue-stages
+python -B "$tools/verify-field-results.py" --venue-stages stages.json
+```
