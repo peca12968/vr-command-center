@@ -46,6 +46,12 @@ Get-Content -LiteralPath $report
 
 若只對應到部分裝置，摘要會列出仍無法對應的台數。若 Windows 或 ADB 清單無法讀取，摘要會指出資料不足。省略 `-Summary` 可輸出 JSON 記錄。裝置型號與實際安裝版本由接下來的部署工具核對。
 
+已有場館座位對應檔時，可用同一份檔案確認是哪一席待授權、離線或尚未出現在 USB 清單。只填接到這台電腦的座位即可。結果依房號與席號排列，省略裝置序號。這項檢查只讀取 Windows 與現有 ADB 服務，全程無需啟動遊戲或按「允許」。
+
+```powershell
+.\scripts\deploy-quest.ps1 -CheckSeatUsb -DeviceMap .\device-map.json -SeatUsbSummary
+```
+
 首次安裝時，請準備已開啟開發者模式、允許本機 USB 偵錯的 Quest 3，以及 Android SDK 的 `adb.exe`。請把下列序號與 ADB 路徑替換成現場值。部署工具會查核防火牆條件、APK 雜湊及裝置型號，啟動後查核 OpenXR 顯示與輸入狀態。若防火牆查核略過啟動，可繼續使用上方的唯讀診斷。
 
 ```powershell

@@ -157,14 +157,14 @@ try {
 
 @unittest.skipUnless(shutil.which('pwsh'), 'PowerShell is required')
 class QuestUsbGroupTests(unittest.TestCase):
-    def snapshot(self, roots, entries, expected, *, server='reachable', unobservable=False):
+    def snapshot(self, roots, entries, expected, *, server='reachable', unobservable=False, seats=None):
         nodes = [node(root, [ADB_DESCRIPTOR]) for root in roots] + [node(USB_PORTABLE, ['USB\\MS_COMP_MTP'])]
         fixture = dict(nodes=nodes, pnpUnavailable=unobservable, expected=expected,
-                       inventory=dict(Status=server, Entries=entries, Unidentified=0))
+                       inventory=dict(Status=server, Entries=entries, Unidentified=0), seats=seats)
         command = PNP_FIXTURE + '''
 . $env:VR_QUEST_USB_SCRIPT
 $inventory = ($env:VR_QUEST_USB_FIXTURE | ConvertFrom-Json -AsHashtable).inventory
-$report = Get-QuestUsbReport $inventory $fixture.expected
+$report = Get-QuestUsbReport $inventory $fixture.expected $fixture.seats
 Write-QuestUsbReport $report
 Write-QuestUsbReport $report -Summary
 '''
@@ -173,8 +173,56 @@ Write-QuestUsbReport $report -Summary
                                 capture_output=True, encoding='utf-8', timeout=15, check=True)
         self.assertNotIn('fixture-serial', result.stdout.lower())
         self.assertNotIn('generated&', result.stdout)
+        self.assertNotIn('172.16.1.87', result.stdout)
         snapshot, summary = result.stdout.split('\n', 1)
         return json.loads(snapshot), summary
+
+    def test_mapped_seats_report_only_their_own_usb_connection(self):
+        seats = [dict(roomId=room, seat=seat, serial=f'fixture-serial{room}{seat}')
+                 for room in range(1, 6) for seat in range(1, 6)]
+        roots = [USB_ROOT + row['serial'][-2:] for row in seats]
+        entries = {row['serial']: 'device' for row in seats}
+        full, _ = self.snapshot(roots, entries, 0, seats=seats)
+        self.assertEqual(full['mapped']['connected'], 25)
+        self.assertIs(full['mapped']['allInDeviceState'], True)
+        self.assertEqual(full['mapped']['seats'], [dict(roomId=s['roomId'], seat=s['seat'], state='device') for s in seats])
+        entries.update({'fixture-serial11': 'unauthorized', 'fixture-serial12': 'offline', 'fixture-serial13': 'other'})
+        del entries['fixture-serial14']
+        # The unassigned, connected fifth-room device cannot fill a different missing seat.
+        roots.pop(4)
+        mapped, summary = self.snapshot(roots, entries, 0, seats=seats[:5])
+        self.assertEqual([s['state'] for s in mapped['mapped']['seats']],
+                         ['unauthorized', 'offline', 'other', 'adb-not-listed', 'usb-not-found'])
+        self.assertEqual(mapped['mapped']['connected'], 0)
+        self.assertIs(mapped['mapped']['allInDeviceState'], False)
+        self.assertIn('第 1 房第 1 席：待頭盔授權', summary)
+
+    def test_ambiguous_missing_and_wireless_seats(self):
+        serials = ['fixture-serial1', 'FIXTURE-SERIAL1', 'fixture-serial', '172.16.1.87:5555', 'fixture-serial2']
+        seats = [dict(roomId=1, seat=i, serial=s) for i, s in enumerate(serials, 1)]
+        roots = [USB_ROOT, USB_ROOT.replace('5011', '5346'), USB_ROOT + '1', USB_ROOT + '2']
+        for server, missing, last in [('unreachable', False, 'adb-inventory-unavailable'),
+                                      ('reachable', True, 'usb-inventory-unavailable')]:
+            report, _ = self.snapshot(roots, {}, 0, server=server, unobservable=missing, seats=seats)
+            states = [s['state'] for s in report['mapped']['seats']]
+            self.assertEqual(states, ['ambiguous-map', 'ambiguous-map', 'usb-inventory-unavailable' if missing else
+                                      'ambiguous-usb', 'not-usb-serial', last])
+            self.assertFalse(report['mapped']['allInDeviceState'])
+
+    def test_deployment_entry_reads_existing_map_and_returns_incomplete(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'devices.json'
+            rows = [dict(roomId=5, seat=2, serial='fixture-serial'), dict(roomId=1, seat=3, serial='fixture-serial3')]
+            path.write_text(json.dumps(dict(version=1, seats=rows)), encoding='utf-8')
+            cmd = PNP_FIXTURE + '\n& $env:VR_DEPLOY_SCRIPT -CheckSeatUsb -DeviceMap $env:VR_TEST_MAP\nexit $LASTEXITCODE'
+            env = {**os.environ, 'VR_DEPLOY_SCRIPT': str(SCRIPT.with_name('deploy-quest.ps1')),
+                   'VR_TEST_MAP': str(path), 'VR_QUEST_USB_FIXTURE': json.dumps(dict(nodes=[]))}
+            result = subprocess.run(['pwsh', '-NonInteractive', '-NoProfile', '-Command', cmd], env=env,
+                                    capture_output=True, encoding='utf-8', timeout=15)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertNotIn('fixture-serial', result.stdout + result.stderr)
+            self.assertEqual(json.loads(result.stdout)['mapped']['seats'], [
+                dict(roomId=1, seat=3, state='usb-not-found'), dict(roomId=5, seat=2, state='usb-not-found')])
 
     def test_partial_inventory_including_wireless_and_ambiguous_devices(self):
         five = [USB_ROOT + str(i) for i in range(5)]

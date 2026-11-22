@@ -60,7 +60,7 @@ function Read-ExistingAdbInventory([int]$Port) {
     finally { $client.Dispose() }
 }
 
-function Get-QuestUsbReport($Inventory, [int]$Expected) {
+function Get-QuestUsbReport($Inventory, [int]$Expected, $MappedSeats) {
     $usb = [ordered]@{
         observed = $false; metaUsbNodes = 0; portableMediaInterfaces = 0
         adbInterfaces = 0; adbInterfacesWithProblems = 0; unknownInterfaceDescriptors = 0; unknownAdbDriverStates = 0
@@ -127,6 +127,26 @@ function Get-QuestUsbReport($Inventory, [int]$Expected) {
             allExpectedInDeviceState = if ($comparable) { $roots -eq $Expected -and $matched.device -eq $Expected }
         }
     }
+    if ($MappedSeats) {
+        # Windows USB instance identities are case-insensitive. Two mapped spellings
+        # must never count one physical headset as two connected seats.
+        $assigned = [Collections.Generic.Dictionary[string,int]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($row in $MappedSeats) { $assigned[$row.serial] = 1 + $assigned[$row.serial] }
+        $seats = @(foreach ($row in $MappedSeats) {
+            $id = $row.serial
+            $state = if ($id -notmatch '\A[a-z0-9._-]{1,128}\z') { 'not-usb-serial' }
+                elseif ($assigned[$id] -ne 1) { 'ambiguous-map' }
+                elseif (-not $usb.observed) { 'usb-inventory-unavailable' }
+                elseif (-not $serials.ContainsKey($id)) { 'usb-not-found' }
+                elseif ($serials[$id] -ne 1) { 'ambiguous-usb' }
+                elseif ($Inventory.Status -ne 'reachable') { 'adb-inventory-unavailable' }
+                elseif (-not $Inventory.Entries.ContainsKey($id)) { 'adb-not-listed' }
+                else { $Inventory.Entries[$id] }
+            [ordered]@{ roomId = $row.roomId; seat = $row.seat; state = $state }
+        })
+        $ready = @($seats | Where-Object state -EQ 'device').Count
+        $report.mapped = [ordered]@{ seats = $seats; connected = $ready; allInDeviceState = $ready -eq $seats.Count }
+    }
     return $report
 }
 
@@ -151,6 +171,20 @@ function Write-QuestUsbReport($Report, [switch]$Summary) {
         'adb-usb-mixed-states' = '可對應的 Meta USB 裝置有不同的偵錯狀態。'
     }
     $messages[$report.status]
+    if ($report.mapped) {
+        $seatLabels = @{
+            'not-usb-serial' = '此對應值不適用於 USB 核對'
+            'ambiguous-map' = '座位表重複指定同一 USB 識別'
+            'usb-inventory-unavailable' = '無法讀取 Windows USB 清單'
+            'usb-not-found' = 'Windows USB 清單沒有這台裝置'
+            'ambiguous-usb' = '多台 Windows 裝置符合此座位'
+            'adb-inventory-unavailable' = '無法取得 ADB 清單'
+            'adb-not-listed' = 'Windows 已看到，ADB 尚未列出'
+            device = '已連線'; unauthorized = '待頭盔授權'; offline = '離線'; other = '偵錯狀態無法確認'
+        }
+        foreach ($row in $report.mapped.seats) { "第 $($row.roomId) 房第 $($row.seat) 席：$($seatLabels[$row.state])" }
+        "指定的 $($report.mapped.seats.Count) 席中，已確認 USB 偵錯連線 $($report.mapped.connected) 席。"
+    }
     if ($report.group) {
         $g = $report.group
         "預期 $($g.expected) 台。"

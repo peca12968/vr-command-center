@@ -17,7 +17,9 @@ param(
     [Parameter(Mandatory, ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='CapturePlan')][Parameter(Mandatory, ParameterSetName='Windows')][string]$VenueBundle,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,5)][int]$RoomId,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,5)][int]$Seat,
-    [Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='CapturePlan')][Parameter(Mandatory, ParameterSetName='PrepareApks')][ValidateNotNullOrEmpty()][string]$DeviceMap,
+    [Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='CapturePlan')][Parameter(Mandatory, ParameterSetName='PrepareApks')][Parameter(Mandatory, ParameterSetName='SeatUsb')][ValidateNotNullOrEmpty()][string]$DeviceMap,
+    [Parameter(Mandatory, ParameterSetName='SeatUsb')][switch]$CheckSeatUsb,
+    [Parameter(ParameterSetName='SeatUsb')][switch]$SeatUsbSummary,
     [Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='CapturePlan')][switch]$AllowPartialMap,
     [Parameter(Mandatory, ParameterSetName='CapturePlan')][switch]$ReadCapturePlan,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,2147483647)][int]$ExpectedVersionCode,
@@ -2179,6 +2181,16 @@ function Read-QuestLaunchedProcess([string[]]$Target, [string]$Nonce) {
         observationSeconds = [Math]::Round($clock.Elapsed.TotalSeconds, 2)
         unityLogLines = @($logs -cmatch '^[VDIWEF]/Unity\s*\(').Count
     }
+}
+
+if ($PSCmdlet.ParameterSetName -eq 'SeatUsb') {
+    if (-not $CheckSeatUsb) { throw 'Specify -CheckSeatUsb to inspect the mapped USB seats.' }
+    $mappedSeats = @(Read-QuestVenueMap $null $DeviceMap -Partial)
+    . (Join-Path $PSScriptRoot 'check-quest-usb.ps1')
+    $report = Get-QuestUsbReport (Read-ExistingAdbInventory 5037) 0 $mappedSeats
+    Write-QuestUsbReport $report -Summary:$SeatUsbSummary
+    if ($report.mapped.allInDeviceState -ne $true) { exit 1 }
+    exit 0
 }
 
 if ($PSCmdlet.ParameterSetName -eq 'Venue') {

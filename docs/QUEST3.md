@@ -22,6 +22,14 @@
 
 ## Windows USB 與 ADB 診斷
 
+已有部署用的第 1 版座位表時，執行下列命令可核對表內 1 至 25 席。每一席依房號、席號顯示，可定位待授權、離線、缺少 USB 裝置或已出現在 Windows 但未連上 ADB 的頭盔。USB 或 ADB 清單無法讀取時會標示原因。相同 USB 識別重複分配給兩席時，兩席都需要確認。
+
+```powershell
+.\scripts\deploy-quest.ps1 -CheckSeatUsb -DeviceMap .\device-map.json -SeatUsbSummary
+```
+
+省略 `-SeatUsbSummary` 會輸出 JSON。每個 `mapped.seats` 項目包含 `roomId`、`seat`、`state`。只有表內每一席都唯一對應到 Windows Meta USB 裝置，且其 ADB 狀態為 `device` 時，`mapped.allInDeviceState` 才為真，程序才回傳 0。未分配的裝置不會補入空席。無線 ADB 位址可保留在部署表中，此項 USB 檢查會將它列為 `not-usb-serial`。診斷後仍需由部署流程核對 Quest 3 型號、APK 及 OpenXR。
+
 接上頭盔後，可在 PowerShell 7 執行唯讀檢查。工具讀取 Windows 目前列舉的 Meta USB 裝置及 ADB 介面描述，並向 `127.0.0.1:5037` 上現有的 ADB 服務查詢清單。它只輸出計數和狀態，省略裝置序號、位址和原始回覆。執行過程無需提權、啟動 ADB 或調整防火牆。 [Windows 裝置相容識別](https://learn.microsoft.com/windows-hardware/drivers/install/devpkey-device-compatibleids) · [ADB 主機查詢協定](https://android.googlesource.com/platform/packages/modules/adb/+/HEAD/docs/dev/services.md)
 
 ```powershell
