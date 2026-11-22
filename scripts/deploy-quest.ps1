@@ -1141,10 +1141,13 @@ function Get-MappedQuestStatus($Row, $Inventory, [int]$VersionCode, [string]$Exp
     return $result
 }
 
-function Read-QuestDeviceSerial([string[]]$Target) {
+function Read-QuestDeviceSerial([string[]]$Target, [switch]$Required) {
     $lines = @(Invoke-QuestAdb ($Target + @('shell', 'getprop', 'ro.serialno')) 2>$null)
     if ($LASTEXITCODE -ne 0 -or $lines.Count -ne 1 -or $lines[0] -cnotmatch '\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\z' -or
-        $lines[0] -match '\A(?:unknown|0+)\z') { return $null }
+        $lines[0] -match '\A(?:unknown|0+)\z') {
+        if ($Required) { throw 'Could not read the original Quest device identity.' }
+        return $null
+    }
     return [string]$lines[0]
 }
 
@@ -1903,6 +1906,7 @@ function Update-QuestPlayerTicket($ConnectionFile, $Ticket, $Target) {
     $fresh = $ConnectionFile.Document
     if ([Guid]::Empty -in @($Ticket.SessionId, $Ticket.PlayerId, $Ticket.AdmissionId)) { throw 'Use a player file for an original admission.' }
     $deviceTarget = Get-SingleQuestTarget $Serial
+    $originalDeviceSerial = Read-QuestDeviceSerial $deviceTarget -Required
     $model = Invoke-QuestAdb ($deviceTarget + @('shell', 'getprop', 'ro.product.model')) 2>$null
     if ($LASTEXITCODE -ne 0 -or ($model -join "`n").Trim() -cne 'Quest 3') { throw 'Select an authorized Meta Quest 3.' }
 
@@ -1955,12 +1959,13 @@ function Update-QuestPlayerTicket($ConnectionFile, $Ticket, $Target) {
             [IO.File]::WriteAllBytes($local, $replacement)
             $staging = "$remote/vr-connection-$([Guid]::NewGuid().ToString('N')).tmp"
             Publish-QuestFile $deviceTarget $local $staging $destination 'Player ticket file' -ExpectedHash $expectedHash `
-                -ContentHash (Get-QuestSha256 $replacement) -RequiredAlignment $requiredAlignment -BeforeActivation {
+                -ContentHash (Get-QuestSha256 $replacement) -RequiredAlignment $requiredAlignment -OriginalDeviceSerial $originalDeviceSerial -BeforeActivation {
                 if ($liveSeat) { Confirm-QuestPlayerReadback $liveSeat }
                 if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'The replacement ticket expired before refresh.' }
             }
         }
     } finally { Remove-Item -LiteralPath $local }
+    Confirm-QuestDeviceSerial $deviceTarget $originalDeviceSerial
     $report = [ordered]@{ roomId = $Ticket.RoomId; seat = $Ticket.Seat + 1; expiresAtUtc = $Ticket.ExpiresAtUtc.ToString('o')
         status = if ($sameTicket) { 'ticket-file-current' } else { 'ticket-file-refreshed' } }
     if ($liveSeat) { $report.managementVerified = $true }
@@ -1975,6 +1980,7 @@ function Set-QuestConnection([string[]]$Target, $Config, $Ticket, $Alignment, [s
     $nonce = if ($RequireOpenXR) { [Guid]::NewGuid().ToString('N') }
     $Deployment.Step = 'prepare-device'
     $remoteDirectory = '/sdcard/Android/data/com.vrcommand.quest/files'
+    Confirm-QuestDeviceSerial $Target $OriginalDeviceSerial
     Invoke-QuestAdb ($Target + @('shell', 'mkdir', '-p', $remoteDirectory)) | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'App data directory could not be prepared.' }
     $deploymentId = [Guid]::NewGuid().ToString('N')
@@ -2038,9 +2044,9 @@ function Set-QuestConnection([string[]]$Target, $Config, $Ticket, $Alignment, [s
     if ($RequireOpenXR) {
         $Deployment.Step = 'observe-openxr'
         $observation = Read-QuestLaunchedProcess $Target $nonce
-        Confirm-QuestDeviceSerial $Target $OriginalDeviceSerial
         $Deployment.OpenXR = [ordered]@{ processId = $observation.processId; nonce = $nonce }
     }
+    Confirm-QuestDeviceSerial $Target $OriginalDeviceSerial
 }
 
 function Confirm-QuestSmokeConfigAbsent([string[]]$Target) {
@@ -2440,12 +2446,11 @@ $stagedApk = $null
 $deployment = @{}
 try {
     $deviceTarget = Get-SingleQuestTarget $Serial
+    $originalDeviceSerial = Read-QuestDeviceSerial $deviceTarget -Required
     $model = Invoke-QuestAdb ($deviceTarget + @('shell', 'getprop', 'ro.product.model'))
     if ($LASTEXITCODE -ne 0) { throw 'Could not identify the selected Android device. On Windows, check USB and ADB with scripts/check-quest-usb.ps1.' }
     $model = ([string]$model).Trim()
     if ($model -ne 'Quest 3') { throw 'Selected device is not a Meta Quest 3. No app was installed.' }
-    $originalDeviceSerial = if ($RequireOpenXR) { Read-QuestDeviceSerial $deviceTarget }
-    if ($RequireOpenXR -and -not $originalDeviceSerial) { throw 'Could not read the original Quest device identity.' }
     if ($ManagementApi -and $PSCmdlet.ParameterSetName -eq 'Bundle') { Confirm-VenueReadback $venue -RequireLiveSource }
     if ($release -and -not $UseInstalledApk) {
         $stagedApk = New-VerifiedQuestApk $apk $release.sha256

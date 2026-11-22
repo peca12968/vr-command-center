@@ -95,6 +95,7 @@ if ($args[0] -ceq '-t' -and $args[1] -ceq '41') {
 } else { exit 99 }
 switch ($args[2]) {
     'install' {
+        if ($env:QUEST_TEST_FAIL -eq 'different-device-during-install') { [IO.File]::WriteAllText($replacedDevice, 'replacement') }
         if ($env:QUEST_TEST_RELEASE_HASH) {
             $installedHash = (Get-FileHash -LiteralPath $args[-1] -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($installedHash -cne $env:QUEST_TEST_RELEASE_HASH) { exit 95 }
@@ -132,6 +133,7 @@ switch ($args[2]) {
         $path = Join-Path $remote $Matches[1]
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { exit 1 }
         Copy-Item -LiteralPath $path -Destination $args[4]
+        if ($env:QUEST_TEST_FAIL -eq 'different-device-after-pull') { [IO.File]::WriteAllText($replacedDevice, 'replacement') }
         if ($env:QUEST_TEST_FAIL -eq 'disconnect-after-pull') { [IO.File]::WriteAllText($disconnected, 'original transport gone') }
         exit 0
     }
@@ -159,7 +161,7 @@ switch ($args[2]) {
                 exit $LASTEXITCODE
             }
             'getprop' {
-                if ($env:QUEST_TEST_FAIL -eq 'getprop') { exit 1 }
+                if ($env:QUEST_TEST_FAIL -eq 'getprop' -and $args[4] -ceq 'ro.product.model') { exit 1 }
                 if ($args[4] -ceq 'ro.serialno') {
                     if ($env:QUEST_TEST_FAIL -eq 'missing-device-identity') { 'unknown' }
                     elseif ([IO.File]::Exists($replacedDevice)) { 'HEADSET-B' }
@@ -235,6 +237,7 @@ switch ($args[2]) {
                     [IO.File]::AppendAllText($alignment.FullName, "`n")
                 }
                 if ($args[4] -ceq 'start') {
+                    if ($env:QUEST_TEST_FAIL -eq 'different-device-during-start') { [IO.File]::WriteAllText($replacedDevice, 'replacement') }
                     $activity = if ($env:QUEST_TEST_FAIL -eq 'launch-short') { 'com.vrcommand.quest/com.vrcommand.quest.MainActivity' }
                         else { 'com.vrcommand.quest/com.unity3d.player.UnityPlayerActivity' }
                     $target = "--user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n $activity"
@@ -442,11 +445,11 @@ class QuestDeployTests(unittest.TestCase):
         self.provision_apk()
         run_cases = (
             ('deploy', lambda: self.run_script('-Serial', 'fixture', failure='disconnect-after-model'),
-             'APK installation failed', ' install -r ', 1),
+             'original Quest device identity', ' install -r ', 0),
             ('first-launch', lambda: self.run_smoke(failure='disconnect-after-inventory'),
              'Could not confirm the Quest has no existing player configuration', ' install -R ', 0),
             ('ticket-refresh', lambda: self.run_refresh('disconnect-after-pull'),
-             'could not be copied', ' push ', 1),
+             'original Quest device identity', ' push ', 0),
         )
         for operation, invoke, message, attempted, attempt_count in run_cases:
             with self.subTest(operation=operation):
@@ -490,7 +493,8 @@ class QuestDeployTests(unittest.TestCase):
         commands = self.commands.read_text(encoding='utf-8').splitlines()
         self.assertEqual('devices -l', commands[0])
         self.assertTrue(all(line.startswith('-t 41 ') for line in commands[1:]))
-        self.assertIn(' shell am start ', commands[-1])
+        self.assertIn(' shell am start ', commands[-2])
+        self.assertEqual('-t 41 shell getprop ro.serialno', commands[-1])
 
     @contextmanager
     def live_quest_check(self, config):
@@ -617,9 +621,10 @@ class QuestDeployTests(unittest.TestCase):
         failed = self.run_script(*flags, '-Serial', 'fixture', failure='installed-apk-mismatch', release_hash=expected)
         self.assert_rejected(failed, 'Installed Quest APK could not be verified')
         commands = self.commands.read_text(encoding='utf-8').splitlines()
-        self.assertEqual(5, len(commands))
-        self.assertEqual('devices -l', commands[0])
-        staged = commands[2].split(' install -r ', 1)[1]
+        self.assertEqual(7, len(commands))
+        self.assertEqual(['devices -l', '-t 41 shell getprop ro.serialno', '-t 41 shell getprop ro.product.model',
+                          '-t 41 shell getprop ro.serialno'], commands[:4])
+        staged = commands[4].split(' install -r ', 1)[1]
         self.assertNotEqual(str(apk), staged)
         self.assertFalse(Path(staged).exists())
         self.assertTrue(commands[-1].endswith('sha256sum /data/app/fixture/base.apk'))
@@ -630,7 +635,8 @@ class QuestDeployTests(unittest.TestCase):
         commands = self.commands.read_text(encoding='utf-8').splitlines()
         self.assertLess(next(i for i, command in enumerate(commands) if 'base.apk' in command),
                         next(i for i, command in enumerate(commands) if ' push ' in command))
-        self.assertIn(' shell am start ', commands[-1])
+        self.assertIn(' shell am start ', commands[-2])
+        self.assertEqual('-t 41 shell getprop ro.serialno', commands[-1])
         self.assertEqual(self.player, json.loads((self.remote/'vr-connection.json').read_bytes()))
         self.assertEqual(expected, hashlib.sha256(apk.read_bytes()).hexdigest())
 
@@ -657,7 +663,7 @@ class QuestDeployTests(unittest.TestCase):
                 result = self.run_script(*flags, '-RequireOpenXR', failure=fault, release_hash=digest)
                 self.assert_rejected(result, 'Installed Quest APK could not be verified')
                 commands = self.commands.read_text(encoding='utf-8').splitlines()
-                self.assertEqual(['devices -l', '-t 41 shell getprop ro.product.model', '-t 41 shell getprop ro.serialno',
+                self.assertEqual(['devices -l', '-t 41 shell getprop ro.serialno', '-t 41 shell getprop ro.product.model',
                                   '-t 41 shell pm path --user current com.vrcommand.quest'] +
                                  (['-t 41 shell sha256sum /data/app/fixture/base.apk'] if fault.endswith('mismatch') else []),
                                  commands)
@@ -707,6 +713,34 @@ class QuestDeployTests(unittest.TestCase):
                     self.assertFalse(any(' force-stop ' in line or ' am start ' in line or ' shell rm ' in line for line in commands))
                     self.assertEqual(b'previous connection', active.read_bytes())
                 self.assertTrue(commands[-1].endswith(' shell getprop ro.serialno'))
+
+    def test_plain_single_deployment_and_ticket_refresh_detect_a_reused_transport(self):
+        self.provision_apk()
+        for action, fault in [('deploy', 'missing-device-identity'), ('deploy', 'different-device-during-install'),
+                              ('deploy', 'different-device-after-copy'), ('deploy', 'different-device-during-start'),
+                              ('refresh', 'different-device-after-copy'), ('current-ticket', 'different-device-after-pull')]:
+            with self.subTest(action=action, fault=fault):
+                self.commands.unlink(missing_ok=True)
+                (self.root / 'replaced-device').unlink(missing_ok=True)
+                active = self.remote / 'vr-connection.json'
+                if action != 'deploy':
+                    self.ticket_refresh(self.expiry if action == 'current-ticket' else self.expiry - 300)
+                else:
+                    active.write_bytes(b'previous connection')
+                original = active.read_bytes()
+                result = self.run_script('-Serial', 'fixture', failure=fault) if action == 'deploy' else self.run_refresh(fault)
+                self.assert_rejected(result, 'original Quest device identity')
+                self.assertNotIn('HEADSET-B', (result.stdout + result.stderr).upper())
+                commands = self.commands.read_text(encoding='utf-8')
+                if fault == 'missing-device-identity':
+                    self.assertNotIn(' install ', commands)
+                if fault in ('missing-device-identity', 'different-device-during-install', 'different-device-after-pull'):
+                    self.assertNotIn(' push ', commands)
+                if fault != 'different-device-during-start':
+                    self.assertEqual(active.read_bytes(), original)
+                    self.assertFalse(any(value in commands for value in (' force-stop ', ' am start ', ' shell rm ')))
+                else:
+                    self.assertIn(' am start ', commands)
 
     def test_single_seat_quest_link_measurement_requires_current_package_and_writes_opt_in(self):
         apk = self.root / 'link build.apk'
@@ -942,13 +976,13 @@ class QuestDeployTests(unittest.TestCase):
                 self.assertEqual(dict(installed, joinTicket=fresh['joinTicket']), json.loads(current.read_bytes()))
                 self.assertEqual(self.plan.read_bytes(), alignment.read_bytes())
                 commands = self.commands.read_text(encoding='utf-8').splitlines()
-                self.assertEqual(7, len(commands))
+                self.assertEqual(11, len(commands))
                 self.assertEqual('devices -l', commands[0])
                 self.assertTrue(all(command.startswith('-t 41 ') for command in commands[1:]))
                 for phrase in ('getprop', 'pull', 'push', 'sha256sum'):
                     self.assertTrue(any(phrase in command for command in commands), commands)
-                self.assertTrue(commands[-2].endswith('shell sha256sum /sdcard/Android/data/com.vrcommand.quest/files/vr-connection.json'))
-                self.assertTrue(commands[-1].endswith('shell sha256sum /sdcard/Android/data/com.vrcommand.quest/files/' + alignment.name))
+                self.assertTrue(commands[-3].endswith('shell sha256sum /sdcard/Android/data/com.vrcommand.quest/files/vr-connection.json'))
+                self.assertTrue(commands[-2].endswith('shell sha256sum /sdcard/Android/data/com.vrcommand.quest/files/' + alignment.name))
                 self.assertNotIn(fresh['joinTicket'], result.stdout + result.stderr + '\n'.join(commands))
                 self.assertNotIn(installed['joinTicket'], result.stdout + result.stderr + '\n'.join(commands))
                 raw = current.read_bytes()
@@ -956,7 +990,7 @@ class QuestDeployTests(unittest.TestCase):
                 repeat = self.run_refresh()
                 self.assertEqual(0, repeat.returncode, repeat.stderr)
                 self.assertEqual('ticket-file-current', json.loads(repeat.stdout)['status'])
-                self.assertEqual(5, len(self.commands.read_text(encoding='utf-8').splitlines()))
+                self.assertEqual(7, len(self.commands.read_text(encoding='utf-8').splitlines()))
                 self.assertEqual(raw, current.read_bytes())
                 self.assertFalse(list(self.remote.glob('*.tmp')))
 
@@ -988,8 +1022,9 @@ class QuestDeployTests(unittest.TestCase):
         self.assertEqual('ticket-file-refreshed', json.loads(result.stdout)['status'])
         self.assertEqual(dict(installed, joinTicket=fresh['joinTicket']), json.loads(current.read_bytes()))
         commands = self.commands.read_text(encoding='utf-8').splitlines()
-        self.assertEqual(6, len(commands))
-        self.assertTrue(commands[-1].endswith('/vr-connection.json'))
+        self.assertEqual(10, len(commands))
+        self.assertTrue(commands[-2].endswith('/vr-connection.json'))
+        self.assertEqual('-t 41 shell getprop ro.serialno', commands[-1])
         self.assertFalse(any('vr-room-alignment-' in command for command in commands))
 
     def test_ticket_refresh_checks_remote_files_before_replacing_and_cleans_owned_staging(self):
@@ -1165,7 +1200,8 @@ class QuestDeployTests(unittest.TestCase):
         verified = next(i for i, line in enumerate(commands) if 'shell sha256sum' in line and line.endswith('/vr-connection.json'))
         self.assertEqual(sorted({alignment_readback, staged_config, stop, activate, verified}),
                          [alignment_readback, staged_config, stop, activate, verified])
-        self.assertIn('shell am start', commands[-1])
+        self.assertIn('shell am start', commands[-2])
+        self.assertEqual('-t 41 shell getprop ro.serialno', commands[-1])
         self.assertNotIn(self.player['joinTicket'], result.stdout + result.stderr + ''.join(commands))
         self.assertFalse(list(self.remote.glob('*.tmp')))
 
@@ -4300,7 +4336,8 @@ else:
         self.assertEqual('devices -l', commands[0])
         self.assertTrue(all(command.startswith('-t 41 ') for command in commands[1:]))
         self.assertEqual(2, sum(' push ' in command for command in commands))
-        self.assertIn('shell am start', commands[-1])
+        self.assertIn('shell am start', commands[-2])
+        self.assertEqual('-t 41 shell getprop ro.serialno', commands[-1])
         self.assertNotIn(config['joinTicket'], result.stdout + result.stderr + ''.join(commands))
 
         release, release_data, _ = self.release_report()
@@ -4434,7 +4471,9 @@ else:
             self.assertFalse(list(remote.glob('*.tmp')))
             self.assertEqual(b'previous connection', (remote / 'vr-connection.json').read_bytes())
         else:
-            self.assertEqual(3, len(commands))
+            self.assertEqual(['devices -l', '-t 41 shell getprop ro.serialno', '-t 41 shell getprop ro.product.model',
+                              '-t 41 shell getprop ro.serialno'], commands[:-1])
+            self.assertIn(' install -r ', commands[-1])
             self.assertFalse(list(remote.iterdir()))
         self.assertEqual(expected, reads)
 
