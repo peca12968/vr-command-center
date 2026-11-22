@@ -28,6 +28,7 @@ let eventFrames = [], matchingEvents = [];
 let replayPlayers = [];
 let followedFrames = [];
 let currentVolume = null;
+let bookmarkRead = 0;
 
 function message(text, error = false) {
   $('message').textContent = text;
@@ -184,6 +185,7 @@ async function readVolumeFile(file) {
 async function openReplay(files, embeddedInfo = null, direction = null) {
   if (!files.length) return;
   const own = ++epoch;
+  $('bookmark-status').textContent = '';
   const continuing = direction !== null, backwards = direction === 'previous';
   pause();
   if (!continuing) {
@@ -311,6 +313,62 @@ async function openReplay(files, embeddedInfo = null, direction = null) {
 }
 
 $('file').addEventListener('change', () => openReplay(Array.from($('file').files)));
+
+$('save-bookmark').addEventListener('click', () => {
+  if (!replay) return;
+  const { sessionId, streamId, roomIds } = replay.header;
+  const frame = replay.packets[index].sequence;
+  const bookmark = { bookmarkVersion: 1, sessionId, streamId, roomIds, scopeRoom: replay.roomId ?? null,
+    frame, room: room.value, player: follow.value, camera: scene.view() };
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(bookmark)], { type: 'application/json' }));
+  link.download = `回放書籤-${sessionId}-${frame}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  $('bookmark-status').textContent = `已匯出第 ${frame} 格的書籤。`;
+});
+
+$('bookmark-file').addEventListener('change', async event => {
+  const [file] = event.target.files;
+  event.target.value = '';
+  if (!file || !replay) return;
+  const request = ++bookmarkRead, recording = replay, generation = epoch;
+  const status = $('bookmark-status');
+  try {
+    if (file.size > 4096) throw new Error('書籤檔案過大。');
+    const content = await file.text();
+    if (request !== bookmarkRead || generation !== epoch || recording !== replay) return;
+    const mark = JSON.parse(content);
+    if (mark?.bookmarkVersion !== 1 || !Number.isSafeInteger(mark.frame) || mark.frame < 1)
+      throw new Error('請選擇播放器匯出的觀看書籤。');
+    const { sessionId, streamId, roomIds } = replay.header;
+    if (mark.sessionId !== sessionId || mark.streamId !== streamId || mark.scopeRoom !== (replay.roomId ?? null) ||
+        !Array.isArray(mark.roomIds) || mark.roomIds.length !== roomIds.length || roomIds.some(id => !mark.roomIds.includes(id)))
+      throw new Error('請開啟與書籤相同錄製及房間範圍的回放檔。');
+    if (mark.frame < replay.startFrame || mark.frame > replay.endFrame)
+      throw new Error(`書籤在第 ${mark.frame} 格，目前檔案為第 ${replay.startFrame}–${replay.endFrame} 格。請開啟包含書籤畫格的分冊。`);
+    if (![...room.options].some(option => option.value === mark.room) ||
+        (mark.player !== '' && !replayPlayers.some(p => p.id === mark.player && (mark.room === 'all' || p.roomId === Number(mark.room)))))
+      throw new Error('書籤的房間或跟隨玩家不在這份回放中。');
+    const camera = mark.camera;
+    if (!Array.isArray(camera?.target) || camera.target.length !== 3 ||
+        !camera.target.every(n => Number.isFinite(n) && Math.abs(n) <= Number.MAX_SAFE_INTEGER) ||
+        ![camera.theta, camera.phi, camera.radius].every(Number.isFinite) || Math.abs(camera.theta) > Math.PI ||
+        camera.phi < .06 || camera.phi > 1.5 || camera.radius < 2 || camera.radius > 240)
+      throw new Error('書籤的鏡頭資料無效。');
+    pause();
+    room.value = mark.room;
+    scene.select('');
+    showFollowOptions(mark.player);
+    scene.restoreView(camera);
+    updateRoomEvents();
+    show(mark.frame - replay.startFrame);
+    status.textContent = `已回到書籤的第 ${mark.frame} 格。`;
+  } catch (error) {
+    if (request === bookmarkRead && generation === epoch && recording === replay)
+      status.textContent = error instanceof SyntaxError ? '無法讀取書籤 JSON。' : error.message;
+  }
+});
 $('volume-file').addEventListener('change', () => openReplay(Array.from($('volume-file').files), null, 'next'));
 $('previous-file').addEventListener('change', () => openReplay(Array.from($('previous-file').files), null, 'previous'));
 const embedded = Array.from(document.querySelectorAll('script[type="application/json"][data-player-replay-part]'));

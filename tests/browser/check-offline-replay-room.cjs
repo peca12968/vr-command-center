@@ -74,6 +74,77 @@ async function checkSparsePlayback(browser, url) {
   } finally { await page.close(); }
 }
 
+async function checkBookmarks(browser, url) {
+  const clip = fixture(), player = clip.packets[0].frame.players[1];
+  const directory = await mkdtemp(resolve(tmpdir(), 'vr-bookmark-'));
+  const path = resolve(directory, 'saved.json');
+  const network = [], errors = [];
+  let page;
+  const field = name => page.locator('#player-replay-' + name);
+  const camera = () => page.locator('#replay-canvas').getAttribute('data-camera');
+  const jsonFile = value => ({ name: 'test.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(value)) });
+  async function open() {
+    page = await browser.newPage({ offline: true });
+    page.on('request', r => { if (/^https?:/.test(r.url())) network.push(r.url()); });
+    page.on('pageerror', e => errors.push(e.message));
+    await page.goto(url);
+    await field('file').setInputFiles(jsonFile(clip));
+    await field('message').filter({ hasText: '已載入 3 格' }).waitFor();
+    await page.getByText('觀看書籤', { exact: true }).click();
+  }
+  async function save() {
+    const download = page.waitForEvent('download');
+    await field('save-bookmark').click();
+    await (await download).saveAs(path);
+  }
+  async function restore(input, expected) {
+    await field('bookmark-file').setInputFiles(input);
+    await field('bookmark-status').filter({ hasText: expected }).waitFor();
+  }
+  try {
+    await open();
+    await field('room').selectOption('5');
+    await field('next').click();
+    await page.locator('#replay-canvas').press('ArrowRight');
+    const freeView = await camera();
+    await save();
+    const saved = JSON.parse(await readFile(path, 'utf8'));
+    assert.equal(saved.frame, 11);
+    await page.close();
+    await open();
+    assert.notEqual(await camera(), freeView);
+    await restore(path, '已回到書籤的第 11 格');
+    assert.equal(await camera(), freeView);
+    assert.equal(await field('room').inputValue(), '5');
+    for (const [change, text] of [
+      [{ streamId: clip.header.sessionId }, '相同錄製'], [{ scopeRoom: 5 }, '房間範圍'],
+      [{ frame: 13 }, '第 10–12 格'], [{ player: clip.packets[0].frame.players[0].id }, '跟隨玩家'],
+      [{ camera: { ...saved.camera, radius: -1 } }, '鏡頭資料無效']
+    ]) {
+      await restore(jsonFile({ ...saved, ...change }), text);
+      assert.equal(await camera(), freeView);
+      assert.match(await field('frame').innerText(), /第 11 格/);
+      assert.equal(await field('room').inputValue(), '5');
+    }
+    await field('follow').selectOption(player.id);
+    await save();
+    const followedView = await camera();
+    await page.close();
+    await open();
+    await restore(path, '已回到書籤的第 11 格');
+    assert.match(await field('frame').innerText(), /第 11 格/);
+    assert.equal(await field('follow').inputValue(), player.id);
+    assert.equal(await camera(), followedView);
+    assert.equal(await field('play').innerText(), '播放');
+    assert.deepEqual(errors, []);
+    assert.deepEqual(network, []);
+    console.log('PASS: local bookmark download and restore across browser contexts, free camera and player follow, five invalid bookmarks preserve view');
+  } finally {
+    await page?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
 async function checkVolumeContinuity(browser, templatePath) {
   const page = await browser.newPage();
   const directory = await mkdtemp(resolve(tmpdir(), 'vr-replay-volume-'));
@@ -169,6 +240,7 @@ async function checkVolumeContinuity(browser, templatePath) {
 async function main() {
   const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   try {
+    await checkBookmarks(browser, pathToFileURL(resolve(process.argv[2])).href);
     await checkVolumeContinuity(browser, resolve(process.argv[2]));
     await checkSparsePlayback(browser, pathToFileURL(resolve(process.argv[2])).href);
     const page = await browser.newPage();

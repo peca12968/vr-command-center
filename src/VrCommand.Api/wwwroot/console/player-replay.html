@@ -45,6 +45,15 @@
         <button id="player-replay-follow-next" class="quiet" type="button" hidden>跳到玩家下次入鏡</button>
       </div>
       <label>時間軸<input id="replay-timeline" type="range" min="0" value="0" step="1"></label>
+      <details>
+        <summary>觀看書籤</summary>
+        <p class="hint">儲存目前的畫格、房間與鏡頭。下次開啟包含這一格的回放檔後，讀取書籤即可接續觀看。</p>
+        <div class="replay-transport">
+          <button id="player-replay-save-bookmark" type="button" class="quiet">儲存觀看書籤</button>
+          <label>讀取觀看書籤<input id="player-replay-bookmark-file" type="file" accept=".json,application/json"></label>
+          <output id="player-replay-bookmark-status" role="status"></output>
+        </div>
+      </details>
       <form id="player-replay-seek" class="replay-transport">
         <label><span>片段時間（秒）</span><input id="player-replay-seconds" type="number" inputmode="decimal" min="0" step="0.001" required></label>
         <button type="submit" class="quiet">跳到時間</button>
