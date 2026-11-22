@@ -17,6 +17,24 @@ export function venueBeginSeatState(row, index) {
   return row.seats?.[index] ?? (row.state === 'NotPreparing' ? 'NotPreparing' : 'Unknown');
 }
 
+export const beginHeadsetNames = new Map([['Quest3', 'Quest 3'], ['ViveXr', 'VIVE XR']]);
+
+export function venueTrackedHeadsetSummary(rooms, seatsPerRoom) {
+  const totals = [];
+  for (const [headset, name] of beginHeadsetNames) {
+    let registered = 0, tracked = 0;
+    for (const room of rooms) {
+      for (let seat = 0; seat < seatsPerRoom; seat++) {
+        if (room.headsets?.[seat] !== headset) continue;
+        registered++;
+        if (venueBeginSeatState(room, seat) === 'Tracked') tracked++;
+      }
+    }
+    if (registered) totals.push(`${name} ${tracked}／${registered} 席`);
+  }
+  return totals.length ? '本階段已確認追蹤／已登記：' + totals.join(' · ') : '';
+}
+
 export function encodeVenueBeginCsv(rooms, policy, exportedAtUtc) {
   const rows = [['reportVersion', 'exportedAtUtc', 'beginPolicy', 'roomId', 'seat', 'sessionId', 'sessionSequence',
     'origin', 'roomState', 'roomStatus', 'seatState', 'seatStatus']];

@@ -455,6 +455,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       const origins = rooms.map(room => mode === 'Linked' || [2, 4].includes(room) ? 'GameServer' : 'Simulation');
       await publishUntil(sources, false, async () => (await status(1).getAttribute('data-begin-state')) === 'WaitingFullTracking'
         && (await status(5).getAttribute('data-begin-state')) === 'WaitingFullTracking'
+        && (await page.locator('#venue-begin-headsets').innerText()).includes('Quest 3 19／19 席 · VIVE XR 4／5 席')
         && (await Promise.all(rooms.map((room, index) => status(room).filter({ hasText: `錄製來源 ${origins[index]}` }).isVisible()))).every(Boolean));
       check((await status(1).innerText()).includes('名冊 5/5 席 · 追蹤 4/5 席')
         && (await status(5).innerText()).includes('名冊 4/5 席 · 追蹤 4/5 席') && await start.isDisabled()
@@ -464,6 +465,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         && await page.locator('[data-begin-seat-room] td[data-begin-seat]').count() === 25,
       `${mode} the tracked-only policy identifies exactly which simulated and vacant seats need attention`);
       assert.equal(await page.locator('[data-begin-seat-room="1"] [data-begin-seat="5"] button').count(), 1);
+      assert.match(await page.locator('[data-begin-seat-room="1"] [data-begin-seat="5"]').innerText(), /登記 VIVE XR/);
+      assert.doesNotMatch(await page.locator('[data-begin-seat-room="5"] [data-begin-seat="5"]').innerText(), /登記/);
       assert.equal(await page.locator('[data-begin-seat-room="5"] [data-begin-seat="5"]')
         .getByRole('button', { name: '填寫房間 5 第 5 席名冊' }).count(), 1);
       await page.locator('#venue-phase').screenshot({ path: path.join(screenshots, `full-tracking-${mode.toLowerCase()}-waiting.png`) });

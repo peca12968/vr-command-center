@@ -7,13 +7,24 @@ const connection = await readFile(new URL('../../src/VrCommand.Api/wwwroot/conso
 const reportCsv = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/report-csv.js', import.meta.url), 'utf8');
 const dataModule = source => 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
 const { readinessView, roomReadinessView, roomEndpointText, roomTicketDestination, roomTicketSourceLive, mrReadinessView, roomMissionTimeView, roomVenuePhaseView,
-  roomMrTrackingPauseTarget, roomMrPauseView, venueTrackingRow, venueBeginObservation, roomPoseFrameTarget, venueBeginRejection, encodeVenueBeginCsv } =
+  roomMrTrackingPauseTarget, roomMrPauseView, venueTrackingRow, venueBeginObservation, roomPoseFrameTarget, venueBeginRejection, encodeVenueBeginCsv, venueTrackedHeadsetSummary } =
   await import(dataModule(code.replace('./mission-clock.js', dataModule(missionClock)).replace('./connection-ui.js', dataModule(connection))
     .replace('./report-csv.js', dataModule(reportCsv))));
 const player = { id: 'player', admissionId: 'first', roomId: 1, seat: 0 };
 const session = { id: 'session', sequence: 10, state: 'Preparing', players: [player] };
 const report = { version: 1, sessionId: 'session', sessionSequence: 10, sourceState: 'Fresh', sourceAgeMilliseconds: 10, origin: 'Simulation',
   players: [{ playerId: 'player', admissionId: 'first', roomId: 1, seat: 0, state: 'Participating', rigKind: 'Simulated', canParticipate: true }] };
+test('Tracking totals follow registered headset, pilot seats and fresh tracked evidence', () => {
+  const rooms = [
+    { headsets: ['Quest3', 'ViveXr', null, 'Quest3', 'ViveXr'], seats: ['Tracked', 'NeedsTracking', 'Vacant', 'Tracked', 'Tracked'] },
+    { headsets: ['ViveXr', 'Quest3'], state: 'Stale' }, { state: 'NotPreparing' },
+    { seats: ['Tracked'] }
+  ];
+  assert.equal(venueTrackedHeadsetSummary(rooms, 5), '本階段已確認追蹤／已登記：Quest 3 2／3 席 · VIVE XR 1／3 席');
+  assert.equal(venueTrackedHeadsetSummary(rooms, 2), '本階段已確認追蹤／已登記：Quest 3 1／2 席 · VIVE XR 0／2 席');
+  assert.equal(venueTrackedHeadsetSummary(rooms, 1), '本階段已確認追蹤／已登記：Quest 3 1／1 席 · VIVE XR 0／1 席');
+  assert.equal(venueTrackedHeadsetSummary([{ state: 'NotPreparing' }], 5), '');
+});
 test('Begin CSV retains only room and seat status and distinguishes stale and absent rooms', async () => {
   const { matchesReportRows } = await import(dataModule(reportCsv));
   const stamp = '2026-11-17T00:00:00.000Z';

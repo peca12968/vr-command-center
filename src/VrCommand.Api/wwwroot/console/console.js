@@ -17,7 +17,7 @@ import { mountReport, mountVenueReport, venueScoreFields } from './report-ui.js'
 import { encodeDepartedPlayersCsv, matchesDebriefCsv } from './report-csv.js';
 import { mountVenueHistory } from './venue-history-ui.js';
 import { mountVenueDebriefSeats } from './venue-debrief-ui.js';
-import { beginSeatLabels, encodeVenueBeginCsv, mountReadiness, mountRoomReadiness, usesTrackedVrStart,
+import { beginHeadsetNames, beginSeatLabels, encodeVenueBeginCsv, mountReadiness, mountRoomReadiness, usesTrackedVrStart, venueTrackedHeadsetSummary,
   venueBeginRejection, venueBeginSeatState } from './readiness-ui.js';
 import { mountConnections, validDestination } from './connection-ui.js';
 import { mountClosure } from './closure-ui.js';
@@ -1218,7 +1218,8 @@ function venueBeginRows(targets, policy, playersPerRoom) {
           ? '已鎖定校正檔' : '校正檔尚未鎖定';
       }
       if (policy !== 'normal' && original) {
-        const occupied = new Set(session.players.filter(player => player.roomId === roomId).map(player => player.seat));
+        const occupied = new Map(session.players.filter(player => player.roomId === roomId).map(player => [player.seat, player.headset]));
+        row.headsets = Array.from({ length: 5 }, (_, index) => occupied.get(index) ?? null);
         row.seats = Array.from({ length: 5 }, (_, index) => {
           if (index >= playersPerRoom) return occupied.has(index) ? 'OutsideStage' : 'NotInStage';
           if (!occupied.has(index)) return 'Vacant';
@@ -1302,7 +1303,7 @@ function renderVenueBegin(targets, waiting, policy, playersPerRoom) {
     + (waiting ? '仍有開場條件待確認，請查看各房狀態。' : '目標場次已就緒。');
   if (summary.textContent !== message) summary.textContent = message;
   const locked = state.busy || !!state.pending;
-  const signature = JSON.stringify([rows, locked]);
+  const signature = JSON.stringify([rows, locked, policy, playersPerRoom]);
   if (list.dataset.rows === signature) return;
   list.dataset.rows = signature;
   list.replaceChildren(...rows.map(row => {
@@ -1329,6 +1330,10 @@ function renderVenueBegin(targets, waiting, policy, playersPerRoom) {
   }));
   const matrix = $('venue-begin-seats');
   matrix.hidden = !rows.some(row => row.seats);
+  const byHeadset = $('venue-begin-headsets');
+  const headsetSummary = policy === 'tracking' ? venueTrackedHeadsetSummary(rows, playersPerRoom) : '';
+  byHeadset.textContent = headsetSummary;
+  byHeadset.hidden = !headsetSummary;
   $('venue-begin-seat-rows').replaceChildren(...(matrix.hidden ? [] : rows.map(row => {
     const tr = element('tr');
     tr.dataset.beginSeatRoom = row.roomId;
@@ -1350,6 +1355,8 @@ function renderVenueBegin(targets, waiting, policy, playersPerRoom) {
         button.addEventListener('click', () => vacant ? void openVacantBeginSeat(row, index + 1) : void openVenueRoster(row, index + 1));
         cell.replaceChildren(button);
       }
+      const model = beginHeadsetNames.get(row.headsets?.[index]);
+      if (model) cell.append(element('div', `登記 ${model}`, 'hint'));
       tr.append(cell);
     }
     return tr;
