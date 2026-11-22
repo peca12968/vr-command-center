@@ -15,7 +15,7 @@ function validClip(clip, streamId) {
 export function mountSavedClips(request, canWrite, load, download) {
   let scope = null, idle = false, draft = null, rows = [], pending = null, work = null;
   const select = $('select'), name = $('name'), exportRoom = $('export-room');
-  const offlinePlayer = $('offline-player'), exportZip = $('export-zip');
+  const offlinePlayer = $('offline-player'), exportZip = $('export-zip'), exportHtml = $('export-html');
   let checkedOfflinePlayer = false;
   const selected = () => rows.find(clip => clip.id === select.value);
   const route = () => `/api/sessions/${scope.sessionId}/world/clips`;
@@ -38,6 +38,8 @@ export function mountSavedClips(request, canWrite, load, download) {
     $('export').disabled = !exportable || frames > MAX_REPLAY_FRAMES;
     exportZip.hidden = offlinePlayer.hidden;
     exportZip.disabled = exportZip.hidden || !exportable || frames > MAX_REPLAY_FRAMES * MAX_REPLAY_FILES;
+    exportHtml.hidden = exportZip.hidden;
+    exportHtml.disabled = exportZip.disabled;
     exportRoom.disabled = $('export').disabled && exportZip.disabled;
     $('retry').hidden = !pending || !!work;
   }
@@ -96,26 +98,27 @@ export function mountSavedClips(request, canWrite, load, download) {
     load(clip);
     message(`已載入「${clip.name}」的起訖標記。`);
   });
-  async function exportClip(zip) {
-    if ((zip ? exportZip : $('export')).disabled || !canWrite()) return;
+  async function exportClip(extension, button) {
+    if (button.disabled || !canWrite()) return;
     const clip = selected(), { sessionId, streamId, roomIds } = scope;
     const room = Number(exportRoom.value) || null, expectedRooms = room === null ? roomIds : [room];
-    const extension = zip ? 'zip' : 'json';
+    const bundled = extension !== 'json';
+    const type = { zip: 'application/zip', html: 'text/html', json: 'application/json' }[extension];
     const suffix = room === null ? '' : '-room-' + String(room).padStart(2, '0');
     const filename = `vr-command-replay-${clip.id}${suffix}.${extension}`;
     const path = `${route()}/${clip.id}/player-replay.${extension}${room === null ? '' : '?roomId=' + room}`;
     const own = work = new AbortController();
     controls();
     try {
-      const segmented = zip && clip.endFrame - clip.startFrame >= MAX_REPLAY_FRAMES;
+      const segmented = bundled && clip.endFrame - clip.startFrame >= MAX_REPLAY_FRAMES;
       const response = await request(path, AbortSignal.any([own.signal, AbortSignal.timeout(segmented ? 90000 : 15000)]));
-      if (response.status !== 200 || response.headers.get('content-type')?.split(';')[0].trim() !== (zip ? 'application/zip' : 'application/json'))
+      if (response.status !== 200 || response.headers.get('content-type')?.split(';')[0].trim() !== type)
         throw new Error('無法讀取片段檔案。');
-      if (zip && !response.headers.get('content-disposition')?.split(';').some(part => part.trim() === 'filename=' + filename))
-        throw new Error('下載回覆的回放 ZIP 名稱不符。');
+      if (bundled && !response.headers.get('content-disposition')?.split(';').some(part => part.trim() === 'filename=' + filename))
+        throw new Error('下載回覆的回放檔名不符。');
       const file = await response.blob();
-      if (!file.size || file.size > (zip ? MAX_REPLAY_SET_BYTES + 3 * 1024 * 1024 : MAX_REPLAY_BYTES)) throw new Error('回放檔案大小不符。');
-      if (!zip) {
+      if (!file.size || file.size > (bundled ? MAX_REPLAY_SET_BYTES + 3 * 1024 * 1024 : MAX_REPLAY_BYTES)) throw new Error('回放檔案大小不符。');
+      if (!bundled) {
         const replay = readPlayerReplay(JSON.parse(await file.text()));
         if (replay.header.sessionId !== sessionId || replay.header.streamId !== streamId
           || replay.clipName !== clip.name || replay.startFrame !== clip.startFrame || replay.endFrame !== clip.endFrame
@@ -126,15 +129,15 @@ export function mountSavedClips(request, canWrite, load, download) {
       }
       if (work !== own) return;
       download(filename, file);
-      message(`已下載「${clip.name}」的${room === null ? '玩家' : '房間 ' + room + ' '}回放${zip ? ' ZIP' : '檔'}。`);
+      message(`已下載「${clip.name}」的${room === null ? '玩家' : '房間 ' + room + ' '}回放${bundled ? ' ' + extension.toUpperCase() : '檔'}。`);
     } catch (error) {
       if (work === own) message(error.message, true);
     } finally {
       if (work === own) { work = null; controls(); }
     }
   }
-  $('export').addEventListener('click', () => exportClip(false));
-  exportZip.addEventListener('click', () => exportClip(true));
+  for (const [extension, button] of [['json', $('export')], ['zip', exportZip], ['html', exportHtml]])
+    button.addEventListener('click', () => exportClip(extension, button));
   $('save').addEventListener('click', () => {
     if ($('save').disabled || !canWrite()) return;
     const title = name.value.trim();

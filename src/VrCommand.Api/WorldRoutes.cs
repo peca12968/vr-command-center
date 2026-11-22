@@ -207,6 +207,35 @@ public static class WorldRoutes
                 }
                 return Results.File(output.ToArray(), "application/zip", stem + ".zip");
             });
+        app.MapGet("/api/sessions/{id:guid}/world/clips/{clip:guid}/player-replay.html",
+            async (Guid id, Guid clip, int? roomId, WorldRecordings store, IWebHostEnvironment environment, HttpContext context) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                var cancellation = context.RequestAborted;
+                var parts = store.PlayerReplayParts(id, clip, roomId, Actor(context), cancellation);
+                var player = environment.WebRootFileProvider.GetFileInfo(OfflinePlayerPath);
+                if (!player.Exists || player.IsDirectory || player.Length is < 1 or > 2 * 1024 * 1024)
+                    return Results.NotFound(new { error = "此管理包未提供離線播放器。" });
+
+                using var reader = new StreamReader(player.CreateReadStream(), Encoding.UTF8);
+                var template = await reader.ReadToEndAsync(cancellation);
+                const string marker = "<!--player-replay-data-->";
+                var offset = template.IndexOf(marker, StringComparison.Ordinal);
+                if (offset < 0) throw new InvalidOperationException("請更新此管理包內的離線播放器。");
+                var output = new MemoryStream();
+                output.Write(Encoding.UTF8.GetBytes(template[..offset]));
+                foreach (var part in parts)
+                {
+                    // The JSON writer escapes HTML delimiters. Fail closed if its encoding ever changes.
+                    if (part.Data.AsSpan().Contains((byte)'<')) throw new InvalidOperationException("回放資料無法嵌入網頁。");
+                    output.Write("<script type=\"application/json\" data-player-replay-part>"u8);
+                    output.Write(part.Data);
+                    output.Write("</script>"u8);
+                }
+                output.Write(Encoding.UTF8.GetBytes(template[(offset + marker.Length)..]));
+                output.Position = 0;
+                return Results.File(output, "text/html; charset=utf-8", ReplayFileStem(clip, roomId) + ".html");
+            });
     }
 
     private static string ReplayFileStem(Guid clip, int? roomId) => roomId is int room

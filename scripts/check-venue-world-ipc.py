@@ -566,13 +566,16 @@ def check_segmented_exports(venue, directory):
 
     def save(first, last):
         clip = source.world + '/clips/' + str(uuid4())
-        venue.request(clip, method='PUT', body={'name': 'Whole mission', 'streamId': source.stream_id,
+        venue.request(clip, method='PUT', body={'name': 'Whole mission <五房> & "回看"', 'streamId': source.stream_id,
                                                'startFrame': first, 'endFrame': last})
         return clip
 
     clip = save(1, 301)
-    with venue.response(clip + '/player-replay.json', status=409), venue.response(clip + '/player-replay.zip', role='Room1', status=403):
+    with venue.response(clip + '/player-replay.json', status=409):
         pass
+    for extension in ('zip', 'html'):
+        with venue.response(clip + '/player-replay.' + extension, role='Room1', status=403):
+            pass
     summary = {}
     for scope, query in [('full', ''), ('room-5', '?roomId=5')]:
         checkpoint = venue.request(source.world + '/clips')
@@ -584,9 +587,12 @@ def check_segmented_exports(venue, directory):
             names = archive.namelist()
             assert names[0] == 'VRCommand-Player-Replay.html' and len(names) == len(set(names))
             ranges = []
+            embedded = []
             for name in names[1:]:
                 payload = archive.read(name)
                 part = json.loads(payload)
+                assert part['clipName'] == 'Whole mission <五房> & "回看"'
+                embedded.append(b'<script type="application/json" data-player-replay-part>' + payload + b'</script>')
                 first, last = part['startFrame'], part['endFrame']
                 assert first == (ranges[-1][1] + 1 if ranges else 1) and 2 <= last - first + 1 <= 300
                 assert name.endswith(f'-frames-{first:06}-{last:06}.json') and len(payload) <= 8 * 1024 * 1024
@@ -602,6 +608,15 @@ def check_segmented_exports(venue, directory):
                 assert ranges == [[1, 299], [300, 301]]
             else:
                 assert len(ranges) > 2 or ranges[0][1] < 299, 'Dense full-venue clip must exercise the byte limit'
+            template = archive.read(names[0])
+            assert template.count(b'<!--player-replay-data-->') == 1
+            expected = template.replace(b'<!--player-replay-data-->', b''.join(embedded))
+        with venue.response(clip + '/player-replay.html' + query) as response:
+            assert response.headers['Cache-Control'] == 'no-store' and response.headers.get_content_type() == 'text/html'
+            assert response.headers.get_filename() == 'vr-command-replay-' + clip.split('/')[-1] + ('-room-05' if query else '') + '.html'
+            html = response.read()
+            assert html == expected
+            (directory / (scope + '.html')).write_bytes(html)
         (directory / (scope + '.zip')).write_bytes(raw)
         summary[scope] = ranges
     return {'sessionId': session['id'], 'clip': clip, 'ranges': summary}

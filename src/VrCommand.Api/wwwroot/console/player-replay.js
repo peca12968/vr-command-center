@@ -134,8 +134,7 @@ function openFrame(next, position) {
   if (replay && Number.isInteger(next) && next >= 0 && next < replay.packets.length) show(next, false, position);
 }
 
-$('file').addEventListener('change', async () => {
-  const files = Array.from($('file').files);
+async function openReplay(files) {
   if (!files.length) return;
   const own = ++epoch;
   pause();
@@ -209,7 +208,15 @@ $('file').addEventListener('change', async () => {
     scene?.reset();
     message(error instanceof SyntaxError ? '無法讀取 JSON 回放檔。' : error.message, true);
   }
-});
+}
+
+$('file').addEventListener('change', () => openReplay(Array.from($('file').files)));
+const embedded = Array.from(document.querySelectorAll('script[type="application/json"][data-player-replay-part]'));
+if (embedded.length) {
+  const parts = embedded.map(element => new Blob([element.textContent]));
+  embedded.forEach(element => element.remove());
+  void openReplay(parts);
+}
 
 function advance(now) {
   const { packets } = replay;

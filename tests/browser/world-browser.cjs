@@ -956,6 +956,20 @@ with zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())) as archive:
       await fs.writeFile(offlineFile, entries[0][1]);
       offlineClip = entries[1][1];
       check(true, 'The console ZIP download contains only the original player and exported clip');
+      const htmlDownload = page.waitForEvent('download');
+      await page.locator('#saved-clip-export-html').click();
+      const html = await htmlDownload;
+      assert.equal(html.suggestedFilename(), stem + '.html');
+      const embeddedFile = path.join(directory, stem + '.html');
+      await html.saveAs(embeddedFile);
+      const direct = await context.browser().newContext({ offline: true });
+      try {
+        const viewer = await direct.newPage();
+        await viewer.goto(pathToFileURL(embeddedFile).href);
+        await viewer.locator('#player-replay-frame').filter({ hasText: `第 ${eventSequence} 格` }).waitFor();
+        assert.equal(await viewer.locator('#player-replay-title').innerText(), clipName);
+        check(true, 'Player opens the HTML downloaded from the console directly into the saved clip');
+      } finally { await direct.close(); }
     } else {
       const asset = await page.request.head(base + '/console/player-replay-offline.html');
       if (asset.status() === 404) check(await offlineLink.isHidden() && await zipButton.isHidden(),
