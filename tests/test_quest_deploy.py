@@ -803,7 +803,8 @@ class QuestDeployTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn('Quest client installed and launched.', result.stdout)
 
-    def run_smoke(self, serial='fixture', failure='', *, resume=False, require_openxr=False, version_code=72):
+    def run_smoke(self, serial='fixture', failure='', *, resume=False, require_openxr=False, version_code=72,
+                  adb_options=None, environment=None):
         apk = self.root / 'sample.apk'
         apk.write_bytes(b'first-launch test APK')
         expected = hashlib.sha256(apk.read_bytes()).hexdigest()
@@ -811,12 +812,73 @@ class QuestDeployTests(unittest.TestCase):
         self.write(release, {'verified': True, 'scope': 'offline-package-consistency', 'quest': {
             'applicationId': 'com.vrcommand.quest', 'architecture': 'arm64-v8a', 'signatureV2': True,
             'versionCode': version_code, 'sha256': expected}})
-        env = {**os.environ, 'QUEST_TEST_ROOT': str(self.root), 'QUEST_TEST_FAIL': failure,
+        env = {**os.environ, **(environment or {}), 'QUEST_TEST_ROOT': str(self.root), 'QUEST_TEST_FAIL': failure,
                'QUEST_TEST_ALTER_ALIGNMENT': '', 'QUEST_TEST_RELEASE_HASH': expected}
         return subprocess.run(['pwsh','-NoProfile','-NonInteractive','-File',str(self.script), '-SmokeTest',
-                               '-Serial', serial, '-AdbPath', str(self.adb), '-ApkPath', str(apk), '-ReleaseReport', str(release),
+                               '-Serial', serial, *(adb_options if adb_options is not None else ['-AdbPath', str(self.adb)]),
+                               '-ApkPath', str(apk), '-ReleaseReport', str(release),
                                *(['-ResumeSmokeTest'] if resume else []), *(['-RequireOpenXR'] if require_openxr else [])],
                               env=env, capture_output=True, encoding='utf-8', timeout=35)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows executable preflight')
+    def test_first_launch_checks_the_selected_sdk_or_explicit_adb_before_startup(self):
+        sdk = self.root / 'installed SDK'
+        sdk_tool = sdk / 'platform-tools' / 'adb.exe'
+        sdk_tool.parent.mkdir(parents=True)
+        override = self.root / 'explicit.exe'
+        path_tool = self.root / 'adb.exe'
+        checked = self.root / 'checked.txt'
+        guard = self.scripts / 'check-windows-firewall-notifications.ps1'
+        guard.write_text('param($Executable,[switch]$Unattended)\n'
+                         'if (!$Unattended) { throw "missing unattended flag" }\n'
+                         '[IO.File]::WriteAllText($env:QUEST_CHECKED_PATH,$Executable)\nexit 2\n', encoding='utf-8')
+        for tool in (sdk_tool, override, path_tool):
+            tool.write_bytes(b'never execute')
+        env = {'ANDROID_HOME': str(sdk), 'PATH': str(self.root) + os.pathsep + os.environ['PATH'],
+               'QUEST_CHECKED_PATH': str(checked)}
+        for options, expected in [([], sdk_tool), (['-AdbPath', str(override)], override), ([], path_tool)]:
+            if expected == path_tool:
+                sdk_tool.unlink()
+            self.assert_rejected(self.run_smoke(adb_options=options, environment=env), 'ADB startup skipped')
+            self.assertEqual(Path(checked.read_text(encoding='utf-8')), expected)
+            checked.unlink()
+
+    def test_moved_field_kit_checks_and_launches_its_game_apk_from_another_directory(self):
+        quest = self.root / 'Quest'
+        diagnostics = quest / 'Diagnostics'
+        diagnostics.mkdir(parents=True)
+        (diagnostics / 'probe.apk').write_bytes(b'diagnostic')
+        apk = quest / 'venue game.apk'
+        apk.write_bytes(b'packaged game')
+        digest = hashlib.sha256(apk.read_bytes()).hexdigest()
+        release = self.root / 'venue-release.json'
+        self.write(release, {'verified': True, 'scope': 'offline-package-consistency', 'quest': {
+            'applicationId': 'com.vrcommand.quest', 'architecture': 'arm64-v8a', 'signatureV2': True,
+            'versionCode': 77, 'sha256': digest}})
+        env = {**os.environ, 'QUEST_TEST_ROOT': str(self.root), 'QUEST_TEST_RELEASE_HASH': digest}
+
+        def invoke(*options):
+            return subprocess.run(['pwsh', '-NoProfile', '-NonInteractive', '-File', str(self.script), '-SmokeTest',
+                                   '-AdbPath', str(self.adb), *options], cwd=self.remote, env=env,
+                                  capture_output=True, encoding='utf-8', timeout=35)
+
+        preview = invoke('-CheckOnly', '-RequireOpenXR')
+        self.assertEqual(preview.returncode, 0, preview.stderr)
+        self.assertEqual(json.loads(preview.stdout), {'phase': 'quest-first-launch-preflight',
+            'status': 'local-apk-verified', 'versionCode': 77, 'apkSha256': digest,
+            'venueReleaseReportSha256': hashlib.sha256(release.read_bytes()).hexdigest()})
+        self.assert_rejected(invoke(), 'Specify -Serial')
+        other = quest / 'another.apk'
+        other.write_bytes(b'other')
+        self.assert_rejected(invoke('-CheckOnly'), 'Choose one game APK')
+        self.assert_rejected(invoke('-CheckOnly', '-ApkPath', str(other)), 'SHA-256 differs')
+        self.assertEqual(invoke('-CheckOnly', '-ApkPath', str(apk)).returncode, 0)
+        other.unlink()
+        self.assertFalse(self.commands.exists())
+        started = invoke('-Serial', 'fixture')
+        self.assertEqual(started.returncode, 0, started.stderr)
+        self.assertEqual(json.loads(started.stdout)['apkSha256'], digest)
+        self.assertEqual(json.loads(started.stdout)['status'], 'process-observed')
 
     def test_fresh_quest_launch_verifies_apk_and_observes_started_process(self):
         result = self.run_smoke()

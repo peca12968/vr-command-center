@@ -1,8 +1,8 @@
 [CmdletBinding(DefaultParameterSetName='Player')]
 param(
     [Parameter(Mandatory, ParameterSetName='Player')][Parameter(Mandatory, ParameterSetName='Refresh')][Parameter(Mandatory, ParameterSetName='PlayerTracking')][string]$ClientConfig,
-    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Refresh')][Parameter(Mandatory, ParameterSetName='Smoke')][string]$Serial,
-    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Refresh')][Parameter(ParameterSetName='Smoke')][Parameter(ParameterSetName='PrepareApks')][string]$AdbPath = 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe',
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Refresh')][Parameter(ParameterSetName='Smoke')][string]$Serial,
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Refresh')][Parameter(ParameterSetName='Smoke')][Parameter(ParameterSetName='PrepareApks')][ValidateNotNullOrEmpty()][string]$AdbPath,
     [Parameter(Mandatory, ParameterSetName='Smoke')][switch]$SmokeTest,
     [Parameter(ParameterSetName='Smoke')][switch]$ResumeSmokeTest,
     [Parameter(ParameterSetName='Smoke')][Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][switch]$RequireOpenXR,
@@ -11,7 +11,7 @@ param(
     [Parameter(ParameterSetName='Player')][string]$AlignmentFile,
     [Parameter(ParameterSetName='Player')][switch]$Passthrough,
     [Parameter(ParameterSetName='Player')][switch]$MixedReality,
-    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='PrepareApks')][switch]$CheckOnly,
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Smoke')][Parameter(ParameterSetName='PrepareApks')][switch]$CheckOnly,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][switch]$RecordLinkMetrics,
     [Parameter(Mandatory, ParameterSetName='Venue')][string]$VenueManifest,
     [Parameter(Mandatory, ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='CapturePlan')][Parameter(Mandatory, ParameterSetName='Windows')][string]$VenueBundle,
@@ -23,7 +23,7 @@ param(
     [Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='CapturePlan')][switch]$AllowPartialMap,
     [Parameter(Mandatory, ParameterSetName='CapturePlan')][switch]$ReadCapturePlan,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,2147483647)][int]$ExpectedVersionCode,
-    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Smoke')][Parameter(Mandatory, ParameterSetName='PrepareApks')][ValidateNotNullOrEmpty()][string]$ReleaseReport,
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Smoke')][Parameter(Mandatory, ParameterSetName='PrepareApks')][ValidateNotNullOrEmpty()][string]$ReleaseReport,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Smoke')][Parameter(ParameterSetName='PrepareApks')][ValidateNotNullOrEmpty()][string]$ApkPath,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][switch]$UseInstalledApk,
     [Parameter(Mandatory, ParameterSetName='PrepareApks')][switch]$PrepareQuestApks,
@@ -50,6 +50,15 @@ $PSNativeCommandUseErrorActionPreference = $false
 . (Join-Path $PSScriptRoot 'quest-adb-process.ps1')
 
 function Confirm-QuestAdbStartup([string]$MissingMessage) {
+    if (-not $AdbPath) {
+        $name = if ($env:OS -eq 'Windows_NT') { 'adb.exe' } else { 'adb' }
+        $sdkTool = if ($env:ANDROID_HOME) { Join-Path $env:ANDROID_HOME "platform-tools/$name" }
+        if ($sdkTool -and (Test-Path -LiteralPath $sdkTool -PathType Leaf)) { $script:AdbPath = $sdkTool }
+        else {
+            $tool = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+            $script:AdbPath = if ($tool) { $tool.Source } else { 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe' }
+        }
+    }
     if (-not (Test-Path -LiteralPath $AdbPath -PathType Leaf)) { throw $MissingMessage }
     if ($env:OS -eq 'Windows_NT' -and [IO.Path]::GetExtension($AdbPath) -eq '.exe') {
         & (Join-Path $PSScriptRoot 'check-windows-firewall-notifications.ps1') -Executable $AdbPath -Unattended
@@ -2276,8 +2285,26 @@ if ($PSCmdlet.ParameterSetName -eq 'PrepareApks') {
 }
 if ($PSCmdlet.ParameterSetName -eq 'Smoke') {
     if (-not $SmokeTest) { throw 'Specify -SmokeTest to install and check a first launch.' }
+    if (-not $CheckOnly -and [string]::IsNullOrWhiteSpace($Serial)) { throw 'Specify -Serial for a Quest first launch.' }
+    if ($CheckOnly -and $ResumeSmokeTest) { throw 'Use -ResumeSmokeTest only when launching the installed Quest app.' }
+    $kitReport = Join-Path $projectRoot 'venue-release.json'
+    $kitQuest = Join-Path $projectRoot 'Quest'
+    if (-not $ReleaseReport) {
+        if (-not (Test-Path -LiteralPath $kitReport -PathType Leaf)) { throw 'Provide -ReleaseReport or use the extracted venue kit.' }
+        $ReleaseReport = $kitReport
+    }
     $release = Read-QuestRelease $ReleaseReport
+    if (-not $ApkPath -and ((Test-Path -LiteralPath $kitReport -PathType Leaf) -or (Test-Path -LiteralPath $kitQuest -PathType Container))) {
+        $games = @(Get-ChildItem -LiteralPath $kitQuest -File -Filter '*.apk')
+        if ($games.Count -ne 1) { throw 'Choose one game APK with -ApkPath or extract the original Quest folder.' }
+        $apk = $games[0].FullName
+    }
     Confirm-LocalQuestApk $apk $release.sha256
+    if ($CheckOnly) {
+        [ordered]@{ phase = 'quest-first-launch-preflight'; status = 'local-apk-verified'; versionCode = $release.versionCode
+            apkSha256 = $release.sha256; venueReleaseReportSha256 = $release.reportSha256 } | ConvertTo-Json -Compress
+        return
+    }
     $deploymentLock = Enter-QuestDeployment
     try { Invoke-QuestFirstLaunch $apk $release | ConvertTo-Json -Compress }
     finally { $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose() }

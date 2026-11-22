@@ -62,6 +62,8 @@ pwsh -NoProfile -NonInteractive -File .\scripts\check-quest-usb.ps1
 
 ## 首次安裝與啟動檢查
 
+使用場館包時，可先在未接頭盔的電腦執行 `deploy-quest.ps1 -SmokeTest -CheckOnly -RequireOpenXR`。工具從解壓目錄讀取發行報告，核對遊戲 APK 的雜湊及支援啟動檢查的版本。回條中的 `local-apk-verified` 表示本機檔案核對成功。頭盔上的 OpenXR 顯示與輸入須在實際啟動後確認。 [場館包操作](VENUE_FIELD_KIT.md)
+
 準備一台尚未安裝 VR Command 的 Quest 3。在手機 Meta Horizon App 開啟頭盔的開發者模式，接上資料線，再於頭盔內允許 USB 偵錯。從 `adb devices -l` 取得狀態為 `device` 的裝置序號。Windows 若只顯示 Reality Labs 的 USB 介面，請確認開發者模式、重啟頭盔並重新連接。 [Meta 實機設定](https://developers.meta.com/vr/documentation/android-apps/enable-developer-mode/) · [Android Debug Bridge](https://developer.android.com/tools/adb)
 
 以目前 `artifacts/quest/VrCommand.apk` 對應的原發行報告執行以下檢查。`-ApkPath` 可指定另存的原 APK；兩者的 SHA-256 必須一致。

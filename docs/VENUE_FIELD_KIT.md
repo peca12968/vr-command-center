@@ -145,13 +145,17 @@ Get-Content -LiteralPath $report
 
 某席在 Windows 已出現、但 ADB 尚無法對應時，該列會附上 Windows 能核對到該席的檔案傳輸介面、USB 偵錯介面或驅動程式問題。若 ADB 已列出裝置但缺少有效的連線編號，或有其他項目使用同一編號，摘要會指出房號與席號。只有連線編號可唯一使用的席位才計入已連線台數。
 
-首次安裝時，請準備已開啟開發者模式、允許本機 USB 偵錯的 Quest 3，以及 Android SDK 的 `adb.exe`。請把下列序號與 ADB 路徑替換成現場值。部署工具會查核防火牆條件、APK 雜湊及裝置型號，啟動後查核 OpenXR 顯示與輸入狀態。若防火牆查核略過啟動，可繼續使用上方的唯讀診斷。
+尚未接上頭盔時，可先核對解壓後的遊戲 APK。工具從腳本所在的套件讀取根目錄的 `venue-release.json` 及 `Quest` 目錄內的遊戲 APK。成功時會列出版本編號與兩份檔案的 SHA-256。此步驟可以在沒有 ADB 的電腦上完成。
+
+```powershell
+.\scripts\deploy-quest.ps1 -SmokeTest -CheckOnly -RequireOpenXR
+```
+
+首次安裝時，請準備已開啟開發者模式、允許本機 USB 偵錯的 Quest 3，以及 Android SDK 的 `adb.exe`。填入頭盔序號後，工具會查核防火牆條件、APK 及裝置型號，啟動後查核 OpenXR 顯示與輸入。可使用 `ANDROID_HOME` 中的 platform-tools 或 PATH 上的 ADB，也可以用 `-AdbPath` 指定現場的執行檔。若防火牆查核略過啟動，可繼續使用上方的唯讀診斷。
 
 ```powershell
 $env:VR_COMMAND_UNATTENDED = '1'
-$apk = (Get-ChildItem -LiteralPath .\Quest -Filter '*.apk' -File).FullName
-.\scripts\deploy-quest.ps1 -SmokeTest -RequireOpenXR -Serial '<頭盔序號>' `
-  -AdbPath 'C:\Android\platform-tools\adb.exe' -ApkPath $apk -ReleaseReport .\venue-release.json
+.\scripts\deploy-quest.ps1 -SmokeTest -RequireOpenXR -Serial '<頭盔序號>'
 ```
 
 各席實際入場時使用主控台為該玩家產生的連線檔。MR 場次還需要現場校正資料。五房連線與實機操作須在場館網路驗收。
