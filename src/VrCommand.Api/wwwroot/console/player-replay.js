@@ -18,6 +18,7 @@ function weatherText(packet) {
   return [weatherNames[packet.weather], packet.frame.night ? '夜晚' : '白天', packet.lightning ? '雷電開啟' : '雷電關閉'].join(' · ');
 }
 let replay, scene, index = 0, cursor = 0, lastTime = 0, animation = 0, epoch = 0;
+let speed = 1;
 let restartAt = null;
 let eventFrames = [], matchingEvents = [];
 let replayPlayers = [];
@@ -107,12 +108,11 @@ function updateFollow(position) {
 function show(next, continuous = false, position) {
   const { packets } = replay;
   const packet = packets[next];
-  const elapsed = position ?? packet.elapsedMilliseconds;
   updateFollow(next);
   scene.show(packet.frame, packets[next - 1]?.frame, packet.events.filter(event => event.hasRay),
     { weather: packet.weather, lightning: packet.lightning }, continuous);
   index = next;
-  if (!continuous) cursor = elapsed;
+  if (!continuous) cursor = position ?? packet.elapsedMilliseconds;
   timeline.value = index;
   $('back').disabled = index === 0;
   $('next').disabled = index === packets.length - 1;
@@ -121,13 +121,17 @@ function show(next, continuous = false, position) {
   $('clock').textContent = clock;
   $('clock').hidden = !clock;
   $('weather').textContent = weatherText(packet);
-  const first = packets[0].elapsedMilliseconds;
-  $('time').textContent = `片段 ${clipSeconds(elapsed - first)} / ${clipSeconds(packets.at(-1).elapsedMilliseconds - first)} 秒`;
+  showTime();
   showFrameEvents();
 }
 
 function clipSeconds(milliseconds) {
   return (milliseconds / 1000).toFixed(3).replace(/0$/, '');
+}
+
+function showTime() {
+  const packets = replay.packets, first = packets[0].elapsedMilliseconds;
+  $('time').textContent = `片段 ${clipSeconds(Math.floor(cursor - first))} / ${clipSeconds(packets.at(-1).elapsedMilliseconds - first)} 秒`;
 }
 
 function openFrame(next, position) {
@@ -270,8 +274,17 @@ if (embedded.length) {
   void openReplay(parts, document.getElementById('replay-volume')?.dataset.volume ?? null);
 }
 
-function advance(now) {
+function advancePosition(now) {
   const { packets } = replay;
+  cursor = Math.min(packets.at(-1).elapsedMilliseconds, cursor + Math.max(0, now - lastTime) * speed);
+  lastTime = Math.max(lastTime, now);
+  let next = index;
+  while (next + 1 < packets.length && packets[next + 1].elapsedMilliseconds <= cursor) next++;
+  if (next !== index) show(next, true);
+  else showTime();
+}
+
+function advance(now) {
   if (restartAt !== null) {
     if (now >= restartAt) {
       show(0);
@@ -281,12 +294,8 @@ function advance(now) {
     animation = requestAnimationFrame(advance);
     return;
   }
-  cursor += Math.min(250, Math.max(0, now - lastTime)) * Number($('speed').value);
-  lastTime = now;
-  let next = index;
-  while (next + 1 < packets.length && packets[next + 1].elapsedMilliseconds <= cursor) next++;
-  if (next !== index) show(next, true);
-  if (next === packets.length - 1) {
+  advancePosition(now);
+  if (index === replay.packets.length - 1) {
     if (!loop.checked) { pause(); return; }
     scene.weather.pause();
     restartAt = now + loopPauseMilliseconds;
@@ -296,11 +305,19 @@ function advance(now) {
 
 $('play').addEventListener('click', () => {
   if (!replay) return;
-  if (animation) { pause(); return; }
+  if (animation) {
+    if (restartAt === null) advancePosition(performance.now());
+    pause(); return;
+  }
   if (index === replay.packets.length - 1) show(0);
   lastTime = performance.now();
+  speed = Number($('speed').value);
   $('play').textContent = '暫停';
   animation = requestAnimationFrame(advance);
+});
+$('speed').addEventListener('change', () => {
+  if (animation && restartAt === null) advancePosition(performance.now());
+  speed = Number($('speed').value);
 });
 $('back').addEventListener('click', () => openFrame(index - 1));
 $('next').addEventListener('click', () => openFrame(index + 1));

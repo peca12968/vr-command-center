@@ -24,9 +24,58 @@ function fixture() {
       sessionId: players[0].id, streamId: players[1].id, roomIds: [1, 2, 3, 4, 5], props: [] }, packets };
 }
 
+async function checkSparsePlayback(browser, url) {
+  const page = await browser.newPage();
+  try {
+    await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
+    await page.clock.pauseAt(new Date('2026-01-01T00:00:01Z'));
+    await page.goto(url);
+    const clip = fixture();
+    clip.header.missionClockVersion = 1;
+    clip.header.missionDurationSeconds = 60;
+    clip.packets.forEach((packet, i) => {
+      packet.elapsedMilliseconds = [5000, 8000, 10000][i];
+      packet.frame.tick = 20 * i;
+    });
+    const control = name => page.locator('#player-replay-' + name);
+    const toggle = () => control('play').evaluate(button => button.click());
+    await control('file').setInputFiles({ name: 'sparse.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(clip)) });
+    await control('message').filter({ hasText: '已載入 3 格' }).waitFor();
+    await control('seconds').fill('0.75');
+    await control('seek').evaluate(form => form.requestSubmit());
+    await toggle();
+    await page.clock.fastForward(1250);
+    assert.equal(await control('time').innerText(), '片段 2.00 / 5.00 秒', 'Playback time must advance between recorded frames');
+    assert.match(await control('frame').innerText(), /第 10 格/);
+    assert.match(await control('clock').innerText(), /活動時間 00:00/);
+    await toggle();
+    await page.clock.fastForward(2500);
+    assert.equal(await control('time').innerText(), '片段 2.00 / 5.00 秒');
+    await control('speed').selectOption('2');
+    await toggle();
+    await page.clock.fastForward(625);
+    assert.equal(await control('time').innerText(), '片段 3.25 / 5.00 秒');
+    assert.match(await control('frame').innerText(), /第 11 格/);
+    assert.match(await control('clock').innerText(), /活動時間 00:01/);
+    // Account for the time before a speed change and before pause, even without an animation frame.
+    await page.clock.runFor(5);
+    await control('speed').selectOption('.5');
+    await page.clock.runFor(4);
+    await toggle();
+    assert.equal(await control('time').innerText(), '片段 3.262 / 5.00 秒');
+    await toggle();
+    await page.clock.fastForward(4000);
+    assert.equal(await control('play').innerText(), '播放');
+    assert.equal(await control('time').innerText(), '片段 5.00 / 5.00 秒');
+    assert.match(await control('frame').innerText(), /第 12 格/);
+    console.log('PASS: sparse replay time, frozen recorded clock, playback-rate changes, pause and exact ending');
+  } finally { await page.close(); }
+}
+
 async function main() {
   const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   try {
+    await checkSparsePlayback(browser, pathToFileURL(resolve(process.argv[2])).href);
     const page = await browser.newPage();
     const errors = [], network = [];
     page.on('pageerror', error => errors.push(error.message));
