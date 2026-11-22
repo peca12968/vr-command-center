@@ -14,7 +14,7 @@ import { mountVenueRoster } from './venue-roster-ui.js';
 import { mountVenueSettingScope } from './venue-setting-scope-ui.js';
 import { mountOperatorNetwork } from './operator-network-ui.js';
 import { mountReport, mountVenueReport, venueScoreFields } from './report-ui.js';
-import { matchesDebriefCsv } from './report-csv.js';
+import { encodeDepartedPlayersCsv, matchesDebriefCsv } from './report-csv.js';
 import { mountVenueHistory } from './venue-history-ui.js';
 import { mountVenueDebriefSeats } from './venue-debrief-ui.js';
 import { beginSeatLabels, encodeVenueBeginCsv, mountReadiness, mountRoomReadiness, usesTrackedVrStart,
@@ -1699,6 +1699,8 @@ function venueDepartureScope(batch, session) {
 function closeVenueDepartures() {
   departureReview?.csvController?.abort();
   departureReview = null;
+  $('venue-departed-export').hidden = true;
+  $('venue-departed-export').onclick = null;
   $('venue-departed-players').hidden = $('venue-departed-table').hidden = true;
   $('venue-departed-rows').replaceChildren();
   $('venue-departed-status').textContent = '';
@@ -1761,15 +1763,18 @@ async function openVenueDepartures(batch, session, scope, focusPlayer = null) {
       || !Number.isSafeInteger(body.throughSequence) || body.throughSequence < body.endedAtSequence
       || body.finalStreamSequence < 0 || !Array.isArray(body.players) || body.players.length !== session.rosterDepartureCount
       || new Set(body.players.map(player => player?.statistics?.playerId)).size !== body.players.length
+      || new Set(body.players.map(player => player?.admissionId)).size !== body.players.length
       || !body.players.every(player => {
         const score = player?.statistics;
         return score && archiveId.test(score.playerId) && typeof score.name === 'string' && session.roomIds.includes(score.roomId)
-          && Number.isSafeInteger(player.leftAtSequence) && player.leftAtSequence >= 3 && player.leftAtSequence < body.endedAtSequence
+          && archiveId.test(player.admissionId) && Number.isInteger(player.seat) && player.seat >= 0 && player.seat < 5
+          && Number.isSafeInteger(player.joinedAtSequence) && player.joinedAtSequence >= 2
+          && Number.isSafeInteger(player.leftAtSequence) && player.joinedAtSequence < player.leftAtSequence && player.leftAtSequence < body.endedAtSequence
           && scores.every(key => Number.isSafeInteger(score[key]) && score[key] >= 0) && score.shotsHit <= score.ammoUsed
           && Number.isFinite(score.accuracyPercent) && score.accuracyPercent >= 0 && score.accuracyPercent <= 100
           && Number.isInteger(score.health) && score.health >= 0 && score.health <= 100;
       })) throw new Error('Archive mismatch');
-    $('venue-departed-rows').replaceChildren(...body.players.map(({ statistics: player }) => {
+    $('venue-departed-rows').replaceChildren(...body.players.map(({ statistics: player, seat, joinedAtSequence, leftAtSequence }) => {
       const csv = element('button', '下載 CSV', 'quiet small');
       csv.type = 'button';
       csv.dataset.venueDepartedCsv = player.playerId;
@@ -1798,10 +1803,16 @@ async function openVenueDepartures(batch, session, scope, focusPlayer = null) {
         damage.addEventListener('click', () => openReplay(true));
         actions.append(damage);
       }
-      return row([player.roomId, player.name, ...scores.map(key => player[key]), `${player.accuracyPercent}%`, player.health, csv, actions]);
+      return row([player.roomId, seat + 1, player.name, `${joinedAtSequence} → ${leftAtSequence}`,
+        ...scores.map(key => player[key]), `${player.accuracyPercent}%`, player.health, csv, actions]);
     }));
     status.textContent = '';
     $('venue-departed-table').hidden = false;
+    $('venue-departed-export').hidden = false;
+    $('venue-departed-export').onclick = () => {
+      if (current()) download(`vr-command-departed-${body.requestId}-${body.sessionId}.csv`,
+        new Blob([encodeDepartedPlayersCsv(body)], { type: 'text/csv;charset=utf-8' }));
+    };
     if (archiveId.test(focusPlayer ?? ''))
       $('venue-departed-rows').querySelector(`[data-venue-departed-replay="${focusPlayer}"]`)?.focus();
   } catch { if (current()) status.textContent = '暫時無法確認離場玩家戰績，可重新開啟。'; }

@@ -1658,7 +1658,8 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
       assert.deepEqual(review, { requestId: batch.requestId, sessionId: first.running.id, streamId: evidence.streamId,
         worldSequence: saved.sessions[0].replay.throughSequence, finalStreamSequence: 1, endedAtSequence: evidence.endedAtSequence,
         throughSequence: target['statistics.json'].throughSequence,
-        players: [{ leftAtSequence: evidence.players[0].leftAtSequence,
+        players: [{ admissionId: departed.admissionId, seat: departed.seat, joinedAtSequence: evidence.players[0].joinedAtSequence,
+          leftAtSequence: evidence.players[0].leftAtSequence,
           statistics: target['statistics.json'].players.find(row => row.playerId === departed.id) }] });
       await api(reportPath, 'GET', undefined, 'Room2', mode === 'Independent' ? 403 : 404);
       await api(reportPath, 'GET', undefined, 'GameServer', 403);
@@ -1709,7 +1710,15 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
       await openDeparture.click();
       await departureTable.waitFor();
       const departureCells = await departureTable.locator('tbody td').allTextContents();
-      assert.deepEqual(departureCells, ['1', departed.name, '1', '0', '0', '0', '0', '0%', '100', '下載 CSV', '個人回放']);
+      const [entry] = evidence.players;
+      assert.deepEqual(departureCells, ['1', String(departed.seat + 1), departed.name, `${entry.joinedAtSequence} → ${entry.leftAtSequence}`,
+        '1', '0', '0', '0', '0', '0%', '100', '下載 CSV', '個人回放']);
+      const groupDownload = page.waitForEvent('download');
+      await page.locator('#venue-departed-export').click();
+      const groupFile = await groupDownload;
+      assert.equal(groupFile.suggestedFilename(), `vr-command-departed-${batch.requestId}-${first.running.id}.csv`);
+      const groupCsv = await fs.readFile(await groupFile.path(), 'utf8');
+      assert.ok(groupCsv.includes(`,"${departed.id}","${departed.admissionId}","${entry.joinedAtSequence}","${entry.leftAtSequence}",`));
       assert.equal(await departureTable.getByRole('button', {name:/最近中彈/}).count(), 0);
       const csvButton = departureTable.getByRole('button', { name: `下載房間 1 ${departed.name} 的個人戰績 CSV` });
       if (mode === 'Linked') {

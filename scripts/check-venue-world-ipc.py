@@ -331,6 +331,13 @@ def check_mode(venue, mode):
                           'expectedSequence': session['sequence'], 'roomAlignment': {f'room{room}': secrets.token_hex(32)}})
         for room in session['roomIds']:
             for seat in range(1, 6):
+                if (room, seat) == (1, 4):
+                    prior = venue.request(route + '/players', method='POST', body={'playerId': str(uuid4()),
+                        'roomId': room, 'name': f'Room {room} seat {seat}', 'headset': 'Quest3'})
+                    prior_seat = next(p for p in prior['players'] if p['roomId'] == room and p['seat'] == seat - 1)
+                    with venue.response(route + '/players/' + prior_seat['id'], method='DELETE',
+                                        admission=prior_seat['admissionId'], status=204):
+                        pass
                 headset = 'ViveXr' if session['environment']['mode'] == 'VR' and seat % 2 == 0 else 'Quest3'
                 if (room, seat) == (5, 2):
                     headset = 'Quest3'  # This attendee switches devices after the room is full.
@@ -430,6 +437,11 @@ def check_mode(venue, mode):
             assert kind == 'complete' and complete['complete'] and live.readline() == b''
 
         closure = venue.request(closure_route)
+        first_session = next(s for s in sessions if 1 in s['roomIds'])
+        left = venue.request(f"/api/venue/closure/{closure['batch']['requestId']}/sessions/{first_session['id']}/departed-players")
+        occupant, = left['players']
+        assert occupant['seat'] == prior_seat['seat'] == 3 and occupant['admissionId'] == prior_seat['admissionId']
+        assert occupant['statistics']['playerId'] == prior_seat['id'] and occupant['statistics']['name'] == prior_seat['name']
         assert {row['sessionId'] for row in closure['batch']['sessions']} == {s['id'] for s in sessions}
         saved = {}
         for row in closure['batch']['sessions']:
@@ -467,19 +479,41 @@ def check_departed_clip(venue):
         'missionId': mission['id'], 'mode': 'Linked', 'roomIds': list(ROOMS)})
     route = '/api/sessions/' + session['id']
     departed = str(uuid4())
+    earlier = str(uuid4())
+    name = '=同名,"甲"'
+    joined = venue.request(route + '/players', method='POST', body={'playerId': earlier, 'roomId': 1, 'name': name, 'headset': 'Quest3'})
+    admissions = {earlier: (joined['players'][0]['admissionId'], joined['sequence'])}
+    with venue.response(route + '/players/' + earlier, method='DELETE', admission=admissions[earlier][0], status=204):
+        pass
     for room in (1, 5):
-        venue.request(route + '/players', method='POST', body={'playerId': departed if room == 1 else str(uuid4()),
-                      'roomId': room, 'name': f'Seat {room}', 'headset': 'Quest3'})
+        joined = venue.request(route + '/players', method='POST', body={'playerId': departed if room == 1 else str(uuid4()),
+                               'roomId': room, 'name': name if room == 1 else f'Seat {room}', 'headset': 'Quest3'})
+        if room == 1:
+            admissions[departed] = (joined['players'][0]['admissionId'], joined['sequence'])
     with ExitStack() as stack:
         source = Publisher(venue, session, stack)
+        publish_destinations(venue, [source], 'Linked')
+        source.state = venue.request(route)
         source.publish()
         venue.phase('Begin', 'begin')
         source.state = venue.request(route)
         source.publish(damage=True, departing=departed)
-        venue.phase('End', 'end')
+        end = venue.phase('End', 'end')
         source.state = venue.request(route)
         source.publish()
         source.seal()
+    departures_path = f"/api/venue/closure/{end['requestId']}/sessions/{session['id']}/departed-players"
+    for role in ('Room1', 'GameServer'):
+        with venue.response(departures_path, role=role, status=403):
+            pass
+    report = venue.request(departures_path)
+    assert {row['statistics']['playerId'] for row in report['players']} == set(admissions)
+    for row in report['players']:
+        score = row['statistics']
+        assert (row['admissionId'], row['joinedAtSequence']) == admissions[score['playerId']]
+        assert row['seat'] == 0 and score['roomId'] == 1 and score['name'] == name
+        assert row['joinedAtSequence'] < row['leftAtSequence'] < report['endedAtSequence']
+        assert (score['hitsReceived'], score['damageTaken'], score['health']) == ((1, 20, 80) if score['playerId'] == departed else (0, 0, 100))
     clip = source.world + '/clips/' + str(uuid4())
     venue.request(clip, method='PUT', body={'name': 'After departure', 'streamId': source.stream_id, 'startFrame': 2, 'endFrame': 3})
     export = clip + '/player-replay.json'

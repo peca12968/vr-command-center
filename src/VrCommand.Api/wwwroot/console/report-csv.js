@@ -57,6 +57,17 @@ export function encodeReportRows(rows) {
   return '\uFEFF' + rows.map(row => row.map(cell => `"${String(cell).replaceAll('"', '""')}"`).join(',') + '\r\n').join('');
 }
 
+export function encodeDepartedPlayersCsv(report) {
+  const header = ['reportVersion', 'requestId', 'sessionId', 'streamId', 'worldSequence', 'endedAtSequence',
+    'throughSequence', 'finalStreamSequence', 'roomId', 'seatNumber', 'playerId', 'admissionId', 'joinedAtSequence',
+    'leftAtSequence', 'playerName', 'ammoUsed', 'shotsHit', 'kills', 'hitsReceived', 'damageTaken', 'accuracyPercent', 'health'];
+  const rows = report.players.map(({ admissionId, seat, joinedAtSequence, leftAtSequence, statistics: p }) =>
+    [1, report.requestId, report.sessionId, report.streamId, report.worldSequence, report.endedAtSequence,
+      report.throughSequence, report.finalStreamSequence, p.roomId, seat + 1, p.playerId, admissionId, joinedAtSequence,
+      leftAtSequence, csvReportText(p.name), p.ammoUsed, p.shotsHit, p.kills, p.hitsReceived, p.damageTaken, p.accuracyPercent, p.health]);
+  return encodeReportRows([header, ...rows]);
+}
+
 export function csvReportText(value) {
   return /\p{Cc}|^\p{White_Space}*[=+@-]/u.test(value) ? "'" + value : value;
 }

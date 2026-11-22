@@ -17,7 +17,7 @@ internal sealed record VenueClosureSession(Guid SessionId, long AppliedAtSequenc
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueParticipationBegin? ParticipationBegin,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? RosterDepartureCount = null);
 internal sealed record VenueClosureBatch(Guid RequestId, DateTimeOffset RecordedAtUtc, VenueClosureSession[] Sessions);
-internal sealed record VenueDepartedPlayer(long LeftAtSequence, PlayerStatistics Statistics);
+internal sealed record VenueDepartedPlayer(Guid AdmissionId, int Seat, long JoinedAtSequence, long LeftAtSequence, PlayerStatistics Statistics);
 internal sealed record VenueDepartedPlayers(Guid RequestId, Guid SessionId, Guid StreamId, long WorldSequence,
     long FinalStreamSequence, long EndedAtSequence, long ThroughSequence, VenueDepartedPlayer[] Players);
 internal sealed record VenueClosureResponse(VenueClosureBatch? Batch,
@@ -213,8 +213,13 @@ public sealed partial class WorldRecordings
             if (row.Replay is null || evidence?.Session.CombatStream is not { Sealed: true } stream)
                 throw new InvalidOperationException("Departed player review requires the original sealed field evidence.");
             var scores = evidence.Statistics.Players.ToDictionary(player => player.PlayerId);
-            var players = evidence.RosterDepartures?.Players.Select(player => new VenueDepartedPlayer(player.LeftAtSequence,
-                scores[player.PlayerId])).ToArray() ?? [];
+            var players = evidence.RosterDepartures?.Players.Select(player =>
+            {
+                var admission = manager.Observed(sessionId, player.JoinedAtSequence, actor).Players.Single(p =>
+                    p.Id == player.PlayerId && p.AdmissionId == player.AdmissionId && p.RoomId == player.RoomId);
+                return new VenueDepartedPlayer(admission.AdmissionId, admission.Seat, player.JoinedAtSequence,
+                    player.LeftAtSequence, scores[player.PlayerId]);
+            }).ToArray() ?? [];
             return new(batchId, sessionId, stream.StreamId, row.Replay.ThroughSequence, stream.AcceptedSequence,
                 original.AppliedAtSequence, evidence.Statistics.ThroughSequence, players);
         }
