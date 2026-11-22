@@ -265,6 +265,17 @@ def configure_weather(venue, sources, mode):
     return expected
 
 
+def check_current_environment(venue, room, expected):
+    route = f'/api/rooms/{room}/hardware-environment'
+    for role in ('Master', f'Room{room}'):
+        with venue.response(route, role=role) as response:
+            assert response.getheader('Cache-Control') == 'no-store'
+            assert json.load(response) == {'version': 1, 'roomId': room, 'session': expected}
+    for denied in (f'Room{room % 5 + 1}', 'GameServer'):
+        with venue.response(route, role=denied, status=403):
+            pass
+
+
 def check_room_environment(venue, session, room, phase_sequence, environment_sequence):
     route = f"/api/sessions/{session['id']}/rooms/{room}/hardware-environment"
     with venue.response(route, role=f'Room{room}') as response:
@@ -275,6 +286,7 @@ def check_room_environment(venue, session, room, phase_sequence, environment_seq
                         'environmentSinceSequence': environment_sequence,
                         'environment': session['environment'] if session['state'] == 'Running' else None}
     assert venue.request(route) == snapshot
+    check_current_environment(venue, room, None if session['state'] == 'Ended' else snapshot)
     return snapshot
 
 
@@ -284,6 +296,12 @@ def recorded_weather(packet):
 
 
 def check_mode(venue, mode):
+    for room in ROOMS:
+        check_current_environment(venue, room, None)
+    for invalid in (0, 6):
+        with venue.response(f'/api/rooms/{invalid}/hardware-environment', status=400):
+            pass
+
     def mission(experience, enemies=1):
         return venue.request('/api/missions', method='POST', status=201, body={'name': f'{mode} {experience} IPC review',
             'briefing': '', 'durationSeconds': 180, 'props': [], 'environment': {'mode': experience, 'weather': 'Clear',

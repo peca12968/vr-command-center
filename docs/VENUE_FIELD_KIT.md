@@ -29,7 +29,7 @@ dotnet .\VRCommand-HardwareSimulator\VrCommand.HardwareSimulator.dll `
   --input .\VRCommand-HardwareSimulator\example.json --output ..\hardware-rehearsal.json
 ```
 
-硬體廠商可用房控憑證讀取 `GET /api/sessions/{sessionId}/rooms/{roomId}/hardware-environment`。請指定該房目前的場次 ID 與房號。回覆的 `environment` 在執行中提供 VR／MR 模式、天氣、日夜與雷電設定；準備、暫停、結束時為 `null`。恢復連線後重新讀取，並核對 `phaseSinceSequence` 和 `environmentSinceSequence`。此回覆描述管理台設定，實體輸出與確認方式由廠商介面決定。
+硬體廠商可用房控憑證固定讀取 `GET /api/rooms/{roomId}/hardware-environment`。空房的 `session` 為 `null`，準備或暫停時的 `session.environment` 為 `null`。執行中提供 VR／MR 模式、天氣、日夜與雷電設定。恢復連線後重新讀取。若 `session.sessionId` 改變，請重新採用新場次的設定與序號。實體輸出與確認方式由廠商介面決定。
 
 ### 開場前測試兩台電腦的遊戲連線
 

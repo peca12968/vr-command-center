@@ -8,6 +8,7 @@ public record RoomHardwareSignal(Guid EventId, long EventSequence, long StreamSe
 public record RoomHardwareSeat(Guid PlayerId, Guid AdmissionId, [property: JsonRequired] int Seat);
 public record VenueHardwareRoom(int RoomId, Guid SessionId, long SessionSequence, RoomHardwareSeat[] Bindings);
 public record VenueHardwareBindings(int Version, SessionMode Mode, VenueHardwareRoom[] Rooms);
+public record CurrentRoomHardwareEnvironment(int Version, int RoomId, RoomHardwareEnvironment? Session);
 public record RoomHardwareEnvironment(int Version, Guid SessionId, int RoomId, SessionState State,
     long ThroughSequence, long PhaseSinceSequence, long EnvironmentSinceSequence, EnvironmentSettings? Environment);
 
@@ -50,9 +51,27 @@ public sealed partial class SessionManager
             var session = history.View;
             AccessPolicy.Player(actor, session, roomId);
             if (!session.RoomIds.Contains(roomId)) throw new ArgumentException("Room is outside this session.");
-            return new(1, id, roomId, session.State, session.Sequence, history.PhaseSinceSequence,
-                history.EnvironmentSinceSequence, session.State == SessionState.Running ? session.Environment : null);
+            return HardwareEnvironment(history, roomId);
         }
+    }
+
+    public CurrentRoomHardwareEnvironment ReadCurrentHardwareEnvironment(int roomId, OperatorIdentity actor)
+    {
+        if (roomId is < 1 or > RoomCount) throw new ArgumentException("Room number is outside the venue.");
+        AccessPolicy.Read(actor, [roomId]);
+        if (actor.Role == OperatorRole.GameServer) throw new AccessDeniedException("Room hardware requires a controller.");
+        lock (gate)
+        {
+            var current = Active().SingleOrDefault(session => session.RoomIds.Contains(roomId));
+            return new(1, roomId, current is null ? null : HardwareEnvironment(Find(current.Id), roomId));
+        }
+    }
+
+    private static RoomHardwareEnvironment HardwareEnvironment(History history, int roomId)
+    {
+        var session = history.View;
+        return new(1, session.Id, roomId, session.State, session.Sequence, history.PhaseSinceSequence,
+            history.EnvironmentSinceSequence, session.State == SessionState.Running ? session.Environment : null);
     }
 
     public RoomHardwareFeedback ReadHardwareFeedback(Guid id, int roomId, long? after, OperatorIdentity actor, bool includeBindings = false)

@@ -166,6 +166,11 @@ app.MapWorldRoutes();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/me", (HttpContext context) => Actor(context));
 app.MapGet("/api/rooms", (SessionManager manager, HttpContext context) => manager.Rooms(Actor(context)));
+app.MapGet("/api/rooms/{roomId:int}/hardware-environment", (int roomId, SessionManager manager, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    return manager.ReadCurrentHardwareEnvironment(roomId, Actor(context));
+});
 if (controlHttps is not null)
 {
     var networkProof = new OperatorNetworkProof();

@@ -2,15 +2,17 @@
 
 ## 房間環境狀態
 
-管理包 0.31.275 提供 `GET /api/sessions/{sessionId}/rooms/{roomId}/hardware-environment`。房間轉接器可用本房憑證讀取主控目前指定的 VR／MR 模式、天氣、日夜與雷電設定。五房合併時，各房讀到同一場次設定；獨立開場時，每房使用自己的場次 ID。
+管理包 0.31.282 起，每台房間轉接器可固定讀取 `GET /api/rooms/{roomId}/hardware-environment`。主控或該房憑證都可讀取。空房回覆中的 `session` 為 `null`。有場次時，`session` 同時包含場次 ID、階段與該次讀取的環境設定。換場或服務重啟後仍使用同一網址。
 
-在管理電腦上，以下範例使用本房的 `$sessionId`、`$roomId` 及既有的 Bearer `$headers`。跨機時請使用場館設定的 HTTPS 管理位址。
+在管理電腦上，以下範例使用本房的 `$roomId` 及既有的 Bearer `$headers`。跨機時請使用場館設定的 HTTPS 管理位址。
 
 ```powershell
-$url = "http://127.0.0.1:5081/api/sessions/$sessionId/rooms/$roomId/hardware-environment"
-$snapshot = Invoke-RestMethod -Uri $url -Headers $headers
+$url = "http://127.0.0.1:5081/api/rooms/$roomId/hardware-environment"
+$snapshot = (Invoke-RestMethod -Uri $url -Headers $headers).session
 $snapshot | Select-Object sessionId, roomId, state, phaseSinceSequence, environmentSinceSequence, environment
 ```
+
+請依序取樣。若場次 ID 改變，請捨棄上場序號並採用新快照。跨場序號各自從頭計算。要查指定場次，可使用 0.31.275 起提供的 `GET /api/sessions/{sessionId}/rooms/{roomId}/hardware-environment`，直接取得下表欄位。
 
 | 欄位 | 轉接器判讀方式 |
 | --- | --- |
