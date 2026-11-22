@@ -81,28 +81,31 @@ async function checkVolumeContinuity(browser, templatePath) {
     const template = await readFile(templatePath, 'utf8');
     const first = fixture(), player = first.packets[0].frame.players[1];
     const other = { ...player, id: '00000000-0000-0000-0000-000000000099' };
-    const volume = (start, packets) => {
+    const volume = (start, packets, clipStart = 10) => {
       const part = { ...first, startFrame: start, endFrame: start + packets.length - 1, packets };
       const marker = `<span hidden id="replay-volume" data-volume="${first.header.sessionId}:${start}:${part.endFrame}:21"></span>`;
-      return template.replace('<!--player-replay-data-->', () => marker +
+      const origin = clipStart === null ? '' : `<span hidden id="replay-clip-start">${clipStart}</span>`;
+      return template.replace('<!--player-replay-data-->', () => marker + origin +
         '<script type="application/json" data-player-replay-part>' + JSON.stringify(part) + '</script>');
     };
     const path = resolve(directory, 'first.html');
     const suspended = p => ({ ...p, suspended: true, frame: { ...p.frame, phase: 'Paused' } });
     const storm = p => ({ ...p, weather: 'Storm', lightning: true, frame: { ...p.frame, night: true, visibility: 'Storm' } });
-    await writeFile(path, volume(10, [storm(first.packets[0]), first.packets[1], suspended(first.packets[2])]));
+    const firstPackets = [storm(first.packets[0]), first.packets[1], suspended(first.packets[2])];
+    await writeFile(path, volume(10, firstPackets));
     const packet = (sequence, elapsedMilliseconds, tick, players) => ({ ...first.packets[0], sequence, elapsedMilliseconds,
       frame: { ...first.packets[0].frame, tick, players }, events: [] });
     const nextPackets = [packet(13, 900, 12, [other]), packet(14, 1100, 13, [other, player]), suspended(packet(15, 1300, 14, [player]))].map(storm);
     const field = name => page.locator('#player-replay-' + name);
     const camera = () => page.locator('#replay-canvas').getAttribute('data-camera');
-    const choose = async (start, packets) => {
-      await field('volume-file').setInputFiles({ name: 'next.html', mimeType: 'text/html', buffer: Buffer.from(volume(start, packets)) });
+    const choose = async (start, packets, input = 'volume-file', clipStart = 10) => {
+      await field(input).setInputFiles({ name: 'renamed.html', mimeType: 'text/html', buffer: Buffer.from(volume(start, packets, clipStart)) });
       await page.waitForFunction(() => !document.querySelector('#player-replay-message').textContent.includes('正在讀取'));
     };
     await page.goto(pathToFileURL(path).href);
     await field('room').selectOption('5');
     await field('follow').selectOption(player.id);
+    assert.ok(await field('previous').isHidden(), 'The saved clip begins at frame 10');
     const initialCamera = await camera();
     // The viewer is on frame 10. Both checks must compare against the last frame (12).
     for (const change of [{ elapsedMilliseconds: 899 }, { frame: { ...nextPackets[0].frame, tick: 11 } }]) {
@@ -126,6 +129,20 @@ async function checkVolumeContinuity(browser, templatePath) {
     await field('follow-next').click();
     assert.match(await field('frame').innerText(), /第 14 格/);
     assert.equal(await field('follow-status').innerText(), '');
+    await choose(13, nextPackets, 'previous-file');
+    assert.match(await field('message').innerText(), /本冊前一格/);
+    await choose(10, [firstPackets[0], firstPackets[1], { ...firstPackets[2], elapsedMilliseconds: 901 }], 'previous-file');
+    assert.match(await field('message').innerText(), /晚於本冊首格/);
+    assert.match(await field('frame').innerText(), /第 14 格/);
+    await choose(10, firstPackets, 'previous-file', 9);
+    assert.match(await field('message').innerText(), /本冊前一格/);
+    await choose(10, firstPackets, 'previous-file', null);
+    assert.match(await field('frame').innerText(), /第 12 格/);
+    assert.equal(await field('room').inputValue(), '5');
+    assert.equal(await field('follow').inputValue(), player.id);
+    assert.ok(await field('previous').isHidden(), 'Retain the known clip start when reading an older volume');
+    await choose(13, nextPackets);
+    await field('follow-next').click();
     const followingCamera = await camera();
     await choose(16, [16, 17, 18].map(n => suspended(storm(packet(n, n * 100, n, [other])))));
     assert.ok(await field('environment-field').isHidden());
@@ -141,6 +158,7 @@ async function checkVolumeContinuity(browser, templatePath) {
     assert.match(await field('frame').innerText(), /第 19 格/);
     assert.equal(await camera(), freeCamera);
     assert.equal(await field('volume-label').innerText(), '已到最後一冊。');
+    assert.ok(await field('previous').isVisible());
     console.log('PASS: four consecutive volumes preserve the camera and follow the original player across a gap');
   } finally {
     await page.close();

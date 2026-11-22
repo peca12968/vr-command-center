@@ -154,20 +154,24 @@ function openFrame(next, position) {
   if (replay && Number.isInteger(next) && next >= 0 && next < replay.packets.length) show(next, false, position);
 }
 
-function volumeInfo(value) {
+function volumeInfo(value, clipStartText) {
   const match = /^([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}):(\d+):(\d+):(\d+)$/.exec(value ?? '');
   if (!match) throw new Error('請選擇由場館匯出的回放分冊網頁。');
   const [first, last, end] = match.slice(2).map(Number);
   if (![first, last, end].every(Number.isSafeInteger) || first < 1 || last <= first || end < last)
     throw new Error('回放分冊的畫格範圍無效。');
-  return { clip: match[1], first, last, end };
+  const clipStart = clipStartText == null ? null : Number(clipStartText);
+  if (clipStart !== null && (!/^[1-9]\d*$/.test(clipStartText) || !Number.isSafeInteger(clipStart) || clipStart > first))
+    throw new Error('回放片段的起始畫格無效。');
+  return { clip: match[1], first, last, end, clipStart };
 }
 
 async function readVolumeFile(file) {
   if (file.size > MAX_REPLAY_SET_BYTES + 2 * 1024 * 1024 + 8192) throw new Error('回放網頁超過分冊容量。');
   const html = await file.text();
   const marker = /<span hidden id="replay-volume" data-volume="([^"<>]{1,110})"><\/span>/.exec(html);
-  const volume = volumeInfo(marker?.[1]);
+  const start = /<span hidden id="replay-clip-start">([^<>]*)<\/span>/.exec(html);
+  const volume = volumeInfo(marker?.[1], start?.[1]);
   const files = [];
   // Extract data only. The selected HTML never becomes a document or executes scripts.
   for (const part of html.matchAll(/<script type="application\/json" data-player-replay-part>([^<]+)<\/script>/g)) {
@@ -177,9 +181,10 @@ async function readVolumeFile(file) {
   return { files, volume };
 }
 
-async function openReplay(files, embeddedInfo = null, continuing = false) {
+async function openReplay(files, embeddedInfo = null, direction = null) {
   if (!files.length) return;
   const own = ++epoch;
+  const continuing = direction !== null, backwards = direction === 'previous';
   pause();
   if (!continuing) {
     replay = null;
@@ -189,6 +194,7 @@ async function openReplay(files, embeddedInfo = null, continuing = false) {
   }
   $('file').value = '';
   $('volume-file').value = '';
+  $('previous-file').value = '';
   message('正在讀取本機回放檔。');
   try {
     let volume = null;
@@ -196,8 +202,13 @@ async function openReplay(files, embeddedInfo = null, continuing = false) {
       ({ files, volume } = await readVolumeFile(files[0]));
       if (own !== epoch) return;
       if (!currentVolume || volume.clip !== currentVolume.clip || volume.end !== currentVolume.end ||
-          volume.first !== currentVolume.last + 1) throw new Error('請選擇同一片段、從下一格開始的分冊。');
-    } else if (embeddedInfo !== null) volume = volumeInfo(embeddedInfo);
+          (volume.clipStart !== null && currentVolume.clipStart !== null && volume.clipStart !== currentVolume.clipStart) ||
+          (backwards ? volume.last + 1 !== currentVolume.first : volume.first !== currentVolume.last + 1))
+        throw new Error(backwards ? '請選擇同一片段、結束於本冊前一格的上一冊。' : '請選擇同一片段、從下一格開始的分冊。');
+      volume.clipStart ??= currentVolume.clipStart;
+      if (volume.clipStart !== null && volume.clipStart > Math.min(volume.first, currentVolume.first))
+        throw new Error('分冊超出原片段的畫格範圍。');
+    } else if (embeddedInfo !== null) volume = volumeInfo(embeddedInfo, document.getElementById('replay-clip-start')?.textContent);
     if (files.length > MAX_REPLAY_FILES) throw new Error('請一次選擇最多 24 份回放檔。');
     if (files.some(file => file.size > MAX_REPLAY_BYTES)) throw new Error('回放檔超過 8 MiB。');
     if (files.reduce((size, file) => size + file.size, 0) > MAX_REPLAY_SET_BYTES) throw new Error('所選片段合計超過 64 MiB，請分批開啟。');
@@ -211,12 +222,13 @@ async function openReplay(files, embeddedInfo = null, continuing = false) {
     if (volume && (candidate.startFrame !== volume.first || candidate.endFrame !== volume.last))
       throw new Error('分冊標示與實際畫格範圍不符。');
     if (continuing && !samePlayerReplaySource(candidate, replay))
-      throw new Error('下一冊必須來自同一場錄製與相同房間範圍。');
-    const previousTail = continuing ? replay.packets.at(-1) : null;
-    if (previousTail) {
-      const first = candidate.packets[0];
-      if (first.elapsedMilliseconds < previousTail.elapsedMilliseconds || first.frame.tick < previousTail.frame.tick)
-        throw new Error('下一冊的錄製時間或任務刻數早於本冊末格，請重新取得分冊。');
+      throw new Error('相鄰分冊必須來自同一場錄製與相同房間範圍。');
+    const previousTail = continuing && !backwards ? replay.packets.at(-1) : null;
+    if (continuing) {
+      const earlier = backwards ? candidate.packets.at(-1) : previousTail;
+      const later = backwards ? replay.packets[0] : candidate.packets[0];
+      if (later.elapsedMilliseconds < earlier.elapsedMilliseconds || later.frame.tick < earlier.frame.tick)
+        throw new Error(backwards ? '上一冊末格的錄製時間或任務刻數晚於本冊首格。' : '下一冊的錄製時間或任務刻數早於本冊末格，請重新取得分冊。');
     }
     if (!scene) {
       const { ReplayScene } = await import('./replay-scene.js');
@@ -241,7 +253,9 @@ async function openReplay(files, embeddedInfo = null, continuing = false) {
     showFollowOptions(previousPlayer);
     currentVolume = volume;
     $('continuation').hidden = !volume;
+    $('previous').hidden = !volume || volume.first <= (volume.clipStart ?? 1);
     if (volume) {
+      $('previous-label').textContent = `開啟上一冊（結束於第 ${volume.first - 1} 格）`;
       $('volume-file').hidden = volume.last === volume.end;
       $('volume-label').textContent = volume.last === volume.end ? '已到最後一冊。'
         : `開啟下一冊（從第 ${volume.last + 1} 格開始）`;
@@ -283,7 +297,7 @@ async function openReplay(files, embeddedInfo = null, continuing = false) {
     if (previousView) scene.restoreView(previousView);
     else scene.preset('top', room.value);
     updateRoomEvents();
-    show(0);
+    show(backwards ? candidate.packets.length - 1 : 0);
     message(`已載入 ${candidate.packets.length} 格。`);
   } catch (error) {
     if (own !== epoch) return;
@@ -297,7 +311,8 @@ async function openReplay(files, embeddedInfo = null, continuing = false) {
 }
 
 $('file').addEventListener('change', () => openReplay(Array.from($('file').files)));
-$('volume-file').addEventListener('change', () => openReplay(Array.from($('volume-file').files), null, true));
+$('volume-file').addEventListener('change', () => openReplay(Array.from($('volume-file').files), null, 'next'));
+$('previous-file').addEventListener('change', () => openReplay(Array.from($('previous-file').files), null, 'previous'));
 const embedded = Array.from(document.querySelectorAll('script[type="application/json"][data-player-replay-part]'));
 if (embedded.length) {
   const parts = embedded.map(element => new Blob([element.textContent]));

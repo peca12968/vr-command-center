@@ -135,7 +135,7 @@ public sealed partial class WorldRecordings
     public byte[] ExportPlayerReplay(Guid id, Guid clipId, int? roomId, OperatorIdentity actor, CancellationToken cancellation)
         => PlayerReplayParts(id, clipId, roomId, actor, cancellation, split: false).Single().Data;
 
-    public IEnumerable<(byte[] Data, string Suffix, long LastFrame, long ClipEnd)> PlayerReplayParts(Guid id, Guid clipId, int? roomId,
+    public IEnumerable<(byte[] Data, string Suffix, long LastFrame, long ClipEnd, long ClipStart)> PlayerReplayParts(Guid id, Guid clipId, int? roomId,
         OperatorIdentity actor, CancellationToken cancellation, bool split = true, long? fromFrame = null)
     {
         var recording = ReplayClipRecording(id, actor, write: true);
@@ -166,7 +166,7 @@ public sealed partial class WorldRecordings
         }
         return ReadParts();
 
-        IEnumerable<(byte[] Data, string Suffix, long LastFrame, long ClipEnd)> ReadParts()
+        IEnumerable<(byte[] Data, string Suffix, long LastFrame, long ClipEnd, long ClipStart)> ReadParts()
         {
             long first = fromFrame ?? clip.StartFrame;
             int files = 0, bytes = 0;
@@ -196,7 +196,7 @@ public sealed partial class WorldRecordings
                     throw new InvalidOperationException("片段超過播放器一次可開啟的 24 份檔案或 64 MiB，請縮小片段範圍。");
                 }
                 long last = first + count - 1;
-                yield return (data, first == clip.StartFrame && last == clip.EndFrame ? "" : FormattableString.Invariant($"-frames-{first:D6}-{last:D6}"), last, clip.EndFrame);
+                yield return (data, first == clip.StartFrame && last == clip.EndFrame ? "" : FormattableString.Invariant($"-frames-{first:D6}-{last:D6}"), last, clip.EndFrame, clip.StartFrame);
                 if (last == clip.EndFrame) yield break;
                 first = Math.Min(last + 1, clip.EndFrame - 1);
             }
