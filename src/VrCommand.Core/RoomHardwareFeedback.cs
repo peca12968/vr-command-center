@@ -9,6 +9,7 @@ public record RoomHardwareSeat(Guid PlayerId, Guid AdmissionId, [property: JsonR
 public record VenueHardwareRoom(int RoomId, Guid SessionId, long SessionSequence, RoomHardwareSeat[] Bindings);
 public record VenueHardwareBindings(int Version, SessionMode Mode, VenueHardwareRoom[] Rooms);
 public record CurrentRoomHardwareEnvironment(int Version, int RoomId, RoomHardwareEnvironment? Session);
+public record VenueHardwareEnvironment(int Version, DateTimeOffset CheckedAtUtc, CurrentRoomHardwareEnvironment[] Rooms);
 public record RoomHardwareEnvironment(int Version, Guid SessionId, int RoomId, SessionState State,
     long ThroughSequence, long PhaseSinceSequence, long EnvironmentSinceSequence, EnvironmentSettings? Environment);
 
@@ -72,6 +73,22 @@ public sealed partial class SessionManager
         var session = history.View;
         return new(1, session.Id, roomId, session.State, session.Sequence, history.PhaseSinceSequence,
             history.EnvironmentSinceSequence, session.State == SessionState.Running ? session.Environment : null);
+    }
+
+    public VenueHardwareEnvironment ReadVenueHardwareEnvironment(OperatorIdentity actor)
+    {
+        RequireVenueMaster(actor);
+        lock (gate)
+        {
+            var rooms = Enumerable.Range(1, RoomCount).Select(id => new CurrentRoomHardwareEnvironment(1, id, null)).ToArray();
+            foreach (var session in Active())
+            {
+                var history = Find(session.Id);
+                foreach (var id in session.RoomIds)
+                    rooms[id - 1] = new(1, id, HardwareEnvironment(history, id));
+            }
+            return new(1, clock.GetUtcNow(), rooms);
+        }
     }
 
     public RoomHardwareFeedback ReadHardwareFeedback(Guid id, int roomId, long? after, OperatorIdentity actor, bool includeBindings = false)

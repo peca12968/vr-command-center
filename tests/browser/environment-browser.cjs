@@ -7,6 +7,7 @@ const { promisify } = require('node:util');
 const execute = promisify(execFile);
 
 module.exports = async function environmentBrowser({ page, api, tokens, directory, root, base, screenshots, check }) {
+  await require('./venue-environment-download.cjs')({ context: page.context(), base, tokens });
   const previousSessions = new Set((await api('/world-recordings')).map(row => row.header.sessionId));
   const keys = path.join(directory, 'environment-keys.json'), recording = path.join(directory, 'environment.ndjson');
   await fs.writeFile(keys, JSON.stringify({ OperatorKeys: tokens }));

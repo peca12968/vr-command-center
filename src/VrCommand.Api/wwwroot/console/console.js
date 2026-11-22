@@ -1388,6 +1388,7 @@ function applyVenuePermissions() {
   $('venue-phase').hidden = !master();
   const begin = master() ? venueTargets('Begin') : [], pause = venueTargets('Pause'), resume = venueTargets('Resume'), end = venueTargets('End');
   const locked = state.busy || !!state.pending || !master();
+  $('export-venue-environment').disabled = locked;
   const originalRoster = begin.some(target => state.session?.state === 'Preparing' && state.session.id === target.sessionId
     && state.session.sequence === target.sessionSequence);
   $('roster-return-begin').hidden = !originalRoster;
@@ -3014,6 +3015,18 @@ $('venue-begin').addEventListener('click', () => {
   run(() => venuePhase('Begin', { beginView }));
 });
 $('venue-begin-export').addEventListener('click', downloadVenueBeginChecklist);
+$('export-venue-environment').addEventListener('click', () => {
+  if (!master() || state.pending) return;
+  const epoch = state.epoch, view = operationsViewEpoch;
+  void run(async () => {
+    const data = await api('/venue/hardware-environment');
+    if (state.epoch !== epoch || operationsViewEpoch !== view || !master()) return;
+    if (data?.version !== 1 || !Number.isFinite(Date.parse(data.checkedAtUtc))
+      || data.rooms?.length !== venueMissionRooms.length || !venueMissionRooms.every((id, index) => data.rooms[index]?.roomId === id))
+      throw new Error('Unexpected venue environment response');
+    download('vr-command-venue-environment.json', new Blob([JSON.stringify(data, null, 2) + '\n'], { type: 'application/json' }));
+  }, true);
+});
 $('venue-begin-size').addEventListener('change', applyVenuePermissions);
 for (const [id, other] of [['venue-full-tracking', 'venue-full-participation'], ['venue-full-participation', 'venue-full-tracking']]) {
   $(id).addEventListener('change', () => {

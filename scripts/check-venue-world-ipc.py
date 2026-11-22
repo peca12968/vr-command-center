@@ -276,6 +276,16 @@ def check_current_environment(venue, room, expected):
             pass
 
 
+def check_venue_environment(venue):
+    route = '/api/venue/hardware-environment'
+    with venue.response(route) as response:
+        assert response.getheader('Cache-Control') == 'no-store'
+        snapshot = json.load(response)
+    assert snapshot['version'] == 1 and datetime.fromisoformat(snapshot['checkedAtUtc']).utcoffset() is not None
+    assert snapshot['rooms'] == [venue.request(f'/api/rooms/{room}/hardware-environment', role=f'Room{room}') for room in ROOMS]
+    return [row['session'] for row in snapshot['rooms']]
+
+
 def check_room_environment(venue, session, room, phase_sequence, environment_sequence):
     route = f"/api/sessions/{session['id']}/rooms/{room}/hardware-environment"
     with venue.response(route, role=f'Room{room}') as response:
@@ -296,6 +306,10 @@ def recorded_weather(packet):
 
 
 def check_mode(venue, mode):
+    for denied in ('Room1', 'Room5', 'GameServer'):
+        with venue.response('/api/venue/hardware-environment', role=denied, status=403):
+            pass
+    assert check_venue_environment(venue) == [None] * 5
     for room in ROOMS:
         check_current_environment(venue, room, None)
     for invalid in (0, 6):
@@ -378,6 +392,7 @@ def check_mode(venue, mode):
         begun = venue.phase('Begin', 'begin', requireFullTracking=True)
         assert begun['requireFullTracking'] and {row['sessionId'] for row in begun['sessions']} == {s['id'] for s in sessions}
         weather = configure_weather(venue, sources, mode)
+        venue_climate = check_venue_environment(venue)
         live_weather = {}
         hardware = {}
         for source in sources:
@@ -385,6 +400,7 @@ def check_mode(venue, mode):
             phase = next(row['appliedAtSequence'] for row in begun['sessions'] if row['sessionId'] == source.state['id'])
             for room in source.session['roomIds']:
                 hardware[room] = check_room_environment(venue, source.state, room, phase, source.state['sequence'])
+                assert venue_climate[room - 1] == hardware[room]
                 route = source.route + f'/rooms/{room}/hardware-environment'
                 for denied in (f'Room{room % 5 + 1}', 'GameServer'):
                     with venue.response(route, role=denied, status=403):
@@ -583,6 +599,7 @@ def check_environment_resume(venue, paused, climate):
     route = '/api/sessions/' + paused['sessionId']
     changed = paused['environmentSinceSequence']
     assert check_room_environment(venue, venue.request(route), 1, paused['phaseSinceSequence'], changed) == paused
+    assert check_venue_environment(venue) == [paused, None, None, None, None]
     for action, state in [('Resume', 'Running'), ('End', 'Ended')]:
         receipt = venue.request(route + '/commands', method='POST', body={'action': action, 'commandId': str(uuid4())})
         snapshot = check_room_environment(venue, venue.request(route), 1, receipt['appliedAtSequence'], changed)
