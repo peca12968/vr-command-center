@@ -136,6 +136,8 @@ pwsh -NoProfile -NonInteractive -File .\scripts\deploy-quest.ps1 -ClientConfig .
 
 ## 開場前從頭盔執行 UDP 預檢
 
+若頭盔有多個 Android 使用者，先切到要進行診斷的帳號。安裝工具會讀取該帳號的數字識別碼；若同一份診斷 APK 已由另一個帳號安裝，會先核對檔案雜湊，再讓目前帳號使用。執行網路測試時，暫存金鑰、診斷程序及清理都指定開始時的帳號。結束時若前景帳號已不同，請切回要測的帳號再執行。這項支援涵蓋網路診斷，遊戲入場及頭盔追蹤另行驗收。 [Android 多使用者操作](https://source.android.com/docs/devices/admin/multi-user-testing) · [Android run-as](https://android.googlesource.com/platform/system/core/+/master/run-as/run-as.cpp)
+
 使用獨立的 `vr-command-quest-udp-probe-0.1.0.apk`（套件 `com.vrcommand.udpprobe`）做場館診斷。它透過已授權的 ADB 裝置執行，從頭盔指定的 IPv4 傳送與 Windows 監聽端相同的 UDP 挑戰。報告可以納入逐來源封存驗收。 [Windows 監聽與封存操作](EXTERNAL_CLIENTS.md#核對每個玩家來源的-udp-預檢) · [Android Debug Bridge](https://developer.android.com/tools/adb)
 
 在 Windows 伺服器開場前，先用 `check-lan-udp.ps1 -NewKey` 產生本次探測金鑰，再使用正式遊戲埠啟動監聽，指定頭盔實際的 Wi-Fi IPv4 及樣本數。保存監聽端的原始報告。監聽出現 `listening` 後，在連接頭盔的電腦執行以下指令。例子以頭盔 `192.168.1.20`、伺服器 `192.168.1.10` 和遊戲埠 `7777` 為例。

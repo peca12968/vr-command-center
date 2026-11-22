@@ -9,6 +9,13 @@ class AdbTransportError(ValueError):
     """An ADB transport could not be selected from the device inventory."""
 
 
+def android_user_id(output):
+    match = re.fullmatch(rb'(0|[1-9][0-9]{0,9})(?:\r?\n)?', output)
+    if match is None or int(match[1]) > 2**31 - 1:
+        raise ValueError('Could not identify the foreground Android user on the selected Quest.')
+    return match[1].decode('ascii')
+
+
 def read_adb_transports(adb, timeout):
     if timeout <= 0:
         raise AdbTransportError('Deadline elapsed before reading Quest ADB transports')

@@ -44,43 +44,69 @@ class DiagnosticInstallTests(unittest.TestCase):
             adb.touch()
             apk.write_bytes(b'fixture diagnostic')
             digest = hashlib.sha256(apk.read_bytes()).hexdigest()
-            for model, installed, remote, success in (
-                    ('Quest 3', False, digest, True), ('Quest 3', True, digest, True),
-                    ('Quest 3', True, '0'*64, False), ('Other', False, digest, False)):
-                with self.subTest(model=model, installed=installed, remote=remote):
-                    installs = []
+            path = '/data/app/shared/base.apk'
+            user = '10'
+            for state, remote, switched, action, ready in (
+                    ('missing', digest, False, 'install', True),
+                    ('shared', digest, False, 'attach', True),
+                    ('shared', '0'*64, False, None, False),
+                    ('installed', digest, False, None, True),
+                    ('installed', '0'*64, False, None, False),
+                    ('disabled', digest, False, None, False),
+                    ('missing', digest, True, 'install', False),
+                    ('wrong-model', digest, False, None, False)):
+                with self.subTest(state=state, remote=remote, switched=switched):
+                    actions, staged_files = [], []
+                    reads = 0
                     def invoke(command, **options):
+                        nonlocal reads
                         if command[1:] == ['devices', '-l']:
                             response = 'List of devices attached\nfixture device transport_id:31'
                         else:
                             self.assertEqual(command[:3], [str(adb), '-t', '31'])
                             args = command[3:]
-                            if args == ['shell', 'getprop', 'ro.product.model']:
-                                response = model
-                            elif args == ['shell', 'pm', 'list', 'packages', installer.PACKAGE]:
-                                response = 'package:' + installer.PACKAGE if installed else ''
+                            if args == ['shell', 'am', 'get-current-user']:
+                                reads += 1
+                                response = '11' if switched and reads > 1 else user
+                            elif args == ['shell', 'getprop', 'ro.product.model']:
+                                response = 'Other' if state == 'wrong-model' else 'Quest 3'
+                            elif args[:4] == ['shell', 'pm', 'list', 'packages']:
+                                self.assertEqual(args[-3:], ['--user', user, installer.PACKAGE])
+                                flags = args[4:-3]
+                                if flags == ['-f', '-u']:
+                                    response = f'package:{path}={installer.PACKAGE}' if state == 'shared' else ''
+                                elif flags == ['-e']:
+                                    response = 'package:' + installer.PACKAGE if actions or state == 'installed' else ''
+                                else:
+                                    self.assertEqual(flags, [])
+                                    response = 'package:' + installer.PACKAGE if state in ('installed', 'disabled') else ''
                             elif args[0] == 'install':
-                                staged = Path(args[1])
+                                self.assertEqual(args[1:-1], ['-R', '--user', user, '--pkg', installer.PACKAGE])
+                                staged = Path(args[-1])
                                 self.assertNotEqual(staged, apk)
                                 self.assertEqual(staged.read_bytes(), apk.read_bytes())
-                                installs.append(staged)
+                                staged_files.append(staged)
+                                actions.append('install')
                                 response = 'Success'
-                            elif args == ['shell', 'pm', 'path', installer.PACKAGE]:
-                                response = 'package:/data/app/fixture/base.apk'
+                            elif args == ['shell', 'pm', 'install-existing', '--user', user, installer.PACKAGE]:
+                                actions.append('attach')
+                                response = 'Package installed for user ' + user
+                            elif args == ['shell', 'pm', 'path', '--user', user, installer.PACKAGE]:
+                                response = 'package:' + path
                             else:
-                                self.assertEqual(args, ['shell', 'sha256sum', '/data/app/fixture/base.apk'])
-                                response = remote + '  /data/app/fixture/base.apk'
+                                self.assertEqual(args, ['shell', 'sha256sum', path])
+                                response = remote + '  ' + path
                         return subprocess.CompletedProcess(command, 0, response.encode())
                     with patch.object(installer, 'APK_SHA256', digest), patch('subprocess.run', side_effect=invoke) as child, \
                             patch('windows_firewall.require_silent_windows_launch') as guard:
-                        if success:
+                        if ready:
                             self.assertEqual(installer.install(adb, 'fixture', apk)['status'],
-                                             'already-installed' if installed else 'installed')
+                                             'already-installed' if state == 'installed' else 'installed')
                         else:
                             with self.assertRaises(ValueError):
                                 installer.install(adb, 'fixture', apk)
-                        self.assertEqual(len(installs), int(not installed and model == 'Quest 3'))
-                        self.assertTrue(all(not path.exists() for path in installs))
+                        self.assertEqual(actions, [action] if action else [])
+                        self.assertTrue(all(not path.exists() for path in staged_files))
                         self.assertEqual(guard.call_count, child.call_count)
             with patch('subprocess.run') as child:
                 with self.assertRaisesRegex(ValueError, 'differs'):
@@ -793,6 +819,8 @@ class QuestUdpAdbTests(unittest.TestCase):
             if command[1:] == ['devices', '-l']:
                 return self.inventory()
             target = command[1:3]
+            if command[3:] == ['shell', 'am', 'get-current-user']:
+                return self.result(b'0')
             phase = 'transfer' if kwargs['input'] is not None else 'instrument' if 'instrument' in command else 'cleanup'
             phases.append((phase, target))
             if phase == 'transfer':
@@ -812,9 +840,15 @@ class QuestUdpAdbTests(unittest.TestCase):
 
     def test_adb_key_is_sent_only_on_private_stdin_and_cleaned(self):
         with patch.object(quest_udp.subprocess, 'run',
-                          side_effect=[self.inventory(), self.result(), self.result(self.output()), self.result()]) as calls:
+                          side_effect=[self.inventory(), self.result(b'10'), self.result(), self.result(self.output()),
+                                       self.result(), self.result(b'10')]) as calls:
             self.assertEqual(self.report, quest_udp.run_probe(self.args))
-        inventory, transfer, probe, cleanup = calls.call_args_list
+        inventory, initial_user, transfer, probe, cleanup, final_user = calls.call_args_list
+        self.assertEqual(initial_user.args[0], final_user.args[0])
+        self.assertEqual(['-t', '41', 'shell', 'am', 'get-current-user'], initial_user.args[0][1:])
+        self.assertIn('run-as ' + quest_udp.PACKAGE + ' --user 10 ', transfer.args[0][-1])
+        self.assertEqual(['instrument', '--user', '10'], probe.args[0][5:8])
+        self.assertEqual(['run-as', quest_udp.PACKAGE, '--user', '10', 'rm', '-f'], cleanup.args[0][4:-1])
         self.assertEqual(['devices', '-l'], inventory.args[0][1:])
         self.assertEqual(self.key, transfer.kwargs['input'])
         self.assertIsNone(probe.kwargs['input'])
@@ -830,10 +864,10 @@ class QuestUdpAdbTests(unittest.TestCase):
     def test_bad_report_is_rejected_and_private_file_is_cleaned(self):
         self.report['peerAddress'] = '127.0.0.3'
         with patch.object(quest_udp.subprocess, 'run',
-                          side_effect=[self.inventory(), self.result(), self.result(self.output()), self.result()]) as calls:
+                          side_effect=[self.inventory(), self.result(b'0'), self.result(), self.result(self.output()), self.result()]) as calls:
             with self.assertRaisesRegex(ValueError, 'requested probe'):
                 quest_udp.run_probe(self.args)
-        self.assertEqual(4, calls.call_count)
+        self.assertEqual(5, calls.call_count)
         self.assertIn('rm', calls.call_args.args[0])
         self.report['peerAddress'] = SERVER
         self.report.update(matched=0, complete=False, exchangeSha256=None, samples=[{'sample': 1, 'roundTripMs': None}])
@@ -842,8 +876,24 @@ class QuestUdpAdbTests(unittest.TestCase):
     def test_disconnect_after_android_completion_prevents_publishing_success(self):
         rejected = subprocess.CompletedProcess([], 1, b'', b'no device with transport id 41')
         with patch.object(quest_udp.subprocess, 'run', side_effect=[
-            self.inventory(), self.result(), self.result(self.output()), rejected
+            self.inventory(), self.result(b'0'), self.result(), self.result(self.output()), rejected
         ]) as calls, self.assertRaisesRegex(ValueError, 'ADB could not run the Quest probe'):
             quest_udp.run_probe(self.args)
-        self.assertEqual(['-t', '41', 'shell', 'run-as', quest_udp.PACKAGE, 'rm', '-f'],
+        self.assertEqual(['-t', '41', 'shell', 'run-as', quest_udp.PACKAGE, '--user', '0', 'rm', '-f'],
                          calls.call_args.args[0][1:-1])
+
+    def test_switched_profile_does_not_publish_success_and_cleanup_targets_original_profile(self):
+        with patch.object(quest_udp.subprocess, 'run', side_effect=[
+                self.inventory(), self.result(b'10'), self.result(), self.result(self.output()),
+                self.result(), self.result(b'11')]) as calls, self.assertRaisesRegex(ValueError, 'user changed'):
+            quest_udp.run_probe(self.args)
+        cleanup = calls.call_args_list[-2].args[0]
+        self.assertEqual(['run-as', quest_udp.PACKAGE, '--user', '10', 'rm', '-f'], cleanup[4:-1])
+
+    def test_invalid_user_never_receives_probe_key(self):
+        for user in (b'', b'current', b'10 11', b'0\n10', b'-1', b'01', b'2147483648'):
+            with self.subTest(user=user), patch.object(quest_udp.subprocess, 'run', side_effect=[
+                    self.inventory(), self.result(user)]) as calls, self.assertRaisesRegex(ValueError, 'foreground'):
+                quest_udp.run_probe(self.args)
+            self.assertEqual(2, calls.call_count)
+            self.assertIsNone(calls.call_args.kwargs['input'])

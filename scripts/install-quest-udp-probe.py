@@ -13,10 +13,11 @@ PACKAGE = 'com.vrcommand.udpprobe'
 APK_NAME = 'vr-command-quest-udp-probe-0.1.0.apk'
 APK_BYTES = 16588
 APK_SHA256 = '478bcd63b9d79aca638d49049388021241245a6f046f3221fd95b0ba6e2f4c1f'
+APK_PATH = r'((?:/[A-Za-z0-9._=+~-]+)+/base\.apk)'
 
 
 def install(adb, serial, apk):
-    from quest_adb import read_adb_transports, select_adb_transport
+    from quest_adb import android_user_id, read_adb_transports, select_adb_transport
     from windows_firewall import require_silent_windows_launch
 
     with apk.open('rb') as stream:
@@ -33,20 +34,47 @@ def install(adb, serial, apk):
                                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         if result.returncode:
             raise ValueError('The selected Quest did not complete the diagnostic installation check.')
-        return result.stdout.decode('utf-8').strip()
+        return result.stdout
 
-    if invoke('shell', 'getprop', 'ro.product.model') != 'Quest 3':
+    if invoke('shell', 'getprop', 'ro.product.model').strip() != b'Quest 3':
         raise ValueError('The selected device must be a Meta Quest 3.')
-    packages = invoke('shell', 'pm', 'list', 'packages', PACKAGE).splitlines()
-    installed = 'package:' + PACKAGE in packages
+    user_query = ('shell', 'am', 'get-current-user')
+    user = android_user_id(invoke(*user_query))
+
+    def packages(*flags):
+        lines = invoke('shell', 'pm', 'list', 'packages', *flags, '--user', user, PACKAGE).decode().splitlines()
+        if any(not line.startswith('package:') for line in lines):
+            raise ValueError('Could not check Android packages for the selected Quest user.')
+        return lines
+
+    def verify(path):
+        if not re.fullmatch(APK_PATH, path):
+            raise ValueError('Could not identify the installed Quest diagnostic APK.')
+        if invoke('shell', 'sha256sum', path).decode().split() != [APK_SHA256, path]:
+            raise ValueError('The diagnostic installed on the Quest differs from the venue release.')
+
+    installed = 'package:' + PACKAGE in packages()
     if not installed:
-        with tempfile.TemporaryDirectory(prefix='vr-quest-probe-') as directory:
-            staged = Path(directory) / APK_NAME
-            staged.write_bytes(data)
-            invoke('install', str(staged), timeout=90)
-    path = re.fullmatch(r'package:((?:/[A-Za-z0-9._=+~-]+)+/base\.apk)', invoke('shell', 'pm', 'path', PACKAGE))
-    if path is None or invoke('shell', 'sha256sum', path[1]).split()[:1] != [APK_SHA256]:
-        raise ValueError('The diagnostic installed on the Quest differs from the venue release.')
+        # Android shares the APK across users, while installation and private files are per user.
+        existing = [line for line in packages('-f', '-u') if line.endswith('=' + PACKAGE)]
+        if existing:
+            if len(existing) != 1:
+                raise ValueError('Could not identify one shared Quest diagnostic APK.')
+            verify(existing[0][len('package:'):-(len(PACKAGE) + 1)])
+            invoke('shell', 'pm', 'install-existing', '--user', user, PACKAGE)
+        else:
+            with tempfile.TemporaryDirectory(prefix='vr-quest-probe-') as directory:
+                staged = Path(directory) / APK_NAME
+                staged.write_bytes(data)
+                invoke('install', '-R', '--user', user, '--pkg', PACKAGE, str(staged), timeout=90)
+    if 'package:' + PACKAGE not in packages('-e'):
+        raise ValueError('The Quest diagnostic is unavailable for the selected Android user.')
+    path = re.fullmatch('package:' + APK_PATH, invoke('shell', 'pm', 'path', '--user', user, PACKAGE).decode().rstrip('\r\n'))
+    if path is None:
+        raise ValueError('Could not identify the installed Quest diagnostic APK.')
+    verify(path[1])
+    if android_user_id(invoke(*user_query)) != user:
+        raise ValueError('The foreground Android user changed during diagnostic installation.')
     return {'status': 'already-installed' if installed else 'installed', 'sha256': APK_SHA256}
 
 

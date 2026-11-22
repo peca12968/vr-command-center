@@ -9,7 +9,7 @@ import re
 import subprocess
 import uuid
 
-from quest_adb import AdbTransportError, read_adb_transports, select_adb_transport
+from quest_adb import AdbTransportError, android_user_id, read_adb_transports, select_adb_transport
 
 PACKAGE = 'com.vrcommand.udpprobe'
 PREFIX = 'INSTRUMENTATION_RESULT: probeReport='
@@ -103,17 +103,22 @@ def run_probe(args, *, target=None):
             raise ValueError('ADB could not run the Quest probe. Check the selected device and installed probe APK.')
         return result.stdout
 
+    user_query = ['shell', 'am', 'get-current-user']
+    user = android_user_id(invoke(user_query))
     try:
-        invoke(['shell', '-T', f"run-as {PACKAGE} sh -c 'umask 077; mkdir -p files && set -C && cat > {private_key}'"], data=key)
+        invoke(['shell', '-T', f"run-as {PACKAGE} --user {user} sh -c 'umask 077; mkdir -p files && set -C && cat > {private_key}'"], data=key)
         settings = {'keyName': key_name, 'localAddress': args.local_address, 'peerAddress': args.peer_address,
                     'port': args.port, 'count': args.count, 'timeoutMs': args.timeout_ms}
-        command = ['shell', 'am', 'instrument', '-w', '-r']
+        command = ['shell', 'am', 'instrument', '--user', user, '-w', '-r']
         for name, value in settings.items():
             command += ['-e', name, str(value)]
         command += [PACKAGE + '/.ProbeInstrumentation']
-        return android_report(invoke(command, timeout=15 + args.count * args.timeout_ms / 1000), args)
+        report = android_report(invoke(command, timeout=15 + args.count * args.timeout_ms / 1000), args)
     finally:
-        invoke(['shell', 'run-as', PACKAGE, 'rm', '-f', private_key])
+        invoke(['shell', 'run-as', PACKAGE, '--user', user, 'rm', '-f', private_key])
+    if android_user_id(invoke(user_query)) != user:
+        raise ValueError('The foreground Android user changed during the Quest probe.')
+    return report
 
 
 def main():
