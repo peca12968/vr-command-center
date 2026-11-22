@@ -158,6 +158,8 @@ function Get-QuestUsbReport($Inventory, [int]$Expected, $MappedSeats) {
         # Windows USB instance identities are case-insensitive. Two mapped spellings
         # must never count one physical headset as two connected seats.
         $assigned = [Collections.Generic.Dictionary[string,int]]::new([StringComparer]::OrdinalIgnoreCase)
+        # A Windows USB match ignores case. Deployment looks up the ADB alias exactly.
+        $adbAliases = [Collections.Generic.HashSet[string]]::new([string[]]@($Inventory.Entries.Keys), [StringComparer]::Ordinal)
         foreach ($row in $MappedSeats) { $assigned[$row.serial] = 1 + $assigned[$row.serial] }
         $seats = @(foreach ($row in $MappedSeats) {
             $id = $row.serial
@@ -168,6 +170,7 @@ function Get-QuestUsbReport($Inventory, [int]$Expected, $MappedSeats) {
                 elseif ($serials[$id] -ne 1) { 'ambiguous-usb' }
                 elseif ($Inventory.Status -ne 'reachable') { 'adb-inventory-unavailable' }
                 elseif (-not $Inventory.Entries.ContainsKey($id)) { 'adb-not-listed' }
+                elseif (-not $adbAliases.Contains($id)) { 'adb-serial-case-mismatch' }
                 else { $Inventory.Entries[$id] }
             $seatReport = [ordered]@{ roomId = $row.roomId; seat = $row.seat; state = $state }
             if ($state -in @('adb-not-listed', 'adb-inventory-unavailable')) {
@@ -217,6 +220,7 @@ function Write-QuestUsbReport($Report, [switch]$Summary) {
             'ambiguous-usb' = '多台 Windows 裝置符合此座位'
             'adb-inventory-unavailable' = '無法取得 ADB 清單'
             'adb-not-listed' = 'Windows 已看到，ADB 尚未列出'
+            'adb-serial-case-mismatch' = '請將座位表中的序號大小寫改成與 ADB 清單一致'
             'transport-unavailable' = '缺少可用的 ADB 連線編號'
             'transport-ambiguous' = 'ADB 連線編號重複'
             device = '已連線'; unauthorized = '待頭盔授權'; offline = '離線'; other = '偵錯狀態無法確認'

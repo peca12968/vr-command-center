@@ -45,7 +45,7 @@ def adb_reply(text):
 
 @unittest.skipUnless(shutil.which('pwsh'), 'PowerShell is required')
 class QuestUsbTests(unittest.TestCase):
-    def diagnose(self, nodes, reply, *, unobservable=False):
+    def diagnose(self, nodes, reply, *, unobservable=False, seats=None):
         from windows_firewall import WindowsFirewallLaunchError, require_silent_windows_launch
 
         requests = []
@@ -84,6 +84,11 @@ class QuestUsbTests(unittest.TestCase):
                 worker = Thread(target=serve, daemon=True)
                 worker.start()
             command = PNP_FIXTURE + '\n& $env:VR_QUEST_USB_SCRIPT -AdbServerPort ([int]$env:VR_QUEST_USB_PORT)'
+            if seats:
+                command = PNP_FIXTURE + '''
+. $env:VR_QUEST_USB_SCRIPT
+Write-QuestUsbReport (Get-QuestUsbReport (Read-ExistingAdbInventory ([int]$env:VR_QUEST_USB_PORT)) $fixture.seats.Count $fixture.seats)
+'''
             if local_socket:
                 command = PNP_FIXTURE + '''
 . $env:VR_QUEST_USB_SCRIPT
@@ -94,12 +99,12 @@ try {
         $stream = [Net.Sockets.NetworkStream]::new($socket)
         try { $inventory = Read-AdbInventoryStream $stream } finally { $stream.Dispose() }
     } catch [Net.Sockets.SocketException] { $inventory = @{ Status = 'unreachable'; Entries = @{}; Unidentified = 0 } }
-    Write-QuestUsbReport (Get-QuestUsbReport $inventory 0)
+    Write-QuestUsbReport (Get-QuestUsbReport $inventory $fixture.seats.Count $fixture.seats)
 } finally { $socket.Dispose() }
 '''
             result = subprocess.run(['pwsh', '-NoProfile', '-NonInteractive', '-Command', command],
                                     env={**os.environ, **options, 'VR_QUEST_USB_SCRIPT': str(SCRIPT),
-                                         'VR_QUEST_USB_FIXTURE': json.dumps(dict(nodes=nodes, pnpUnavailable=unobservable))},
+                                         'VR_QUEST_USB_FIXTURE': json.dumps(dict(nodes=nodes, pnpUnavailable=unobservable, seats=seats))},
                                     capture_output=True, encoding='utf-8', timeout=12)
             if reply is not None:
                 worker.join(timeout=4)
@@ -154,6 +159,22 @@ try {
         self.assertEqual(self.diagnose([root, dict(interface, descriptors=[])], ready)['status'], 'meta-usb-interface-descriptors-incomplete')
         self.assertEqual(self.diagnose([], ready)['status'], 'meta-usb-not-enumerated')
         self.assertEqual(self.diagnose([], ready, unobservable=True)['status'], 'windows-usb-inventory-unavailable')
+
+    def test_mapped_alias_must_match_the_case_used_by_adb_for_deployment(self):
+        seats = [dict(roomId=room, seat=seat, serial=f'fixture-serial{room}{seat}')
+                 for room in range(1, 6) for seat in range(1, 6)]
+        nodes = [node(USB_ROOT.upper() + row['serial'][-2:], [ADB_DESCRIPTOR]) for row in seats]
+        rows = ''.join(f"{row['serial']} device transport_id:{i}\n" for i, row in enumerate(seats, 1))
+        seats[-1]['serial'] = seats[-1]['serial'].upper()
+        report = self.diagnose(nodes, adb_reply(rows), seats=seats)
+        self.assertTrue(report['group']['allExpectedInDeviceState'])
+        self.assertEqual(report['mapped']['seats'][-1], dict(roomId=5, seat=5, state='adb-serial-case-mismatch'))
+        self.assertEqual(report['mapped']['connected'], 24)
+        self.assertFalse(report['mapped']['allInDeviceState'])
+        seats[-1]['serial'] = seats[-1]['serial'].lower()
+        corrected = self.diagnose(nodes, adb_reply(rows), seats=seats)
+        self.assertTrue(corrected['mapped']['allInDeviceState'])
+        self.assertEqual(corrected['mapped']['connected'], 25)
 
     def test_only_a_unique_usable_transport_counts_as_connected(self):
         nodes = [node(USB_ROOT, [ADB_DESCRIPTOR])]
